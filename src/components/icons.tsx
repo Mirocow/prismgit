@@ -130,6 +130,18 @@ export const ChevronRight = (p: IconProps) => (
   </Icon>
 );
 
+export const ChevronLeft = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="15 18 9 12 15 6" />
+  </Icon>
+);
+
+export const ChevronUp = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="18 15 12 9 6 15" />
+  </Icon>
+);
+
 export const Search = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="11" cy="11" r="8" />

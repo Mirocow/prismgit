@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil } from '../components/icons';
+import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil, AlertCircle } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -13,7 +13,11 @@ interface FileGroup {
   empty: boolean;
 }
 
-export function ChangesPage() {
+interface ChangesPageProps {
+  onResolveConflict?: (file: string) => void;
+}
+
+export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { status, refreshStatus, stageFiles, stageAll, commit, push, pull } = useGitStore();
   const toast = useToastStore();
@@ -210,6 +214,7 @@ export function ChangesPage() {
       code === 'C' ? 'copied' :
       'modified';
     const isUntracked = idx === '?' && wd === '?';
+    const isConflict = code === 'U' || (idx === 'U') || (wd === 'U');
     return (
       <div
         key={file.path}
@@ -227,6 +232,18 @@ export function ChangesPage() {
         </span>
         <span className="flex-1 truncate font-mono">{file.path}</span>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+          {isConflict && onResolveConflict && (
+            <button
+              className="btn btn-primary text-2xs !py-0.5 !px-2"
+              title="Open Conflict Solver"
+              onClick={(e) => {
+                e.stopPropagation();
+                onResolveConflict(file.path);
+              }}
+            >
+              Resolve
+            </button>
+          )}
           {isStaged ? (
             <button
               className="icon-btn !w-5 !h-5"
@@ -350,6 +367,36 @@ export function ChangesPage() {
         {/* Left: File lists + commit editor */}
         <div className="w-1/2 flex flex-col border-r border-border-default overflow-hidden">
           <div className="flex-1 overflow-y-auto">
+            {/* Conflicts — show first as it's most urgent */}
+            {status?.conflicted && status.conflicted.length > 0 && (
+              <div className="border-b border-status-conflict/30 bg-status-conflict/5">
+                <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-status-conflict bg-status-conflict/10 flex items-center gap-2">
+                  <AlertCircle size={12} />
+                  Merge Conflicts ({status.conflicted.length})
+                </div>
+                {status.conflicted.map((filePath) => (
+                  <div
+                    key={filePath}
+                    className="group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs hover:bg-bg-hover border-l-2 border-status-conflict"
+                    onClick={() => onResolveConflict && onResolveConflict(filePath)}
+                  >
+                    <span className="font-mono font-bold w-4 text-center text-status-conflict">U</span>
+                    <span className="flex-1 truncate font-mono">{filePath}</span>
+                    <button
+                      className="btn btn-primary text-2xs !py-0.5 !px-2"
+                      title="Open Conflict Solver"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onResolveConflict && onResolveConflict(filePath);
+                      }}
+                    >
+                      Resolve
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Staged */}
             <div>
               <button

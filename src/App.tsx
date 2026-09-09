@@ -9,6 +9,9 @@ import { CloneModal } from './components/CloneModal';
 import { InitModal } from './components/InitModal';
 import { RebasePanel } from './components/RebasePanel';
 import { FindObjectDialog } from './components/FindObjectDialog';
+import { GitFlowDialog } from './components/GitFlowDialog';
+import { InteractiveRebaseDialog } from './components/InteractiveRebaseDialog';
+import { ConflictSolver } from './components/ConflictSolver';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useAuthStore } from './stores/authStore';
@@ -21,6 +24,7 @@ const HistoryPage = lazy(() => import('./pages/HistoryPage').then(m => ({ defaul
 const BlamePage = lazy(() => import('./pages/BlamePage').then(m => ({ default: m.BlamePage })));
 const InvestigatePage = lazy(() => import('./pages/InvestigatePage').then(m => ({ default: m.InvestigatePage })));
 const JournalPage = lazy(() => import('./pages/JournalPage').then(m => ({ default: m.JournalPage })));
+const GitFlowPage = lazy(() => import('./pages/GitFlowPage').then(m => ({ default: m.GitFlowPage })));
 const BranchesPage = lazy(() => import('./pages/BranchesPage').then(m => ({ default: m.BranchesPage })));
 const StashesPage = lazy(() => import('./pages/StashesPage').then(m => ({ default: m.StashesPage })));
 const TagsPage = lazy(() => import('./pages/TagsPage').then(m => ({ default: m.TagsPage })));
@@ -48,6 +52,9 @@ export default function App() {
   const [showClone, setShowClone] = useState(false);
   const [showInit, setShowInit] = useState(false);
   const [showFind, setShowFind] = useState(false);
+  const [showGitFlow, setShowGitFlow] = useState(false);
+  const [showIRebase, setShowIRebase] = useState(false);
+  const [conflictFile, setConflictFile] = useState<string | null>(null);
   const [dismissRebase, setDismissRebase] = useState(false);
 
   useEffect(() => {
@@ -90,6 +97,8 @@ export default function App() {
         .catch((e) => toast.error('Fetch failed', String(e)));
     };
     const handleToggleTheme = () => useSettingsStore.getState().toggleTheme();
+    const handleGitFlow = () => setShowGitFlow(true);
+    const handleIRebase = () => setShowIRebase(true);
 
     const cleanups = [
       window.smartgit.events.on('menu:openRepository', (path) => handleOpenRepo(path as string)),
@@ -100,6 +109,8 @@ export default function App() {
       window.smartgit.events.on('menu:pull', handlePull),
       window.smartgit.events.on('menu:fetch', handleFetch),
       window.smartgit.events.on('menu:toggleTheme', handleToggleTheme),
+      window.smartgit.events.on('menu:gitFlow', handleGitFlow),
+      window.smartgit.events.on('menu:interactiveRebase', handleIRebase),
     ];
     return () => cleanups.forEach((fn) => fn && fn());
   }, [toast]);
@@ -107,9 +118,9 @@ export default function App() {
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      // Ctrl+F: Find object (only when not in input)
       const target = e.target as HTMLElement;
       const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      // Ctrl+F: Find object
       if ((e.ctrlKey || e.metaKey) && e.key === 'f' && !isInInput) {
         e.preventDefault();
         setShowFind(true);
@@ -119,10 +130,31 @@ export default function App() {
         e.preventDefault();
         useSettingsStore.getState().toggleTheme();
       }
+      // Ctrl+Shift+G: Git-Flow dialog
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'G' && !isInInput) {
+        e.preventDefault();
+        setShowGitFlow(true);
+      }
+      // Ctrl+Shift+R: Interactive Rebase
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'R' && !isInInput) {
+        e.preventDefault();
+        setShowIRebase(true);
+      }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
+
+  // Auto-open Conflict Solver when conflicts appear
+  useEffect(() => {
+    if (status?.conflicted && status.conflicted.length > 0 && !conflictFile) {
+      // Don't auto-open, but show a hint
+      toast.warning(
+        `${status.conflicted.length} merge conflicts`,
+        'Use the Changes view to resolve them — click a conflicted file to open the Conflict Solver'
+      );
+    }
+  }, [status?.conflicted, conflictFile, toast]);
 
   // Refresh status when repository changes
   useEffect(() => {
@@ -143,10 +175,16 @@ export default function App() {
 
   const showRebasePanel = currentRepo && status?.isRebasing && !dismissRebase;
 
+  const handleFind = useCallback(() => setShowFind(true), []);
+
   if (!currentRepo) {
     return (
       <div className="flex flex-col h-screen">
-        <Toolbar onFind={() => setShowFind(true)} />
+        <Toolbar
+          onFind={handleFind}
+          onGitFlow={() => setShowGitFlow(true)}
+          onInteractiveRebase={() => setShowIRebase(true)}
+        />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex-1 overflow-auto">
@@ -163,18 +201,23 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen">
-      <Toolbar onFind={() => setShowFind(true)} />
+      <Toolbar
+        onFind={handleFind}
+        onGitFlow={() => setShowGitFlow(true)}
+        onInteractiveRebase={() => setShowIRebase(true)}
+      />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-hidden flex flex-col">
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/" element={<Navigate to="/changes" replace />} />
-              <Route path="/changes" element={<ChangesPage />} />
+              <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/investigate" element={<InvestigatePage />} />
               <Route path="/blame" element={<BlamePage />} />
               <Route path="/journal" element={<JournalPage />} />
+              <Route path="/gitflow" element={<GitFlowPage />} />
               <Route path="/branches" element={<BranchesPage />} />
               <Route path="/stashes" element={<StashesPage />} />
               <Route path="/tags" element={<TagsPage />} />
@@ -191,6 +234,11 @@ export default function App() {
       <CloneModal open={showClone} onClose={() => setShowClone(false)} />
       <InitModal open={showInit} onClose={() => setShowInit(false)} />
       <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
+      <GitFlowDialog open={showGitFlow} onClose={() => setShowGitFlow(false)} />
+      <InteractiveRebaseDialog open={showIRebase} onClose={() => setShowIRebase(false)} />
+      {conflictFile && (
+        <ConflictSolver filePath={conflictFile} onClose={() => setConflictFile(null)} />
+      )}
       {showRebasePanel && (
         <RebasePanel onClose={() => setDismissRebase(true)} />
       )}

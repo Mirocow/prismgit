@@ -1,4 +1,4 @@
-import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon } from './icons';
+import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -8,9 +8,11 @@ import { cn } from '../lib/utils';
 
 interface ToolbarProps {
   onFind?: () => void;
+  onGitFlow?: () => void;
+  onInteractiveRebase?: () => void;
 }
 
-export function Toolbar({ onFind }: ToolbarProps = {}) {
+export function Toolbar({ onFind, onGitFlow, onInteractiveRebase }: ToolbarProps = {}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const status = useGitStore((s) => s.status);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -141,6 +143,23 @@ export function Toolbar({ onFind }: ToolbarProps = {}) {
           disabled={!currentRepo}
         >
           <Sync size={14} />
+        </button>
+        <div className="w-px h-5 bg-border-default mx-1" />
+        <button
+          className="icon-btn"
+          title="Git-Flow (Ctrl+Shift+G)"
+          onClick={() => onGitFlow && onGitFlow()}
+          disabled={!currentRepo}
+        >
+          <GitMerge size={14} />
+        </button>
+        <button
+          className="icon-btn"
+          title="Interactive Rebase (Ctrl+Shift+R)"
+          onClick={() => onInteractiveRebase && onInteractiveRebase()}
+          disabled={!currentRepo}
+        >
+          <RotateCcw size={14} />
         </button>
         <div className="w-px h-5 bg-border-default mx-1" />
         <button

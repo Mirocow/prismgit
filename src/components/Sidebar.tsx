@@ -18,6 +18,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/investigate', label: 'Investigate', icon: Search, group: 'Working Tree' },
   { path: '/blame', label: 'Blame', icon: FileText, group: 'Working Tree' },
   { path: '/journal', label: 'Journal', icon: RotateCcw, group: 'Working Tree' },
+  { path: '/gitflow', label: 'Git-Flow', icon: GitBranch, group: 'Workflows' },
   { path: '/branches', label: 'Branches', icon: GitBranch, group: 'Refs' },
   { path: '/tags', label: 'Tags', icon: Tag, group: 'Refs' },
   { path: '/worktrees', label: 'Worktrees', icon: FolderTree, group: 'Refs' },

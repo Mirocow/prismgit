@@ -114,6 +114,17 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
         },
         { type: 'separator' },
         {
+          label: 'Git-Flow...',
+          accelerator: 'CmdOrCtrl+Shift+G',
+          click: () => getMainWindow()?.webContents.send('menu:gitFlow'),
+        },
+        {
+          label: 'Interactive Rebase...',
+          accelerator: 'CmdOrCtrl+Shift+R',
+          click: () => getMainWindow()?.webContents.send('menu:interactiveRebase'),
+        },
+        { type: 'separator' },
+        {
           label: 'New Branch...',
           accelerator: 'CmdOrCtrl+Shift+N',
           click: () => getMainWindow()?.webContents.send('menu:newBranch'),
