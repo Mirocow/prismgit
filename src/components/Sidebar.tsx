@@ -199,7 +199,7 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
-    <ResizableSplitter direction="horizontal" onResize={(d) => handleSidebarResize(-d)} />
+    <ResizableSplitter direction="horizontal" onResize={handleSidebarResize} />
     </>
   );
 }

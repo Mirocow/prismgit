@@ -1,5 +1,5 @@
 import { useEffect, useState, Suspense, lazy, useCallback, useRef } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Toolbar } from './components/Toolbar';
 import { StatusBar } from './components/StatusBar';
@@ -59,6 +59,7 @@ export default function App() {
   const toast = useToastStore();
   const windowStyle = useWindowStyleStore((s) => s.style);
   const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
+  const navigate = useNavigate();
   const [showClone, setShowClone] = useState(false);
   const [showInit, setShowInit] = useState(false);
   const [showFind, setShowFind] = useState(false);
@@ -182,6 +183,18 @@ export default function App() {
       cleanup();
     };
   }, [currentRepo, refreshStatus]);
+
+  // Navigate when window style changes
+  useEffect(() => {
+    if (!currentRepo) return;
+    if (windowStyle === 'log') {
+      navigate('/history');
+    } else if (windowStyle === 'working-tree') {
+      navigate('/changes');
+    } else {
+      navigate('/changes');
+    }
+  }, [windowStyle, currentRepo, navigate]);
 
   // Refresh status when repository changes (only once, not on every render)
   useEffect(() => {
