@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, Settings as SettingsIcon, X, EyeOff, FileText, ChevronDown } from './icons';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
-import { useSettingsStore } from '../stores/settingsStore';
-import { useSelectionStore } from '../stores/selectionStore';
 import { api, type BranchInfo } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useGitStore } from '../stores/gitStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { useToastStore } from '../stores/toastStore';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
 
 // Default visible groups — user can toggle these via the customize button
 const DEFAULT_TOOLBAR_GROUPS = {
@@ -206,77 +206,6 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
       </div>
 
       <Divider />
-
-      {/* Git action buttons — rendered in the order saved in localStorage.
-          User can reorder via the customize dropdown (drag-and-drop). */}
-      <div className="flex items-center no-drag">
-        {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>).map(key => {
-          if (!groups[key]) return null;
-          switch (key) {
-            case 'sync':
-              return (
-                <div key={key} className="flex items-center">
-                  <LabeledButton icon={ArrowDown} label="Fetch" iconColor={COLOR_BLUE} onClick={handlePull} disabled={disabled} title="Fetch + pull from remote" />
-                  <LabeledButton icon={ArrowUp} label="Push" iconColor={COLOR_GREEN} onClick={handlePush} disabled={disabled} title="Push to remote" />
-                  <Divider />
-                </div>
-              );
-            case 'stage':
-              return (
-                <div key={key} className="flex items-center">
-                  <LabeledButton icon={Plus} label="Stage" iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
-                  <LabeledButton icon={Minus} label="Unstage" iconColor={COLOR_ORANGE} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage all changes" />
-                  <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
-                    if (!currentRepo || !confirm('Discard all uncommitted changes?')) return;
-                    api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
-                      toast.success('Changes discarded'); refreshStatus(currentRepo.path);
-                    }).catch((e) => toast.error('Discard failed', String(e)));
-                  }} disabled={disabled} title="Discard all changes" />
-                  <Divider />
-                </div>
-              );
-            case 'stash':
-              return (
-                <div key={key} className="flex items-center">
-                  <LabeledButton icon={CloudDownload} label="Stash" iconColor={COLOR_PURPLE} onClick={() => {
-                    if (!currentRepo) return;
-                    api.git.stashPush(currentRepo.path, undefined, true).then(() => {
-                      toast.success('Stash saved'); refreshStatus(currentRepo.path);
-                    }).catch((e) => toast.error('Stash failed', String(e)));
-                  }} disabled={disabled} title="Save stash" />
-                  <LabeledButton icon={GitPullRequest} label="Pop" iconColor={COLOR_PURPLE} onClick={() => {
-                    if (!currentRepo) return;
-                    api.git.stashList(currentRepo.path).then(stashes => {
-                      if (stashes.length === 0) { toast.info('No stashes'); return; }
-                      api.git.stashApply(currentRepo.path, 0).then(() => {
-                        toast.success('Stash applied'); refreshStatus(currentRepo.path);
-                      }).catch((e) => toast.error('Apply failed', String(e)));
-                    });
-                  }} disabled={disabled} title="Apply latest stash" />
-                  <Divider />
-                </div>
-              );
-            case 'log':
-              return (
-                <div key={key} className="flex items-center">
-                  <LabeledButton icon={GitBranch} label="History" iconColor={COLOR_BLUE} onClick={() => navigate('/history')} disabled={disabled} title="Commit history" active={currentPath === '/history'} />
-                  <LabeledButton icon={FileText} label="Diff" iconColor={COLOR_BLUE} onClick={() => navigate('/diff')} disabled={disabled} title="Compare files between refs" active={currentPath === '/diff'} />
-                  <LabeledButton icon={Search} label="Blame" iconColor={COLOR_BLUE} onClick={() => navigate('/blame')} disabled={disabled} title="Blame a file" active={currentPath === '/blame'} />
-                  <Divider />
-                </div>
-              );
-            case 'workflows':
-              return (
-                <div key={key} className="flex items-center">
-                  <LabeledButton icon={GitMerge} label="Git-Flow" iconColor={COLOR_ORANGE} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow operations" />
-                  <LabeledButton icon={RotateCcw} label="Rebase" iconColor={COLOR_ORANGE} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Interactive rebase" />
-                </div>
-              );
-            default:
-              return null;
-          }
-        })}
-      </div>
 
       {/* Center: status badges + global selections (draggable area) */}
       <div className="flex-1 flex items-center justify-center titlebar-drag gap-2">
