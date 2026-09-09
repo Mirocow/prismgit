@@ -244,12 +244,12 @@ export function DiffPage() {
         {loading ? 'Computing diff...' : title} · {filePath}
       </div>
 
-      {/* Diff viewer */}
-      <div className="flex-1 overflow-hidden">
+      {/* Diff viewer — scrollable */}
+      <div className="flex-1 overflow-auto">
         {diff ? (
           <DiffViewer diff={diff} filePath={filePath} />
         ) : (
-          <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
+          <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm p-8">
             {loading ? 'Loading...' : 'Select base and compare refs to see diff'}
           </div>
         )}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Search, FileText, Loader, RefreshCw, GitCommit } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
@@ -15,30 +15,37 @@ export function BlamePage() {
   const [blame, setBlame] = useState<BlameResult | null>(null);
   const [loading, setLoading] = useState(false);
   // Read global file selection — when user clicks "Blame this file" from Changes/History,
-  // the file path is pre-filled here.
+  // the file path is pre-filled here AND we auto-trigger the blame.
   const globalFilePath = useSelectionStore((s) => s.selectedFilePath);
   useEffect(() => {
     if (globalFilePath) {
       setFilePath(globalFilePath);
+      // Auto-trigger blame after setting the path
+      // Use a small delay to ensure state is updated
+      setTimeout(() => {
+        handleBlameRef.current?.(globalFilePath);
+      }, 50);
     }
   }, [globalFilePath]);
 
-  const handleBlame = useCallback(async () => {
-    if (!filePath.trim()) {
+  // Ref to avoid stale closure in handleBlame
+  const handleBlameRef = useRef<(path?: string) => void>();
+  handleBlameRef.current = (overridePath?: string) => {
+    const path = overridePath || filePath;
+    if (!path.trim()) {
       toast.warning('File path is required');
       return;
     }
     setLoading(true);
-    try {
-      const result = await api.git.blame(repo.path, filePath, ref || undefined);
-      setBlame(result);
-    } catch (e) {
-      toast.error('Blame failed', String(e));
-      setBlame(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [repo.path, filePath, ref, toast]);
+    api.git.blame(repo.path, path, ref || undefined)
+      .then(setBlame)
+      .catch((e) => { toast.error('Blame failed', String(e)); setBlame(null); })
+      .finally(() => setLoading(false));
+  };
+
+  const handleBlame = useCallback(() => {
+    handleBlameRef.current?.();
+  }, []);
 
   // Group blame lines by commit hash for color visualization
   const colorMap = useMemo(() => {

@@ -960,29 +960,44 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               </div>
             )}
 
-            {/* Staged */}
+            {/* Staged — limit to 200 for performance on large repos */}
             {stagedFiles.length > 0 && (
               <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
                 Staged ({stagedFiles.length})
               </div>
             )}
-            {stagedFiles.map((f) => renderFileRow(f, true))}
+            {stagedFiles.slice(0, 200).map((f) => renderFileRow(f, true))}
+            {stagedFiles.length > 200 && (
+              <div className="px-3 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
+                Showing first 200 of {stagedFiles.length} — use filter to narrow
+              </div>
+            )}
 
-            {/* Unstaged */}
+            {/* Unstaged — limit to 200 */}
             {unstagedFiles.length > 0 && (
               <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
                 Changes ({unstagedFiles.length})
               </div>
             )}
-            {unstagedFiles.map((f) => renderFileRow(f, false))}
+            {unstagedFiles.slice(0, 200).map((f) => renderFileRow(f, false))}
+            {unstagedFiles.length > 200 && (
+              <div className="px-3 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
+                Showing first 200 of {unstagedFiles.length} — use filter to narrow
+              </div>
+            )}
 
-            {/* Untracked */}
+            {/* Untracked — limit to 200 */}
             {untrackedFiles.length > 0 && (
               <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
                 Untracked ({untrackedFiles.length})
               </div>
             )}
-            {untrackedFiles.map((f) => renderFileRow(f, false))}
+            {untrackedFiles.slice(0, 200).map((f) => renderFileRow(f, false))}
+            {untrackedFiles.length > 200 && (
+              <div className="px-3 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
+                Showing first 200 of {untrackedFiles.length} — use filter to narrow
+              </div>
+            )}
 
             {totalChanged === 0 && (
               <div className="flex flex-col items-center justify-center py-12 text-text-tertiary">
