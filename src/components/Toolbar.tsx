@@ -1,4 +1,4 @@
-import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw } from './icons';
+import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -10,10 +10,12 @@ interface ToolbarProps {
   onFind?: () => void;
   onGitFlow?: () => void;
   onInteractiveRebase?: () => void;
+  onRepoInfo?: () => void;
 }
 
-export function Toolbar({ onFind, onGitFlow, onInteractiveRebase }: ToolbarProps = {}) {
+export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: ToolbarProps = {}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
+  const currentMetadata = useRepositoryStore((s) => s.currentMetadata);
   const status = useGitStore((s) => s.status);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const push = useGitStore((s) => s.push);
@@ -162,6 +164,17 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase }: ToolbarProps
           <RotateCcw size={14} />
         </button>
         <div className="w-px h-5 bg-border-default mx-1" />
+        <button
+          className="icon-btn"
+          title="Repository info (description, tags, notes)"
+          onClick={() => onRepoInfo && onRepoInfo()}
+          disabled={!currentRepo}
+        >
+          <Star
+            size={14}
+            className={currentMetadata?.favorite ? 'text-status-modified fill-current' : ''}
+          />
+        </button>
         <button
           className="icon-btn"
           title="Find object (Ctrl+F)"

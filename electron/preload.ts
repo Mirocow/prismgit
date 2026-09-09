@@ -194,6 +194,19 @@ const api = {
     removeRepo: (path: string) => ipcRenderer.invoke('settings:removeRepo', path),
     updateRepo: (path: string, updates: Record<string, unknown>) =>
       ipcRenderer.invoke('settings:updateRepo', path, updates),
+
+    // Repository metadata
+    getRepoMetadata: (path: string) => ipcRenderer.invoke('settings:getRepoMetadata', path),
+    getRepoMetadataAll: () => ipcRenderer.invoke('settings:getRepoMetadataAll'),
+    setRepoMetadata: (path: string, metadata: unknown) =>
+      ipcRenderer.invoke('settings:setRepoMetadata', path, metadata),
+    updateRepoMetadata: (path: string, updates: unknown) =>
+      ipcRenderer.invoke('settings:updateRepoMetadata', path, updates),
+    deleteRepoMetadata: (path: string) => ipcRenderer.invoke('settings:deleteRepoMetadata', path),
+    toggleFavorite: (path: string) => ipcRenderer.invoke('settings:toggleFavorite', path),
+    addTag: (path: string, tag: string) => ipcRenderer.invoke('settings:addTag', path, tag),
+    removeTag: (path: string, tag: string) => ipcRenderer.invoke('settings:removeTag', path, tag),
+    refreshRepoStats: (path: string) => ipcRenderer.invoke('settings:refreshRepoStats', path),
   } as SettingsApi,
 
   // Window controls

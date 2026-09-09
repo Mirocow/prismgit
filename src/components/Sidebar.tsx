@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { cn } from '../lib/utils';
@@ -34,7 +34,7 @@ const NAV_ITEMS: NavItem[] = [
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { repos, currentRepo, openRepository, removeRepo, pinRepo } = useRepositoryStore();
+  const { repos, metadata, currentRepo, openRepository, removeRepo, pinRepo } = useRepositoryStore();
   const [showRepoList, setShowRepoList] = useState(true);
 
   useEffect(() => {
@@ -65,6 +65,9 @@ export function Sidebar() {
           >
             <FolderGit size={14} />
             <span className="truncate">{currentRepo ? currentRepo.name : 'Repositories'}</span>
+            {currentRepo && metadata[currentRepo.path]?.favorite && (
+              <Star size={11} className="text-status-modified fill-current" />
+            )}
           </button>
           <button
             className="icon-btn no-drag flex-shrink-0"
@@ -82,40 +85,52 @@ export function Sidebar() {
                 No repositories yet.<br />Click + to add one.
               </div>
             ) : (
-              repos.map((repo) => (
-                <div
-                  key={repo.path}
-                  className={cn(
-                    'group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs hover:bg-bg-hover',
-                    currentRepo?.path === repo.path && 'bg-bg-active'
-                  )}
-                  onClick={() => openRepository(repo.path)}
-                  title={repo.path}
-                >
-                  <FolderGit size={12} className="text-text-tertiary flex-shrink-0" />
-                  <span className="flex-1 truncate">{repo.name}</span>
-                  <button
-                    className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5"
-                    title={repo.pinned ? 'Unpin' : 'Pin'}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      pinRepo(repo.path, !repo.pinned);
-                    }}
+              repos.map((repo) => {
+                const meta = metadata[repo.path];
+                return (
+                  <div
+                    key={repo.path}
+                    className={cn(
+                      'group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs hover:bg-bg-hover',
+                      currentRepo?.path === repo.path && 'bg-bg-active'
+                    )}
+                    style={meta?.color ? { borderLeft: `2px solid ${meta.color}` } : undefined}
+                    onClick={() => openRepository(repo.path)}
+                    title={repo.path}
                   >
-                    {repo.pinned ? <PinOff size={10} /> : <Pin size={10} />}
-                  </button>
-                  <button
-                    className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 hover:!text-status-deleted"
-                    title="Remove from list"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeRepo(repo.path);
-                    }}
-                  >
-                    <X size={10} />
-                  </button>
-                </div>
-              ))
+                    <FolderGit size={12} className="text-text-tertiary flex-shrink-0" />
+                    <span className="flex-1 truncate">{repo.name}</span>
+                    {meta?.favorite && (
+                      <Star size={10} className="text-status-modified fill-current flex-shrink-0" />
+                    )}
+                    {meta?.tags && meta.tags.length > 0 && (
+                      <span className="text-2xs text-text-tertiary flex-shrink-0">
+                        {meta.tags.length}
+                      </span>
+                    )}
+                    <button
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5"
+                      title={repo.pinned ? 'Unpin' : 'Pin'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        pinRepo(repo.path, !repo.pinned);
+                      }}
+                    >
+                      {repo.pinned ? <PinOff size={10} /> : <Pin size={10} />}
+                    </button>
+                    <button
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 hover:!text-status-deleted"
+                      title="Remove from list"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeRepo(repo.path);
+                      }}
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                );
+              })
             )}
           </div>
         )}

@@ -22,7 +22,7 @@ import type {
   GithubRepository,
   GithubPullRequest,
 } from '../../electron/types/github-api';
-import type { AppSettings, RepositoryEntry } from '../../electron/types/settings-api';
+import type { AppSettings, RepositoryEntry, RepositoryMetadata } from '../../electron/types/settings-api';
 
 export type {
   StatusResult,
@@ -47,6 +47,7 @@ export type {
   GithubPullRequest,
   AppSettings,
   RepositoryEntry,
+  RepositoryMetadata,
 };
 
 export const api = window.smartgit;

@@ -10,6 +10,12 @@ vi.mock('../../src/lib/api', () => ({
       addRepo: vi.fn(),
       removeRepo: vi.fn(),
       updateRepo: vi.fn(),
+      getRepoMetadataAll: vi.fn().mockResolvedValue([]),
+      updateRepoMetadata: vi.fn(),
+      toggleFavorite: vi.fn(),
+      addTag: vi.fn(),
+      removeTag: vi.fn(),
+      refreshRepoStats: vi.fn().mockResolvedValue({}),
     },
     git: {
       isRepo: vi.fn(),

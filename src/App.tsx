@@ -12,6 +12,7 @@ import { FindObjectDialog } from './components/FindObjectDialog';
 import { GitFlowDialog } from './components/GitFlowDialog';
 import { InteractiveRebaseDialog } from './components/InteractiveRebaseDialog';
 import { ConflictSolver } from './components/ConflictSolver';
+import { RepoInfoDialog } from './components/RepoInfoDialog';
 import { WindowStyleSwitcher, useWindowStyle } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSettingsStore } from './stores/settingsStore';
@@ -50,6 +51,7 @@ function PageLoader() {
 export default function App() {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const loadRepos = useRepositoryStore((s) => s.loadRepos);
+  const loadMetadata = useRepositoryStore((s) => s.loadMetadata);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const loadAuth = useAuthStore((s) => s.loadAuthState);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -61,14 +63,16 @@ export default function App() {
   const [showFind, setShowFind] = useState(false);
   const [showGitFlow, setShowGitFlow] = useState(false);
   const [showIRebase, setShowIRebase] = useState(false);
+  const [showRepoInfo, setShowRepoInfo] = useState(false);
   const [conflictFile, setConflictFile] = useState<string | null>(null);
   const [dismissRebase, setDismissRebase] = useState(false);
 
   useEffect(() => {
     loadRepos();
+    loadMetadata();
     loadSettings();
     loadAuth();
-  }, [loadRepos, loadSettings, loadAuth]);
+  }, [loadRepos, loadMetadata, loadSettings, loadAuth]);
 
   // Listen for menu events
   useEffect(() => {
@@ -187,7 +191,7 @@ export default function App() {
   if (!currentRepo) {
     return (
       <div className="flex flex-col h-screen">
-        <Toolbar onFind={handleFind} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} />
+        <Toolbar onFind={handleFind} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex-1 overflow-auto">
@@ -208,6 +212,7 @@ export default function App() {
         onFind={handleFind}
         onGitFlow={() => setShowGitFlow(true)}
         onInteractiveRebase={() => setShowIRebase(true)}
+        onRepoInfo={() => setShowRepoInfo(true)}
       />
       <div className="flex flex-1 overflow-hidden">
         {/* In 'log' window style, hide sidebar by default — can be toggled */}
@@ -250,6 +255,7 @@ export default function App() {
       <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
       <GitFlowDialog open={showGitFlow} onClose={() => setShowGitFlow(false)} />
       <InteractiveRebaseDialog open={showIRebase} onClose={() => setShowIRebase(false)} />
+      <RepoInfoDialog open={showRepoInfo} onClose={() => setShowRepoInfo(false)} />
       {conflictFile && (
         <ConflictSolver filePath={conflictFile} onClose={() => setConflictFile(null)} />
       )}

@@ -1,13 +1,16 @@
 import { create } from 'zustand';
-import { api, type RepositoryEntry } from '../lib/api';
+import { api, type RepositoryEntry, type RepositoryMetadata } from '../lib/api';
 
 interface RepositoryState {
   repos: RepositoryEntry[];
+  metadata: Record<string, RepositoryMetadata>;
   currentRepo: RepositoryEntry | null;
+  currentMetadata: RepositoryMetadata | null;
   loading: boolean;
   error: string | null;
 
   loadRepos: () => Promise<void>;
+  loadMetadata: () => Promise<void>;
   openRepository: (path: string) => Promise<void>;
   openRepositoryPicker: () => Promise<void>;
   closeRepository: () => void;
@@ -15,11 +18,20 @@ interface RepositoryState {
   cloneRepository: (url: string, targetPath: string, options?: { depth?: number; branch?: string }) => Promise<string>;
   initRepository: (targetPath: string) => Promise<void>;
   pinRepo: (path: string, pinned: boolean) => Promise<void>;
+
+  // Metadata operations
+  updateMetadata: (path: string, updates: Partial<RepositoryMetadata>) => Promise<void>;
+  toggleFavorite: (path: string) => Promise<void>;
+  addTag: (path: string, tag: string) => Promise<void>;
+  removeTag: (path: string, tag: string) => Promise<void>;
+  refreshStats: (path: string) => Promise<void>;
 }
 
 export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   repos: [],
+  metadata: {},
   currentRepo: null,
+  currentMetadata: null,
   loading: false,
   error: null,
 
@@ -28,6 +40,11 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     try {
       const repos = await api.settings.getRepos();
       const sorted = [...repos].sort((a, b) => {
+        const metaA = get().metadata[a.path];
+        const metaB = get().metadata[b.path];
+        // Favorites first, then pinned, then by lastOpened
+        if (metaA?.favorite && !metaB?.favorite) return -1;
+        if (!metaA?.favorite && metaB?.favorite) return 1;
         if (a.pinned && !b.pinned) return -1;
         if (!a.pinned && b.pinned) return 1;
         return b.lastOpened - a.lastOpened;
@@ -35,6 +52,21 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       set({ repos: sorted, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
+    }
+  },
+
+  loadMetadata: async () => {
+    try {
+      const allMetadata = await api.settings.getRepoMetadataAll();
+      const metadataMap: Record<string, RepositoryMetadata> = {};
+      for (const m of allMetadata) {
+        metadataMap[m.path] = m;
+      }
+      set({ metadata: metadataMap });
+      // Re-sort repos with new metadata
+      get().loadRepos();
+    } catch (e) {
+      set({ error: String(e) });
     }
   },
 
@@ -47,9 +79,16 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       }
       const name = await api.fs.pathBasename(path);
       await api.settings.addRepo({ path, name });
+      // Refresh stats in background (don't block UI)
+      api.settings.refreshRepoStats(path).then(() => {
+        get().loadMetadata();
+      }).catch(() => { /* ignore */ });
+
       const repo: RepositoryEntry = { path, name, lastOpened: Date.now() };
       await get().loadRepos();
-      set({ currentRepo: repo, loading: false });
+      await get().loadMetadata();
+      const metadata = get().metadata[path] || null;
+      set({ currentRepo: repo, currentMetadata: metadata, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
       throw e;
@@ -63,14 +102,15 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   },
 
   closeRepository: () => {
-    set({ currentRepo: null });
+    set({ currentRepo: null, currentMetadata: null });
   },
 
   removeRepo: async (path: string) => {
     await api.settings.removeRepo(path);
     await get().loadRepos();
+    await get().loadMetadata();
     if (get().currentRepo?.path === path) {
-      set({ currentRepo: null });
+      set({ currentRepo: null, currentMetadata: null });
     }
   },
 
@@ -100,5 +140,46 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   pinRepo: async (path, pinned) => {
     await api.settings.updateRepo(path, { pinned });
     await get().loadRepos();
+  },
+
+  // Metadata operations
+  updateMetadata: async (path, updates) => {
+    await api.settings.updateRepoMetadata(path, updates);
+    await get().loadMetadata();
+    if (get().currentRepo?.path === path) {
+      set({ currentMetadata: get().metadata[path] });
+    }
+  },
+
+  toggleFavorite: async (path) => {
+    await api.settings.toggleFavorite(path);
+    await get().loadMetadata();
+    if (get().currentRepo?.path === path) {
+      set({ currentMetadata: get().metadata[path] });
+    }
+  },
+
+  addTag: async (path, tag) => {
+    await api.settings.addTag(path, tag);
+    await get().loadMetadata();
+    if (get().currentRepo?.path === path) {
+      set({ currentMetadata: get().metadata[path] });
+    }
+  },
+
+  removeTag: async (path, tag) => {
+    await api.settings.removeTag(path, tag);
+    await get().loadMetadata();
+    if (get().currentRepo?.path === path) {
+      set({ currentMetadata: get().metadata[path] });
+    }
+  },
+
+  refreshStats: async (path) => {
+    await api.settings.refreshRepoStats(path);
+    await get().loadMetadata();
+    if (get().currentRepo?.path === path) {
+      set({ currentMetadata: get().metadata[path] });
+    }
   },
 }));

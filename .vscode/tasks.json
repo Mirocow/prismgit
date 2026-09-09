@@ -1,0 +1,102 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build:dev",
+      "type": "shell",
+      "command": "npm run build",
+      "group": "build",
+      "problemMatcher": ["$tsc"],
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "build:production",
+      "type": "shell",
+      "command": "npm run build",
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "dev:server",
+      "type": "shell",
+      "command": "npx vite --port 5173",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "fileLocation": "relative",
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "message": 4
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "VITE",
+          "endsPattern": "ready in"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "typecheck",
+      "type": "shell",
+      "command": "npx tsc --noEmit",
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "npx vitest run",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:watch",
+      "type": "shell",
+      "command": "npx vitest",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "kill:vite",
+      "type": "shell",
+      "command": "kill $(lsof -t -i:5173) 2>/dev/null || true",
+      "windows": {
+        "command": "taskkill /F /IM node.exe /FI \"WINDOWTITLE eq vite\" 2>nul || exit 0"
+      },
+      "presentation": {
+        "reveal": "never",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "package:linux",
+      "type": "shell",
+      "command": "make package-linux",
+      "group": "build"
+    },
+    {
+      "label": "docker:linux",
+      "type": "shell",
+      "command": "make docker-linux",
+      "group": "build"
+    },
+    {
+      "label": "docker:all",
+      "type": "shell",
+      "command": "make docker-all",
+      "group": "build"
+    }
+  ]
+}
