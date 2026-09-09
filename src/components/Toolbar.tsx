@@ -696,7 +696,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                 <LabeledButton icon={Plus} label="Stage" iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
                 <LabeledButton icon={Minus} label="Unstage" iconColor={COLOR_ORANGE} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage all changes" />
                 <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
-                  if (!currentRepo || !confirm('Discard all uncommitted changes?')) return;
+                  if (!currentRepo || !confirm('Discard ALL uncommitted changes?\n\nThis will permanently discard all staged and unstaged changes. This cannot be undone.')) return;
                   api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
                     toast.success('Changes discarded'); refreshStatus(currentRepo.path);
                   }).catch((e) => toast.error('Discard failed', String(e)));

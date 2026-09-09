@@ -49,7 +49,7 @@ export function JournalPage() {
   }, [entries, filter]);
 
   const handleCherryPick = async (entry: ReflogEntry) => {
-    if (!confirm(`Cherry-pick ${shortHash(entry.hash)} onto current branch?`)) return;
+    if (!confirm(`Cherry-pick ${shortHash(entry.hash)}?\n\nThis will apply the changes from this commit onto your current branch.\n\nCommit: "${entry.message.substring(0, 80)}"`)) return;
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) {

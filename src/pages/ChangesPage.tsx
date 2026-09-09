@@ -654,9 +654,11 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           items.push({ label: 'View file history...', clickId: 'file-history' });
           items.push({ label: 'Blame this file...', clickId: 'blame' });
           items.push({ type: 'separator' });
+          items.push({ label: 'Stash this file only...', clickId: 'stash-file' });
+          items.push({ type: 'separator' });
           items.push({ label: 'Copy path', clickId: 'copy-path' });
           items.push({ label: 'Copy full path', clickId: 'copy-full-path' });
-          showContextMenu(items, (action) => {
+          showContextMenu(items, async (action) => {
             if (action === 'stage') handleStageFile(file.path);
             else if (action === 'unstage') handleUnstageFile(file.path);
             else if (action === 'restore') handleRestoreFile(file.path);
@@ -686,6 +688,16 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             else if (action === 'blame') {
               useSelectionStore.getState().selectFile(file.path);
               window.location.hash = '#/blame';
+            }
+            else if (action === 'stash-file') {
+              // Stash only this file: git stash push -- <file>
+              try {
+                await api.git.stashPush(repo.path, undefined, false, false, [file.path]);
+                toast.success(`Stashed file: ${file.path}`);
+                refreshStatus(repo.path);
+              } catch (e) {
+                toast.error('Stash failed', String(e));
+              }
             }
             else if (action === 'copy-path') {
               copyToClipboard(file.path);

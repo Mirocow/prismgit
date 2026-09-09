@@ -268,7 +268,7 @@ export function HistoryPage() {
   }, [selectedIdx, repo.path, filtered]);
 
   const handleCherryPick = async (entry: LogEntry) => {
-    if (!confirm(`Cherry-pick ${shortHash(entry.hash)}?`)) return;
+    if (!confirm(`Cherry-pick ${shortHash(entry.hash)}?\n\nThis will apply the changes from this commit onto your current branch.\n\nCommit: "${entry.subject}"`)) return;
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) toast.warning(`${result.conflicts.length} conflicts`);
@@ -289,7 +289,7 @@ export function HistoryPage() {
   };
 
   const handleRevert = async (entry: LogEntry) => {
-    if (!confirm(`Revert ${shortHash(entry.hash)}?`)) return;
+    if (!confirm(`Revert ${shortHash(entry.hash)}?\n\nThis will create a NEW commit that undoes the changes from this commit.\n\nOriginal commit: "${entry.subject}"`)) return;
     try {
       const result = await api.git.revert(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) toast.warning(`${result.conflicts.length} conflicts`);
@@ -308,7 +308,7 @@ export function HistoryPage() {
   };
 
   const handleRebase = async (hash: string) => {
-    if (!confirm(`Rebase onto ${shortHash(hash)}?`)) return;
+    if (!confirm(`Rebase current branch onto ${shortHash(hash)}?\n\nThis will replay your current branch's commits on top of this commit. May cause conflicts.`)) return;
     try {
       await api.git.rebase(repo.path, hash);
       toast.success('Rebase started');
@@ -317,7 +317,7 @@ export function HistoryPage() {
   };
 
   const handleCheckout = async (hash: string) => {
-    if (!confirm(`Checkout ${shortHash(hash)}? (detached HEAD)`)) return;
+    if (!confirm(`Checkout ${shortHash(hash)}?\n\nThis will put you in detached HEAD state. You won't be on any branch.`)) return;
     try {
       await api.git.checkout(repo.path, hash);
       toast.success(`Checked out ${shortHash(hash)}`);

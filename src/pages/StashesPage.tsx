@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Package, RefreshCw, Plus, Trash, Download, Upload, Check } from '../components/icons';
+import { Package, RefreshCw, Plus, Trash, Download, Upload, Check, FileText, ChevronDown, ChevronRight, X } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
-import { api, type StashEntry } from '../lib/api';
+import { api, type StashEntry, type DiffResult } from '../lib/api';
 import { formatDate, shortHash } from '../lib/utils';
 import { CommitHashLink } from '../components/StatusBar';
+import { DiffViewer } from '../components/DiffViewer';
+import { cn } from '../lib/utils';
 
 export function StashesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
@@ -16,6 +18,10 @@ export function StashesPage() {
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [stashMessage, setStashMessage] = useState('');
   const [includeUntracked, setIncludeUntracked] = useState(false);
+  // View stash content (diff)
+  const [viewingStash, setViewingStash] = useState<number | null>(null);
+  const [stashDiff, setStashDiff] = useState<DiffResult | null>(null);
+  const [stashDiffLoading, setStashDiffLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -47,11 +53,11 @@ export function StashesPage() {
     }
   };
 
-  const handlePop = async (index: number) => {
-    if (!confirm(`Pop stash@{${index}}?`)) return;
+  const handlePop = async (stash: StashEntry) => {
+    if (!confirm(`Pop stash@{${stash.index}}?\n\nThis will apply the stashed changes to your working tree and remove the stash.\n\nStash message: "${stash.message}"`)) return;
     try {
-      await api.git.stashPop(repo.path, index);
-      toast.success('Stash popped');
+      await api.git.stashPop(repo.path, stash.index);
+      toast.success(`Stash@{${stash.index}} popped`);
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
@@ -59,24 +65,80 @@ export function StashesPage() {
     }
   };
 
-  const handleApply = async (index: number) => {
+  const handleApply = async (stash: StashEntry) => {
     try {
-      await api.git.stashApply(repo.path, index);
-      toast.success('Stash applied');
+      await api.git.stashApply(repo.path, stash.index);
+      toast.success(`Stash@{${stash.index}} applied (stash kept)`);
       await refreshStatus(repo.path);
     } catch (e) {
       toast.error('Stash apply failed', String(e));
     }
   };
 
-  const handleDrop = async (index: number) => {
-    if (!confirm(`Drop stash@{${index}}?`)) return;
+  const handleDrop = async (stash: StashEntry) => {
+    if (!confirm(`Drop stash@{${stash.index}}?\n\nThis will permanently delete the stash.\n\nStash message: "${stash.message}"`)) return;
     try {
-      await api.git.stashDrop(repo.path, index);
-      toast.success('Stash dropped');
+      await api.git.stashDrop(repo.path, stash.index);
+      toast.success(`Stash@{${stash.index}} dropped`);
       await load();
     } catch (e) {
       toast.error('Stash drop failed', String(e));
+    }
+  };
+
+  // View stash content — shows diff between stash and its parent
+  const handleViewStash = async (stash: StashEntry) => {
+    if (viewingStash === stash.index) {
+      setViewingStash(null);
+      setStashDiff(null);
+      return;
+    }
+    setViewingStash(stash.index);
+    setStashDiffLoading(true);
+    setStashDiff(null);
+    try {
+      // git stash show -p stash@{N} shows the diff of the stash vs its base
+      const rawDiff = await api.git.raw(repo.path, ['stash', 'show', '-p', '--no-color', `stash@{${stash.index}}`]);
+      // Parse the raw diff into DiffResult structure
+      const lines = rawDiff.split('\n');
+      const hunks: any[] = [];
+      let currentHunk: any = null;
+      let oldLine = 0, newLine = 0;
+      for (const line of lines) {
+        if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) continue;
+        if (line.startsWith('@@')) {
+          if (currentHunk) hunks.push(currentHunk);
+          const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+          if (match) {
+            currentHunk = {
+              oldStart: parseInt(match[1]), oldLines: parseInt(match[2] || '1'),
+              newStart: parseInt(match[3]), newLines: parseInt(match[4] || '1'),
+              header: line, lines: []
+            };
+            oldLine = parseInt(match[1]);
+            newLine = parseInt(match[3]);
+          }
+          continue;
+        }
+        if (currentHunk) {
+          if (line.startsWith('+')) {
+            currentHunk.lines.push({ type: 'add', content: line.substring(1), oldLineNumber: null, newLineNumber: newLine++ });
+          } else if (line.startsWith('-')) {
+            currentHunk.lines.push({ type: 'del', content: line.substring(1), oldLineNumber: oldLine++, newLineNumber: null });
+          } else if (line.startsWith(' ')) {
+            currentHunk.lines.push({ type: 'context', content: line.substring(1), oldLineNumber: oldLine++, newLineNumber: newLine++ });
+          }
+        }
+      }
+      if (currentHunk) hunks.push(currentHunk);
+      setStashDiff({
+        oldContent: '', newContent: '', oldPath: `stash@{${stash.index}}`, newPath: `stash@{${stash.index}}`,
+        hunks, binary: false, newFile: false, deletedFile: false, renamedFile: false,
+      });
+    } catch (e) {
+      toast.error('Failed to load stash diff', String(e));
+    } finally {
+      setStashDiffLoading(false);
     }
   };
 
@@ -112,43 +174,68 @@ export function StashesPage() {
           </div>
         ) : (
           stashes.map((s) => (
-            <div
-              key={s.index}
-              className="group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover"
-            >
-              <code className="text-xs font-mono text-text-tertiary">
-                stash@{'{' + s.index + '}'}
-              </code>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-text-primary truncate">{s.message}</div>
-                <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
-                  <CommitHashLink hash={s.hash} />
-                  <span>· {formatDate(s.date)}</span>
+            <div key={s.index}>
+              <div
+                className="group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
+                onClick={() => handleViewStash(s)}
+              >
+                <code className="text-xs font-mono text-text-tertiary flex-shrink-0">
+                  stash@{'{' + s.index + '}'}
+                </code>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-text-primary truncate">{s.message}</div>
+                  <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
+                    <CommitHashLink hash={s.hash} />
+                    <span>· {formatDate(s.date)}</span>
+                  </div>
+                </div>
+                {/* Expand/collapse indicator */}
+                <span className="flex-shrink-0 text-text-tertiary">
+                  {viewingStash === s.index ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                </span>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="icon-btn !w-6 !h-6"
+                    title="View stash content"
+                    onClick={() => handleViewStash(s)}
+                  >
+                    <FileText size={12} />
+                  </button>
+                  <button
+                    className="icon-btn !w-6 !h-6"
+                    title="Apply (keep stash)"
+                    onClick={() => handleApply(s)}
+                  >
+                    <Check size={12} />
+                  </button>
+                  <button
+                    className="icon-btn !w-6 !h-6"
+                    title="Pop (apply + drop)"
+                    onClick={() => handlePop(s)}
+                  >
+                    <Upload size={12} />
+                  </button>
+                  <button
+                    className="icon-btn !w-6 !h-6 hover:!text-status-deleted"
+                    title="Drop (delete)"
+                    onClick={() => handleDrop(s)}
+                  >
+                    <Trash size={12} />
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                <button
-                  className="icon-btn !w-6 !h-6"
-                  title="Apply"
-                  onClick={() => handleApply(s.index)}
-                >
-                  <Check size={12} />
-                </button>
-                <button
-                  className="icon-btn !w-6 !h-6"
-                  title="Pop"
-                  onClick={() => handlePop(s.index)}
-                >
-                  <Upload size={12} />
-                </button>
-                <button
-                  className="icon-btn !w-6 !h-6 hover:!text-status-deleted"
-                  title="Drop"
-                  onClick={() => handleDrop(s.index)}
-                >
-                  <Trash size={12} />
-                </button>
-              </div>
+              {/* Stash content diff viewer — expandable */}
+              {viewingStash === s.index && (
+                <div className="border-b border-border-default bg-bg-primary max-h-96 overflow-y-auto">
+                  {stashDiffLoading ? (
+                    <div className="p-4 text-center text-text-tertiary text-xs">Loading stash diff...</div>
+                  ) : stashDiff ? (
+                    <DiffViewer diff={stashDiff} filePath={`stash@{${s.index}}`} />
+                  ) : (
+                    <div className="p-4 text-center text-text-tertiary text-xs">No diff content</div>
+                  )}
+                </div>
+              )}
             </div>
           ))
         )}
