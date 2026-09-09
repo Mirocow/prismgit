@@ -341,21 +341,21 @@ export function BranchesPage() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary" style={{ height: 28 }}>
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default bg-bg-tertiary" style={{ height: 32 }}>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium">Branches</span>
+          <span className="text-xs font-semibold">Branches</span>
           <span className="text-2xs text-text-tertiary">
             {localBranches.length} local · {Object.values(remoteGroups).reduce((a, b) => a + b.length, 0)} remote
           </span>
         </div>
         <div className="flex items-center gap-1">
           <input type="text" placeholder="Filter..." value={search}
-            onChange={(e) => setSearch(e.target.value)} className="text-xs w-32 px-2 py-0.5" />
-          <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={load}>
-            <RefreshCw size={11} />
+            onChange={(e) => setSearch(e.target.value)} className="text-xs w-32 px-2 py-1" />
+          <button className="icon-btn !w-6 !h-6" title="Refresh" onClick={load}>
+            <RefreshCw size={12} />
           </button>
-          <button className="btn btn-primary text-2xs !py-0.5 !px-2" onClick={() => setShowNewDialog(true)}>
-            <Plus size={11} /> New
+          <button className="btn btn-primary text-2xs !py-1 !px-2.5" onClick={() => setShowNewDialog(true)}>
+            <Plus size={12} /> New
           </button>
         </div>
       </div>

@@ -45,11 +45,11 @@ function WindowControls() {
         <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" /></svg>
       </button>
       <button
-        className="flex items-center justify-center w-11 h-9 hover:bg-red-500 hover:text-white transition-colors text-text-secondary"
+        className="flex items-center justify-center w-11 h-9 hover:bg-red-500 hover:text-white transition-colors text-text-secondary rounded-bl-md"
         onClick={handleClose}
         title="Close"
       >
-        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" strokeWidth="1.2" /></svg>
+        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" strokeWidth="1.4" /></svg>
       </button>
     </div>
   );
@@ -137,7 +137,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
     icon: typeof RefreshCw; onClick: () => void; disabled?: boolean; title: string;
   }) => (
     <button
-      className="flex items-center justify-center w-7 h-7 rounded hover:bg-bg-hover transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary"
+      className="flex items-center justify-center w-8 h-8 rounded-md hover:bg-bg-hover transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary"
       onClick={onClick}
       disabled={disabled}
       title={title}
@@ -154,7 +154,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
   }) => (
     <button
       className={cn(
-        'flex items-center gap-1.5 px-2.5 h-7 rounded-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs',
+        'flex items-center gap-1.5 px-3 h-8 rounded-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs',
         active
           ? 'bg-accent text-text-inverse'
           : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
@@ -169,19 +169,24 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
     </button>
   );
 
-  const Divider = () => <div className="w-px h-5 bg-border-subtle mx-1.5" />;
+  const Divider = () => <div className="w-px h-5 bg-border-subtle mx-2" />;
 
   return (
     <header
-      className="flex items-center h-9 bg-bg-tertiary border-b border-border-default flex-shrink-0 select-none titlebar-drag"
+      className="flex items-center h-10 bg-bg-tertiary border-b border-border-default flex-shrink-0 select-none titlebar-drag"
     >
       {/* App name (left, like Ollama Code) */}
       <div className="flex items-center gap-2 px-3 flex-shrink-0">
-        <span className="text-xs font-semibold text-accent">SmartGit</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-purple) 100%)' }}>
+            <GitBranch size={11} className="text-white" strokeWidth={2.5} />
+          </div>
+          <span className="text-xs font-bold text-text-primary tracking-tight">SmartGit</span>
+        </div>
         {currentRepo && (
           <>
             <span className="text-text-tertiary text-xs">/</span>
-            <span className="text-xs text-text-secondary">{currentRepo.name}</span>
+            <span className="text-xs text-text-secondary font-medium">{currentRepo.name}</span>
           </>
         )}
       </div>
@@ -398,7 +403,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
     <div className="relative">
       <div className="flex items-center">
         <button
-          className="flex items-center gap-1.5 px-2.5 h-7 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
+          className="flex items-center gap-1.5 px-3 h-8 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
           style={{ color: '#86b300' }}
           onClick={() => doPush()}
           disabled={disabled}
@@ -408,7 +413,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
           <span className="hidden md:inline">Push</span>
         </button>
         <button
-          className="flex items-center px-1 h-7 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
+          className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
           onClick={() => setOpen(!open)}
           disabled={disabled}
           title="Push options — select branch, force push, tags"
@@ -531,7 +536,7 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
     <div className="relative">
       <div className="flex items-center">
         <button
-          className="flex items-center gap-1.5 px-2.5 h-7 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
+          className="flex items-center gap-1.5 px-3 h-8 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
           style={{ color: '#399ee6' }}
           onClick={() => doPull()}
           disabled={disabled}
@@ -541,7 +546,7 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
           <span className="hidden md:inline">Pull</span>
         </button>
         <button
-          className="flex items-center px-1 h-7 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
+          className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
           onClick={() => setOpen(!open)}
           disabled={disabled}
           title="Pull options — select branch, rebase, no-ff"
@@ -656,7 +661,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   }) => (
     <button
       className={cn(
-        'flex items-center gap-1.5 px-2.5 h-7 rounded-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs',
+        'flex items-center gap-1.5 px-3 h-8 rounded-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs',
         active
           ? 'bg-accent text-text-inverse'
           : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
@@ -671,7 +676,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
     </button>
   );
 
-  const Divider = () => <div className="w-px h-5 bg-border-subtle mx-1.5" />;
+  const Divider = () => <div className="w-px h-5 bg-border-subtle mx-2" />;
 
   if (!currentRepo) return null;
 
@@ -689,12 +694,12 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   };
 
   return (
-    <div className="flex items-center h-8 bg-bg-secondary border-b border-border-default flex-shrink-0 no-drag px-2 gap-0.5">
+    <div className="flex items-center h-9 bg-bg-secondary border-b border-border-default flex-shrink-0 no-drag px-2 gap-0.5">
       {/* Conflict resolution button — only shown when conflicts exist */}
       {hasConflicts && (
         <>
           <button
-            className="flex items-center gap-1.5 px-2.5 h-7 rounded-md transition-colors no-drag text-xs bg-status-conflict/15 text-status-conflict border border-status-conflict/40 hover:bg-status-conflict/25 font-medium"
+            className="flex items-center gap-1.5 px-3 h-8 rounded-md transition-colors no-drag text-xs bg-status-conflict/15 text-status-conflict border border-status-conflict/40 hover:bg-status-conflict/25 font-medium animate-pulse"
             onClick={handleResolveConflicts}
             title={`${status?.conflicted?.length || 0} conflicted file(s) — click to resolve`}
           >

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star, ChevronLeft, ChevronRight } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, Plus, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star, ChevronDown, ChevronLeft, ChevronRight } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { ResizableSplitter, useResizableWidth } from './ResizableSplitter';
@@ -88,7 +88,7 @@ export function Sidebar() {
     >
       {/* Collapse button */}
       <button
-        className="absolute -right-3 top-16 z-50 w-6 h-6 rounded-full bg-bg-tertiary border border-border-default flex items-center justify-center hover:bg-accent hover:text-text-inverse no-drag"
+        className="absolute -right-3 top-16 z-50 w-6 h-6 rounded-full bg-bg-elevated border border-border-default flex items-center justify-center hover:bg-accent hover:text-text-inverse no-drag shadow-sm transition-colors"
         onClick={() => setCollapsed(!collapsed)}
         title={collapsed ? 'Expand sidebar' : 'Collapse sidebar (icons only)'}
       >
@@ -97,21 +97,27 @@ export function Sidebar() {
 
       {/* Repository switcher */}
       <div className="border-b border-border-default">
-        <div className="flex items-center justify-between px-3 py-2">
+        <div className="flex items-center justify-between px-3 py-2.5">
           <button
-            className="flex items-center gap-2 text-sm font-medium hover:text-accent truncate"
+            className="flex items-center gap-2 text-sm font-semibold hover:text-accent truncate transition-colors"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowRepoList(!showRepoList); }}
           >
-            {showRepoList ? <FolderGitOpen size={14} /> : <FolderGit size={14} />}
+            {showRepoList ? <FolderGitOpen size={15} className="text-accent" /> : <FolderGit size={15} className="text-text-secondary" />}
             {!collapsed && <span className="truncate">{currentRepo ? currentRepo.name : 'Repositories'}</span>}
             {currentRepo && metadata[currentRepo.path]?.favorite && (
               <Star size={11} className="text-status-modified fill-current" />
             )}
+            {!collapsed && (
+              <ChevronDown
+                size={12}
+                className={cn('text-text-tertiary transition-transform', showRepoList && 'rotate-180')}
+              />
+            )}
           </button>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
             {currentRepo && (
               <button
-                className="icon-btn no-drag flex-shrink-0 hover:!text-status-deleted"
+                className="icon-btn no-drag flex-shrink-0 hover:!text-status-deleted !w-7 !h-7"
                 title="Close repository (release memory, stop watcher, clear selections)"
                 onClick={(e) => {
                   e.preventDefault(); e.stopPropagation();
@@ -124,7 +130,7 @@ export function Sidebar() {
               </button>
             )}
             <button
-              className="icon-btn no-drag flex-shrink-0"
+              className="icon-btn no-drag flex-shrink-0 !w-7 !h-7"
               title="Open another repository..."
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); useRepositoryStore.getState().openRepositoryPicker(); }}
             >
@@ -134,44 +140,46 @@ export function Sidebar() {
         </div>
 
         {showRepoList && (
-          <div className="max-h-64 overflow-y-auto border-t border-border-subtle">
+          <div className="max-h-72 overflow-y-auto border-t border-border-subtle">
             {repos.length === 0 ? (
-              <div className="px-3 py-4 text-xs text-text-tertiary text-center">
-                No repositories yet.<br />Click + to add one.
+              <div className="px-3 py-6 text-xs text-text-tertiary text-center">
+                <Folder size={20} className="mx-auto mb-2 opacity-40" />
+                No repositories yet.<br />Click <Plus size={10} className="inline" /> to add one.
               </div>
             ) : (
               repos.map((repo) => {
                 const meta = metadata[repo.path];
+                const isActive = currentRepo?.path === repo.path;
                 return (
                   <div
                     key={repo.path}
                     className={cn(
-                      'group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs hover:bg-bg-hover',
-                      currentRepo?.path === repo.path && 'bg-bg-active'
+                      'group flex items-center gap-2 px-3 py-2 cursor-pointer text-xs transition-colors hover:bg-bg-hover',
+                      isActive && 'bg-bg-active'
                     )}
-                    style={meta?.color ? { borderLeft: `2px solid ${meta.color}` } : undefined}
+                    style={meta?.color ? { borderLeft: `3px solid ${meta.color}` } : undefined}
                     onClick={(e) => { e.stopPropagation(); openRepository(repo.path); }}
                     title={repo.path}
                   >
-                    {currentRepo?.path === repo.path ? <FolderGitOpen size={12} className="text-accent flex-shrink-0" /> : <FolderGit size={12} className="text-text-tertiary flex-shrink-0" />}
-                    <span className="flex-1 truncate">{repo.name}</span>
+                    {isActive ? <FolderGitOpen size={13} className="text-accent flex-shrink-0" /> : <FolderGit size={13} className="text-text-tertiary flex-shrink-0" />}
+                    <span className={cn('flex-1 truncate', isActive && 'text-accent font-medium')}>{repo.name}</span>
                     {meta?.favorite && (
                       <Star size={10} className="text-status-modified fill-current flex-shrink-0" />
                     )}
                     {meta?.tags && meta.tags.length > 0 && (
-                      <span className="text-2xs text-text-tertiary flex-shrink-0">
+                      <span className="text-2xs text-text-tertiary flex-shrink-0 px-1.5 py-0.5 rounded-full bg-bg-tertiary">
                         {meta.tags.length}
                       </span>
                     )}
                     <button
-                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5"
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 transition-opacity"
                       title={repo.pinned ? 'Unpin' : 'Pin'}
                       onClick={(e) => { e.stopPropagation(); pinRepo(repo.path, !repo.pinned); }}
                     >
                       {repo.pinned ? <PinOff size={10} /> : <Pin size={10} />}
                     </button>
                     <button
-                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 hover:!text-status-deleted"
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 hover:!text-status-deleted transition-opacity"
                       title="Remove from list"
                       onClick={(e) => { e.stopPropagation(); removeRepo(repo.path); }}
                     >
@@ -189,9 +197,9 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto py-2">
         {currentRepo ? (
           Object.entries(groups).map(([groupName, items]) => (
-            <div key={groupName} className="mb-2">
+            <div key={groupName} className="mb-3">
               {!collapsed && (
-                <div className="px-3 py-1 text-2xs font-semibold uppercase tracking-wider text-text-tertiary">
+                <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary">
                   {groupName}
                 </div>
               )}
@@ -202,9 +210,9 @@ export function Sidebar() {
                   <button
                     key={item.path}
                     className={cn(
-                      'w-full flex items-center gap-3 px-3 py-1.5 text-sm transition-colors cursor-pointer',
+                      'w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors cursor-pointer',
                       isActive
-                        ? 'bg-accent-muted text-text-primary border-l-2 border-accent'
+                        ? 'bg-accent-muted text-accent font-medium border-l-2 border-accent'
                         : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary border-l-2 border-transparent'
                     )}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate(item.path); }}
@@ -218,7 +226,7 @@ export function Sidebar() {
             </div>
           ))
         ) : (
-          <div className="px-3 py-4 text-xs text-text-tertiary">
+          <div className="px-3 py-4 text-xs text-text-tertiary text-center">
             Open a repository to access Git operations
           </div>
         )}
@@ -227,7 +235,7 @@ export function Sidebar() {
       {/* Bottom: theme toggle + settings */}
       <div className="border-t border-border-default p-2 space-y-1">
         <button
-          className="w-full flex items-center gap-3 px-3 py-2 text-sm rounded transition-colors text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+          className="w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors text-text-secondary hover:bg-bg-hover hover:text-text-primary"
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleTheme(); }}
           title="Toggle theme (Ctrl+Shift+T)"
         >
@@ -236,7 +244,7 @@ export function Sidebar() {
         </button>
         <button
           className={cn(
-            'w-full flex items-center gap-3 px-3 py-2 text-sm rounded transition-colors cursor-pointer',
+            'w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer',
             location.pathname === '/settings'
               ? 'bg-bg-active text-text-primary'
               : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'

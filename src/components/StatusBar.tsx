@@ -5,6 +5,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
+import { ArrowUp, ArrowDown } from './icons';
 
 /**
  * Clickable commit hash — clicking jumps to History and focuses that commit.
@@ -67,9 +68,12 @@ export function StatusBar() {
 
   if (!currentRepo) {
     return (
-      <footer className="h-6 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
-        <span>Ready</span>
-        <span>SmartGit Electron v1.0</span>
+      <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
+        <span className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-status-success inline-block" />
+          Ready
+        </span>
+        <span className="font-mono">SmartGit Electron v2.0</span>
       </footer>
     );
   }
@@ -78,13 +82,13 @@ export function StatusBar() {
   const staged = status?.staged.length ?? 0;
 
   return (
-    <footer className="h-6 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
+    <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
       <div className="flex items-center gap-3">
         {/* HEAD indicator — always visible, shows where you are */}
         {status?.current && headHash && (
           <span className="flex items-center gap-1.5" title="Current HEAD">
-            <span className="text-accent font-medium">HEAD</span>
-            <span className="text-text-secondary">→</span>
+            <span className="text-accent font-semibold tracking-wide">HEAD</span>
+            <span className="text-text-tertiary">→</span>
             <span className="text-text-primary font-medium">{status.current}</span>
             <CommitHashLink hash={headHash} />
           </span>
@@ -95,7 +99,7 @@ export function StatusBar() {
             <span className="text-text-tertiary">selected:</span>
             <CommitHashLink hash={selectedCommitHash} />
             <button
-              className="text-text-tertiary hover:text-text-primary"
+              className="text-text-tertiary hover:text-text-primary transition-colors px-1"
               onClick={() => selectCommit(null)}
               title="Clear selection"
             >
@@ -105,12 +109,30 @@ export function StatusBar() {
         )}
       </div>
       <div className="flex items-center gap-3">
-        {staged > 0 && <span>{staged} staged</span>}
-        {changed > 0 && <span>{changed} changed</span>}
-        {status?.ahead ? <span className="text-status-added">↑{status.ahead}</span> : null}
-        {status?.behind ? <span className="text-status-modified">↓{status.behind}</span> : null}
+        {staged > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
+            {staged} staged
+          </span>
+        )}
+        {changed > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-modified inline-block" />
+            {changed} changed
+          </span>
+        )}
+        {status?.ahead ? (
+          <span className="text-status-added flex items-center gap-0.5 font-medium">
+            <ArrowUp size={9} />{status.ahead}
+          </span>
+        ) : null}
+        {status?.behind ? (
+          <span className="text-status-modified flex items-center gap-0.5 font-medium">
+            <ArrowDown size={9} />{status.behind}
+          </span>
+        ) : null}
         {lastRefresh > 0 && (
-          <span>updated {new Date(lastRefresh).toLocaleTimeString()}</span>
+          <span className="text-text-tertiary">updated {new Date(lastRefresh).toLocaleTimeString()}</span>
         )}
       </div>
     </footer>

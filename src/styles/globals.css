@@ -17,25 +17,27 @@
 
 :root {
   /* Ollama-code Light theme (Ayu Light) — default */
-  --bg-primary: #f8f9fa;
+  /* Slightly warmer, more layered backgrounds for better visual hierarchy */
+  --bg-primary: #f7f8fa;
   --bg-secondary: #ffffff;
-  --bg-tertiary: #f0f1f3;
+  --bg-tertiary: #eef0f3;
   --bg-elevated: #ffffff;
-  --bg-hover: rgba(0, 0, 0, 0.04);
-  --bg-active: rgba(57, 158, 230, 0.12);
+  --bg-hover: rgba(15, 23, 42, 0.05);
+  --bg-active: rgba(57, 158, 230, 0.13);
   --bg-selected: #ddeeff;
   --bg-sidebar-selected: #e4f0fb;
 
-  --border-default: #e3e4e6;
-  --border-subtle: #ececed;
-  --border-strong: #c8cacf;
+  --border-default: #d8dade;
+  --border-subtle: #e6e7eb;
+  --border-strong: #c2c7cd;
   --border-focused: #399ee6;
 
-  --text-primary: #5c6166;
-  --text-secondary: #8a8f93;
-  --text-tertiary: #a8acb0;
+  /* Slightly darker text for better contrast on light backgrounds */
+  --text-primary: #2c3138;
+  --text-secondary: #5c6166;
+  --text-tertiary: #868b92;
   --text-inverse: #ffffff;
-  --text-link: #399ee6;
+  --text-link: #2585d4;
 
   --accent: #399ee6;
   --accent-hover: #55b4d4;
@@ -179,18 +181,24 @@ html, body, #root {
   overflow: hidden;
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
-  font-size: 13px;
-  --font-size-base: 13px;
-  --font-size-tree: 12px;
-  --font-size-list: 12px;
-  --font-size-diff: 11px;
-  --font-size-mono: 11px;
+  /* Use system UI font stack for non-code text — much more readable than pure monospace */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 13.5px;
+  --font-size-base: 13.5px;
+  --font-size-tree: 12.5px;
+  --font-size-list: 12.5px;
+  --font-size-diff: 12px;
+  --font-size-mono: 11.5px;
   font-weight: 400;
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+/* All code paths, hashes, branches, file paths stay monospace */
+.mono, code, pre, kbd, .font-mono {
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace !important;
 }
 
 button {
@@ -220,8 +228,8 @@ input:focus, textarea:focus, select:focus {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -230,11 +238,21 @@ input:focus, textarea:focus, select:focus {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 4px;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* Thin scrollbar variant — for tight panels like file trees */
+::-webkit-scrollbar.thin {
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-corner {
@@ -245,24 +263,27 @@ input:focus, textarea:focus, select:focus {
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 11px;
-  border-radius: 4px;
-  font-size: 12px;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 5px;
+  font-size: 12.5px;
   font-weight: 500;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
   -webkit-app-region: no-drag;
+  letter-spacing: -0.005em;
 }
 
 .btn-primary {
   background-color: var(--accent);
   color: var(--text-inverse);
   font-weight: 600;
+  box-shadow: 0 1px 2px rgba(57, 158, 230, 0.2);
 }
 
 .btn-primary:hover {
   background-color: var(--accent-hover);
+  box-shadow: 0 2px 5px rgba(57, 158, 230, 0.3);
 }
 
 .btn-primary:disabled {
@@ -329,11 +350,11 @@ input:focus, textarea:focus, select:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
   color: var(--text-secondary);
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
   -webkit-app-region: no-drag;
 }
 
@@ -356,29 +377,32 @@ input:focus, textarea:focus, select:focus {
 .panel {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-default);
-  border-radius: 6px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
 }
 
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border-default);
   background-color: var(--bg-tertiary);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.7px;
   color: var(--text-secondary);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
 }
 
 /* === List items === */
 .list-item {
-  padding: 5px 10px;
+  padding: 6px 12px;
   cursor: pointer;
   border-bottom: 1px solid var(--border-subtle);
-  transition: background-color 0.08s ease;
+  transition: background-color 0.1s ease;
   user-select: none;
 }
 
@@ -388,19 +412,22 @@ input:focus, textarea:focus, select:focus {
 
 .list-item.active {
   background-color: var(--bg-selected);
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
 }
 
 /* === Badges === */
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 9px;
-  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.5px;
   border: 1px solid transparent;
+  line-height: 1.2;
 }
 
 .badge-added { background-color: rgba(170, 217, 76, 0.12); color: var(--status-added); border-color: rgba(170, 217, 76, 0.25); }
@@ -432,7 +459,12 @@ input[type="checkbox"], input[type="radio"] {
 }
 
 @keyframes slideUp {
-  from { transform: translateY(4px); opacity: 0; }
+  from { transform: translateY(6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-6px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
 
@@ -441,11 +473,15 @@ input[type="checkbox"], input[type="radio"] {
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.12s ease-out;
+  animation: fadeIn 0.18s ease-out;
 }
 
 .animate-slide-up {
-  animation: slideUp 0.16s ease-out;
+  animation: slideUp 0.22s ease-out;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.18s ease-out;
 }
 
 .spin {
@@ -463,6 +499,12 @@ input[type="checkbox"], input[type="radio"] {
 /* === Code/mono text === */
 .mono {
   font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* === Small text utility (replaces text-2xs misuses) === */
+.text-2xs {
+  font-size: 10.5px;
+  line-height: 1.3;
 }
 
 /* === Syntax highlighting colors (Ayu Dark) === */
@@ -495,7 +537,7 @@ input[type="checkbox"], input[type="radio"] {
   width: var(--splitter-width);
   background: var(--splitter-color);
   cursor: col-resize;
-  transition: background 0.12s;
+  transition: background 0.15s;
   flex-shrink: 0;
   position: relative;
 }
@@ -510,8 +552,8 @@ input[type="checkbox"], input[type="radio"] {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -3px;
-  right: -3px;
+  left: -4px;
+  right: -4px;
 }
 
 .split-divider-horizontal {
@@ -519,7 +561,7 @@ input[type="checkbox"], input[type="radio"] {
   width: 100%;
   background: var(--splitter-color);
   cursor: row-resize;
-  transition: background 0.12s;
+  transition: background 0.15s;
   flex-shrink: 0;
 }
 

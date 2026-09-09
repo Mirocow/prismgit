@@ -226,12 +226,15 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
         return (
           <div key={hi} className="font-mono text-xs">
             <div
-              className="bg-bg-tertiary text-text-tertiary px-2 py-1 sticky top-0 cursor-pointer flex items-center gap-2 hover:bg-bg-hover"
+              className="bg-bg-tertiary text-text-secondary px-3 py-1.5 sticky top-0 cursor-pointer flex items-center gap-2 hover:bg-bg-hover border-b border-border-subtle"
               onClick={() => toggleHunk(hi)}
             >
               {isCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-              <span className="truncate">{hunk.header}</span>
-              <span className="ml-auto text-2xs">+{hunk.newLines} -{hunk.oldLines}</span>
+              <span className="truncate font-mono text-2xs text-text-tertiary">{hunk.header}</span>
+              <span className="ml-auto flex items-center gap-2 text-2xs">
+                <span className="text-status-added font-medium">+{hunk.newLines}</span>
+                <span className="text-status-deleted font-medium">-{hunk.oldLines}</span>
+              </span>
             </div>
             {!isCollapsed && (() => {
               const isExpanded = expandedHunks.has(hi);
@@ -401,20 +404,20 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg-primary">
       {/* Diff header */}
-      <div className="px-3 py-1.5 border-b border-border-default text-xs bg-bg-secondary flex items-center justify-between flex-shrink-0">
+      <div className="px-3 py-2 border-b border-border-default text-xs bg-bg-secondary flex items-center justify-between flex-shrink-0 gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {diff.newFile && <span className="badge badge-added">NEW</span>}
           {diff.deletedFile && <span className="badge badge-deleted">DELETED</span>}
           {diff.renamedFile && <span className="badge badge-renamed">RENAMED</span>}
           {diff.modeChange && <span className="badge badge-modified">MODE</span>}
-          <span className="font-mono truncate">{diff.newPath}</span>
+          <span className="font-mono truncate text-text-primary">{diff.newPath}</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-status-added">+{addedLines}</span>
-          <span className="text-status-deleted">-{removedLines}</span>
+          <span className="text-status-added font-medium">+{addedLines}</span>
+          <span className="text-status-deleted font-medium">-{removedLines}</span>
           <div className="w-px h-4 bg-border-default mx-1" />
           <select
-            className="text-2xs bg-bg-tertiary border border-border-default rounded px-1 py-0.5"
+            className="text-2xs bg-bg-tertiary border border-border-default rounded px-1.5 py-0.5"
             value={wsMode}
             onChange={(e) => setWsMode(e.target.value as WhitespaceMode)}
             title="Whitespace mode"
@@ -424,24 +427,24 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
             <option value="ignore-trailing">Ignore trailing</option>
           </select>
           <button
-            className={cn('px-2 py-0.5 text-2xs rounded border', useWordDiff
+            className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', useWordDiff
               ? 'bg-accent text-text-inverse border-accent'
-              : 'bg-bg-tertiary text-text-secondary border-border-default')}
+              : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setUseWordDiff(!useWordDiff)}
             title="Toggle word-level diff highlighting"
           >
             Word diff
           </button>
-          <div className="flex bg-bg-tertiary rounded">
+          <div className="flex bg-bg-tertiary rounded overflow-hidden border border-border-default">
             <button
-              className={cn('px-2 py-0.5 text-2xs rounded-l', viewMode === 'unified' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}
+              className={cn('px-2.5 py-0.5 text-2xs transition-colors', viewMode === 'unified' ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
               onClick={() => setViewMode('unified')}
               title="Unified view"
             >
               Unified
             </button>
             <button
-              className={cn('px-2 py-0.5 text-2xs rounded-r', viewMode === 'split' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}
+              className={cn('px-2.5 py-0.5 text-2xs transition-colors border-l border-border-default', viewMode === 'split' ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
               onClick={() => setViewMode('split')}
               title="Split view (side-by-side)"
             >

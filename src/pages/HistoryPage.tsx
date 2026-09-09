@@ -481,12 +481,14 @@ export function HistoryPage() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary" style={{ height: 28 }}>
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default bg-bg-tertiary" style={{ height: 32 }}>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium">Graph</span>
+          <span className="text-xs font-semibold">Graph</span>
           <span className="text-2xs text-text-tertiary">{filtered.length} commits</span>
           {(authorFilter || dateFrom || dateTo || pathFilter || useRegex) && (
-            <span className="text-2xs text-accent" title="Active filters">● filtered</span>
+            <span className="text-2xs text-accent flex items-center gap-1" title="Active filters">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />filtered
+            </span>
           )}
           {selectedBranches.size > 0 && (
             <div className="flex items-center gap-1 ml-2">
