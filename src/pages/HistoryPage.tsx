@@ -50,6 +50,7 @@ export function HistoryPage() {
   const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [showFiles, setShowFiles] = useState(true);
+  const [filesPage, setFilesPage] = useState(0);
   const [editingMessage, setEditingMessage] = useState(false);
   const [editMsgValue, setEditMsgValue] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -267,6 +268,7 @@ export function HistoryPage() {
 
   useEffect(() => {
     if (selectedIdx === null || selectedIdx < 0) { setCommitFiles([]); return; }
+    setFilesPage(0); // Reset pagination when commit changes
     const selected = filtered[selectedIdx];
     if (!selected) return;
     setLoadingFiles(true);
@@ -892,15 +894,24 @@ export function HistoryPage() {
                 </button>
               </div>
               <div>
-                <button className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-1"
-                  onClick={() => setShowFiles(!showFiles)}>
-                  <span className="flex items-center gap-1"><FileText size={10} /> Files ({commitFiles.length})</span>
-                  {showFiles ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                </button>
+                <div className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-1">
+                  <button className="flex items-center gap-1" onClick={() => setShowFiles(!showFiles)}>
+                    {showFiles ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                    <FileText size={10} /> Files ({commitFiles.length})
+                  </button>
+                  {/* Pagination for large commits */}
+                  {commitFiles.length > 50 && (
+                    <span className="flex items-center gap-1 normal-case">
+                      <button className="text-2xs hover:text-accent" onClick={() => setFilesPage(Math.max(0, filesPage - 1))} disabled={filesPage === 0}>‹ Prev</button>
+                      <span className="text-2xs">{filesPage * 50 + 1}-{Math.min((filesPage + 1) * 50, commitFiles.length)} / {commitFiles.length}</span>
+                      <button className="text-2xs hover:text-accent" onClick={() => setFilesPage(Math.min(Math.ceil(commitFiles.length / 50) - 1, filesPage + 1))} disabled={filesPage >= Math.ceil(commitFiles.length / 50) - 1}>Next ›</button>
+                    </span>
+                  )}
+                </div>
                 {showFiles && (
                   <div className="space-y-0.5">
                     {loadingFiles ? <div className="text-2xs text-text-tertiary">Loading...</div> :
-                      commitFiles.map((f, i) => {
+                      commitFiles.slice(filesPage * 50, (filesPage + 1) * 50).map((f, i) => {
                         // Highlight the file that matches the active file-history filter
                         const isHighlighted = globalPathFilter === f.path || globalPathFilter === f.oldPath;
                         return (

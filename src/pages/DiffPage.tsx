@@ -286,7 +286,7 @@ export function DiffPage() {
             <div className="px-2 py-1 text-2xs font-semibold uppercase text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary">
               Changed Files ({changedFiles.length})
             </div>
-            {changedFiles.map((f, i) => (
+            {changedFiles.slice(0, 200).map((f, i) => (
               <div
                 key={i}
                 className={cn(
@@ -303,6 +303,11 @@ export function DiffPage() {
                 <span className="flex-1 truncate font-mono text-text-secondary">{f.path}</span>
               </div>
             ))}
+            {changedFiles.length > 200 && (
+              <div className="px-2 py-1 text-2xs text-text-tertiary border-t border-border-subtle">
+                Showing first 200 of {changedFiles.length}
+              </div>
+            )}
           </div>
         )}
 

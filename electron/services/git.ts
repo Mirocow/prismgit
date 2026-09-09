@@ -1865,10 +1865,10 @@ async function buildDirLevel(
 }
 
 /** List repository directories (Changes view tree), skipping VCS/build directories. */
-export async function listDirectories(repoPath: string, maxDepth = 256): Promise<DirNode[]> {
-  // No practical depth limit — 256 covers any real repository.
-  // Budget prevents pathological cases (e.g. node_modules with millions of dirs).
-  const budget: DirBudget = { count: 0, max: 50000 };
+export async function listDirectories(repoPath: string, maxDepth = 1024): Promise<DirNode[]> {
+  // No practical depth or node limit — 1024 depth, 200000 node budget.
+  // These are just safety guards against pathological filesystems (e.g. symlink loops).
+  const budget: DirBudget = { count: 0, max: 200000 };
   return buildDirLevel(repoPath, '', 1, maxDepth, budget);
 }
 
