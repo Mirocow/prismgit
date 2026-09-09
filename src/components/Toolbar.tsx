@@ -476,6 +476,7 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const settings = useSettingsStore((s) => s.settings);
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [selectedBranch, setSelectedBranch] = useState('');
@@ -505,11 +506,21 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
       const parts = selectedBranch.split('/');
       const remote = parts[0];
       const branch = parts.slice(1).join('/');
-      await api.git.pull(currentRepo.path, remote, branch, useRebase, noFF);
-      toast.success(`Pulled from ${selectedBranch}${useRebase ? ' (rebase)' : ''}`);
+      // Read pull strategy from settings — merge or rebase
+      // If dropdown has explicit rebase checkbox, use that. Otherwise use settings default.
+      const shouldRebase = useRebase || (settings.pullStrategy === 'rebase');
+      await api.git.pull(currentRepo.path, remote, branch, shouldRebase, noFF);
+      toast.success(`Pulled from ${selectedBranch}${shouldRebase ? ' (rebase)' : ' (merge)'}`);
       refreshStatus(currentRepo.path);
     } catch (e) {
-      toast.error('Pull failed', String(e));
+      // Don't crash — show error, let user resolve conflicts via ConflictSolver
+      const msg = String(e);
+      if (msg.includes('CONFLICT') || msg.includes('conflict')) {
+        toast.warning('Pull resulted in conflicts', 'Use "Resolve Conflicts" button in toolbar');
+        refreshStatus(currentRepo.path);
+      } else {
+        toast.error('Pull failed', msg);
+      }
     }
     setOpen(false);
     setUseRebase(false);
@@ -599,6 +610,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   const pull = useGitStore((s) => s.pull);
   const fetch = useGitStore((s) => s.fetch);
   const toast = useToastStore();
+  const settings = useSettingsStore((s) => s.settings);
   const navigate = useNavigate();
   const location = useLocation();
   const currentPath = location.pathname;
@@ -615,8 +627,21 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   };
   const handlePull = async () => {
     if (!currentRepo) return;
-    try { await pull(currentRepo.path); toast.success('Petched successfully'); }
-    catch (e) { toast.error('Fetch failed', String(e)); }
+    try {
+      // Use settings strategy: merge or rebase
+      const shouldRebase = settings.pullStrategy === 'rebase';
+      await api.git.pull(currentRepo.path, 'origin', undefined, shouldRebase, false);
+      toast.success(`Pulled ${shouldRebase ? '(rebase)' : '(merge)'}`);
+      refreshStatus(currentRepo.path);
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes('CONFLICT') || msg.includes('conflict')) {
+        toast.warning('Pull resulted in conflicts', 'Use "Resolve Conflicts" button');
+        refreshStatus(currentRepo.path);
+      } else {
+        toast.error('Pull failed', msg);
+      }
+    }
   };
 
   const COLOR_BLUE = '#399ee6';

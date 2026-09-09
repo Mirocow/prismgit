@@ -322,6 +322,47 @@ export function SettingsPage() {
           </div>
         </section>
 
+        {/* Pull Strategy */}
+        <section className="panel mb-4">
+          <div className="panel-header">Pull Strategy</div>
+          <div className="p-4 space-y-3">
+            <div>
+              <label className="text-xs text-text-tertiary block mb-2">When pulling from remote:</label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="pullStrategy"
+                    value="merge"
+                    checked={(settings.pullStrategy ?? 'merge') === 'merge'}
+                    onChange={() => setSetting('pullStrategy', 'merge')}
+                  />
+                  <div>
+                    <div className="font-medium">Merge (default)</div>
+                    <div className="text-2xs text-text-tertiary">Creates a merge commit when local and remote have diverged</div>
+                  </div>
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="pullStrategy"
+                    value="rebase"
+                    checked={settings.pullStrategy === 'rebase'}
+                    onChange={() => setSetting('pullStrategy', 'rebase')}
+                  />
+                  <div>
+                    <div className="font-medium">Rebase</div>
+                    <div className="text-2xs text-text-tertiary">Replays local commits on top of remote, linear history</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+            <div className="text-2xs text-text-tertiary">
+              This setting applies to the quick Pull button and the Pull dropdown. The dropdown also has per-pull checkboxes for manual override.
+            </div>
+          </div>
+        </section>
+
         {/* About */}
         <section className="panel mb-4">
           <div className="panel-header">About</div>

@@ -39,6 +39,7 @@ export interface AppSettings {
   maxHistoryLoad: number;
   enableTelemetry: boolean;
   githubPAT?: string;
+  pullStrategy: 'merge' | 'rebase';
 }
 
 export interface SettingsApi {
