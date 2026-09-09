@@ -1852,8 +1852,10 @@ async function buildDirLevel(
 }
 
 /** List repository directories (Changes view tree), skipping VCS/build directories. */
-export async function listDirectories(repoPath: string, maxDepth = 4): Promise<DirNode[]> {
-  const budget: DirBudget = { count: 0, max: 2000 };
+export async function listDirectories(repoPath: string, maxDepth = 64): Promise<DirNode[]> {
+  // Depth 64 is effectively unlimited for real repositories (paths are capped by
+  // the OS far below this), while still guarding against pathological recursion.
+  const budget: DirBudget = { count: 0, max: 5000 };
   return buildDirLevel(repoPath, '', 1, maxDepth, budget);
 }
 
