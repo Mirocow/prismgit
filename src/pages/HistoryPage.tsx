@@ -1,24 +1,33 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import {
-  RefreshCw, Copy, GitBranch, Search, GitPullRequest, Undo,
-  Pencil, ExternalLink, FileText, ChevronDown, ChevronRight,
-  Tag as TagIcon, CornerDownRight, RotateCcw, Filter, X,
-} from '../components/icons';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
-import { useGitStore } from '../stores/gitStore';
-import { useSelectionStore } from '../stores/selectionStore';
-import { api, type LogEntry, type CommitFile, type BranchInfo } from '../lib/api';
-import { cn, shortHash, copyToClipboard } from '../lib/utils';
-import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
-import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
-import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
-import { CommitHashLink } from '../components/StatusBar';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DiffViewer } from '../components/DiffViewer';
-import { computeGraph, bezierPath, laneColor, BRANCH_COLORS } from '../lib/gitGraph';
+import {
+  ChevronDown, ChevronRight,
+  Copy,
+  CornerDownRight,
+  ExternalLink, FileText,
+  Filter,
+  GitBranch,
+  GitPullRequest,
+  Pencil,
+  RefreshCw,
+  RotateCcw,
+  Tag as TagIcon,
+  Undo,
+  X
+} from '../components/icons';
+import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
+import { CommitHashLink } from '../components/StatusBar';
+import { api, type BranchInfo, type CommitFile, type LogEntry } from '../lib/api';
+import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
+import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
-import type { GraphNode } from '../lib/gitGraph';
+import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { useLazyList } from '../lib/useLazyList';
+import { cn, copyToClipboard, shortHash } from '../lib/utils';
+import { useGitStore } from '../stores/gitStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { useToastStore } from '../stores/toastStore';
 
 const ROW_HEIGHT = 28;
 const LANE_WIDTH = 20;
@@ -279,14 +288,6 @@ export function HistoryPage() {
 
   // Compare a commit with the current working tree — shows a diff dialog
   const [compareDiff, setCompareDiff] = useState<{ result: import('../lib/api').DiffResult; title: string } | null>(null);
-  const handleCompareWithWorkingTree = async (entry: LogEntry) => {
-    try {
-      // Compare working tree with a commit: `git diff <commit> -- .`
-      // Pass '.' as file path to diff all files (the diff() function handles this).
-      const result = await api.git.diff(repo.path, '.', { ref: entry.hash });
-      setCompareDiff({ result, title: `Working Tree vs ${shortHash(entry.hash)} · ${entry.subject}` });
-    } catch (e) { toast.error('Failed to compute comparison', String(e)); }
-  };
 
   const handleRevert = async (entry: LogEntry) => {
     if (!confirm(`Revert ${shortHash(entry.hash)}?`)) return;
@@ -888,10 +889,6 @@ export function HistoryPage() {
                 <button className="btn btn-secondary text-2xs" onClick={() => handleReset(selected.hash, 'mixed')}
                   title="Reset to this commit (mixed)">
                   <RotateCcw size={10} /> Reset
-                </button>
-                <button className="btn btn-primary text-2xs" onClick={() => handleCompareWithWorkingTree(selected)}
-                  title="Compare this commit with the current working tree">
-                  <FileText size={10} /> Compare with Working Tree
                 </button>
               </div>
               <div>
