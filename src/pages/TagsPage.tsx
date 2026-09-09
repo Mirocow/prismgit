@@ -54,7 +54,7 @@ export function TagsPage() {
   };
 
   const handleDelete = async (tag: TagInfo) => {
-    if (!confirm(`Delete tag '${tag.name}'?`)) return;
+    if (!confirm(`Delete tag '${tag.name}'?\n\nThis will permanently remove the tag reference. The tagged commit will not be affected.`)) return;
     try {
       await api.git.deleteTag(repo.path, tag.name);
       toast.success(`Tag '${tag.name}' deleted`);

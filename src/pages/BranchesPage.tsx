@@ -68,7 +68,7 @@ export function BranchesPage() {
   };
 
   const handleDelete = async (branch: BranchInfo) => {
-    if (!confirm(`Delete branch '${branch.name}'?`)) return;
+    if (!confirm(`Delete branch '${branch.name}'?\n\nThis will remove the local branch reference. Use force-delete if the branch is not fully merged.`)) return;
     try {
       await api.git.deleteBranch(repo.path, branch.name, false, branch.remote);
       toast.success(`Deleted '${branch.name}'`);
@@ -78,7 +78,7 @@ export function BranchesPage() {
 
   const handleDeleteRemote = async (branch: BranchInfo) => {
     const remoteBranch = branch.name.replace(/^[^/]+\//, '');
-    if (!confirm(`Delete remote branch '${branch.name}'?`)) return;
+    if (!confirm(`Delete remote branch '${branch.name}'?\n\nThis will run 'git push origin --delete' and permanently remove the branch from the remote repository.`)) return;
     try {
       await api.git.deleteBranch(repo.path, remoteBranch, true, true);
       toast.success(`Deleted remote '${remoteBranch}'`);
