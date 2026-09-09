@@ -51,6 +51,10 @@ export interface GlobalSelectionState {
   fileExtensionFilter: string | null;
   /** Status filter for file lists: 'all' | 'modified' | 'added' | 'deleted' | 'untracked'. */
   fileStatusFilter: 'all' | 'modified' | 'added' | 'deleted' | 'untracked';
+  /** Multi-select file status filter — empty set means all statuses visible. */
+  fileStatusFilterSet: Set<'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed'>;
+  /** File scope: 'all' = include nested directories, 'top' = current directory only. */
+  fileScope: 'all' | 'top';
 
   // Actions
   selectCommit: (hash: string | null) => void;
@@ -66,6 +70,9 @@ export interface GlobalSelectionState {
   setCompressFilePaths: (compress: boolean) => void;
   setFileExtensionFilter: (ext: string | null) => void;
   setFileStatusFilter: (filter: 'all' | 'modified' | 'added' | 'deleted' | 'untracked') => void;
+  toggleFileStatusFilter: (status: 'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed') => void;
+  clearFileStatusFilterSet: () => void;
+  setFileScope: (scope: 'all' | 'top') => void;
   /** Clear all selections (e.g. when switching repos). */
   clearAll: () => void;
 }
@@ -83,6 +90,8 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   compressFilePaths: true,
   fileExtensionFilter: null,
   fileStatusFilter: 'all',
+  fileStatusFilterSet: new Set(),
+  fileScope: 'all',
 
   selectCommit: (hash) => set({ selectedCommitHash: hash }),
   selectBranch: (name) => set({
@@ -107,6 +116,14 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   setCompressFilePaths: (compress) => set({ compressFilePaths: compress }),
   setFileExtensionFilter: (ext) => set({ fileExtensionFilter: ext }),
   setFileStatusFilter: (filter) => set({ fileStatusFilter: filter }),
+  toggleFileStatusFilter: (status) => {
+    const next = new Set(get().fileStatusFilterSet);
+    if (next.has(status)) next.delete(status);
+    else next.add(status);
+    set({ fileStatusFilterSet: next });
+  },
+  clearFileStatusFilterSet: () => set({ fileStatusFilterSet: new Set() }),
+  setFileScope: (scope) => set({ fileScope: scope }),
   clearAll: () => set({
     selectedCommitHash: null,
     selectedBranch: null,

@@ -27,6 +27,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const setCompressFilePaths = useSelectionStore((s) => s.setCompressFilePaths);
   const fileStatusFilter = useSelectionStore((s) => s.fileStatusFilter);
   const setFileStatusFilter = useSelectionStore((s) => s.setFileStatusFilter);
+  const fileStatusFilterSet = useSelectionStore((s) => s.fileStatusFilterSet);
+  const toggleFileStatusFilter = useSelectionStore((s) => s.toggleFileStatusFilter);
+  const clearFileStatusFilterSet = useSelectionStore((s) => s.clearFileStatusFilterSet);
+  const fileScope = useSelectionStore((s) => s.fileScope);
+  const setFileScope = useSelectionStore((s) => s.setFileScope);
+  const [showStatusPicker, setShowStatusPicker] = useState(false);
   const fileExtensionFilter = useSelectionStore((s) => s.fileExtensionFilter);
   const setFileExtensionFilter = useSelectionStore((s) => s.setFileExtensionFilter);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -182,6 +188,29 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     }
   };
 
+  // File scope helper: filter out nested paths if scope is 'top'
+  const scopeFilter = (path: string): boolean => {
+    if (fileScope === 'all') return true;
+    // 'top' mode: only files directly in repo root (no '/' in path)
+    return !path.includes('/');
+  };
+
+  // Multi-select status set helper
+  const matchesStatusSet = (file: FileStatus, isStaged: boolean): boolean => {
+    if (fileStatusFilterSet.size === 0) return true;
+    const idx = file.index as string;
+    const wd = file.working_dir as string;
+    const code = idx !== ' ' && idx !== '?' ? idx : wd;
+    if (fileStatusFilterSet.has('staged') && isStaged) return true;
+    if (fileStatusFilterSet.has('unstaged') && !isStaged) return true;
+    if (fileStatusFilterSet.has('modified') && (code === 'M' || code === 'R' || code === 'C' || code === 'T')) return true;
+    if (fileStatusFilterSet.has('added') && code === 'A') return true;
+    if (fileStatusFilterSet.has('deleted') && code === 'D') return true;
+    if (fileStatusFilterSet.has('renamed') && (code === 'R' || code === 'C')) return true;
+    if (fileStatusFilterSet.has('untracked') && code === '?') return true;
+    return false;
+  };
+
   const stagedFiles: FileStatus[] = (status?.files || []).filter((f) => {
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) return false;
@@ -189,6 +218,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     return idx !== ' ' && idx !== '?' && idx !== '!';
   }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+    .filter(f => scopeFilter(f.path))
+    .filter(f => matchesStatusSet(f, true))
     .filter(f => {
       if (fileStatusFilter === 'all') return true;
       const idx = f.index as string;
@@ -210,6 +241,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     return wd !== ' ' && wd !== '!';
   }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+    .filter(f => scopeFilter(f.path))
+    .filter(f => matchesStatusSet(f, false))
     .filter(f => {
       if (fileStatusFilter === 'all') return true;
       const idx = f.index as string;
@@ -226,7 +259,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     const wd = f.working_dir as string;
     return idx === '?' && wd === '?';
   }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()))
-    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()));
+    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+    .filter(f => scopeFilter(f.path));
 
   const totalChanged = (status?.files.length ?? 0);
 
@@ -419,19 +453,68 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             value={fileFilter}
             onChange={(e) => setFileFilter(e.target.value)}
           />
-          {/* Status filter dropdown */}
-          <select
-            className="text-2xs bg-bg-tertiary border border-border-default rounded px-1 py-0.5"
-            value={fileStatusFilter}
-            onChange={(e) => setFileStatusFilter(e.target.value as 'all' | 'modified' | 'added' | 'deleted' | 'untracked')}
-            title="Filter by status"
-          >
-            <option value="all">All</option>
-            <option value="modified">Modified</option>
-            <option value="added">Added</option>
-            <option value="deleted">Deleted</option>
-            <option value="untracked">Untracked</option>
-          </select>
+          {/* Multi-select status filter — dropdown with checkboxes */}
+          <div className="relative">
+            <button
+              className={cn('text-2xs px-2 py-0.5 border rounded flex items-center gap-1',
+                fileStatusFilterSet.size > 0
+                  ? 'border-accent bg-accent-muted text-accent'
+                  : 'border-border-default bg-bg-tertiary text-text-secondary')}
+              onClick={() => setShowStatusPicker(!showStatusPicker)}
+              title="Filter files by status (multi-select)"
+            >
+              <span>Status:</span>
+              <span>{fileStatusFilterSet.size > 0 ? `${fileStatusFilterSet.size} filters` : 'All'}</span>
+              <ChevronDown size={9} />
+            </button>
+            {showStatusPicker && (
+              <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-56">
+                <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs border-b border-border-subtle">
+                  <input type="checkbox"
+                    checked={fileStatusFilterSet.size === 0}
+                    onChange={() => clearFileStatusFilterSet()}
+                  />
+                  <span className="font-medium">All statuses</span>
+                </label>
+                {([
+                  { id: 'staged', label: 'Staged' },
+                  { id: 'unstaged', label: 'Unstaged' },
+                  { id: 'modified', label: 'Modified' },
+                  { id: 'added', label: 'Added (new)' },
+                  { id: 'deleted', label: 'Deleted' },
+                  { id: 'renamed', label: 'Renamed' },
+                  { id: 'untracked', label: 'Untracked' },
+                ] as const).map(opt => (
+                  <label key={opt.id} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
+                    <input type="checkbox" checked={fileStatusFilterSet.has(opt.id)}
+                      onChange={() => toggleFileStatusFilter(opt.id)} />
+                    <span>{opt.label}</span>
+                  </label>
+                ))}
+                <div className="px-3 py-1 border-t border-border-subtle flex justify-between">
+                  <button className="text-2xs text-accent" onClick={() => clearFileStatusFilterSet()}>Clear</button>
+                  <button className="text-2xs btn btn-primary !py-0.5 !px-2" onClick={() => setShowStatusPicker(false)}>Done</button>
+                </div>
+              </div>
+            )}
+          </div>
+          {/* File scope toggle: current dir only vs all nested */}
+          <div className="flex bg-bg-tertiary border border-border-default rounded">
+            <button
+              className={cn('px-2 py-0.5 text-2xs rounded-l', fileScope === 'all' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}
+              onClick={() => setFileScope('all')}
+              title="Show files from current directory AND all nested subdirectories"
+            >
+              All
+            </button>
+            <button
+              className={cn('px-2 py-0.5 text-2xs rounded-r', fileScope === 'top' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}
+              onClick={() => setFileScope('top')}
+              title="Show files from current directory only (no nested)"
+            >
+              Top
+            </button>
+          </div>
           {/* Extension filter */}
           <input
             type="text"

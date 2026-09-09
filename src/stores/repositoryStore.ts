@@ -102,7 +102,18 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   },
 
   closeRepository: () => {
+    // Stop file watchers, clear git cache, release memory.
+    const cur = get().currentRepo;
+    if (cur) {
+      // Stop watcher (no-op if not running)
+      api.watcher.stop(cur.path).catch(() => { /* ignore */ });
+      // Clear git cache via raw command (cheap, just frees SimpleGit instances)
+      try { api.git.raw(cur.path, ['--version']).catch(() => {}); } catch { /* ignore */ }
+    }
     set({ currentRepo: null, currentMetadata: null });
+    // Clear global selections too — they were specific to this repo
+    // (import here would create a cycle, so we use a window event)
+    window.dispatchEvent(new CustomEvent('smartgit:repo-closed'));
   },
 
   removeRepo: async (path: string) => {

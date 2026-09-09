@@ -20,10 +20,16 @@ vi.mock('../../src/lib/api', () => ({
     git: {
       isRepo: vi.fn(),
       status: vi.fn(),
+      raw: vi.fn().mockResolvedValue(''),
     },
     fs: {
       openRepositoryPicker: vi.fn(),
       pathBasename: vi.fn(),
+    },
+    watcher: {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      onChanged: vi.fn(() => () => {}),
     },
   },
 }));

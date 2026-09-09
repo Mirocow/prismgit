@@ -19,6 +19,7 @@ import { useSettingsStore } from './stores/settingsStore';
 import { useAuthStore } from './stores/authStore';
 import { useToastStore } from './stores/toastStore';
 import { useGitStore } from './stores/gitStore';
+import { useSelectionStore } from './stores/selectionStore';
 import { api } from './lib/api';
 
 // Lazy-load pages for smaller initial bundle
@@ -75,6 +76,17 @@ export default function App() {
     loadSettings();
     loadAuth();
   }, [loadRepos, loadMetadata, loadSettings, loadAuth]);
+
+  // Listen for repo-closed events to clear global selections and free memory
+  useEffect(() => {
+    const handler = () => {
+      useSelectionStore.getState().clearAll();
+      // Navigate back to welcome screen
+      window.location.hash = '#/';
+    };
+    window.addEventListener('smartgit:repo-closed', handler);
+    return () => window.removeEventListener('smartgit:repo-closed', handler);
+  }, []);
 
   // Listen for menu events
   useEffect(() => {

@@ -32,6 +32,26 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/lfs', label: 'Git LFS', icon: Package, group: 'Refs' },
 ];
 
+// Tooltips explaining what each tool does — shown on hover
+const NAV_TOOLTIPS: Record<string, string> = {
+  '/changes': 'Working tree changes (staged + unstaged files). Stage, unstage, commit. Right-click file → View file history',
+  '/history': 'Commit graph — multi-branch selection, filters by author/date/path. Click commit → selected everywhere. Right-click → Create Tag/Branch here',
+  '/annotate': 'Per-line author annotation for the selected file (who wrote each line)',
+  '/investigate': 'Search commits by message, author, hash, or content (-G pattern)',
+  '/blame': 'Git blame for a specific file — line-by-line attribution with hash links',
+  '/journal': 'Recent activity log (last N commits across all branches)',
+  '/gitflow': 'Git-Flow operations: feature/release/hotfix start/finish',
+  '/pulls': 'Pull requests from GitHub/GitLab (forge integration)',
+  '/reviews': 'Code review queue (distributed reviews)',
+  '/branches': 'Branch management — checkout, merge, rebase, rename, delete. Ctrl+click to select for History filter',
+  '/tags': 'Tag management — click any tag to jump to its commit in History',
+  '/worktrees': 'Worktrees — multiple working directories for the same repo',
+  '/reflog': 'Reference log — every HEAD movement, click hash to jump back',
+  '/stashes': 'Saved stashes — click hash to view stash commit',
+  '/submodules': 'Submodule management — init, update, sync',
+  '/lfs': 'Git LFS — large file storage status and operations',
+};
+
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -80,16 +100,21 @@ export function Sidebar() {
           <div className="flex items-center gap-1">
             {currentRepo && (
               <button
-                className="icon-btn no-drag flex-shrink-0"
-                title="Close repository"
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); useRepositoryStore.getState().closeRepository(); }}
+                className="icon-btn no-drag flex-shrink-0 hover:!text-status-deleted"
+                title="Close repository (release memory, stop watcher, clear selections)"
+                onClick={(e) => {
+                  e.preventDefault(); e.stopPropagation();
+                  if (confirm(`Close repository '${currentRepo.name}'?\n\nThis will:\n• Stop file-system watcher\n• Clear git cache\n• Clear all selections\n• Free memory`)) {
+                    useRepositoryStore.getState().closeRepository();
+                  }
+                }}
               >
                 <X size={14} />
               </button>
             )}
             <button
               className="icon-btn no-drag flex-shrink-0"
-              title="Open repository"
+              title="Open another repository..."
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); useRepositoryStore.getState().openRepositoryPicker(); }}
             >
               <FolderPlus size={14} />
@@ -170,6 +195,7 @@ export function Sidebar() {
                         : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary border-l-2 border-transparent'
                     )}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate(item.path); }}
+                    title={NAV_TOOLTIPS[item.path] || item.label}
                   >
                     <Icon size={15} />
                     <span>{item.label}</span>
