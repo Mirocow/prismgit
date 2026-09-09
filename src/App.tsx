@@ -187,6 +187,10 @@ export default function App() {
     if (currentRepo) {
       refreshStatus(currentRepo.path);
       setDismissRebase(false);
+      // Navigate to Changes view when repo opens (default landing page)
+      if (window.location.hash === '#/' || window.location.hash === '') {
+        window.location.hash = '#/changes';
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRepo?.path]);
@@ -195,11 +199,11 @@ export default function App() {
 
   const handleFind = useCallback(() => setShowFind(true), []);
 
-  // Determine routes based on window style
-  // Standard: full sidebar + all pages
-  // Log: History-focused (default to /history)
-  // Working Tree: Changes-focused (default to /changes)
-  const defaultRoute = windowStyle === 'log' ? '/history' : windowStyle === 'working-tree' ? '/changes' : '/changes';
+  // Determine default route based on window style
+  // Standard: Changes (working tree) — default
+  // Log: History
+  // Working Tree: Changes
+  const defaultRoute = windowStyle === 'log' ? '/history' : '/changes';
 
   if (!currentRepo) {
     return (
@@ -234,12 +238,12 @@ export default function App() {
         onRepoInfo={() => setShowRepoInfo(true)}
       />
       <div className="flex flex-1 overflow-hidden">
-        {/* In 'log' window style, hide sidebar by default — can be toggled */}
-        {windowStyle !== 'log' && <Sidebar />}
+        {/* Sidebar always visible — navigation must be accessible */}
+        <Sidebar />
         <main className="flex-1 overflow-hidden flex flex-col">
-          {/* Window style switcher bar (only shown for standard) */}
-          {windowStyle === 'standard' && (
-            <div className="flex items-center justify-end px-3 py-1 border-b border-border-subtle bg-bg-tertiary">
+          {/* Window style switcher bar (only in standard mode) */}
+          {currentRepo && (
+            <div className="flex items-center justify-end px-3 py-0.5 border-b border-border-subtle bg-bg-tertiary" style={{ height: 24 }}>
               <WindowStyleSwitcher value={windowStyle} onChange={setWindowStyle} />
             </div>
           )}

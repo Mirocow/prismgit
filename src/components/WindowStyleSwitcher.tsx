@@ -7,9 +7,10 @@ type WindowStyle = 'standard' | 'log' | 'working-tree';
 const STORAGE_KEY = 'smartgit-window-style';
 
 export function useWindowStyle() {
-  const [style, setStyle] = useState<WindowStyle>(() => {
+  const [style, setStyleState] = useState<WindowStyle>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY) as WindowStyle;
+      // Default to 'standard' — always show sidebar + full navigation
       return saved || 'standard';
     } catch {
       return 'standard';
@@ -17,7 +18,7 @@ export function useWindowStyle() {
   });
 
   const change = (s: WindowStyle) => {
-    setStyle(s);
+    setStyleState(s);
     try {
       localStorage.setItem(STORAGE_KEY, s);
     } catch {
