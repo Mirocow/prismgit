@@ -7,7 +7,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore } from '../stores/toastStore';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
 
 // Default visible groups — user can toggle these via the customize button
 const DEFAULT_TOOLBAR_GROUPS = {
@@ -238,15 +238,6 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
             )}
           </div>
         ) : null}
-        {/* Global selections chips — show what's currently selected across the app */}
-        {selectedCommitHash && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1" title={`Selected commit (from any tool): ${selectedCommitHash}`}>
-            <GitCommit size={9} />{selectedCommitHash.substring(0, 7)}
-            <button onClick={() => useSelectionStore.getState().selectCommit(null)} title="Clear selection">
-              <X size={8} />
-            </button>
-          </span>
-        )}
         {selectedBranch && (
           <span className="text-2xs px-1.5 py-0.5 rounded border border-status-added/40 bg-status-added/10 text-status-added flex items-center gap-1" title={`Selected branch: ${selectedBranch}`}>
             <GitBranch size={9} />{selectedBranch}
@@ -778,37 +769,6 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
             return null;
         }
       })}
-      {/* Spacer + customize button on the right */}
-      <div className="flex-1" />
-      <button
-        className="flex items-center justify-center w-6 h-6 rounded hover:bg-bg-hover transition-colors no-drag text-text-tertiary hover:text-text-primary"
-        onClick={() => setShowCustomize(!showCustomize)}
-        title="Customize toolbar"
-      >
-        <SettingsIcon size={13} />
-      </button>
-      {showCustomize && (
-        <div className="absolute top-full right-2 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-64">
-          <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
-            Toolbar editor
-          </div>
-          <div className="py-1">
-            {(Object.keys(DEFAULT_TOOLBAR_GROUPS) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>).map(key => (
-              <label key={key} className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs">
-                <input type="checkbox" checked={groups[key]}
-                  onChange={(e) => setGroup(key, e.target.checked)} />
-                <span className="capitalize">{key}</span>
-              </label>
-            ))}
-          </div>
-          <div className="px-3 py-1 border-t border-border-subtle">
-            <button className="text-2xs text-accent"
-              onClick={() => { setGroups(DEFAULT_TOOLBAR_GROUPS); saveToolbarGroups(DEFAULT_TOOLBAR_GROUPS); }}>
-              Reset
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
