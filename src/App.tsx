@@ -23,11 +23,13 @@ import { api } from './lib/api';
 // Lazy-load pages for smaller initial bundle
 const ChangesPage = lazy(() => import('./pages/ChangesPage').then(m => ({ default: m.ChangesPage })));
 const HistoryPage = lazy(() => import('./pages/HistoryPage').then(m => ({ default: m.HistoryPage })));
+const AnnotatePage = lazy(() => import('./pages/AnnotatePage').then(m => ({ default: m.AnnotatePage })));
 const BlamePage = lazy(() => import('./pages/BlamePage').then(m => ({ default: m.BlamePage })));
 const InvestigatePage = lazy(() => import('./pages/InvestigatePage').then(m => ({ default: m.InvestigatePage })));
 const JournalPage = lazy(() => import('./pages/JournalPage').then(m => ({ default: m.JournalPage })));
 const GitFlowPage = lazy(() => import('./pages/GitFlowPage').then(m => ({ default: m.GitFlowPage })));
 const PullRequestsPage = lazy(() => import('./pages/PullRequestsPage').then(m => ({ default: m.PullRequestsPage })));
+const ReviewsPage = lazy(() => import('./pages/ReviewsPage').then(m => ({ default: m.ReviewsPage })));
 const LfsPage = lazy(() => import('./pages/LfsPage').then(m => ({ default: m.LfsPage })));
 const BranchesPage = lazy(() => import('./pages/BranchesPage').then(m => ({ default: m.BranchesPage })));
 const StashesPage = lazy(() => import('./pages/StashesPage').then(m => ({ default: m.StashesPage })));
@@ -222,11 +224,13 @@ export default function App() {
               <Route path="/" element={<Navigate to={defaultRoute} replace />} />
               <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} />} />
               <Route path="/history" element={<HistoryPage />} />
+              <Route path="/annotate" element={<AnnotatePage />} />
               <Route path="/investigate" element={<InvestigatePage />} />
               <Route path="/blame" element={<BlamePage />} />
               <Route path="/journal" element={<JournalPage />} />
               <Route path="/gitflow" element={<GitFlowPage />} />
               <Route path="/pulls" element={<PullRequestsPage />} />
+              <Route path="/reviews" element={<ReviewsPage />} />
               <Route path="/lfs" element={<LfsPage />} />
               <Route path="/branches" element={<BranchesPage />} />
               <Route path="/stashes" element={<StashesPage />} />

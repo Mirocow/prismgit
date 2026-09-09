@@ -2,125 +2,123 @@
 
 A modern, cross-platform Git client built on Electron + React + TypeScript, inspired by SmartGit 20-24 with **Ollama-code** design language (Ayu Dark/Light palettes).
 
-## v3.0 — Docker Builds + SmartGit 24 Features
+[![Tests](https://img.shields.io/badge/tests-161%20passing-brightgreen)](tests/) [![Bundle](https://img.shields.io/badge/bundle-240KB%20gzip%2072KB-blue)](#) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-### Docker-сборка для всех платформ
-
-Все сборки выполняются **только в Docker контейнерах**, поддерживая:
-
-| Платформа | Механизм | Артифакты |
-|-----------|----------|-----------|
-| Linux | Нативная сборка | AppImage, .deb, .rpm |
-| Windows | Кросс-компиляция через Wine | .exe (NSIS), .msi |
-| macOS Intel | electron-builder на Linux | .dmg, .zip (unsigned) |
-| macOS Apple Silicon | electron-builder на Linux | .dmg, .zip (unsigned) |
+## Quick Start
 
 ```bash
-# Сборка всех платформ:
-./scripts/docker-build.sh all
+# Clone and install
+git clone <repo-url>
+cd smartgit-electron
+make install
 
-# Или через docker compose:
-docker compose up --build
+# Development
+make dev
+
+# Build all platforms via Docker
+make docker-all
+
+# Run tests
+make test
 ```
 
-Подробности в [docs/DOCKER-BUILD.md](docs/DOCKER-BUILD.md).
+## Features
 
-### 2 темы (как в ollama-code)
+### Working Tree
+- **Changes** — stage/unstage/restore/ignore/delete/reveal with drag & drop
+- **History** — commit log with graph visualization, search, file tree per commit
+- **Annotate** — inline annotations with overlap analysis (SmartGit 24)
+- **Investigate** — file history with rename following
+- **Blame** — line-by-line authorship with commit colors
+- **Journal** — operation history with filters
 
-- **Dark** (по умолчанию) — Ayu Dark: `#0b0e14` фон, `#bfbdb6` текст, `#39BAE6` акцент
-- **Light** — Ayu Light: `#f8f9fa` фон, `#5c6166` текст, `#399ee6` акцент
+### Workflows
+- **Git-Flow** — Feature/Release/Hotfix with start/finish workflows
+- **Pull Requests** — GitHub PR management (list, create, open)
+- **Distributed Reviews** — offline code review stored in git notes (SmartGit add-on)
 
-Переключение:
-- Кнопка в тулбаре (Sun/Moon иконка)
-- Кнопка внизу sidebar
-- Горячая клавиша **Ctrl+Shift+T**
-- Автосохранение в localStorage + настройках приложения
+### Refs
+- **Branches** — local/remote, checkout, create, rename, delete, merge, push
+- **Tags** — annotated/lightweight, create, delete, push
+- **Worktrees** — add, remove, prune
+- **Reflog** — view, delete entries
+- **Stashes** — push, pop, apply, drop, branch
+- **Submodules** — init, update, sync, deinit, add
+- **Git LFS** — install, pull, push, fetch, track, list
 
-### SmartGit 24 функции
+### SmartGit 24 Features
+- **Interactive Rebase** — visual todo editor (pick/reword/edit/squash/fixup/drop)
+- **Conflict Solver** — 3-pane view (Base | Ours | Theirs) with 4 layouts
+- **Smart Views** — preset filters for Graph (All, Current Branch, My Commits, Recent, etc.)
+- **Overlap Column** — visualization of related commits
+- **Find Object** — search branch/tag/remote refs (Ctrl+F)
+- **Split Commit** — split via interactive rebase
+- **Edit Commit Message** — inline editor
+- **Cherry Pick / Revert** — with conflict detection
+- **Tolerant Clone URL** — strips "git clone " prefix, auto-derives folder name
 
-**新增新增新增 Новые функции:**
+### Three Window Styles
+- **Standard** — full sidebar + all pages
+- **Log** — History-focused (sidebar hidden)
+- **Working Tree** — Changes-focused
 
-- **Investigate** (File Log) — история файла с follow renames, как в SmartGit 24
-- **Journal** — журнал операций с фильтрами (commit/checkout/merge/rebase/reset/other)
-- **Find Object** (Ctrl+F) — поиск по branch/tag/remote refs с навигацией стрелками
-- **Tolerant Clone URL** — автонормализация URL (strip "git clone ", кавычек, авто-имя папки)
-- **Edit Commit Message** с inline editor
-- **Cherry Pick / Revert** с conflict detection
-- **Reset to ref** из Journal
-- **Open in Browser** для коммитов, веток, репозитория
-- **Drag file to external app** — через reveal in file manager
+Switch with Ctrl+Shift+1/2/3 or toolbar button.
 
-**SmartGit-подобный UI для Merge & Rebase:**
+### Two Themes (Ollama-code)
+- **Dark** (default) — Ayu Dark: `#0b0e14` background
+- **Light** — Ayu Light: `#f8f9fa` background
 
-- `RebasePanel` — автоматически показывается при rebase в процессе
-  - Список конфликтующих файлов с кнопкой "Open"
-  - Continue / Skip / Abort кнопки
-- `MergePanel` — то же для merge, с опциями No-FF / Squash
-- Индикаторы состояния в тулбаре: MERGING / REBASING / CHERRY-PICKING / REVERTING / BISECTING
+Toggle with Ctrl+Shift+T.
 
-### Оптимизации (сохранены из v2.0)
-
-- **Main bundle: 211KB** (gzip 65KB)
-- **Lazy-loaded pages** — все страницы загружаются по требованию
-- **Custom SVG icons** (15KB) вместо lucide-react (1MB)
-- **No Monaco editor, no @electron/remote, no diff library**
-- **Auto-refresh** статуса каждые 30s
-- **prefers-reduced-motion** поддержка
-
-## Технологии
+## Tech Stack
 
 - Electron 32, React 18, TypeScript 5.6, Vite 5
 - Tailwind CSS 3, Zustand, simple-git, electron-store
-- Custom SVG icons (без icon library)
-- Docker + Wine для кросс-платформенной сборки
+- Custom SVG icons (no icon library)
+- Vitest + Testing Library for tests
+- Docker + Wine for cross-platform builds
 
-## Структура проекта
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) — system design and data flow
+- [API Reference](docs/API.md) — all Git operations and IPC channels
+- [Contributing](docs/CONTRIBUTING.md) — development setup and guidelines
+- [Changelog](docs/CHANGELOG.md) — version history
+- [Docker Build](docs/DOCKER-BUILD.md) — multi-platform build guide
+- [Testing](docs/TESTING.md) — test suite documentation
+
+## Project Structure
 
 ```
-├── Dockerfile                # Multi-stage сборка (Linux + Wine для Windows)
-├── docker-compose.yml        # 4 сервиса: linux, win, mac, mac-arm64
-├── scripts/
-│   ├── docker-build.sh       # Оркестратор сборки
-│   ├── replace-icons.py      # Миграция иконок (dev)
-│   └── replace-icon-usage.py # Миграция иконок (dev)
-├── docs/
-│   └── DOCKER-BUILD.md       # Подробная документация по Docker-сборке
 ├── electron/                 # Main process
-│   ├── main.ts
-│   ├── preload.ts
-│   ├── ipc/                  # 5 IPC модулей
-│   ├── services/             # git, github, storage
-│   └── types/                # API контракты
-├── src/                      # Renderer
-│   ├── App.tsx               # Root с lazy routes + global hotkeys
-│   ├── components/
-│   │   ├── icons.tsx         # 50+ SVG иконок
-│   │   ├── Sidebar.tsx       # Навигация + theme toggle
-│   │   ├── Toolbar.tsx       # Actions + Find + Theme
-│   │   ├── RebasePanel.tsx   # SmartGit-like rebase UI
-│   │   ├── MergePanel.tsx    # SmartGit-like merge UI
-│   │   ├── FindObjectDialog.tsx  # SmartGit 24 Find Object
-│   │   └── ...
-│   ├── pages/
-│   │   ├── ChangesPage.tsx
-│   │   ├── HistoryPage.tsx       # Graph visualization
-│   │   ├── InvestigatePage.tsx   # SmartGit 24 File Log
-│   │   ├── JournalPage.tsx       # SmartGit 24 Journal
-│   │   ├── BlamePage.tsx
-│   │   ├── BranchesPage.tsx
-│   │   ├── TagsPage.tsx
-│   │   ├── WorktreesPage.tsx
-│   │   ├── ReflogPage.tsx
-│   │   ├── StashesPage.tsx
-│   │   ├── SubmodulesPage.tsx
-│   │   └── SettingsPage.tsx
-│   ├── stores/               # Zustand stores
-│   ├── lib/                  # API + utils
-│   └── styles/globals.css    # Ollama-code dark + light themes
-└── package.json
+│   ├── main.ts               # Entry, window state, context menu
+│   ├── preload.ts            # Context bridge API
+│   ├── menu.ts               # Application menu
+│   ├── ipc/                  # IPC handlers (5 modules)
+│   ├── services/             # Business logic
+│   │   ├── git.ts            # Git operations (simple-git)
+│   │   ├── github.ts         # GitHub API client
+│   │   ├── storage.ts        # Persistent settings
+│   │   └── watcher.ts        # File watcher for auto-refresh
+│   └── types/                # TypeScript API contracts
+├── src/                      # Renderer process
+│   ├── App.tsx               # Root with lazy routes + hotkeys
+│   ├── components/           # UI components
+│   ├── pages/                # 18 lazy-loaded pages
+│   ├── stores/               # Zustand state management
+│   ├── lib/                  # Utilities and business logic
+│   └── styles/               # Ayu Dark/Light themes
+├── tests/                    # Vitest test suite
+│   ├── unit/                 # Unit tests
+│   ├── integration/          # Service integration tests
+│   └── components/           # React component tests
+├── Dockerfile                # Multi-platform Docker build
+├── docker-compose.yml        # 4 build services
+├── Makefile                  # All-in-one task runner
+└── vitest.config.ts          # Test configuration
 ```
 
-## Горячие клавиши
+## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
@@ -130,39 +128,29 @@ docker compose up --build
 | Ctrl+Shift+P | Push |
 | Ctrl+Shift+L | Pull |
 | Ctrl+Shift+F | Fetch |
+| Ctrl+Shift+G | Git-Flow dialog |
+| Ctrl+Shift+R | Interactive Rebase |
 | Ctrl+Shift+N | New Branch |
 | Ctrl+Alt+S | Stash |
-| **Ctrl+Shift+T** | **Toggle Theme** |
-| **Ctrl+F** | **Find Object** |
+| Ctrl+Shift+T | Toggle Theme |
+| Ctrl+Shift+1/2/3 | Window Style (Standard/Log/Working Tree) |
+| Ctrl+F | Find Object |
 | Esc | Close dialog |
 
-## Запуск локально (без Docker)
+## Docker Build
+
+All builds happen in Docker containers:
 
 ```bash
-npm install
-npm run dev          # development
-npm run build        # production build
+make docker-all          # All platforms
+make docker-linux        # Linux only
+make docker-win          # Windows (via Wine)
+make docker-mac          # macOS Intel
+make docker-mac-arm64    # macOS Apple Silicon
 ```
 
-## Сборка в Docker
+See [docs/DOCKER-BUILD.md](docs/DOCKER-BUILD.md) for details.
 
-```bash
-# Все платформы:
-./scripts/docker-build.sh all
-
-# Конкретная платформа:
-./scripts/docker-build.sh linux
-./scripts/docker-build.sh win
-./scripts/docker-build.sh mac
-./scripts/docker-build.sh mac-arm64
-```
-
-## GitHub Integration
-
-1. Settings → GitHub Integration
-2. Создать PAT на github.com/settings/tokens (scopes: repo, read:user)
-3. Вставить токен и нажать Connect
-
-## Лицензия
+## License
 
 MIT
