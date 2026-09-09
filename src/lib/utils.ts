@@ -1,8 +1,7 @@
 import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 
 export function cn(...inputs: ClassValue[]): string {
-  return twMerge(clsx(inputs));
+  return clsx(inputs);
 }
 
 export function formatDate(dateStr: string): string {
@@ -46,22 +45,6 @@ export async function copyToClipboard(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
 }
 
-export function getStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    unmodified: ' ',
-    modified: 'M',
-    added: 'A',
-    deleted: 'D',
-    renamed: 'R',
-    copied: 'C',
-    untracked: '?',
-    ignored: '!',
-    conflicted: 'U',
-    typechanged: 'T',
-  };
-  return labels[status] || ' ';
-}
-
 export function getStatusColor(status: string): string {
   const colors: Record<string, string> = {
     modified: 'var(--status-modified)',
@@ -76,4 +59,32 @@ export function getStatusColor(status: string): string {
     copied: 'var(--status-renamed)',
   };
   return colors[status] || 'var(--text-primary)';
+}
+
+export function getStatusColorFromCode(code: string): string {
+  switch (code) {
+    case 'M': return 'var(--status-modified)';
+    case 'A': return 'var(--status-added)';
+    case 'D': return 'var(--status-deleted)';
+    case 'R': return 'var(--status-renamed)';
+    case 'C': return 'var(--status-renamed)';
+    case '?': return 'var(--status-untracked)';
+    case 'U': return 'var(--status-conflict)';
+    case 'T': return 'var(--status-modified)';
+    default: return 'var(--text-tertiary)';
+  }
+}
+
+export function getStatusCode(code: string): string {
+  switch (code) {
+    case '?': return 'untracked';
+    case 'U': return 'conflict';
+    case 'M': return 'modified';
+    case 'A': return 'added';
+    case 'D': return 'deleted';
+    case 'R': return 'renamed';
+    case 'C': return 'copied';
+    case 'T': return 'typechanged';
+    default: return 'modified';
+  }
 }

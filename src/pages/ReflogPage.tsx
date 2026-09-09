@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { History, RefreshCw, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { History, RefreshCw, Trash, ChevronDown, ChevronRight } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type ReflogEntry } from '../lib/api';
@@ -141,7 +141,7 @@ export function ReflogPage() {
                   title="Delete entry"
                   onClick={() => handleDelete(entry)}
                 >
-                  <Trash2 size={11} />
+                  <Trash size={11} />
                 </button>
               </div>
             </div>

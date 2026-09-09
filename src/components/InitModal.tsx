@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { GitBranchPlus, Folder, X, Loader } from 'lucide-react';
+import { Plus, Folder, X, Loader } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
@@ -58,7 +58,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
           <h3 className="text-base font-medium flex items-center gap-2">
-            <GitBranchPlus size={16} />
+            <Plus size={16} />
             Initialize Repository
           </h3>
           <button className="icon-btn" onClick={onClose}>
@@ -105,7 +105,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
             onClick={handleInit}
             disabled={loading || !path.trim()}
           >
-            {loading ? <Loader size={13} className="animate-spin" /> : <GitBranchPlus size={13} />}
+            {loading ? <Loader size={13} className="animate-spin" /> : <Plus size={13} />}
             Initialize
           </button>
         </div>

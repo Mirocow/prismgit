@@ -1,14 +1,5 @@
 import { useState } from 'react';
-import {
-  Settings as SettingsIcon,
-  Github,
-  LogOut,
-  Sun,
-  Moon,
-  Folder,
-  Plus,
-  RefreshCw,
-} from 'lucide-react';
+import { Settings as SettingsIcon, Github, LogOut, Sun, Moon, Folder, Plus, RefreshCw } from '../components/icons';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';

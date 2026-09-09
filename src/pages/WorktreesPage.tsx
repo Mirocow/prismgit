@@ -1,16 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import {
-  FolderTree,
-  RefreshCw,
-  Plus,
-  Trash2,
-  Folder,
-  GitBranch,
-  AlertCircle,
-  Loader,
-  CheckCircle,
-  CornerDownRight,
-} from 'lucide-react';
+import { FolderTree, RefreshCw, Plus, Trash, Folder, GitBranch, AlertCircle, Loader, CheckCircle, CornerDownRight } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type WorktreeInfo } from '../lib/api';
@@ -130,7 +119,7 @@ export function WorktreesPage() {
             disabled={busy === 'prune'}
             title="Prune stale worktree metadata"
           >
-            {busy === 'prune' ? <Loader size={12} className="animate-spin" /> : <Trash2 size={12} />}
+            {busy === 'prune' ? <Loader size={12} className="animate-spin" /> : <Trash size={12} />}
             Prune
           </button>
           <button
@@ -237,7 +226,7 @@ export function WorktreesPage() {
                             title="Remove worktree"
                             onClick={() => handleRemove(wt)}
                           >
-                            <Trash2 size={12} />
+                            <Trash size={12} />
                           </button>
                         </>
                       )}

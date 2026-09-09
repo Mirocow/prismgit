@@ -1,4 +1,4 @@
-import { CheckCircle, AlertCircle, Info, X, AlertTriangle } from 'lucide-react';
+import { CheckCircle, AlertCircle, Info, X, AlertTriangle } from './icons';
 import { useToastStore } from '../stores/toastStore';
 import { cn } from '../lib/utils';
 

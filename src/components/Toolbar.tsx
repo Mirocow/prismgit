@@ -1,16 +1,4 @@
-import {
-  RefreshCw,
-  GitBranch,
-  ArrowUp,
-  ArrowDown,
-  GitCommit,
-  GitPullRequestArrow,
-  CloudDownload,
-  RefreshCcw,
-  ExternalLink,
-  Folder,
-  AlertCircle,
-} from 'lucide-react';
+import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -129,7 +117,7 @@ export function Toolbar() {
           onClick={handlePull}
           disabled={!currentRepo}
         >
-          <GitPullRequestArrow size={14} />
+          <GitPullRequest size={14} />
         </button>
         <button
           className="icon-btn"
@@ -145,7 +133,7 @@ export function Toolbar() {
           onClick={handleSynchronize}
           disabled={!currentRepo}
         >
-          <RefreshCcw size={14} />
+          <Sync size={14} />
         </button>
         <div className="w-px h-5 bg-border-default mx-1" />
         <button

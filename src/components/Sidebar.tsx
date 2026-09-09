@@ -1,23 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  GitBranch,
-  GitCommit,
-  GitPullRequest,
-  History,
-  Tag,
-  Package,
-  Settings as SettingsIcon,
-  FolderPlus,
-  FolderGit2,
-  Pin,
-  PinOff,
-  X,
-  FolderTree,
-  RotateCcw,
-  FileText,
-  Search,
-} from 'lucide-react';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { cn } from '../lib/utils';
 
@@ -72,7 +55,7 @@ export function Sidebar() {
             className="flex items-center gap-2 text-sm font-medium hover:text-accent truncate"
             onClick={() => setShowRepoList(!showRepoList)}
           >
-            <FolderGit2 size={14} />
+            <FolderGit size={14} />
             <span className="truncate">{currentRepo ? currentRepo.name : 'Repositories'}</span>
           </button>
           <button
@@ -101,7 +84,7 @@ export function Sidebar() {
                   onClick={() => openRepository(repo.path)}
                   title={repo.path}
                 >
-                  <FolderGit2 size={12} className="text-text-tertiary flex-shrink-0" />
+                  <FolderGit size={12} className="text-text-tertiary flex-shrink-0" />
                   <span className="flex-1 truncate">{repo.name}</span>
                   <button
                     className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5"

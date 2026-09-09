@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Tag as TagIcon, Plus, Trash2, RefreshCw, Check } from 'lucide-react';
+import { Tag as TagIcon, Plus, Trash, RefreshCw, Check } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type TagInfo } from '../lib/api';
@@ -120,7 +120,7 @@ export function TagsPage() {
                 title="Delete"
                 onClick={() => handleDelete(t)}
               >
-                <Trash2 size={12} />
+                <Trash size={12} />
               </button>
             </div>
           ))

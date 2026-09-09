@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Toolbar } from './components/Toolbar';
@@ -7,21 +7,32 @@ import { ToastContainer } from './components/ToastContainer';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { CloneModal } from './components/CloneModal';
 import { InitModal } from './components/InitModal';
-import { ChangesPage } from './pages/ChangesPage';
-import { HistoryPage } from './pages/HistoryPage';
-import { BranchesPage } from './pages/BranchesPage';
-import { StashesPage } from './pages/StashesPage';
-import { TagsPage } from './pages/TagsPage';
-import { SubmodulesPage } from './pages/SubmodulesPage';
-import { WorktreesPage } from './pages/WorktreesPage';
-import { ReflogPage } from './pages/ReflogPage';
-import { BlamePage } from './pages/BlamePage';
-import { SettingsPage } from './pages/SettingsPage';
+import { RebasePanel } from './components/RebasePanel';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useAuthStore } from './stores/authStore';
 import { useToastStore } from './stores/toastStore';
 import { useGitStore } from './stores/gitStore';
+
+// Lazy-load pages for smaller initial bundle
+const ChangesPage = lazy(() => import('./pages/ChangesPage').then(m => ({ default: m.ChangesPage })));
+const HistoryPage = lazy(() => import('./pages/HistoryPage').then(m => ({ default: m.HistoryPage })));
+const BlamePage = lazy(() => import('./pages/BlamePage').then(m => ({ default: m.BlamePage })));
+const BranchesPage = lazy(() => import('./pages/BranchesPage').then(m => ({ default: m.BranchesPage })));
+const StashesPage = lazy(() => import('./pages/StashesPage').then(m => ({ default: m.StashesPage })));
+const TagsPage = lazy(() => import('./pages/TagsPage').then(m => ({ default: m.TagsPage })));
+const SubmodulesPage = lazy(() => import('./pages/SubmodulesPage').then(m => ({ default: m.SubmodulesPage })));
+const WorktreesPage = lazy(() => import('./pages/WorktreesPage').then(m => ({ default: m.WorktreesPage })));
+const ReflogPage = lazy(() => import('./pages/ReflogPage').then(m => ({ default: m.ReflogPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+
+function PageLoader() {
+  return (
+    <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
+      <div className="animate-fade-in">Loading...</div>
+    </div>
+  );
+}
 
 export default function App() {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
@@ -29,9 +40,11 @@ export default function App() {
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const loadAuth = useAuthStore((s) => s.loadAuthState);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const status = useGitStore((s) => s.status);
   const toast = useToastStore();
   const [showClone, setShowClone] = useState(false);
   const [showInit, setShowInit] = useState(false);
+  const [dismissRebase, setDismissRebase] = useState(false);
 
   useEffect(() => {
     loadRepos();
@@ -46,45 +59,33 @@ export default function App() {
         toast.error('Failed to open repository', String(e));
       });
     };
-    const handleClone = () => {
-      setShowClone(true);
-    };
-    const handleInit = () => {
-      setShowInit(true);
-    };
+    const handleClone = () => setShowClone(true);
+    const handleInit = () => setShowInit(true);
     const handleCommit = () => {
       window.location.hash = '#/changes';
     };
     const handlePush = () => {
       const repo = useRepositoryStore.getState().currentRepo;
       if (!repo) return;
-      useGitStore.getState().push(repo.path).then(() => {
-        toast.success('Pushed successfully');
-      }).catch((e) => {
-        toast.error('Push failed', String(e));
-      });
+      useGitStore.getState().push(repo.path)
+        .then(() => toast.success('Pushed successfully'))
+        .catch((e) => toast.error('Push failed', String(e)));
     };
     const handlePull = () => {
       const repo = useRepositoryStore.getState().currentRepo;
       if (!repo) return;
-      useGitStore.getState().pull(repo.path).then(() => {
-        toast.success('Pulled successfully');
-      }).catch((e) => {
-        toast.error('Pull failed', String(e));
-      });
+      useGitStore.getState().pull(repo.path)
+        .then(() => toast.success('Pulled successfully'))
+        .catch((e) => toast.error('Pull failed', String(e)));
     };
     const handleFetch = () => {
       const repo = useRepositoryStore.getState().currentRepo;
       if (!repo) return;
-      useGitStore.getState().fetch(repo.path).then(() => {
-        toast.success('Fetched successfully');
-      }).catch((e) => {
-        toast.error('Fetch failed', String(e));
-      });
+      useGitStore.getState().fetch(repo.path)
+        .then(() => toast.success('Fetched successfully'))
+        .catch((e) => toast.error('Fetch failed', String(e)));
     };
-    const handleToggleTheme = () => {
-      useSettingsStore.getState().toggleTheme();
-    };
+    const handleToggleTheme = () => useSettingsStore.getState().toggleTheme();
 
     const cleanups = [
       window.smartgit.events.on('menu:openRepository', (path) => handleOpenRepo(path as string)),
@@ -103,8 +104,20 @@ export default function App() {
   useEffect(() => {
     if (currentRepo) {
       refreshStatus(currentRepo.path);
+      setDismissRebase(false);
     }
   }, [currentRepo, refreshStatus]);
+
+  // Auto-refresh status every 30s when repo is open
+  useEffect(() => {
+    if (!currentRepo) return;
+    const interval = setInterval(() => {
+      refreshStatus(currentRepo.path);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [currentRepo, refreshStatus]);
+
+  const showRebasePanel = currentRepo && status?.isRebasing && !dismissRebase;
 
   if (!currentRepo) {
     return (
@@ -130,25 +143,30 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-hidden flex flex-col">
-          <Routes>
-            <Route path="/" element={<Navigate to="/changes" replace />} />
-            <Route path="/changes" element={<ChangesPage />} />
-            <Route path="/history" element={<HistoryPage />} />
-            <Route path="/blame" element={<BlamePage />} />
-            <Route path="/branches" element={<BranchesPage />} />
-            <Route path="/stashes" element={<StashesPage />} />
-            <Route path="/tags" element={<TagsPage />} />
-            <Route path="/submodules" element={<SubmodulesPage />} />
-            <Route path="/worktrees" element={<WorktreesPage />} />
-            <Route path="/reflog" element={<ReflogPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Routes>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/changes" replace />} />
+              <Route path="/changes" element={<ChangesPage />} />
+              <Route path="/history" element={<HistoryPage />} />
+              <Route path="/blame" element={<BlamePage />} />
+              <Route path="/branches" element={<BranchesPage />} />
+              <Route path="/stashes" element={<StashesPage />} />
+              <Route path="/tags" element={<TagsPage />} />
+              <Route path="/submodules" element={<SubmodulesPage />} />
+              <Route path="/worktrees" element={<WorktreesPage />} />
+              <Route path="/reflog" element={<ReflogPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
       <StatusBar />
       <ToastContainer />
       <CloneModal open={showClone} onClose={() => setShowClone(false)} />
       <InitModal open={showInit} onClose={() => setShowInit(false)} />
+      {showRebasePanel && (
+        <RebasePanel onClose={() => setDismissRebase(true)} />
+      )}
     </div>
   );
 }

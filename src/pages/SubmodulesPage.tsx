@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Package, RefreshCw, GitBranch, CheckCircle, AlertCircle, Loader } from 'lucide-react';
+import { Package, RefreshCw, GitBranch, CheckCircle, AlertCircle, Loader } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type SubmoduleInfo } from '../lib/api';

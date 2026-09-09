@@ -1,20 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  GitCommit,
-  RefreshCw,
-  Copy,
-  GitBranch,
-  Search,
-  GitPullRequestArrow,
-  Undo2,
-  Pencil,
-  ExternalLink,
-  FileText,
-  ChevronDown,
-  ChevronRight,
-  Tag as TagIcon,
-  CornerDownRight,
-} from 'lucide-react';
+import { GitCommit, RefreshCw, Copy, GitBranch, Search, GitPullRequest, Undo, Pencil, ExternalLink, FileText, ChevronDown, ChevronRight, Tag as TagIcon, CornerDownRight } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { useGitStore } from '../stores/gitStore';
@@ -565,7 +550,7 @@ export function HistoryPage() {
                     onClick={() => handleCherryPick(selected)}
                     title="Cherry-pick onto current branch"
                   >
-                    <GitPullRequestArrow size={11} />
+                    <GitPullRequest size={11} />
                     Cherry Pick
                   </button>
                   <button
@@ -573,7 +558,7 @@ export function HistoryPage() {
                     onClick={() => handleRevert(selected)}
                     title="Create a revert commit"
                   >
-                    <Undo2 size={11} />
+                    <Undo size={11} />
                     Revert
                   </button>
                 </div>

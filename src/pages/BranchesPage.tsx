@@ -1,17 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import {
-  GitBranch,
-  Plus,
-  RefreshCw,
-  Trash2,
-  GitMerge,
-  Edit2,
-  Check,
-  ArrowUp,
-  ArrowDown,
-  ExternalLink,
-  Upload,
-} from 'lucide-react';
+import { GitBranch, Plus, RefreshCw, Trash, GitMerge, Edit, Check, ArrowUp, ArrowDown, ExternalLink, Upload } from '../components/icons';
+import { MergePanel } from '../components/MergePanel';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -274,7 +263,7 @@ export function BranchesPage() {
                 setRenameValue(b.name);
               }}
             >
-              <Edit2 size={12} />
+              <Edit size={12} />
             </button>
             <button
               className="icon-btn !w-6 !h-6 hover:!text-status-deleted"
@@ -284,7 +273,7 @@ export function BranchesPage() {
                 handleDelete(b);
               }}
             >
-              <Trash2 size={12} />
+              <Trash size={12} />
             </button>
           </>
         )}
@@ -308,7 +297,7 @@ export function BranchesPage() {
                 handleDeleteRemote(b);
               }}
             >
-              <Trash2 size={12} />
+              <Trash size={12} />
             </button>
           </>
         )}
@@ -420,35 +409,12 @@ export function BranchesPage() {
         </div>
       )}
 
-      {/* Merge confirmation */}
+      {/* Merge panel - SmartGit-like with conflict resolution UI */}
       {mergeTarget && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-          onClick={() => setMergeTarget(null)}
-        >
-          <div
-            className="panel w-96 p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-base font-medium mb-2">Merge Branch</h3>
-            <p className="text-sm text-text-secondary mb-4">
-              Merge <code className="font-mono text-accent">{mergeTarget}</code> into{' '}
-              <code className="font-mono text-accent">{status?.current || 'HEAD'}</code>?
-            </p>
-            <div className="flex justify-end gap-2">
-              <button className="btn btn-secondary" onClick={() => setMergeTarget(null)}>
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => handleMerge(mergeTarget)}
-              >
-                <GitMerge size={13} />
-                Merge
-              </button>
-            </div>
-          </div>
-        </div>
+        <MergePanel
+          targetBranch={mergeTarget}
+          onClose={() => setMergeTarget(null)}
+        />
       )}
     </div>
   );

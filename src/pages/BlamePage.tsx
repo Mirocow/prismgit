@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Search, FileText, Loader, RefreshCw, GitCommit } from 'lucide-react';
+import { Search, FileText, Loader, RefreshCw, GitCommit } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type BlameResult } from '../lib/api';

@@ -1,19 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import {
-  GitCommit,
-  RefreshCw,
-  Plus,
-  Minus,
-  ChevronDown,
-  ChevronRight,
-  GitPullRequestArrow,
-  RotateCcw,
-  EyeOff,
-  Folder,
-  ExternalLink,
-  Trash2,
-  Pencil,
-} from 'lucide-react';
+import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -296,7 +282,7 @@ export function ChangesPage() {
                       handleDeleteFile(file.path);
                     }}
                   >
-                    <Trash2 size={11} />
+                    <Trash size={11} />
                   </button>
                 </>
               )}
@@ -443,7 +429,7 @@ export function ChangesPage() {
                   disabled={!commitMsg.trim() || stagedFiles.length === 0}
                   title="Commit then push"
                 >
-                  <GitPullRequestArrow size={13} />
+                  <GitPullRequest size={13} />
                   Commit & Push
                 </button>
                 <button

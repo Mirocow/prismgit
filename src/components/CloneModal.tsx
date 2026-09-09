@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Folder, X, Github, Loader, Download } from 'lucide-react';
+import { Folder, X, Github, Loader, Download } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useAuthStore } from '../stores/authStore';
 import { useSettingsStore } from '../stores/settingsStore';

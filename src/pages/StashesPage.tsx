@@ -1,13 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import {
-  Archive,
-  RefreshCw,
-  Plus,
-  Trash2,
-  Download,
-  Upload,
-  Check,
-} from 'lucide-react';
+import { Package, RefreshCw, Plus, Trash, Download, Upload, Check } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -113,7 +105,7 @@ export function StashesPage() {
           <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
         ) : stashes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-            <Archive size={32} className="mb-2 opacity-50" />
+            <Package size={32} className="mb-2 opacity-50" />
             <div className="text-sm">No stashes</div>
             <div className="text-xs mt-1">Stash your changes to save them temporarily</div>
           </div>
@@ -153,7 +145,7 @@ export function StashesPage() {
                   title="Drop"
                   onClick={() => handleDrop(s.index)}
                 >
-                  <Trash2 size={12} />
+                  <Trash size={12} />
                 </button>
               </div>
             </div>

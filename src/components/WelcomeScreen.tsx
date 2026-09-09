@@ -1,4 +1,4 @@
-import { FolderOpen, GitBranchPlus, Github, BookOpen } from 'lucide-react';
+import { Folder, Plus, Github, BookOpen } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 
 export function WelcomeScreen() {
@@ -9,7 +9,7 @@ export function WelcomeScreen() {
       <div className="max-w-md text-center">
         <div className="mb-6 flex justify-center">
           <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-accent to-accent-hover flex items-center justify-center shadow-lg">
-            <GitBranchPlus size={40} className="text-white" />
+            <Plus size={40} className="text-white" />
           </div>
         </div>
         <h1 className="text-2xl font-semibold text-text-primary mb-2">SmartGit Electron</h1>
@@ -19,7 +19,7 @@ export function WelcomeScreen() {
 
         <div className="flex flex-col gap-3 max-w-xs mx-auto">
           <button className="btn btn-primary justify-center" onClick={openRepo}>
-            <FolderOpen size={16} />
+            <Folder size={16} />
             Open Repository
           </button>
           <button
