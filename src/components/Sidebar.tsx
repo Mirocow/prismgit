@@ -38,6 +38,8 @@ export function Sidebar() {
   const { repos, metadata, currentRepo, openRepository, removeRepo, pinRepo } = useRepositoryStore();
   const [showRepoList, setShowRepoList] = useState(true);
   const { width: sidebarWidth, handleResize: handleSidebarResize } = useResizableWidth(240, 180, 400);
+  const theme = useSettingsStore((s) => s.theme);
+  const toggleTheme = useSettingsStore((s) => s.toggleTheme);
 
   useEffect(() => {
     if (!currentRepo) {
@@ -45,7 +47,6 @@ export function Sidebar() {
     }
   }, [currentRepo]);
 
-  // Group nav items
   const groups = NAV_ITEMS.reduce<Record<string, NavItem[]>>((acc, item) => {
     const g = item.group || 'Other';
     if (!acc[g]) acc[g] = [];
@@ -53,10 +54,14 @@ export function Sidebar() {
     return acc;
   }, {});
 
+  const handleNavigate = (path: string) => {
+    navigate(path);
+  };
+
   return (
     <>
     <aside
-      className="flex flex-col bg-bg-secondary border-r border-border-default flex-shrink-0"
+      className="flex flex-col bg-bg-secondary border-r border-border-default flex-shrink-0 no-drag"
       style={{ width: sidebarWidth }}
     >
       {/* Repository switcher */}
@@ -98,7 +103,7 @@ export function Sidebar() {
                       currentRepo?.path === repo.path && 'bg-bg-active'
                     )}
                     style={meta?.color ? { borderLeft: `2px solid ${meta.color}` } : undefined}
-                    onClick={() => openRepository(repo.path)}
+                    onClick={(e) => { e.stopPropagation(); openRepository(repo.path); }}
                     title={repo.path}
                   >
                     <FolderGit size={12} className="text-text-tertiary flex-shrink-0" />
@@ -114,20 +119,14 @@ export function Sidebar() {
                     <button
                       className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5"
                       title={repo.pinned ? 'Unpin' : 'Pin'}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        pinRepo(repo.path, !repo.pinned);
-                      }}
+                      onClick={(e) => { e.stopPropagation(); pinRepo(repo.path, !repo.pinned); }}
                     >
                       {repo.pinned ? <PinOff size={10} /> : <Pin size={10} />}
                     </button>
                     <button
                       className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 hover:!text-status-deleted"
                       title="Remove from list"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeRepo(repo.path);
-                      }}
+                      onClick={(e) => { e.stopPropagation(); removeRepo(repo.path); }}
                     >
                       <X size={10} />
                     </button>
@@ -154,12 +153,12 @@ export function Sidebar() {
                   <button
                     key={item.path}
                     className={cn(
-                      'w-full flex items-center gap-3 px-3 py-1.5 text-sm transition-colors',
+                      'w-full flex items-center gap-3 px-3 py-1.5 text-sm transition-colors cursor-pointer',
                       isActive
                         ? 'bg-accent-muted text-text-primary border-l-2 border-accent'
                         : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary border-l-2 border-transparent'
                     )}
-                    onClick={() => navigate(item.path)}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate(item.path); }}
                   >
                     <Icon size={15} />
                     <span>{item.label}</span>
@@ -179,20 +178,20 @@ export function Sidebar() {
       <div className="border-t border-border-default p-2 space-y-1">
         <button
           className="w-full flex items-center gap-3 px-3 py-2 text-sm rounded transition-colors text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-          onClick={() => useSettingsStore.getState().toggleTheme()}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleTheme(); }}
           title="Toggle theme (Ctrl+Shift+T)"
         >
-          {useSettingsStore.getState().theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-          <span>{useSettingsStore.getState().theme === 'dark' ? 'Light Theme' : 'Dark Theme'}</span>
+          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          <span>{theme === 'dark' ? 'Light Theme' : 'Dark Theme'}</span>
         </button>
         <button
           className={cn(
-            'w-full flex items-center gap-3 px-3 py-2 text-sm rounded transition-colors',
+            'w-full flex items-center gap-3 px-3 py-2 text-sm rounded transition-colors cursor-pointer',
             location.pathname === '/settings'
               ? 'bg-bg-active text-text-primary'
               : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
           )}
-          onClick={() => navigate('/settings')}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate('/settings'); }}
         >
           <SettingsIcon size={15} />
           <span>Settings</span>

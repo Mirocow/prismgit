@@ -184,15 +184,18 @@ export default function App() {
     };
   }, [currentRepo, refreshStatus]);
 
-  // Navigate when window style changes
+  // Navigate when window style changes — only when user explicitly switches
+  const prevStyle = useRef(windowStyle);
   useEffect(() => {
     if (!currentRepo) return;
-    if (windowStyle === 'log') {
-      navigate('/history');
-    } else if (windowStyle === 'working-tree') {
-      navigate('/changes');
-    } else {
-      navigate('/changes');
+    // Only navigate if style actually changed (not on first render)
+    if (prevStyle.current !== windowStyle) {
+      prevStyle.current = windowStyle;
+      if (windowStyle === 'log') {
+        navigate('/history');
+      } else {
+        navigate('/changes');
+      }
     }
   }, [windowStyle, currentRepo, navigate]);
 
