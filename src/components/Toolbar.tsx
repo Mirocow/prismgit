@@ -366,7 +366,6 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
               Toolbar editor — drag to reorder, click eye to hide
             </div>
             <div className="py-1 max-h-72 overflow-y-auto">
-              {/* Visible groups — drag-and-drop reorder */}
               <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Visible</div>
               {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>)
                 .filter(key => groups[key])
@@ -386,12 +385,10 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
                       e.preventDefault();
                       const draggedKey = e.dataTransfer.getData('text/toolbar-group') as keyof typeof DEFAULT_TOOLBAR_GROUPS;
                       if (!draggedKey || draggedKey === key) return;
-                      // Reorder groups: swap positions
                       const groupKeys = Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>;
                       const draggedIdx = groupKeys.indexOf(draggedKey);
                       const targetIdx = groupKeys.indexOf(key);
                       if (draggedIdx === -1 || targetIdx === -1) return;
-                      // Build new ordered groups object
                       const newOrdered: Record<string, boolean> = {};
                       const reordered = [...groupKeys];
                       reordered.splice(draggedIdx, 1);
@@ -414,7 +411,6 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
                     </button>
                   </div>
                 ))}
-              {/* Hidden groups */}
               {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>)
                 .filter(key => !groups[key]).length > 0 && (
                 <>
@@ -454,5 +450,176 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
       {/* Window controls (frameless) — minimize, maximize, close */}
       <WindowControls />
     </header>
+  );
+}
+
+/**
+ * Git Toolbar — second row, below the main Toolbar.
+ * Contains the colored git operation buttons (Fetch, Push, Stage, Stash, History, Diff, Blame, Git-Flow, Rebase).
+ * This is the toolbar the user wants to be separate from the app-level header.
+ */
+export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () => void; onInteractiveRebase?: () => void } = {}) {
+  const currentRepo = useRepositoryStore((s) => s.currentRepo);
+  const status = useGitStore((s) => s.status);
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const push = useGitStore((s) => s.push);
+  const pull = useGitStore((s) => s.pull);
+  const fetch = useGitStore((s) => s.fetch);
+  const toast = useToastStore();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const currentPath = location.pathname;
+  const [groups, setGroups] = useState(loadToolbarGroups);
+  const [showCustomize, setShowCustomize] = useState(false);
+  const setGroup = (key: keyof typeof DEFAULT_TOOLBAR_GROUPS, value: boolean) => {
+    const next = { ...groups, [key]: value };
+    setGroups(next);
+    saveToolbarGroups(next);
+  };
+
+  const disabled = !currentRepo;
+
+  const handlePush = async () => {
+    if (!currentRepo) return;
+    try { await push(currentRepo.path); toast.success('Pushed successfully'); }
+    catch (e) { toast.error('Push failed', String(e)); }
+  };
+  const handlePull = async () => {
+    if (!currentRepo) return;
+    try { await pull(currentRepo.path); toast.success('Petched successfully'); }
+    catch (e) { toast.error('Fetch failed', String(e)); }
+  };
+
+  const COLOR_BLUE = '#399ee6';
+  const COLOR_GREEN = '#86b300';
+  const COLOR_ORANGE = '#f2ae49';
+  const COLOR_PURPLE = '#a37acc';
+  const COLOR_RED = '#f07171';
+
+  const LabeledButton = ({ icon: Icon, label, onClick, disabled, title, iconColor, active }: {
+    icon: typeof RefreshCw; label: string; onClick: () => void; disabled?: boolean; title: string;
+    iconColor?: string; active?: boolean;
+  }) => (
+    <button
+      className={cn(
+        'flex items-center gap-1.5 px-2.5 h-7 rounded-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs',
+        active
+          ? 'bg-accent text-text-inverse'
+          : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+      )}
+      style={!active && iconColor ? { color: iconColor } : undefined}
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+    >
+      <Icon size={14} />
+      <span className="hidden md:inline">{label}</span>
+    </button>
+  );
+
+  const Divider = () => <div className="w-px h-5 bg-border-subtle mx-1.5" />;
+
+  if (!currentRepo) return null;
+
+  return (
+    <div className="flex items-center h-8 bg-bg-secondary border-b border-border-default flex-shrink-0 no-drag px-2 gap-0.5">
+      {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>).map(key => {
+        if (!groups[key]) return null;
+        switch (key) {
+          case 'sync':
+            return (
+              <div key={key} className="flex items-center">
+                <LabeledButton icon={ArrowDown} label="Fetch" iconColor={COLOR_BLUE} onClick={handlePull} disabled={disabled} title="Fetch + pull from remote" />
+                <LabeledButton icon={ArrowUp} label="Push" iconColor={COLOR_GREEN} onClick={handlePush} disabled={disabled} title="Push to remote" />
+                <Divider />
+              </div>
+            );
+          case 'stage':
+            return (
+              <div key={key} className="flex items-center">
+                <LabeledButton icon={Plus} label="Stage" iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
+                <LabeledButton icon={Minus} label="Unstage" iconColor={COLOR_ORANGE} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage all changes" />
+                <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
+                  if (!currentRepo || !confirm('Discard all uncommitted changes?')) return;
+                  api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
+                    toast.success('Changes discarded'); refreshStatus(currentRepo.path);
+                  }).catch((e) => toast.error('Discard failed', String(e)));
+                }} disabled={disabled} title="Discard all changes" />
+                <Divider />
+              </div>
+            );
+          case 'stash':
+            return (
+              <div key={key} className="flex items-center">
+                <LabeledButton icon={CloudDownload} label="Stash" iconColor={COLOR_PURPLE} onClick={() => {
+                  if (!currentRepo) return;
+                  api.git.stashPush(currentRepo.path, undefined, true).then(() => {
+                    toast.success('Stash saved'); refreshStatus(currentRepo.path);
+                  }).catch((e) => toast.error('Stash failed', String(e)));
+                }} disabled={disabled} title="Save stash" />
+                <LabeledButton icon={GitPullRequest} label="Pop" iconColor={COLOR_PURPLE} onClick={() => {
+                  if (!currentRepo) return;
+                  api.git.stashList(currentRepo.path).then(stashes => {
+                    if (stashes.length === 0) { toast.info('No stashes'); return; }
+                    api.git.stashApply(currentRepo.path, 0).then(() => {
+                      toast.success('Stash applied'); refreshStatus(currentRepo.path);
+                    }).catch((e) => toast.error('Apply failed', String(e)));
+                  });
+                }} disabled={disabled} title="Apply latest stash" />
+                <Divider />
+              </div>
+            );
+          case 'log':
+            return (
+              <div key={key} className="flex items-center">
+                <LabeledButton icon={GitBranch} label="History" iconColor={COLOR_BLUE} onClick={() => navigate('/history')} disabled={disabled} title="Commit history" active={currentPath === '/history'} />
+                <LabeledButton icon={FileText} label="Diff" iconColor={COLOR_BLUE} onClick={() => navigate('/diff')} disabled={disabled} title="Compare files between refs" active={currentPath === '/diff'} />
+                <LabeledButton icon={Search} label="Blame" iconColor={COLOR_BLUE} onClick={() => navigate('/blame')} disabled={disabled} title="Blame a file" active={currentPath === '/blame'} />
+                <Divider />
+              </div>
+            );
+          case 'workflows':
+            return (
+              <div key={key} className="flex items-center">
+                <LabeledButton icon={GitMerge} label="Git-Flow" iconColor={COLOR_ORANGE} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow operations" />
+                <LabeledButton icon={RotateCcw} label="Rebase" iconColor={COLOR_ORANGE} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Interactive rebase" />
+              </div>
+            );
+          default:
+            return null;
+        }
+      })}
+      {/* Spacer + customize button on the right */}
+      <div className="flex-1" />
+      <button
+        className="flex items-center justify-center w-6 h-6 rounded hover:bg-bg-hover transition-colors no-drag text-text-tertiary hover:text-text-primary"
+        onClick={() => setShowCustomize(!showCustomize)}
+        title="Customize toolbar"
+      >
+        <SettingsIcon size={13} />
+      </button>
+      {showCustomize && (
+        <div className="absolute top-full right-2 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-64">
+          <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
+            Toolbar editor
+          </div>
+          <div className="py-1">
+            {(Object.keys(DEFAULT_TOOLBAR_GROUPS) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>).map(key => (
+              <label key={key} className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs">
+                <input type="checkbox" checked={groups[key]}
+                  onChange={(e) => setGroup(key, e.target.checked)} />
+                <span className="capitalize">{key}</span>
+              </label>
+            ))}
+          </div>
+          <div className="px-3 py-1 border-t border-border-subtle">
+            <button className="text-2xs text-accent"
+              onClick={() => { setGroups(DEFAULT_TOOLBAR_GROUPS); saveToolbarGroups(DEFAULT_TOOLBAR_GROUPS); }}>
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

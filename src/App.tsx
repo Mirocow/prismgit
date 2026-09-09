@@ -1,7 +1,7 @@
 import { useEffect, useState, Suspense, lazy, useCallback, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
-import { Toolbar } from './components/Toolbar';
+import { Toolbar, GitToolbar } from './components/Toolbar';
 import { StatusBar } from './components/StatusBar';
 import { ToastContainer } from './components/ToastContainer';
 import { WelcomeScreen } from './components/WelcomeScreen';
@@ -262,6 +262,10 @@ export default function App() {
         onGitFlow={() => setShowGitFlow(true)}
         onInteractiveRebase={() => setShowIRebase(true)}
         onRepoInfo={() => setShowRepoInfo(true)}
+      />
+      <GitToolbar
+        onGitFlow={() => setShowGitFlow(true)}
+        onInteractiveRebase={() => setShowIRebase(true)}
       />
       <div className="flex flex-1 overflow-hidden no-drag">
         {/* Sidebar always visible — navigation must be accessible */}
