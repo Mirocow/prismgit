@@ -753,7 +753,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           {code}
         </span>
         {/* Name */}
-        <span className="flex-1 truncate font-mono whitespace-nowrap">{displayName}</span>
+        <span className="flex-1 truncate font-mono whitespace-nowrap" title={file.path}>{displayName}</span>
         {/* Line-change counts (+N -M) — reserved width keeps columns aligned */}
         <span
           className="text-2xs flex-shrink-0 text-right tabular-nums whitespace-nowrap overflow-hidden"
@@ -769,8 +769,10 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         </span>
         {/* State text */}
         <span className="text-text-tertiary flex-shrink-0 italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>{stateLabel}</span>
-        {/* Relative directory */}
-        <span className="text-text-tertiary flex-shrink-0 truncate whitespace-nowrap" style={{ width: colWidths.dir }}>{relDir}</span>
+        {/* Relative directory — shown/hidden based on compressFilePaths */}
+        {!compressFilePaths && relDir && (
+          <span className="text-text-tertiary flex-shrink-0 truncate whitespace-nowrap" style={{ width: colWidths.dir }} title={relDir}>{relDir}</span>
+        )}
         {/* Actions — fixed width so all rows stay column-aligned */}
         <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0 overflow-hidden" style={{ width: 92 }}>
           {isConflict && onResolveConflict && (
@@ -913,10 +915,10 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           >
             <Folder size={11} />
           </button>
-          {/* Path compression toggle */}
+          {/* Path compression toggle — EyeOff = hide relative dir column */}
           <button
-            className={cn('icon-btn !w-5 !h-5', compressFilePaths && 'active')}
-            title="Toggle path compression (collapse single-child folders)"
+            className={cn('icon-btn !w-5 !h-5', !compressFilePaths && 'active')}
+            title={compressFilePaths ? 'Show relative directory column' : 'Hide relative directory column (compressed view)'}
             onClick={() => setCompressFilePaths(!compressFilePaths)}
           >
             <EyeOff size={11} />
