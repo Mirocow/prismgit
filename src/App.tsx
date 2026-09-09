@@ -254,7 +254,7 @@ export default function App() {
         onInteractiveRebase={() => setShowIRebase(true)}
         onRepoInfo={() => setShowRepoInfo(true)}
       />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden no-drag">
         {/* Sidebar always visible — navigation must be accessible */}
         <Sidebar />
         <main className="flex-1 overflow-hidden flex flex-col">

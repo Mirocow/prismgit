@@ -69,7 +69,7 @@ export function Sidebar() {
         <div className="flex items-center justify-between px-3 py-2">
           <button
             className="flex items-center gap-2 text-sm font-medium hover:text-accent truncate"
-            onClick={() => setShowRepoList(!showRepoList)}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowRepoList(!showRepoList); }}
           >
             <FolderGit size={14} />
             <span className="truncate">{currentRepo ? currentRepo.name : 'Repositories'}</span>
@@ -77,13 +77,24 @@ export function Sidebar() {
               <Star size={11} className="text-status-modified fill-current" />
             )}
           </button>
-          <button
-            className="icon-btn no-drag flex-shrink-0"
-            title="Open repository"
-            onClick={() => useRepositoryStore.getState().openRepositoryPicker()}
-          >
-            <FolderPlus size={14} />
-          </button>
+          <div className="flex items-center gap-1">
+            {currentRepo && (
+              <button
+                className="icon-btn no-drag flex-shrink-0"
+                title="Close repository"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); useRepositoryStore.getState().closeRepository(); }}
+              >
+                <X size={14} />
+              </button>
+            )}
+            <button
+              className="icon-btn no-drag flex-shrink-0"
+              title="Open repository"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); useRepositoryStore.getState().openRepositoryPicker(); }}
+            >
+              <FolderPlus size={14} />
+            </button>
+          </div>
         </div>
 
         {showRepoList && (
