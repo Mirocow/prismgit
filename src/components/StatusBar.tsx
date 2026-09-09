@@ -53,6 +53,7 @@ export function StatusBar() {
   // Global selected commit — visible from anywhere in the app
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const selectCommit = useSelectionStore((s) => s.selectCommit);
+  const toast = useToastStore();
 
   // HEAD commit hash — fetch once when branch changes
   const [headHash, setHeadHash] = useState<string | null>(null);
@@ -114,30 +115,62 @@ export function StatusBar() {
         )}
       </div>
       <div className="flex items-center gap-3">
-        {staged > 0 && (
-          <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
-            {staged} staged
-          </span>
-        )}
-        {changed > 0 && (
-          <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-status-modified inline-block" />
-            {changed} changed
-          </span>
-        )}
+        {/* Clickable counters — quick jump to the working tree */}
+        <button
+          className="flex items-center gap-1 hover:text-text-primary transition-colors cursor-pointer px-1 rounded"
+          onClick={() => { window.location.hash = '#/changes'; }}
+          title="Open Changes (Ctrl+1)"
+        >
+          {staged > 0 && (
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
+              {staged} staged
+            </span>
+          )}
+          {changed > 0 && (
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-status-modified inline-block" />
+              {changed} changed
+            </span>
+          )}
+        </button>
+        {/* Ahead / behind — click to push / pull (VS Code-style sync buttons) */}
         {status?.ahead ? (
-          <span className="text-status-added flex items-center gap-0.5 font-medium">
+          <button
+            className="text-status-added flex items-center gap-0.5 font-medium hover:bg-bg-hover rounded px-1 py-0.5 transition-colors cursor-pointer"
+            onClick={() => {
+              if (!currentRepo) return;
+              useGitStore.getState().push(currentRepo.path)
+                .then(() => toast.success('Pushed successfully'))
+                .catch((e) => toast.error('Push failed', String(e)));
+            }}
+            title={`${status.ahead} commit(s) ahead — click to push`}
+          >
             <ArrowUp size={9} />{status.ahead}
-          </span>
+          </button>
         ) : null}
         {status?.behind ? (
-          <span className="text-status-modified flex items-center gap-0.5 font-medium">
+          <button
+            className="text-status-modified flex items-center gap-0.5 font-medium hover:bg-bg-hover rounded px-1 py-0.5 transition-colors cursor-pointer"
+            onClick={() => {
+              if (!currentRepo) return;
+              useGitStore.getState().pull(currentRepo.path)
+                .then(() => toast.success('Pulled successfully'))
+                .catch((e) => toast.error('Pull failed', String(e)));
+            }}
+            title={`${status.behind} commit(s) behind — click to pull`}
+          >
             <ArrowDown size={9} />{status.behind}
-          </span>
+          </button>
         ) : null}
         {lastRefresh > 0 && (
-          <span className="text-text-tertiary">updated {new Date(lastRefresh).toLocaleTimeString()}</span>
+          <button
+            className="text-text-tertiary hover:text-text-primary transition-colors cursor-pointer"
+            onClick={() => currentRepo && useGitStore.getState().refreshStatus(currentRepo.path)}
+            title="Refresh status (F5)"
+          >
+            updated {new Date(lastRefresh).toLocaleTimeString()}
+          </button>
         )}
       </div>
     </footer>

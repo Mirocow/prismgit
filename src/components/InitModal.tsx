@@ -4,12 +4,14 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 interface InitModalProps {
   open: boolean;
   onClose: () => void;
 }
 
 export function InitModal({ open, onClose }: InitModalProps) {
+  useEscapeKey(open, onClose);
   const initRepository = useRepositoryStore((s) => s.initRepository);
   const toast = useToastStore();
   const [path, setPath] = useState('');

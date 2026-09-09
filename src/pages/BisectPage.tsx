@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 interface BisectState {
   state: 'bisecting' | 'none';
   remaining?: number;
@@ -26,6 +27,7 @@ export function BisectPage() {
 
   // Log dialog
   const [showLog, setShowLog] = useState(false);
+  useEscapeKey(showLog, () => setShowLog(false));
   const [logText, setLogText] = useState('');
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);

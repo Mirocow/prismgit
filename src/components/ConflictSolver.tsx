@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 type ConflictResolution = 'ours' | 'theirs' | 'base' | 'both-ours-first' | 'both-theirs-first' | 'manual';
 
 interface ConflictHunk {
@@ -62,6 +63,7 @@ function parseConflicts(content: string): ConflictHunk[] {
 }
 
 export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
+  useEscapeKey(true, onClose);
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();

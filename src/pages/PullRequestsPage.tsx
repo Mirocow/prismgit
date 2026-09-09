@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api, type GithubPullRequest } from '../lib/api';
 import { cn, formatDate } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 export function PullRequestsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { authenticated, user } = useAuthStore();
@@ -14,6 +15,7 @@ export function PullRequestsPage() {
   const [loading, setLoading] = useState(false);
   const [state, setState] = useState<'open' | 'closed' | 'all'>('open');
   const [showCreate, setShowCreate] = useState(false);
+  useEscapeKey(showCreate, () => setShowCreate(false));
   const [repoInfo, setRepoInfo] = useState<{ owner?: string; repo?: string; provider?: string }>({});
 
   // Create PR form

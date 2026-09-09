@@ -4,6 +4,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 interface LfsFile {
   path: string;
   size: string;
@@ -19,6 +20,7 @@ export function LfsPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [showTrack, setShowTrack] = useState(false);
+  useEscapeKey(showTrack, () => setShowTrack(false));
   const [trackPattern, setTrackPattern] = useState('');
 
   const load = useCallback(async () => {

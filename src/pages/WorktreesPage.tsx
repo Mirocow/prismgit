@@ -5,12 +5,14 @@ import { useToastStore } from '../stores/toastStore';
 import { api, type WorktreeInfo } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 export function WorktreesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  useEscapeKey(showAdd, () => setShowAdd(false));
   const [newPath, setNewPath] = useState('');
   const [newBranch, setNewBranch] = useState('');
   const [detach, setDetach] = useState(false);

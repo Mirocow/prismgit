@@ -7,12 +7,14 @@ import { CommitHashLink } from '../components/StatusBar';
 import { api, type TagInfo } from '../lib/api';
 import { shortHash } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 export function TagsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const [tags, setTags] = useState<TagInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
+  useEscapeKey(showDialog, () => setShowDialog(false));
   const [name, setName] = useState('');
   const [message, setMessage] = useState('');
   const [ref, setRef] = useState('HEAD');

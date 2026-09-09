@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 interface ApplyPatchModalProps {
   open: boolean;
   onClose: () => void;
@@ -20,6 +21,7 @@ type Mode = 'file' | 'paste';
  *  - reverse-apply (--reverse) to undo a previously applied patch
  */
 export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
+  useEscapeKey(open, onClose);
   const repo = useRepositoryStore((s) => s.currentRepo);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();

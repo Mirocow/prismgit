@@ -15,6 +15,7 @@ import {
 } from '../lib/distributedReviews';
 import { cn, formatDate, shortHash } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 type Severity = 'info' | 'suggestion' | 'warning' | 'critical';
 
 const SEVERITY_COLORS: Record<Severity, string> = {
@@ -39,6 +40,7 @@ export function ReviewsPage() {
   const [commits, setCommits] = useState<LogEntry[]>([]);
   const [selectedCommit, setSelectedCommit] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  useEscapeKey(showAdd, () => setShowAdd(false));
   const [newComment, setNewComment] = useState<Partial<ReviewComment>>({});
   const [busy, setBusy] = useState<string | null>(null);
 

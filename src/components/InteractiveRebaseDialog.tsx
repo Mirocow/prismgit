@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api, type LogEntry } from '../lib/api';
 import { cn } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 type RebaseAction = 'pick' | 'reword' | 'edit' | 'squash' | 'fixup' | 'drop';
 
 interface RebaseTodoItem {
@@ -41,6 +42,7 @@ export function InteractiveRebaseDialog({
   ontoBranch = '',
   numCommits = 10,
 }: InteractiveRebaseDialogProps) {
+  useEscapeKey(open, onClose);
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();

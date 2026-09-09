@@ -25,11 +25,15 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: 'Global',
     shortcuts: [
+      { desc: 'Command palette (pages, actions, tools)', keys: ['Ctrl', 'K'] },
+      { desc: 'Command palette (alternative)', keys: ['Ctrl', 'P'] },
       { desc: 'Open repository', keys: ['Ctrl', 'O'] },
       { desc: 'Clone repository', keys: ['Ctrl', 'Shift', 'O'] },
       { desc: 'Find object (commit/branch/tag)', keys: ['Ctrl', 'F'] },
+      { desc: 'Refresh git status', keys: ['F5'] },
       { desc: 'Toggle theme (dark/light)', keys: ['Ctrl', 'Shift', 'T'] },
-      { desc: 'Show this shortcuts overlay', keys: ['Ctrl', '?'] },
+      { desc: 'Show this shortcuts overlay', keys: ['?'] },
+      { desc: 'Toggle this shortcuts overlay', keys: ['Ctrl', '?'] },
       { desc: 'Git-Flow dialog', keys: ['Ctrl', 'Shift', 'G'] },
       { desc: 'Interactive rebase', keys: ['Ctrl', 'Shift', 'R'] },
       { desc: 'Window style: Standard', keys: ['Ctrl', 'Shift', '1'] },
@@ -47,6 +51,9 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { desc: 'Go to Tags', keys: ['Alt', '5'] },
       { desc: 'Go to Stashes', keys: ['Alt', '6'] },
       { desc: 'Go to Settings', keys: ['Alt', ','] },
+      { desc: 'Quick nav: Changes / History / Diff', keys: ['Ctrl', '1–3'] },
+      { desc: 'Quick nav: Branches / Tags / Stashes', keys: ['Ctrl', '4–6'] },
+      { desc: 'Quick nav: Remotes / Journal / Investigate', keys: ['Ctrl', '7–9'] },
     ],
   },
   {
@@ -57,7 +64,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { desc: 'Pull', keys: ['Ctrl', 'Shift', 'L'] },
       { desc: 'Fetch', keys: ['Ctrl', 'Shift', 'F'] },
       { desc: 'Stage all', keys: ['Ctrl', 'Shift', 'A'] },
-      { desc: 'Discard all changes', keys: ['Ctrl', 'Shift', 'D'] },
+      { desc: 'Close dialog / palette', keys: ['Esc'] },
     ],
   },
   {

@@ -15,6 +15,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 interface ChangesPageProps {
   onResolveConflict?: (file: string) => void;
 }
@@ -450,6 +451,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
 
   // Clean untracked files/directories: dry-run preview first, then confirm
   const [showCleanDialog, setShowCleanDialog] = useState(false);
+  useEscapeKey(showCleanDialog, () => setShowCleanDialog(false));
   const [cleanPreview, setCleanPreview] = useState<string[]>([]);
   const [cleanBusy, setCleanBusy] = useState(false);
 

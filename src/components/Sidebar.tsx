@@ -1,39 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, Plus, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star, ChevronDown, CloudDownload, Filter } from './icons';
+import { Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, Plus, Pin, PinOff, X, Sun, Moon, Star, ChevronDown } from './icons';
+import { NAV_ITEMS, NAV_SHORTCUTS, type NavItem } from './navItems';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useGitStore } from '../stores/gitStore';
 import { ResizableSplitter, useResizableWidth } from './ResizableSplitter';
 import { cn } from '../lib/utils';
-
-interface NavItem {
-  path: string;
-  label: string;
-  icon: typeof GitBranch;
-  group?: string;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { path: '/changes', label: 'Changes', icon: GitCommit, group: 'Working Tree' },
-  { path: '/history', label: 'History', icon: History, group: 'Working Tree' },
-  { path: '/diff', label: 'Diff', icon: FileText, group: 'Working Tree' },
-  { path: '/annotate', label: 'Annotate', icon: FileText, group: 'Working Tree' },
-  { path: '/investigate', label: 'Investigate', icon: Search, group: 'Working Tree' },
-  { path: '/blame', label: 'Blame', icon: FileText, group: 'Working Tree' },
-  { path: '/journal', label: 'Journal', icon: RotateCcw, group: 'Working Tree' },
-  { path: '/gitflow', label: 'Git-Flow', icon: GitBranch, group: 'Workflows' },
-  { path: '/bisect', label: 'Bisect', icon: Filter, group: 'Workflows' },
-  { path: '/pulls', label: 'Pull Requests', icon: GitPullRequest, group: 'Workflows' },
-  { path: '/reviews', label: 'Reviews', icon: GitPullRequest, group: 'Workflows' },
-  { path: '/branches', label: 'Branches', icon: GitBranch, group: 'Refs' },
-  { path: '/tags', label: 'Tags', icon: Tag, group: 'Refs' },
-  { path: '/remotes', label: 'Remotes', icon: CloudDownload, group: 'Refs' },
-  { path: '/worktrees', label: 'Worktrees', icon: FolderTree, group: 'Refs' },
-  { path: '/reflog', label: 'Reflog', icon: RotateCcw, group: 'Refs' },
-  { path: '/stashes', label: 'Stashes', icon: GitPullRequest, group: 'Refs' },
-  { path: '/submodules', label: 'Submodules', icon: Package, group: 'Refs' },
-  { path: '/lfs', label: 'Git LFS', icon: Package, group: 'Refs' },
-];
 
 // Tooltips explaining what each tool does — shown on hover
 const NAV_TOOLTIPS: Record<string, string> = {
@@ -65,6 +38,9 @@ export function Sidebar() {
   const { width: sidebarWidth, handleResize: handleSidebarResize } = useResizableWidth(240, 180, 400);
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
+  // Live change counters for the Changes badge
+  const changedCount = useGitStore((s) => s.status?.files.length ?? 0);
+  const stagedCount = useGitStore((s) => s.status?.staged.length ?? 0);
 
   useEffect(() => {
     if (!currentRepo) {
@@ -78,6 +54,7 @@ export function Sidebar() {
     acc[g].push(item);
     return acc;
   }, {});
+
 
   const handleNavigate = (path: string) => {
     navigate(path);
@@ -196,6 +173,9 @@ export function Sidebar() {
               {items.map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
+                // Changes item gets a live badge; others show their quick-nav key
+                const showBadge = item.path === '/changes' && changedCount > 0;
+                const shortcut = NAV_SHORTCUTS[item.path];
                 return (
                   <button
                     key={item.path}
@@ -212,6 +192,19 @@ export function Sidebar() {
                   >
                     <Icon size={15} />
                     <span>{item.label}</span>
+                    {showBadge ? (
+                      <span
+                        className={cn(
+                          'ml-auto text-2xs font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center',
+                          stagedCount > 0 ? 'badge badge-added' : 'bg-accent-muted text-accent'
+                        )}
+                        title={`${changedCount} file(s) with changes${stagedCount > 0 ? `, ${stagedCount} staged` : ''}`}
+                      >
+                        {changedCount}
+                      </span>
+                    ) : shortcut ? (
+                      <kbd className="ml-auto text-2xs text-text-tertiary border border-border-subtle rounded px-1 opacity-60">{shortcut}</kbd>
+                    ) : null}
                   </button>
                 );
               })}

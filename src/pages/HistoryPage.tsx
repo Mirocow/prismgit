@@ -30,6 +30,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 const ROW_HEIGHT = 28;
 const LANE_WIDTH = 20;
 const GRAPH_PAD = 6;
@@ -330,6 +331,7 @@ export function HistoryPage() {
 
   // Compare a commit with the current working tree — shows a diff dialog
   const [compareDiff, setCompareDiff] = useState<{ result: import('../lib/api').DiffResult; title: string } | null>(null);
+  useEscapeKey(!!compareDiff, () => setCompareDiff(null));
 
   const handleRevert = async (entry: LogEntry) => {
     if (!confirm(`Revert ${shortHash(entry.hash)}?\n\nThis will create a NEW commit that undoes the changes from this commit.\n\nOriginal commit: "${entry.subject}"`)) return;
@@ -385,6 +387,7 @@ export function HistoryPage() {
   // Split-off dialog: move the selected files from this commit into a NEW commit
   // that is created right after it (git rebase --onto machinery via splitOffFiles).
   const [showSplitOff, setShowSplitOff] = useState(false);
+  useEscapeKey(showSplitOff, () => setShowSplitOff(false));
   const [splitOffEntry, setSplitOffEntry] = useState<LogEntry | null>(null);
   const [splitOffSelected, setSplitOffSelected] = useState<Set<string>>(new Set());
   const [splitOffMessage, setSplitOffMessage] = useState('');
@@ -526,6 +529,7 @@ export function HistoryPage() {
 
   // Tag-from-commit dialog state
   const [showTagDialog, setShowTagDialog] = useState(false);
+  useEscapeKey(showTagDialog, () => setShowTagDialog(false));
   const [tagTarget, setTagTarget] = useState<string | null>(null);
   const [tagName, setTagName] = useState('');
   const [tagMessage, setTagMessage] = useState('');
@@ -552,6 +556,7 @@ export function HistoryPage() {
 
   // Branch-from-commit dialog state
   const [showBranchDialog, setShowBranchDialog] = useState(false);
+  useEscapeKey(showBranchDialog, () => setShowBranchDialog(false));
   const [branchTarget, setBranchTarget] = useState<string | null>(null);
   const [branchName, setBranchName] = useState('');
   const [branchCheckout, setBranchCheckout] = useState(true);

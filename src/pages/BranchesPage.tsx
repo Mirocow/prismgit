@@ -12,6 +12,7 @@ import { api, type BranchInfo } from '../lib/api';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { cn, formatDate, shortHash } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 export function BranchesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { status, refreshStatus } = useGitStore();
@@ -20,6 +21,7 @@ export function BranchesPage() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [showNewDialog, setShowNewDialog] = useState(false);
+  useEscapeKey(showNewDialog, () => setShowNewDialog(false));
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchStart, setNewBranchStart] = useState('HEAD');
   const [newBranchCheckout, setNewBranchCheckout] = useState(true);
@@ -121,6 +123,7 @@ export function BranchesPage() {
   // Compare an arbitrary branch against the CURRENT branch: ahead/behind counts,
   // changed file list, unified patch preview, and a jump into the Diff tool.
   const [compareBranch, setCompareBranch] = useState<BranchInfo | null>(null);
+  useEscapeKey(!!compareBranch, () => setCompareBranch(null));
   const [compareCurrent, setCompareCurrent] = useState<string | null>(null);
   const [compareCounts, setCompareCounts] = useState<{ ahead: number; behind: number } | null>(null);
   const [compareFiles, setCompareFiles] = useState<{ status: string; path: string }[]>([]);

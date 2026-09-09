@@ -5,12 +5,14 @@ import { useToastStore } from '../stores/toastStore';
 import { api, type RepositoryMetadata } from '../lib/api';
 import { cn, formatDate, shortHash } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 interface RepoInfoDialogProps {
   open: boolean;
   onClose: () => void;
 }
 
 export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
+  useEscapeKey(open, onClose);
   const { currentRepo, currentMetadata, updateMetadata, toggleFavorite, addTag, removeTag, refreshStats } = useRepositoryStore();
   const toast = useToastStore();
   const [description, setDescription] = useState('');

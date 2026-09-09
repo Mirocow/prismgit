@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api, type RemoteInfo } from '../lib/api';
 import { cn } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 export function RemotesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -16,11 +17,13 @@ export function RemotesPage() {
 
   // Add remote dialog
   const [showAdd, setShowAdd] = useState(false);
+  useEscapeKey(showAdd, () => setShowAdd(false));
   const [addName, setAddName] = useState('');
   const [addUrl, setAddUrl] = useState('');
 
   // Edit URLs dialog (name + which url is being edited)
   const [editRemote, setEditRemote] = useState<RemoteInfo | null>(null);
+  useEscapeKey(!!editRemote, () => setEditRemote(null));
   const [editFetchUrl, setEditFetchUrl] = useState('');
   const [editPushUrl, setEditPushUrl] = useState('');
 

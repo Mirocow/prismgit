@@ -7,12 +7,14 @@ import { useToastStore } from '../stores/toastStore';
 import { api, type GithubRepository } from '../lib/api';
 import { cn } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 interface CloneModalProps {
   open: boolean;
   onClose: () => void;
 }
 
 export function CloneModal({ open, onClose }: CloneModalProps) {
+  useEscapeKey(open, onClose);
   const cloneRepository = useRepositoryStore((s) => s.cloneRepository);
   const { authenticated, user } = useAuthStore();
   const settings = useSettingsStore((s) => s.settings);

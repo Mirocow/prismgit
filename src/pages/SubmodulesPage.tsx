@@ -5,6 +5,7 @@ import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type SubmoduleInfo } from '../lib/api';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 export function SubmodulesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -13,6 +14,7 @@ export function SubmodulesPage() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  useEscapeKey(showAdd, () => setShowAdd(false));
   const [addUrl, setAddUrl] = useState('');
   const [addPath, setAddPath] = useState('');
   const [addBranch, setAddBranch] = useState('');

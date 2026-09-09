@@ -4,6 +4,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import {
   detectGitFlowConfig,
   startFeature,
@@ -34,6 +35,7 @@ export function GitFlowDialog({
   initialAction = 'start',
   initialName = '',
 }: GitFlowDialogProps) {
+  useEscapeKey(open, onClose);
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();

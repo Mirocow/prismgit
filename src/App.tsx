@@ -13,7 +13,11 @@ import { GitFlowDialog } from './components/GitFlowDialog';
 import { InteractiveRebaseDialog } from './components/InteractiveRebaseDialog';
 import { ConflictSolver } from './components/ConflictSolver';
 import { RepoInfoDialog } from './components/RepoInfoDialog';
+import { SequencerPanel } from './components/SequencerPanel';
+import { ApplyPatchModal } from './components/ApplyPatchModal';
+import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
+import { NAV_SHORTCUTS } from './components/navItems';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSettingsStore } from './stores/settingsStore';
@@ -69,6 +73,8 @@ export default function App() {
   const [showGitFlow, setShowGitFlow] = useState(false);
   const [showIRebase, setShowIRebase] = useState(false);
   const [showRepoInfo, setShowRepoInfo] = useState(false);
+  const [showApplyPatch, setShowApplyPatch] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
   const [conflictFile, setConflictFile] = useState<string | null>(null);
   const [dismissRebase, setDismissRebase] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -148,9 +154,29 @@ export default function App() {
     const handleKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      // Command palette — works even from inputs (standard UX), toggles
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'k' || e.key === 'p')) {
+        e.preventDefault();
+        setShowPalette((v) => !v);
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'f' && !isInInput) {
         e.preventDefault();
         setShowFind(true);
+      }
+      // F5 / Ctrl+R — refresh git status (never reload the window)
+      if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'r' || e.key === 'R'))) {
+        e.preventDefault();
+        const repo = useRepositoryStore.getState().currentRepo;
+        if (repo) useGitStore.getState().refreshStatus(repo.path);
+        return;
+      }
+      // '?' — plain question mark opens shortcuts help; Ctrl+?/Ctrl+/ (below)
+      // handles the toggle variant
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !isInInput) {
+        e.preventDefault();
+        setShowShortcuts(true);
+        return;
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'T') {
         e.preventDefault();
@@ -171,7 +197,9 @@ export default function App() {
       }
       // Alt+number navigation: Alt+1=Changes, Alt+2=History, Alt+3=Diff,
       // Alt+4=Branches, Alt+5=Tags, Alt+6=Stashes, Alt+, =Settings
-      if (e.altKey && !isInInput && currentRepo) {
+      // (read the repo from the store — a closure here would be stale since
+      // this effect has stable deps and runs once)
+      if (e.altKey && !isInInput) {
         const altMap: Record<string, string> = {
           '1': '/changes',
           '2': '/history',
@@ -182,7 +210,7 @@ export default function App() {
           ',': '/settings',
         };
         const target = altMap[e.key];
-        if (target) {
+        if (target && useRepositoryStore.getState().currentRepo) {
           e.preventDefault();
           navigate(target);
         }
@@ -193,10 +221,52 @@ export default function App() {
         if (e.key === '2') { e.preventDefault(); setWindowStyle('log'); }
         if (e.key === '3') { e.preventDefault(); setWindowStyle('working-tree'); }
       }
+      // Git operation shortcuts (promised by the shortcuts overlay) —
+      // push / pull / fetch / stage all, repo required
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && !isInInput) {
+        const repo = useRepositoryStore.getState().currentRepo;
+        const git = useGitStore.getState();
+        if (e.key === 'P' && repo) {
+          e.preventDefault();
+          git.push(repo.path).then(() => toast.success('Pushed successfully')).catch((err) => toast.error('Push failed', String(err)));
+        } else if (e.key === 'L' && repo) {
+          e.preventDefault();
+          git.pull(repo.path).then(() => toast.success('Pulled successfully')).catch((err) => toast.error('Pull failed', String(err)));
+        } else if (e.key === 'F' && repo) {
+          e.preventDefault();
+          git.fetch(repo.path).then(() => toast.success('Fetched successfully')).catch((err) => toast.error('Fetch failed', String(err)));
+        } else if (e.key === 'A' && repo) {
+          e.preventDefault();
+          git.stageAll(repo.path).then(() => toast.success('All changes staged')).catch((err) => toast.error('Stage failed', String(err)));
+        } else if (e.key === 'O') {
+          e.preventDefault();
+          setShowClone(true);
+        }
+      }
+      // Ctrl+O — open repository picker
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'o' && !isInInput) {
+        e.preventDefault();
+        useRepositoryStore.getState().openRepositoryPicker();
+      }
+      // Ctrl+1..9 — quick page navigation (only with an open repository)
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9' && !isInInput) {
+        const path = Object.entries(NAV_SHORTCUTS).find(([, sc]) => sc === `Ctrl+${e.key}`)?.[0];
+        if (path && useRepositoryStore.getState().currentRepo) {
+          e.preventDefault();
+          navigate(path);
+        }
+      }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [setWindowStyle]);
+  }, [setWindowStyle, navigate]);
+
+  // Shortcuts dialog can be opened from the Command Palette via this event
+  useEffect(() => {
+    const handler = () => setShowShortcuts(true);
+    window.addEventListener('prismgit:show-shortcuts', handler);
+    return () => window.removeEventListener('prismgit:show-shortcuts', handler);
+  }, []);
 
   // File watcher: start/stop when repo changes + auto-refresh on changes
   // Use a ref to track in-flight refresh and debounce to avoid loops
@@ -278,6 +348,20 @@ export default function App() {
         <CloneModal open={showClone} onClose={() => setShowClone(false)} />
         <InitModal open={showInit} onClose={() => setShowInit(false)} />
         <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
+        <CommandPalette
+          open={showPalette}
+          onClose={() => setShowPalette(false)}
+          triggers={{
+            onFind: () => setShowFind(true),
+            onGitFlow: () => setShowGitFlow(true),
+            onInteractiveRebase: () => setShowIRebase(true),
+            onRepoInfo: () => setShowRepoInfo(true),
+            onApplyPatch: () => setShowApplyPatch(true),
+            onClone: () => setShowClone(true),
+            onInit: () => setShowInit(true),
+          }}
+        />
+        <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       </div>
     );
   }
@@ -336,6 +420,19 @@ export default function App() {
       {conflictFile && (
         <ConflictSolver filePath={conflictFile} onClose={() => setConflictFile(null)} />
       )}
+      <CommandPalette
+        open={showPalette}
+        onClose={() => setShowPalette(false)}
+        triggers={{
+          onFind: () => setShowFind(true),
+          onGitFlow: () => setShowGitFlow(true),
+          onInteractiveRebase: () => setShowIRebase(true),
+          onRepoInfo: () => setShowRepoInfo(true),
+          onApplyPatch: () => setShowApplyPatch(true),
+          onClone: () => setShowClone(true),
+          onInit: () => setShowInit(true),
+        }}
+      />
       {showRebasePanel && (
         <RebasePanel onClose={() => setDismissRebase(true)} />
       )}

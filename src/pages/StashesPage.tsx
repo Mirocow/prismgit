@@ -10,6 +10,7 @@ import { formatDate, shortHash } from '../lib/utils';
 import { CommitHashLink } from '../components/StatusBar';
 import { cn } from '../lib/utils';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
 export function StashesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -18,6 +19,7 @@ export function StashesPage() {
   const [stashes, setStashes] = useState<StashEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [showNewDialog, setShowNewDialog] = useState(false);
+  useEscapeKey(showNewDialog, () => setShowNewDialog(false));
   const [stashMessage, setStashMessage] = useState('');
   const [includeUntracked, setIncludeUntracked] = useState(false);
 
