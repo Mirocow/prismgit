@@ -6,29 +6,13 @@ import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useToolbarStore, DEFAULT_TOOLBAR_GROUPS, type ToolbarGroups, type ToolbarGroupKey } from '../stores/toolbarStore';
 import { useToastStore } from '../stores/toastStore';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
 
-// Default visible groups — user can toggle these via the customize button
-const DEFAULT_TOOLBAR_GROUPS = {
-  sync: true,
-  stage: true,
-  stash: true,
-  log: true,
-  workflows: true,
-  utils: true,
-};
-
-function loadToolbarGroups(): typeof DEFAULT_TOOLBAR_GROUPS {
-  try {
-    const raw = localStorage.getItem('toolbar-groups');
-    if (raw) return { ...DEFAULT_TOOLBAR_GROUPS, ...JSON.parse(raw) };
-  } catch { /* ignore */ }
-  return DEFAULT_TOOLBAR_GROUPS;
-}
-function saveToolbarGroups(g: typeof DEFAULT_TOOLBAR_GROUPS) {
-  try { localStorage.setItem('toolbar-groups', JSON.stringify(g)); } catch { /* ignore */ }
-}
+// Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
+// customize editor applies to BOTH toolbars (top row + git actions row) live.
+// Default groups & localStorage persistence are handled there.
 
 // Window control buttons — frameless window
 function WindowControls() {
@@ -94,14 +78,11 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
   const setGlobalPathFilter = useSelectionStore((s) => s.setPathFilter);
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const selectedBranch = useSelectionStore((s) => s.selectedBranch);
-  // Toolbar customization state
-  const [groups, setGroups] = useState(loadToolbarGroups);
+  // Toolbar customization state — shared store, so edits apply to GitToolbar too
+  const groups = useToolbarStore((s) => s.groups);
+  const setGroup = useToolbarStore((s) => s.setGroup);
+  const setGroups = useToolbarStore((s) => s.setGroups);
   const [showCustomize, setShowCustomize] = useState(false);
-  const setGroup = (key: keyof typeof DEFAULT_TOOLBAR_GROUPS, value: boolean) => {
-    const next = { ...groups, [key]: value };
-    setGroups(next);
-    saveToolbarGroups(next);
-  };
 
   const disabled = !currentRepo;
   const location = useLocation();
@@ -283,11 +264,11 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
         {showCustomize && (
           <div className="absolute top-full right-2 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-72">
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
-              Toolbar editor — drag to reorder, click eye to hide
+              Toolbar editor — applies to both toolbars · drag to reorder, click eye to hide
             </div>
             <div className="py-1 max-h-72 overflow-y-auto">
               <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Visible</div>
-              {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>)
+              {(Object.keys(groups) as Array<ToolbarGroupKey>)
                 .filter(key => groups[key])
                 .map((key, idx) => (
                   <div
@@ -303,9 +284,9 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
-                      const draggedKey = e.dataTransfer.getData('text/toolbar-group') as keyof typeof DEFAULT_TOOLBAR_GROUPS;
+                      const draggedKey = e.dataTransfer.getData('text/toolbar-group') as ToolbarGroupKey;
                       if (!draggedKey || draggedKey === key) return;
-                      const groupKeys = Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>;
+                      const groupKeys = Object.keys(groups) as Array<ToolbarGroupKey>;
                       const draggedIdx = groupKeys.indexOf(draggedKey);
                       const targetIdx = groupKeys.indexOf(key);
                       if (draggedIdx === -1 || targetIdx === -1) return;
@@ -313,9 +294,8 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
                       const reordered = [...groupKeys];
                       reordered.splice(draggedIdx, 1);
                       reordered.splice(targetIdx, 0, draggedKey);
-                      for (const k of reordered) newOrdered[k] = groups[k as keyof typeof DEFAULT_TOOLBAR_GROUPS];
-                      setGroups(newOrdered as typeof DEFAULT_TOOLBAR_GROUPS);
-                      saveToolbarGroups(newOrdered as typeof DEFAULT_TOOLBAR_GROUPS);
+                      for (const k of reordered) newOrdered[k] = groups[k as ToolbarGroupKey];
+                      setGroups(newOrdered as ToolbarGroups);
                     }}
                     className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-move text-xs"
                     title="Drag to reorder"
@@ -331,11 +311,11 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
                     </button>
                   </div>
                 ))}
-              {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>)
+              {(Object.keys(groups) as Array<ToolbarGroupKey>)
                 .filter(key => !groups[key]).length > 0 && (
                 <>
                   <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary border-t border-border-subtle">Hidden</div>
-                  {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>)
+                  {(Object.keys(groups) as Array<ToolbarGroupKey>)
                     .filter(key => !groups[key])
                     .map(key => (
                       <div key={key} className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover text-xs opacity-60">
@@ -355,7 +335,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
             </div>
             <div className="px-3 py-1 border-t border-border-subtle flex justify-between">
               <button className="text-2xs text-accent"
-                onClick={() => { setGroups(DEFAULT_TOOLBAR_GROUPS); saveToolbarGroups(DEFAULT_TOOLBAR_GROUPS); }}>
+                onClick={() => setGroups(DEFAULT_TOOLBAR_GROUPS)}>
                 Reset to default
               </button>
               <button className="text-2xs btn btn-primary !py-0.5 !px-2"
@@ -622,13 +602,9 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   const navigate = useNavigate();
   const location = useLocation();
   const currentPath = location.pathname;
-  const [groups, setGroups] = useState(loadToolbarGroups);
-  const [showCustomize, setShowCustomize] = useState(false);
-  const setGroup = (key: keyof typeof DEFAULT_TOOLBAR_GROUPS, value: boolean) => {
-    const next = { ...groups, [key]: value };
-    setGroups(next);
-    saveToolbarGroups(next);
-  };
+  // Shared toolbar groups — the customize editor (gear icon in the top toolbar)
+  // controls these live; hiding a group here also removes it from the second row.
+  const groups = useToolbarStore((s) => s.groups);
 
   const disabled = !currentRepo;
 
@@ -703,7 +679,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           <Divider />
         </>
       )}
-      {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>).map(key => {
+      {(Object.keys(groups) as Array<ToolbarGroupKey>).map(key => {
         if (!groups[key]) return null;
         switch (key) {
           case 'sync':
