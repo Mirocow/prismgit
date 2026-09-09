@@ -19,12 +19,14 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/blame', label: 'Blame', icon: FileText, group: 'Working Tree' },
   { path: '/journal', label: 'Journal', icon: RotateCcw, group: 'Working Tree' },
   { path: '/gitflow', label: 'Git-Flow', icon: GitBranch, group: 'Workflows' },
+  { path: '/pulls', label: 'Pull Requests', icon: GitPullRequest, group: 'Workflows' },
   { path: '/branches', label: 'Branches', icon: GitBranch, group: 'Refs' },
   { path: '/tags', label: 'Tags', icon: Tag, group: 'Refs' },
   { path: '/worktrees', label: 'Worktrees', icon: FolderTree, group: 'Refs' },
   { path: '/reflog', label: 'Reflog', icon: RotateCcw, group: 'Refs' },
   { path: '/stashes', label: 'Stashes', icon: GitPullRequest, group: 'Refs' },
   { path: '/submodules', label: 'Submodules', icon: Package, group: 'Refs' },
+  { path: '/lfs', label: 'Git LFS', icon: Package, group: 'Refs' },
 ];
 
 export function Sidebar() {

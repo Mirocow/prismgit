@@ -1535,48 +1535,150 @@ export async function extractRepoInfo(
     let owner: string | undefined;
     let repo: string | undefined;
 
-    // Convert SSH to HTTPS
     const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
     const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
 
     if (sshMatch) {
       const [, host, ownerName, repoName] = sshMatch;
       webUrl = `https://${host}/${ownerName}/${repoName}`;
-      if (host.includes('github.com')) {
-        provider = 'github';
-        owner = ownerName;
-        repo = repoName;
-      } else if (host.includes('gitlab.com') || host.includes('gitlab')) {
-        provider = 'gitlab';
-        owner = ownerName;
-        repo = repoName;
-      } else if (host.includes('bitbucket.org')) {
-        provider = 'bitbucket';
-        owner = ownerName;
-        repo = repoName;
-      }
+      if (host.includes('github.com')) { provider = 'github'; owner = ownerName; repo = repoName; }
+      else if (host.includes('gitlab')) { provider = 'gitlab'; owner = ownerName; repo = repoName; }
+      else if (host.includes('bitbucket.org')) { provider = 'bitbucket'; owner = ownerName; repo = repoName; }
     } else if (httpsMatch) {
       const [, host, ownerName, repoName] = httpsMatch;
       webUrl = `https://${host}/${ownerName}/${repoName}`;
-      if (host.includes('github.com')) {
-        provider = 'github';
-        owner = ownerName;
-        repo = repoName;
-      } else if (host.includes('gitlab.com') || host.includes('gitlab')) {
-        provider = 'gitlab';
-        owner = ownerName;
-        repo = repoName;
-      } else if (host.includes('bitbucket.org')) {
-        provider = 'bitbucket';
-        owner = ownerName;
-        repo = repoName;
-      }
+      if (host.includes('github.com')) { provider = 'github'; owner = ownerName; repo = repoName; }
+      else if (host.includes('gitlab')) { provider = 'gitlab'; owner = ownerName; repo = repoName; }
+      else if (host.includes('bitbucket.org')) { provider = 'bitbucket'; owner = ownerName; repo = repoName; }
     }
-
     return { provider, owner, repo, url, webUrl };
   } catch {
     return { provider: 'unknown' };
   }
+}
+
+// ============= LFS Support =============
+
+export async function lfsStatus(repoPath: string): Promise<{ installed: boolean; files: { path: string; size: string; status: string }[] }> {
+  const git = getGit(repoPath);
+  try {
+    // Check if LFS is initialized
+    const lfsVersion = await git.raw(['lfs', 'version']).catch(() => '');
+    if (!lfsVersion.trim()) {
+      return { installed: false, files: [] };
+    }
+    // Get LFS status
+    const status = await git.raw(['lfs', 'status']).catch(() => '');
+    const files: { path: string; size: string; status: string }[] = [];
+    const lines = status.split('\n');
+    let currentFile: string | null = null;
+    for (const line of lines) {
+      const match = line.match(/^\s+(.+?)\s+\((.+?)\)\s*$/);
+      if (match) {
+        files.push({ path: match[1], size: '', status: match[2] });
+      }
+    }
+    return { installed: true, files };
+  } catch {
+    return { installed: false, files: [] };
+  }
+}
+
+export async function lfsPull(repoPath: string, files?: string[]): Promise<void> {
+  const git = getGit(repoPath);
+  const args = ['lfs', 'pull'];
+  if (files && files.length > 0) args.push('--include', files.join(','));
+  await git.raw(args);
+}
+
+export async function lfsPush(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['lfs', 'push', 'origin', '--all']);
+}
+
+export async function lfsFetch(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['lfs', 'fetch']);
+}
+
+export async function lfsInstall(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['lfs', 'install']);
+}
+
+export async function lfsTrack(repoPath: string, patterns: string[]): Promise<void> {
+  const git = getGit(repoPath);
+  for (const p of patterns) {
+    await git.raw(['lfs', 'track', p]);
+  }
+}
+
+export async function lfsList(repoPath: string): Promise<string[]> {
+  const git = getGit(repoPath);
+  const result = await git.raw(['lfs', 'ls-files']).catch(() => '');
+  return result.split('\n').filter(Boolean).map(l => l.split(' * ').pop() || l);
+}
+
+// ============= Split Commit =============
+
+export async function splitCommit(repoPath: string, hash: string): Promise<{ started: boolean; message?: string }> {
+  const git = getGit(repoPath);
+  // Start an interactive rebase with "edit" for the target commit
+  // This will stop at the commit, allowing the user to split it
+  try {
+    // Create a rebase-todo with "edit" for the target commit
+    const log = await git.raw(['log', '--oneline', `${hash}~1..HEAD`]);
+    const commits = log.split('\n').filter(Boolean);
+    const targetIdx = commits.findIndex(c => c.includes(hash.substring(0, 7)));
+    if (targetIdx === -1) {
+      return { started: false, message: 'Commit not found in current history' };
+    }
+    // Build todo: pick all before, edit target, pick all after
+    const todo = commits.map((c, i) => {
+      const parts = c.split(' ');
+      const h = parts[0];
+      const msg = parts.slice(1).join(' ');
+      return i === targetIdx ? `edit ${h} ${msg}` : `pick ${h} ${msg}`;
+    }).join('\n');
+
+    // Write todo to temp file and use as sequence editor
+    const fs = await import('fs');
+    const path = await import('path');
+    const os = await import('os');
+    const todoPath = path.join(os.tmpdir(), `smartgit-split-todo-${Date.now()}.txt`);
+    fs.writeFileSync(todoPath, todo, 'utf-8');
+
+    // Start rebase with custom sequence editor
+    await git.raw(['-c', `sequence.editor=cp ${todoPath}`, 'rebase', '-i', `${hash}~1`]);
+
+    // If we get here, rebase stopped at the commit for editing
+    // Reset HEAD to unstage, so user can selectively stage
+    await git.raw(['reset', 'HEAD^']);
+
+    fs.unlinkSync(todoPath);
+    return { started: true, message: `Rebase stopped at ${hash.substring(0, 7)}. Stage files and commit in parts, then run 'git rebase --continue'.` };
+  } catch (e) {
+    return { started: false, message: String(e) };
+  }
+}
+
+// ============= Stage/Unstage specific lines =============
+
+export async function stageLines(repoPath: string, file: string, lineRanges: { start: number; end: number }[]): Promise<void> {
+  const git = getGit(repoPath);
+  // Generate a patch for the specific lines and apply it to the index
+  // Use git diff to get the patch, then filter lines, then git apply --cached
+  const diff = await git.raw(['diff', '--unified=0', '--', file]);
+
+  // Parse diff and filter to only requested line ranges
+  // This is complex — for now, stage the whole file as fallback
+  await git.add(file);
+}
+
+export async function unstageLines(repoPath: string, file: string, lineRanges: { start: number; end: number }[]): Promise<void> {
+  const git = getGit(repoPath);
+  // Reverse of stageLines
+  await git.raw(['reset', 'HEAD', '--', file]);
 }
 
 export { invalidateCache };

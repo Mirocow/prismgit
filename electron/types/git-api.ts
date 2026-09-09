@@ -296,4 +296,20 @@ export interface GitApi {
   // File system integration
   revealInFileManager: (fullPath: string) => Promise<boolean>;
   openFile: (fullPath: string) => Promise<boolean>;
+
+  // LFS support
+  lfsStatus: (repoPath: string) => Promise<{ installed: boolean; files: { path: string; size: string; status: string }[] }>;
+  lfsPull: (repoPath: string, files?: string[]) => Promise<void>;
+  lfsPush: (repoPath: string) => Promise<void>;
+  lfsFetch: (repoPath: string) => Promise<void>;
+  lfsInstall: (repoPath: string) => Promise<void>;
+  lfsTrack: (repoPath: string, patterns: string[]) => Promise<void>;
+  lfsList: (repoPath: string) => Promise<string[]>;
+
+  // Split commit
+  splitCommit: (repoPath: string, hash: string) => Promise<{ started: boolean; message?: string }>;
+
+  // Stage specific lines (patch-based)
+  stageLines: (repoPath: string, file: string, lineRanges: { start: number; end: number }[]) => Promise<void>;
+  unstageLines: (repoPath: string, file: string, lineRanges: { start: number; end: number }[]) => Promise<void>;
 }

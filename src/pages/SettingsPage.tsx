@@ -10,6 +10,7 @@ import { cn } from '../lib/utils';
 export function SettingsPage() {
   const { settings, theme, setSetting, toggleTheme } = useSettingsStore();
   const { user, authenticated, loginWithPAT, logout, loadAuthState } = useAuthStore();
+  const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastStore();
   const { repos, removeRepo, loadRepos } = useRepositoryStore();
   const [pat, setPat] = useState('');
@@ -270,6 +271,54 @@ export function SettingsPage() {
                 </div>
               ))
             )}
+          </div>
+        </section>
+
+        {/* External Tools */}
+        <section className="panel mb-4">
+          <div className="panel-header">External Tools</div>
+          <div className="p-4 space-y-3">
+            <div>
+              <label className="text-xs text-text-tertiary block mb-1">Diff tool command</label>
+              <input
+                type="text"
+                className="w-full text-sm mono"
+                placeholder="meld $LOCAL $REMOTE"
+                defaultValue=""
+                onBlur={async (e) => {
+                  if (currentRepo) {
+                    try {
+                      await api.git.configSet(currentRepo.path, 'diff.tool', e.target.value);
+                      toast.success('Diff tool saved');
+                    } catch { /* ignore */ }
+                  }
+                }}
+              />
+              <div className="text-2xs text-text-tertiary mt-1">
+                Use <code className="mono">$LOCAL</code> and <code className="mono">$REMOTE</code> variables.
+                Leave empty to use built-in diff viewer.
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-text-tertiary block mb-1">Merge tool command</label>
+              <input
+                type="text"
+                className="w-full text-sm mono"
+                placeholder="meld $LOCAL $BASE $REMOTE --output=$MERGED"
+                defaultValue=""
+                onBlur={async (e) => {
+                  if (currentRepo) {
+                    try {
+                      await api.git.configSet(currentRepo.path, 'merge.tool', e.target.value);
+                      toast.success('Merge tool saved');
+                    } catch { /* ignore */ }
+                  }
+                }}
+              />
+              <div className="text-2xs text-text-tertiary mt-1">
+                Variables: <code className="mono">$LOCAL $BASE $REMOTE $MERGED</code>
+              </div>
+            </div>
           </div>
         </section>
 

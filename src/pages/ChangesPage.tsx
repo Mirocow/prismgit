@@ -28,6 +28,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [amend, setAmend] = useState(false);
   const [showStaged, setShowStaged] = useState(true);
   const [showUnstaged, setShowUnstaged] = useState(true);
+  const [fileFilter, setFileFilter] = useState('');
+  const [draggedFile, setDraggedFile] = useState<string | null>(null);
 
   const loadDiff = useCallback(
     async (file: string, staged: boolean) => {
@@ -176,28 +178,25 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const stagedFiles: FileStatus[] = (status?.files || []).filter((f) => {
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) return false;
-    // staged if index is not ' ' AND not '?' AND not '!'
     const idx = staged.index as string;
     return idx !== ' ' && idx !== '?' && idx !== '!';
-  });
+  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()));
 
   const unstagedFiles: FileStatus[] = (status?.files || []).filter((f) => {
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) {
-      // file is in status.files but not in staged means it's untracked or has working dir changes
       const wd = f.working_dir as string;
       return wd !== ' ' && wd !== '!';
     }
-    // unstaged if working_dir shows change
     const wd = staged.working_dir as string;
     return wd !== ' ' && wd !== '!';
-  });
+  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()));
 
   const untrackedFiles: FileStatus[] = (status?.files || []).filter((f) => {
     const idx = f.index as string;
     const wd = f.working_dir as string;
     return idx === '?' && wd === '?';
-  });
+  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()));
 
   const renderFileRow = (file: FileStatus, isStaged: boolean) => {
     const isSelected = selectedFile === file.path;
@@ -220,8 +219,35 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         key={file.path}
         className={cn(
           'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs',
-          isSelected ? 'bg-accent-muted' : 'hover:bg-bg-hover'
+          isSelected ? 'bg-accent-muted' : 'hover:bg-bg-hover',
+          draggedFile === file.path && 'dragging'
         )}
+        draggable
+        onDragStart={(e) => {
+          setDraggedFile(file.path);
+          e.dataTransfer.effectAllowed = 'move';
+        }}
+        onDragEnd={() => setDraggedFile(null)}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.currentTarget.classList.add('drag-over');
+        }}
+        onDragLeave={(e) => {
+          e.currentTarget.classList.remove('drag-over');
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.currentTarget.classList.remove('drag-over');
+          if (draggedFile && draggedFile !== file.path) {
+            // Drop from one section to another: if target is staged section, stage; if unstaged, unstage
+            if (isStaged) {
+              handleUnstageFile(draggedFile);
+            } else {
+              handleStageFile(draggedFile);
+            }
+          }
+          setDraggedFile(null);
+        }}
         onClick={() => setSelectedFile(file.path)}
       >
         <span
@@ -335,6 +361,13 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           )}
         </div>
         <div className="flex items-center gap-1">
+          <input
+            type="text"
+            className="text-xs w-40"
+            placeholder="Filter files..."
+            value={fileFilter}
+            onChange={(e) => setFileFilter(e.target.value)}
+          />
           <button className="icon-btn" title="Refresh" onClick={handleRefresh}>
             <RefreshCw size={13} />
           </button>

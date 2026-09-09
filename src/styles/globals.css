@@ -393,9 +393,45 @@ input[type="checkbox"], input[type="radio"] {
   font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
 }
 
+/* === Syntax highlighting colors (Ayu Dark) === */
+.text-keyword { color: var(--accent-yellow); }
+.text-string { color: var(--status-added); }
+.text-number { color: var(--accent-purple); }
+.text-comment { color: var(--comment); font-style: italic; }
+.text-function { color: var(--accent-blue); }
+.text-type { color: var(--accent-cyan); }
+
+/* === Drag and drop === */
+.drag-over {
+  background-color: var(--bg-active) !important;
+  border: 1px dashed var(--accent) !important;
+}
+
+.dragging {
+  opacity: 0.5;
+}
+
 /* === Truncate === */
 .truncate {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* === Split view divider === */
+.split-divider {
+  width: 4px;
+  background: var(--border-default);
+  cursor: col-resize;
+  transition: background 0.12s;
+  flex-shrink: 0;
+}
+
+.split-divider:hover {
+  background: var(--accent);
+}
+
+/* === Resizable panel === */
+.resizable-panel {
+  position: relative;
 }

@@ -139,6 +139,24 @@ const api = {
     extractRepoInfo: (repoPath: string) => ipcRenderer.invoke('git:extractRepoInfo', repoPath),
     revealInFileManager: (fullPath: string) => ipcRenderer.invoke('git:revealInFileManager', fullPath),
     openFile: (fullPath: string) => ipcRenderer.invoke('git:openFile', fullPath),
+
+    // LFS support
+    lfsStatus: (repoPath: string) => ipcRenderer.invoke('git:lfsStatus', repoPath),
+    lfsPull: (repoPath: string, files?: string[]) => ipcRenderer.invoke('git:lfsPull', repoPath, files),
+    lfsPush: (repoPath: string) => ipcRenderer.invoke('git:lfsPush', repoPath),
+    lfsFetch: (repoPath: string) => ipcRenderer.invoke('git:lfsFetch', repoPath),
+    lfsInstall: (repoPath: string) => ipcRenderer.invoke('git:lfsInstall', repoPath),
+    lfsTrack: (repoPath: string, patterns: string[]) => ipcRenderer.invoke('git:lfsTrack', repoPath, patterns),
+    lfsList: (repoPath: string) => ipcRenderer.invoke('git:lfsList', repoPath),
+
+    // Split commit
+    splitCommit: (repoPath: string, hash: string) => ipcRenderer.invoke('git:splitCommit', repoPath, hash),
+
+    // Stage/unstage specific lines
+    stageLines: (repoPath: string, file: string, ranges: { start: number; end: number }[]) =>
+      ipcRenderer.invoke('git:stageLines', repoPath, file, ranges),
+    unstageLines: (repoPath: string, file: string, ranges: { start: number; end: number }[]) =>
+      ipcRenderer.invoke('git:unstageLines', repoPath, file, ranges),
   } as GitApi,
 
   // GitHub integration
@@ -196,6 +214,33 @@ const api = {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
     openExternal: (url: string) => ipcRenderer.send('app:openExternal', url),
+  },
+
+  // File watcher for auto-refresh
+  watcher: {
+    start: (repoPath: string) => ipcRenderer.invoke('watcher:start', repoPath),
+    stop: (repoPath: string) => ipcRenderer.invoke('watcher:stop', repoPath),
+    onChanged: (cb: (data: { repoPath: string; eventType: string; timestamp: number }) => void) => {
+      const listener = (_: unknown, data: { repoPath: string; eventType: string; timestamp: number }) => cb(data);
+      ipcRenderer.on('watcher:changed', listener);
+      return () => ipcRenderer.removeListener('watcher:changed', listener);
+    },
+  },
+
+  // Context menu
+  contextMenu: {
+    show: (items: Array<{ label?: string; type?: 'separator' | 'normal' | 'checkbox' | 'radio'; checked?: boolean; enabled?: boolean; accelerator?: string; clickId?: string }>) =>
+      ipcRenderer.invoke('context-menu:show', items),
+    onClick: (cb: (clickId: string) => void) => {
+      const listener = (_: unknown, clickId: string) => cb(clickId);
+      ipcRenderer.on('context-menu:click', listener);
+      return () => ipcRenderer.removeListener('context-menu:click', listener);
+    },
+  },
+
+  // Clipboard
+  clipboard: {
+    writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
   },
 
   // Menu events (one-way from main to renderer)

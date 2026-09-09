@@ -211,4 +211,24 @@ export function registerGitIpc(): void {
       return false;
     }
   });
+
+  // LFS support
+  ipcMain.handle('git:lfsStatus', (_e, p: string) => gitService.lfsStatus(p));
+  ipcMain.handle('git:lfsPull', (_e, p: string, f?: string[]) => gitService.lfsPull(p, f));
+  ipcMain.handle('git:lfsPush', (_e, p: string) => gitService.lfsPush(p));
+  ipcMain.handle('git:lfsFetch', (_e, p: string) => gitService.lfsFetch(p));
+  ipcMain.handle('git:lfsInstall', (_e, p: string) => gitService.lfsInstall(p));
+  ipcMain.handle('git:lfsTrack', (_e, p: string, patterns: string[]) => gitService.lfsTrack(p, patterns));
+  ipcMain.handle('git:lfsList', (_e, p: string) => gitService.lfsList(p));
+
+  // Split commit
+  ipcMain.handle('git:splitCommit', (_e, p: string, h: string) => gitService.splitCommit(p, h));
+
+  // Stage/unstage specific lines
+  ipcMain.handle('git:stageLines', (_e, p: string, f: string, ranges: { start: number; end: number }[]) =>
+    gitService.stageLines(p, f, ranges)
+  );
+  ipcMain.handle('git:unstageLines', (_e, p: string, f: string, ranges: { start: number; end: number }[]) =>
+    gitService.unstageLines(p, f, ranges)
+  );
 }
