@@ -5,6 +5,7 @@ import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type DiffResult, type FileStatus, type LogEntry } from '../lib/api';
 import { DiffViewer } from '../components/DiffViewer';
+import { ResizableSplitter, useResizableWidth, useResizableHeight } from '../components/ResizableSplitter';
 import { cn, getStatusColor } from '../lib/utils';
 import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 
@@ -26,6 +27,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [journal, setJournal] = useState<LogEntry[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
   const [showSplitView, setShowSplitView] = useState(true);
+  const { width: leftWidth, handleResize: handleLeftResize } = useResizableWidth(500, 250, 800);
+  const { height: journalHeight, handleResize: handleJournalResize } = useResizableHeight(180, 60, 400);
 
   const loadDiff = useCallback(
     async (file: string, staged: boolean) => {
@@ -339,7 +342,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left: File list + Journal + Commit editor */}
-        <div className={cn("flex flex-col border-r border-border-default overflow-hidden", showSplitView ? "w-1/2" : "flex-1")}>
+        <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: leftWidth }}>
           {/* File list with table header */}
           <div className="flex-1 overflow-y-auto">
             {/* Table header */}
@@ -406,7 +409,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           </div>
 
           {/* Journal panel (bottom) — shows recent commits like SmartGit */}
-          <div className="border-t border-border-default flex-shrink-0" style={{ height: 180 }}>
+          <div className="border-t border-border-default flex-shrink-0" style={{ height: journalHeight }}>
+            <ResizableSplitter direction="vertical" onResize={handleJournalResize} />
             <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
               <span className="text-2xs font-semibold uppercase text-text-secondary">Journal</span>
               <span className="text-2xs text-text-tertiary">{journal.length} commits</span>
@@ -499,9 +503,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
 
         {/* Right: Diff viewer */}
         {showSplitView && (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <DiffViewer diff={diff} loading={diffLoading} repoPath={repo.path} filePath={selectedFile || undefined} />
-          </div>
+          <>
+            <ResizableSplitter direction="horizontal" onResize={handleLeftResize} />
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <DiffViewer diff={diff} loading={diffLoading} repoPath={repo.path} filePath={selectedFile || undefined} />
+            </div>
+          </>
         )}
       </div>
     </div>

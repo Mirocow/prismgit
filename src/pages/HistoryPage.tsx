@@ -21,6 +21,7 @@ import { useGitStore } from '../stores/gitStore';
 import { api, type LogEntry, type CommitFile } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
+import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 
 const BRANCH_COLORS = [
   '#5B9BD5', // Steel Blue
@@ -206,6 +207,7 @@ export function HistoryPage() {
   const [showFiles, setShowFiles] = useState(true);
   const [editingMessage, setEditingMessage] = useState(false);
   const [editMsgValue, setEditMsgValue] = useState('');
+  const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
@@ -481,7 +483,8 @@ export function HistoryPage() {
         </div>
 
         {/* Detail panel */}
-        <div className="w-80 border-l border-border-default bg-bg-secondary overflow-y-auto flex-shrink-0">
+        <ResizableSplitter direction="horizontal" onResize={(d) => handleDetailResize(-d)} />
+        <div className="border-l border-border-default bg-bg-secondary overflow-y-auto flex-shrink-0" style={{ width: detailWidth }}>
           {selected ? (
             <div className="p-3">
               {/* Subject */}

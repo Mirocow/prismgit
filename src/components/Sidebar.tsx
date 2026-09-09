@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { ResizableSplitter, useResizableWidth } from './ResizableSplitter';
 import { cn } from '../lib/utils';
 
 interface NavItem {
@@ -36,6 +37,7 @@ export function Sidebar() {
   const location = useLocation();
   const { repos, metadata, currentRepo, openRepository, removeRepo, pinRepo } = useRepositoryStore();
   const [showRepoList, setShowRepoList] = useState(true);
+  const { width: sidebarWidth, handleResize: handleSidebarResize } = useResizableWidth(240, 180, 400);
 
   useEffect(() => {
     if (!currentRepo) {
@@ -52,9 +54,10 @@ export function Sidebar() {
   }, {});
 
   return (
+    <>
     <aside
-      className="flex flex-col bg-bg-secondary border-r border-border-default"
-      style={{ width: 240 }}
+      className="flex flex-col bg-bg-secondary border-r border-border-default flex-shrink-0"
+      style={{ width: sidebarWidth }}
     >
       {/* Repository switcher */}
       <div className="border-b border-border-default">
@@ -196,5 +199,7 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+    <ResizableSplitter direction="horizontal" onResize={(d) => handleSidebarResize(-d)} />
+    </>
   );
 }

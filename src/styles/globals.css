@@ -16,72 +16,80 @@
  */
 
 :root {
-  /* SmartGit Light theme (default) — matches SmartGit 24 native look */
-  --bg-primary: #f0f0f0;
+  /* Ollama-code Light theme (Ayu Light) — default */
+  --bg-primary: #f8f9fa;
   --bg-secondary: #ffffff;
-  --bg-tertiary: #e8e8e8;
+  --bg-tertiary: #f0f1f3;
   --bg-elevated: #ffffff;
-  --bg-hover: rgba(0, 0, 0, 0.05);
-  --bg-active: #d6e8f5;
-  --bg-selected: #d6e8f5;
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-active: rgba(57, 158, 230, 0.12);
+  --bg-selected: #ddeeff;
   --bg-sidebar-selected: #e4f0fb;
 
-  --border-default: #cccccc;
-  --border-subtle: #e0e0e0;
-  --border-strong: #b0b0b0;
-  --border-focused: #4a90d9;
+  --border-default: #e3e4e6;
+  --border-subtle: #ececed;
+  --border-strong: #c8cacf;
+  --border-focused: #399ee6;
 
-  --text-primary: #1a1a1a;
-  --text-secondary: #666666;
-  --text-tertiary: #999999;
+  --text-primary: #5c6166;
+  --text-secondary: #8a8f93;
+  --text-tertiary: #a8acb0;
   --text-inverse: #ffffff;
-  --text-link: #0066cc;
+  --text-link: #399ee6;
 
-  --accent: #4a90d9;
-  --accent-hover: #3a7bc8;
-  --accent-active: #2a6bb8;
-  --accent-muted: rgba(74, 144, 217, 0.12);
+  --accent: #399ee6;
+  --accent-hover: #55b4d4;
+  --accent-active: #1c7eb4;
+  --accent-muted: rgba(57, 158, 230, 0.10);
+  --accent-light-blue: #55b4d4;
   --accent-purple: #a37acc;
   --accent-cyan: #4cbf99;
+  --accent-green: #86b300;
   --accent-yellow: #f2ae49;
   --accent-yellow-dim: #8B7000;
+  --accent-red: #f07171;
+  --accent-red-dim: #993333;
 
-  --status-added: #548235;
-  --status-modified: #c65911;
-  --status-deleted: #c0392b;
-  --status-renamed: #4a90d9;
-  --status-untracked: #548235;
-  --status-conflict: #e74c3c;
-  --status-success: #548235;
+  --status-added: #86b300;
+  --status-modified: #f2ae49;
+  --status-deleted: #f07171;
+  --status-renamed: #399ee6;
+  --status-untracked: #4cbf99;
+  --status-conflict: #ff6b35;
+  --status-success: #86b300;
   --status-warning: #f2ae49;
-  --status-error: #c0392b;
-  --status-info: #4a90d9;
+  --status-error: #f07171;
+  --status-info: #399ee6;
 
-  --diff-added-bg: rgba(84, 130, 53, 0.12);
-  --diff-removed-bg: rgba(192, 57, 43, 0.12);
-  --diff-added-line: rgba(84, 130, 53, 0.06);
-  --diff-removed-line: rgba(192, 57, 43, 0.06);
+  --diff-added-bg: rgba(134, 179, 0, 0.12);
+  --diff-removed-bg: rgba(240, 113, 113, 0.12);
+  --diff-added-line: rgba(134, 179, 0, 0.05);
+  --diff-removed-line: rgba(240, 113, 113, 0.05);
 
-  --tag-bg: #f0e6d2;
-  --tag-border: #c4a882;
-  --tag-text: #5a4a2a;
+  --tag-bg: rgba(57, 158, 230, 0.08);
+  --tag-border: rgba(57, 158, 230, 0.3);
+  --tag-text: #399ee6;
 
   --warning-bg: #fef9e7;
-  --warning-icon: #ffa500;
+  --warning-icon: #f2ae49;
   --warning-border: #f0e0a0;
 
-  --comment: #888888;
-  --graph-line: #2b2b2b;
+  --comment: #abadb1;
+  --graph-line: #c8cacf;
   --graph-node-fill: #ffffff;
-  --graph-node-border: #2b2b2b;
-  --graph-node-selected: #2b2b2b;
+  --graph-node-border: #5c6166;
+  --graph-node-selected: #399ee6;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.10);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+
+  --splitter-color: #d4d4d4;
+  --splitter-color-hover: #399ee6;
+  --splitter-width: 4px;
 }
 
-/* Dark theme — Ayu Dark (Ollama-code) */
+/* Ollama-code Dark theme (Ayu Dark) */
 .dark {
   --bg-primary: #0b0e14;
   --bg-secondary: #0f1218;
@@ -89,8 +97,8 @@
   --bg-elevated: #1a1f29;
   --bg-hover: rgba(255, 255, 255, 0.04);
   --bg-active: rgba(57, 186, 230, 0.12);
-  --bg-selected: rgba(57, 186, 230, 0.18);
-  --bg-sidebar-selected: rgba(57, 186, 230, 0.15);
+  --bg-selected: rgba(57, 186, 230, 0.15);
+  --bg-sidebar-selected: rgba(57, 186, 230, 0.12);
 
   --border-default: #1f2530;
   --border-subtle: #161a23;
@@ -107,10 +115,14 @@
   --accent-hover: #59C2FF;
   --accent-active: #1c8eb4;
   --accent-muted: rgba(57, 186, 230, 0.15);
+  --accent-light-blue: #59C2FF;
   --accent-purple: #D2A6FF;
   --accent-cyan: #95E6CB;
+  --accent-green: #AAD94C;
   --accent-yellow: #FFD700;
   --accent-yellow-dim: #8B7530;
+  --accent-red: #F26D78;
+  --accent-red-dim: #8B3A4A;
 
   --status-added: #AAD94C;
   --status-modified: #FFD700;
@@ -128,16 +140,16 @@
   --diff-added-line: rgba(170, 217, 76, 0.06);
   --diff-removed-line: rgba(242, 109, 120, 0.06);
 
-  --tag-bg: rgba(255, 215, 0, 0.12);
-  --tag-border: rgba(255, 215, 0, 0.25);
-  --tag-text: #FFD700;
+  --tag-bg: rgba(57, 186, 230, 0.10);
+  --tag-border: rgba(57, 186, 230, 0.3);
+  --tag-text: #39BAE6;
 
   --warning-bg: rgba(255, 215, 0, 0.08);
   --warning-icon: #FFD700;
   --warning-border: rgba(255, 215, 0, 0.2);
 
   --comment: #646A71;
-  --graph-line: #646A71;
+  --graph-line: #3D4149;
   --graph-node-fill: #0b0e14;
   --graph-node-border: #bfbdb6;
   --graph-node-selected: #39BAE6;
@@ -145,6 +157,10 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  --splitter-color: #2a313e;
+  --splitter-color-hover: #39BAE6;
+  --splitter-width: 4px;
 }
 
 * {
@@ -442,15 +458,40 @@ input[type="checkbox"], input[type="radio"] {
 
 /* === Split view divider === */
 .split-divider {
-  width: 4px;
-  background: var(--border-default);
+  width: var(--splitter-width);
+  background: var(--splitter-color);
   cursor: col-resize;
+  transition: background 0.12s;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.split-divider:hover,
+.split-divider.dragging {
+  background: var(--splitter-color-hover);
+}
+
+.split-divider::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
+
+.split-divider-horizontal {
+  height: var(--splitter-width);
+  width: 100%;
+  background: var(--splitter-color);
+  cursor: row-resize;
   transition: background 0.12s;
   flex-shrink: 0;
 }
 
-.split-divider:hover {
-  background: var(--accent);
+.split-divider-horizontal:hover,
+.split-divider-horizontal.dragging {
+  background: var(--splitter-color-hover);
 }
 
 /* === Resizable panel === */
