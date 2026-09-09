@@ -1,3 +1,11 @@
+/** Directory node for the repository tree in the Changes view. */
+export interface DirNode {
+  name: string;
+  /** Path relative to the repository root. */
+  path: string;
+  children: DirNode[];
+}
+
 // Extended file status codes from git status --porcelain
 export interface FileStatus {
   path: string;
@@ -316,4 +324,7 @@ export interface GitApi {
   // Stage specific lines (patch-based)
   stageLines: (repoPath: string, file: string, lineRanges: { start: number; end: number }[]) => Promise<void>;
   unstageLines: (repoPath: string, file: string, lineRanges: { start: number; end: number }[]) => Promise<void>;
+
+  // Repository directory tree (Changes view)
+  listDirectories: (repoPath: string, maxDepth?: number) => Promise<DirNode[]>;
 }

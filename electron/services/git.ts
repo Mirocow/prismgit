@@ -18,6 +18,7 @@ import type {
   BlameLine,
   BlameResult,
   GitConfigEntry,
+  DirNode,
 } from '../types/git-api.js';
 
 const gitCache = new Map<string, SimpleGit>();
@@ -1786,6 +1787,74 @@ export async function unstageLines(repoPath: string, file: string, lineRanges: {
   const git = getGit(repoPath);
   // Reverse of stageLines
   await git.raw(['reset', 'HEAD', '--', file]);
+}
+
+// ============= Repository directory tree =============
+
+const DIR_SKIP = new Set([
+  '.git',
+  'node_modules',
+  'dist',
+  'build',
+  'out',
+  '.next',
+  '.turbo',
+  '.cache',
+  '.gradle',
+  '.idea',
+  '__pycache__',
+  'target',
+  'vendor',
+  'coverage',
+  '.vercel',
+  '.output',
+  '.svelte-kit',
+  '.pytest_cache',
+  '.venv',
+  'release',
+]);
+
+interface DirBudget {
+  count: number;
+  max: number;
+}
+
+async function buildDirLevel(
+  absBase: string,
+  rel: string,
+  depth: number,
+  maxDepth: number,
+  budget: DirBudget
+): Promise<DirNode[]> {
+  if (depth > maxDepth || budget.count >= budget.max) return [];
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(path.join(absBase, rel), { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const names = entries
+    .filter((e) => e.isDirectory() && !DIR_SKIP.has(e.name))
+    .map((e) => e.name)
+    .sort((a, b) => a.localeCompare(b));
+  const nodes: DirNode[] = [];
+  for (const name of names) {
+    if (budget.count >= budget.max) break;
+    const childRel = rel ? `${rel}/${name}` : name;
+    budget.count += 1;
+    nodes.push({
+      name,
+      path: childRel,
+      children: await buildDirLevel(absBase, childRel, depth + 1, maxDepth, budget),
+    });
+  }
+  return nodes;
+}
+
+/** List repository directories (Changes view tree), skipping VCS/build directories. */
+export async function listDirectories(repoPath: string, maxDepth = 4): Promise<DirNode[]> {
+  const budget: DirBudget = { count: 0, max: 2000 };
+  return buildDirLevel(repoPath, '', 1, maxDepth, budget);
 }
 
 export { invalidateCache };

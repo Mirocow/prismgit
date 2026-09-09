@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil, AlertCircle, Search } from '../components/icons';
+import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil, AlertCircle, Search, FolderTree, ArrowUp, ArrowDown, X } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
-import { api, type DiffResult, type FileStatus, type LogEntry } from '../lib/api';
+import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
+import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
 import { DiffViewer } from '../components/DiffViewer';
 import { ResizableSplitter, useResizableWidth, useResizableHeight } from '../components/ResizableSplitter';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
@@ -16,9 +17,49 @@ interface ChangesPageProps {
   onResolveConflict?: (file: string) => void;
 }
 
+type FileSortKey = 'name' | 'state' | 'dir';
+
+/** Sortable column header for the Changes file table (SmartGit-style). */
+function SortableHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  width,
+  align,
+}: {
+  label: string;
+  sortKey: FileSortKey;
+  sort: { key: FileSortKey; dir: 1 | -1 };
+  onSort: (key: FileSortKey) => void;
+  width?: number;
+  align?: 'right';
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <button
+      className={cn(
+        'flex items-center gap-0.5 uppercase hover:text-text-primary',
+        active && 'text-accent',
+        align === 'right' && 'justify-end'
+      )}
+      style={width ? { width } : { flex: 1 }}
+      onClick={() => onSort(sortKey)}
+      title={`Sort by ${label.toLowerCase()}`}
+    >
+      <span className="truncate">{label}</span>
+      {active ? (
+        sort.dir === 1 ? <ArrowUp size={9} /> : <ArrowDown size={9} />
+      ) : (
+        <ChevronDown size={9} className="opacity-40" />
+      )}
+    </button>
+  );
+}
+
 export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const { status, refreshStatus, stageFiles, stageAll, commit, push, pull } = useGitStore();
+  const { status, lastRefresh, refreshStatus, stageFiles, stageAll, commit, push, pull } = useGitStore();
   const toast = useToastStore();
   // Global UI state for file filtering and tree mode
   const fileViewMode = useSelectionStore((s) => s.fileViewMode);
@@ -30,8 +71,14 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const fileStatusFilterSet = useSelectionStore((s) => s.fileStatusFilterSet);
   const toggleFileStatusFilter = useSelectionStore((s) => s.toggleFileStatusFilter);
   const clearFileStatusFilterSet = useSelectionStore((s) => s.clearFileStatusFilterSet);
-  const fileScope = useSelectionStore((s) => s.fileScope);
-  const setFileScope = useSelectionStore((s) => s.setFileScope);
+  const fileScopeDir = useSelectionStore((s) => s.fileScopeDir);
+  const setFileScopeDir = useSelectionStore((s) => s.setFileScopeDir);
+  const fileSort = useSelectionStore((s) => s.fileSort);
+  const setFileSort = useSelectionStore((s) => s.setFileSort);
+  const fileFilterRegex = useSelectionStore((s) => s.fileFilterRegex);
+  const toggleFileFilterRegex = useSelectionStore((s) => s.toggleFileFilterRegex);
+  const dirTreeVisible = useSelectionStore((s) => s.dirTreeVisible);
+  const toggleDirTreeVisible = useSelectionStore((s) => s.toggleDirTreeVisible);
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const fileExtensionFilter = useSelectionStore((s) => s.fileExtensionFilter);
   const setFileExtensionFilter = useSelectionStore((s) => s.setFileExtensionFilter);
@@ -46,7 +93,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [journalLoading, setJournalLoading] = useState(false);
   const [showSplitView, setShowSplitView] = useState(true);
   const { width: leftWidth, handleResize: handleLeftResize } = useResizableWidth(500, 250, 800);
+  const { width: treeWidth, handleResize: handleTreeResize } = useResizableWidth(210, 140, 380);
   const { height: journalHeight, handleResize: handleJournalResize } = useResizableHeight(180, 60, 400);
+  const [dirTree, setDirTree] = useState<DirNode[]>([]);
+  const [dirTreeLoading, setDirTreeLoading] = useState(false);
+  const [trackedTotal, setTrackedTotal] = useState(0);
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set([ROOT_KEY]));
   const showContextMenu = useContextMenu();
 
   const loadDiff = useCallback(
@@ -89,6 +141,63 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   useEffect(() => {
     loadJournal();
   }, [loadJournal]);
+
+  const loadDirTree = useCallback(async () => {
+    setDirTreeLoading(true);
+    try {
+      const tree = await api.git.listDirectories(repo.path);
+      setDirTree(tree);
+    } catch {
+      setDirTree([]);
+    } finally {
+      setDirTreeLoading(false);
+    }
+  }, [repo.path]);
+
+  const loadTrackedCount = useCallback(async () => {
+    try {
+      const out = await api.git.raw(repo.path, ['ls-files']);
+      setTrackedTotal(out ? out.split('\n').filter(Boolean).length : 0);
+    } catch {
+      setTrackedTotal(0);
+    }
+  }, [repo.path]);
+
+  useEffect(() => {
+    loadDirTree();
+    loadTrackedCount();
+  }, [loadDirTree, loadTrackedCount, lastRefresh]);
+
+  // Reset folder scope and tree expansion when switching repositories
+  useEffect(() => {
+    setFileScopeDir(null);
+    setExpandedDirs(new Set([ROOT_KEY]));
+  }, [repo.path, setFileScopeDir]);
+
+  const toggleDirExpand = (path: string) => {
+    setExpandedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const handleSelectDir = (dir: string | null) => {
+    setFileScopeDir(dir);
+    if (dir) {
+      setExpandedDirs((prev) => {
+        const next = new Set(prev);
+        const parts = dir.split('/');
+        for (let i = 1; i <= parts.length; i++) next.add(parts.slice(0, i).join('/'));
+        return next;
+      });
+    }
+  };
+
+  const handleSort = (key: FileSortKey) => {
+    setFileSort(fileSort.key === key ? { key, dir: fileSort.dir === 1 ? -1 : 1 } : { key, dir: 1 });
+  };
 
   const handleRefresh = () => {
     refreshStatus(repo.path);
@@ -188,11 +297,51 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     }
   };
 
-  // File scope helper: filter out nested paths if scope is 'top'
-  const scopeFilter = (path: string): boolean => {
-    if (fileScope === 'all') return true;
-    // 'top' mode: only files directly in repo root (no '/' in path)
-    return !path.includes('/');
+  // File filter helper: substring, or regular expression when .* mode is on.
+  // Invalid regexes never hide files.
+  const matchesFileFilter = (path: string): boolean => {
+    const q = fileFilter.trim();
+    if (!q) return true;
+    if (fileFilterRegex) {
+      try {
+        return new RegExp(q, 'i').test(path);
+      } catch {
+        return true;
+      }
+    }
+    return path.toLowerCase().includes(q.toLowerCase());
+  };
+
+  // Directory scope helper: only files inside the folder selected in the tree.
+  const matchesDirScope = (path: string): boolean => {
+    if (!fileScopeDir) return true;
+    return path === fileScopeDir || path.startsWith(`${fileScopeDir}/`);
+  };
+
+  // Sort helper for the Changes table (Name / State / Relative Directory).
+  const sortFiles = (files: FileStatus[]): FileStatus[] => {
+    const nameOf = (p: string) => {
+      const i = p.lastIndexOf('/');
+      return i === -1 ? p : p.slice(i + 1);
+    };
+    const dirOf = (p: string) => {
+      const i = p.lastIndexOf('/');
+      return i === -1 ? '' : p.slice(0, i);
+    };
+    const rank: Record<string, number> = { U: 0, M: 1, A: 2, R: 3, C: 4, T: 5, D: 6, '?': 7 };
+    return [...files].sort((a, b) => {
+      let r = 0;
+      if (fileSort.key === 'name') {
+        r = nameOf(a.path).localeCompare(nameOf(b.path));
+      } else if (fileSort.key === 'dir') {
+        r = dirOf(a.path).localeCompare(dirOf(b.path)) || nameOf(a.path).localeCompare(nameOf(b.path));
+      } else {
+        const ca = (a.index as string) !== ' ' && (a.index as string) !== '?' ? (a.index as string) : (a.working_dir as string);
+        const cb = (b.index as string) !== ' ' && (b.index as string) !== '?' ? (b.index as string) : (b.working_dir as string);
+        r = ((rank[ca] ?? 9) - (rank[cb] ?? 9)) || a.path.localeCompare(b.path);
+      }
+      return r * fileSort.dir;
+    });
   };
 
   // Multi-select status set helper
@@ -211,14 +360,14 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     return false;
   };
 
-  const stagedFiles: FileStatus[] = (status?.files || []).filter((f) => {
+  const stagedFiles: FileStatus[] = sortFiles((status?.files || []).filter((f) => {
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) return false;
     const idx = staged.index as string;
     return idx !== ' ' && idx !== '?' && idx !== '!';
-  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()))
+  }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-    .filter(f => scopeFilter(f.path))
+    .filter((f) => matchesDirScope(f.path))
     .filter(f => matchesStatusSet(f, true))
     .filter(f => {
       if (fileStatusFilter === 'all') return true;
@@ -229,9 +378,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       if (fileStatusFilter === 'deleted') return code === 'D';
       if (fileStatusFilter === 'untracked') return code === '?';
       return true;
-    });
+    }));
 
-  const unstagedFiles: FileStatus[] = (status?.files || []).filter((f) => {
+  const unstagedFiles: FileStatus[] = sortFiles((status?.files || []).filter((f) => {
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) {
       const wd = f.working_dir as string;
@@ -239,9 +388,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     }
     const wd = staged.working_dir as string;
     return wd !== ' ' && wd !== '!';
-  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()))
+  }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-    .filter(f => scopeFilter(f.path))
+    .filter((f) => matchesDirScope(f.path))
     .filter(f => matchesStatusSet(f, false))
     .filter(f => {
       if (fileStatusFilter === 'all') return true;
@@ -252,17 +401,25 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       if (fileStatusFilter === 'deleted') return code === 'D';
       if (fileStatusFilter === 'untracked') return code === '?';
       return true;
-    });
+    }));
 
-  const untrackedFiles: FileStatus[] = (status?.files || []).filter((f) => {
+  const untrackedFiles: FileStatus[] = sortFiles((status?.files || []).filter((f) => {
     const idx = f.index as string;
     const wd = f.working_dir as string;
     return idx === '?' && wd === '?';
-  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()))
+  }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-    .filter(f => scopeFilter(f.path));
+    .filter((f) => matchesDirScope(f.path)));
 
   const totalChanged = (status?.files.length ?? 0);
+
+  // SmartGit-style "N files hidden": tracked files without any changes.
+  const changedTrackedCount = (status?.files ?? []).filter((f) => {
+    const idx = f.index as string;
+    const wd = f.working_dir as string;
+    return (idx !== ' ' && idx !== '?' && idx !== '!') || (wd !== ' ' && wd !== '?' && wd !== '!');
+  }).length;
+  const hiddenCount = Math.max(0, trackedTotal - changedTrackedCount);
 
   const getRelativeDir = (filePath: string): string => {
     const lastSlash = filePath.lastIndexOf('/');
@@ -465,6 +622,11 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               {stagedFiles.length} staged · {unstagedFiles.length + untrackedFiles.length} unstaged
             </span>
           )}
+          {hiddenCount > 0 && (
+            <span className="text-2xs text-text-tertiary" title="Tracked files without changes">
+              {hiddenCount.toLocaleString()} files hidden
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <input
@@ -474,6 +636,16 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             value={fileFilter}
             onChange={(e) => setFileFilter(e.target.value)}
           />
+          <button
+            className={cn('text-2xs px-1.5 py-0.5 border rounded font-mono',
+              fileFilterRegex
+                ? 'border-accent bg-accent-muted text-accent'
+                : 'border-border-default bg-bg-tertiary text-text-secondary hover:text-text-primary')}
+            onClick={toggleFileFilterRegex}
+            title="Treat File Filter as a regular expression"
+          >
+            .*
+          </button>
           {/* Multi-select status filter — dropdown with checkboxes */}
           <div className="relative">
             <button
@@ -519,23 +691,14 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               </div>
             )}
           </div>
-          {/* File scope toggle: current dir only vs all nested */}
-          <div className="flex bg-bg-tertiary border border-border-default rounded">
-            <button
-              className={cn('px-2 py-0.5 text-2xs rounded-l', fileScope === 'all' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}
-              onClick={() => setFileScope('all')}
-              title="Show files from current directory AND all nested subdirectories"
-            >
-              All
-            </button>
-            <button
-              className={cn('px-2 py-0.5 text-2xs rounded-r', fileScope === 'top' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}
-              onClick={() => setFileScope('top')}
-              title="Show files from current directory only (no nested)"
-            >
-              Top
-            </button>
-          </div>
+          {/* Directory tree panel toggle (folder scope lives in the tree) */}
+          <button
+            className={cn('icon-btn !w-5 !h-5', dirTreeVisible && 'active')}
+            title="Toggle directory tree panel"
+            onClick={toggleDirTreeVisible}
+          >
+            <FolderTree size={11} />
+          </button>
           {/* Extension filter */}
           <input
             type="text"
@@ -571,16 +734,49 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
+        {/* Directory tree panel (SmartGit-style) — selects the folder scope */}
+        {dirTreeVisible && (
+          <>
+            <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: treeWidth }}>
+              <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
+                <span className="text-2xs font-semibold uppercase text-text-secondary">Repositories</span>
+                {fileScopeDir && (
+                  <button
+                    className="icon-btn !w-4 !h-4"
+                    title="Clear folder scope — show all files"
+                    onClick={() => setFileScopeDir(null)}
+                  >
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                <DirTreePanel
+                  repoName={repo.path.split(/[\\/]/).filter(Boolean).pop() ?? repo.path}
+                  branch={status?.current ?? null}
+                  tree={dirTree}
+                  loading={dirTreeLoading}
+                  expanded={expandedDirs}
+                  onToggleExpand={toggleDirExpand}
+                  selectedDir={fileScopeDir}
+                  onSelectDir={handleSelectDir}
+                />
+              </div>
+            </div>
+            <ResizableSplitter direction="horizontal" onResize={handleTreeResize} />
+          </>
+        )}
+
         {/* Left: File list + Journal + Commit editor */}
         <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: leftWidth }}>
           {/* File list with table header */}
           <div className="flex-1 overflow-y-auto">
-            {/* Table header */}
+            {/* Table header — click a column to sort (SmartGit-style) */}
             <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary sticky top-0 z-10">
               <span className="w-4"></span>
-              <span className="flex-1">Name</span>
-              <span style={{ width: 70 }}>State</span>
-              <span style={{ width: 120 }} className="text-right">Relative Directory</span>
+              <SortableHeader label="Name" sortKey="name" sort={fileSort} onSort={handleSort} />
+              <SortableHeader label="State" sortKey="state" sort={fileSort} onSort={handleSort} width={70} />
+              <SortableHeader label="Relative Directory" sortKey="dir" sort={fileSort} onSort={handleSort} width={120} align="right" />
               <span style={{ width: 60 }}></span>
             </div>
 

@@ -55,6 +55,14 @@ export interface GlobalSelectionState {
   fileStatusFilterSet: Set<'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed'>;
   /** File scope: 'all' = include nested directories, 'top' = current directory only. */
   fileScope: 'all' | 'top';
+  /** Directory scope for the Changes file list (absolute-relative dir path, null = whole repo). */
+  fileScopeDir: string | null;
+  /** Sort spec for the Changes files table. */
+  fileSort: { key: 'name' | 'state' | 'dir'; dir: 1 | -1 };
+  /** Treat the Changes "File Filter" input as a regular expression. */
+  fileFilterRegex: boolean;
+  /** Whether the directory tree panel is visible on the Changes page. */
+  dirTreeVisible: boolean;
 
   // Actions
   selectCommit: (hash: string | null) => void;
@@ -73,6 +81,10 @@ export interface GlobalSelectionState {
   toggleFileStatusFilter: (status: 'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed') => void;
   clearFileStatusFilterSet: () => void;
   setFileScope: (scope: 'all' | 'top') => void;
+  setFileScopeDir: (dir: string | null) => void;
+  setFileSort: (sort: { key: 'name' | 'state' | 'dir'; dir: 1 | -1 }) => void;
+  toggleFileFilterRegex: () => void;
+  toggleDirTreeVisible: () => void;
   /** Clear all selections (e.g. when switching repos). */
   clearAll: () => void;
 }
@@ -92,6 +104,10 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   fileStatusFilter: 'all',
   fileStatusFilterSet: new Set(),
   fileScope: 'all',
+  fileScopeDir: null,
+  fileSort: { key: 'name', dir: 1 },
+  fileFilterRegex: false,
+  dirTreeVisible: true,
 
   selectCommit: (hash) => set({ selectedCommitHash: hash }),
   selectBranch: (name) => set({
@@ -124,6 +140,10 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   },
   clearFileStatusFilterSet: () => set({ fileStatusFilterSet: new Set() }),
   setFileScope: (scope) => set({ fileScope: scope }),
+  setFileScopeDir: (dir) => set({ fileScopeDir: dir }),
+  setFileSort: (sort) => set({ fileSort: sort }),
+  toggleFileFilterRegex: () => set({ fileFilterRegex: !get().fileFilterRegex }),
+  toggleDirTreeVisible: () => set({ dirTreeVisible: !get().dirTreeVisible }),
   clearAll: () => set({
     selectedCommitHash: null,
     selectedBranch: null,
@@ -133,5 +153,6 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
     selectedBranches: new Set(),
     pathFilter: null,
     authorFilter: null,
+    fileScopeDir: null,
   }),
 }));

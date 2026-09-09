@@ -8,6 +8,7 @@ const api = {
   // Git operations
   git: {
     status: (repoPath: string) => ipcRenderer.invoke('git:status', repoPath),
+    listDirectories: (repoPath: string, maxDepth?: number) => ipcRenderer.invoke('git:listDirectories', repoPath, maxDepth),
     add: (repoPath: string, files: string[]) => ipcRenderer.invoke('git:add', repoPath, files),
     addAll: (repoPath: string) => ipcRenderer.invoke('git:addAll', repoPath),
     restore: (repoPath: string, files: string[], staged?: boolean) => ipcRenderer.invoke('git:restore', repoPath, files, staged),

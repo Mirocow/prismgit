@@ -16,6 +16,7 @@ import type {
   BlameLine,
   BlameResult,
   GitConfigEntry,
+  DirNode,
 } from '../../electron/types/git-api';
 import type {
   GithubUser,
@@ -42,6 +43,7 @@ export type {
   BlameLine,
   BlameResult,
   GitConfigEntry,
+  DirNode,
   GithubUser,
   GithubRepository,
   GithubPullRequest,
