@@ -15,8 +15,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit tests/components",
+    "test:integration": "vitest run tests/integration",
     "test:coverage": "vitest run --coverage",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "verify": "npm run typecheck && npm run test && npm run build",
+    "hooks:install": "bash scripts/install-hooks.sh"
   },
   "dependencies": {
     "clsx": "^2.1.1",

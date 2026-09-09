@@ -490,9 +490,12 @@ export async function merge(
 
   const statusRes = await status(repoPath);
   const hasConflicts = statusRes.conflicted.length > 0;
+  // "Not possible to fast-forward" (from --ff-only rejection) must NOT be
+  // reported as a successful fast-forward — exclude rejection messages first.
+  const ffRejected = /not possible to fast-forward/i.test(output);
   return {
     conflicts: statusRes.conflicted,
-    fastForward: !hasConflicts && /Fast-forward/i.test(output),
+    fastForward: !hasConflicts && !ffRejected && /Fast-forward/i.test(output),
     alreadyUpToDate: !hasConflicts && /Already up to date/i.test(output),
   };
 }
@@ -1471,7 +1474,9 @@ export async function editCommitMessage(
   // Simpler approach: use git commit --amend for HEAD only
   if (hash === 'HEAD' || hash === (await revParse(repoPath, 'HEAD'))) {
     const git = getGit(repoPath);
-    await git.commit(['--amend', '-m', message]);
+    // NOTE: git.commit(array) is interpreted by simple-git as MULTIPLE -m
+    // flags, which silently breaks the amend. Use raw args instead.
+    await git.raw(['commit', '--amend', '-m', message]);
   } else {
     // For non-HEAD commits, use filter-branch
     const git = getGit(repoPath);
@@ -1744,6 +1749,10 @@ export async function lfsList(repoPath: string): Promise<string[]> {
 
 export async function splitCommit(repoPath: string, hash: string): Promise<{ started: boolean; message?: string }> {
   const git = getGit(repoPath);
+  // Dedicated instance with unsafe.allowUnsafeEditor: simple-git blocks
+  // `-c sequence.editor=...` on the default instance, which made splitCommit
+  // fail silently (always {started:false}) despite valid git commands.
+  const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } });
   // Start an interactive rebase with "edit" for the target commit
   // This will stop at the commit, allowing the user to split it
   try {
@@ -1770,7 +1779,7 @@ export async function splitCommit(repoPath: string, hash: string): Promise<{ sta
     fs.writeFileSync(todoPath, todo, 'utf-8');
 
     // Start rebase with custom sequence editor
-    await git.raw(['-c', `sequence.editor=cp ${todoPath}`, 'rebase', '-i', `${hash}~1`]);
+    await gitUnsafe.raw(['-c', `sequence.editor=cp ${todoPath}`, 'rebase', '-i', `${hash}~1`]);
 
     // If we get here, rebase stopped at the commit for editing
     // Reset HEAD to unstage, so user can selectively stage
