@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, Plus, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star, ChevronDown } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, Plus, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star, ChevronDown, CloudDownload, Filter } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { ResizableSplitter, useResizableWidth } from './ResizableSplitter';
@@ -22,10 +22,12 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/blame', label: 'Blame', icon: FileText, group: 'Working Tree' },
   { path: '/journal', label: 'Journal', icon: RotateCcw, group: 'Working Tree' },
   { path: '/gitflow', label: 'Git-Flow', icon: GitBranch, group: 'Workflows' },
+  { path: '/bisect', label: 'Bisect', icon: Filter, group: 'Workflows' },
   { path: '/pulls', label: 'Pull Requests', icon: GitPullRequest, group: 'Workflows' },
   { path: '/reviews', label: 'Reviews', icon: GitPullRequest, group: 'Workflows' },
   { path: '/branches', label: 'Branches', icon: GitBranch, group: 'Refs' },
   { path: '/tags', label: 'Tags', icon: Tag, group: 'Refs' },
+  { path: '/remotes', label: 'Remotes', icon: CloudDownload, group: 'Refs' },
   { path: '/worktrees', label: 'Worktrees', icon: FolderTree, group: 'Refs' },
   { path: '/reflog', label: 'Reflog', icon: RotateCcw, group: 'Refs' },
   { path: '/stashes', label: 'Stashes', icon: GitPullRequest, group: 'Refs' },
@@ -42,10 +44,12 @@ const NAV_TOOLTIPS: Record<string, string> = {
   '/blame': 'Git blame for a specific file — line-by-line attribution with hash links',
   '/journal': 'Recent activity log (last N commits across all branches)',
   '/gitflow': 'Git-Flow operations: feature/release/hotfix start/finish',
+  '/bisect': 'Binary search for the commit that introduced a bug (git bisect with good/bad/skip)',
   '/pulls': 'Pull requests from GitHub/GitLab (forge integration)',
   '/reviews': 'Code review queue (distributed reviews)',
   '/branches': 'Branch management — checkout, merge, rebase, rename, delete. Ctrl+click to select for History filter',
   '/tags': 'Tag management — click any tag to jump to its commit in History',
+  '/remotes': 'Remote management — add/remove/rename remotes, edit URLs, fetch all, preview remote refs (ls-remote)',
   '/worktrees': 'Worktrees — multiple working directories for the same repo',
   '/reflog': 'Reference log — every HEAD movement, click hash to jump back',
   '/stashes': 'Saved stashes — click hash to view stash commit',

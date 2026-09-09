@@ -92,6 +92,34 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
     }
   };
 
+  // Repository maintenance: git count-objects -v (size, pack status)
+  const [objectStats, setObjectStats] = useState<string | null>(null);
+  const [counting, setCounting] = useState(false);
+
+  const handleCountObjects = async () => {
+    if (!currentRepo) return;
+    setCounting(true);
+    try {
+      const raw = await api.git.countObjects(currentRepo.path, true);
+      setObjectStats(raw.trim());
+    } catch (e) {
+      toast.error('count-objects failed', String(e));
+    } finally {
+      setCounting(false);
+    }
+  };
+
+  // Update server info for dumb-HTTP hosting (git update-server-info)
+  const handleUpdateServerInfo = async () => {
+    if (!currentRepo) return;
+    try {
+      await api.git.updateServerInfo(currentRepo.path);
+      toast.success('Server info updated (info/refs + objects/info/packs)');
+    } catch (e) {
+      toast.error('update-server-info failed', String(e));
+    }
+  };
+
   if (!open || !currentRepo) return null;
 
   const meta: Partial<RepositoryMetadata> = currentMetadata || {};
@@ -250,6 +278,34 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
+          </div>
+
+          {/* Repository maintenance */}
+          <div className="border-t border-border-default pt-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-2">
+              Repository Maintenance
+            </div>
+            <div className="flex items-center gap-2 mb-2">
+              <button className="btn btn-secondary text-xs" onClick={handleCountObjects} disabled={counting}>
+                {counting ? <Loader size={12} className="spin" /> : <RefreshCw size={12} />}
+                Count objects
+              </button>
+              <button
+                className="btn btn-secondary text-xs"
+                onClick={handleUpdateServerInfo}
+                title="git update-server-info — refresh info/refs for dumb-HTTP hosting"
+              >
+                Update server info
+              </button>
+            </div>
+            {objectStats && (
+              <pre className="text-2xs font-mono bg-bg-tertiary p-2 rounded whitespace-pre-wrap text-text-secondary">{
+                objectStats
+                  .split('\n')
+                  .filter((l) => !/^\s*$/.test(l))
+                  .join('\n')
+              }</pre>
+            )}
           </div>
 
           {/* Auto-collected stats */}

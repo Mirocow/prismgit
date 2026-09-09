@@ -1,15 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Package, RefreshCw, GitBranch, CheckCircle, AlertCircle, Loader } from '../components/icons';
+import { Package, RefreshCw, GitBranch, CheckCircle, AlertCircle, Loader, Plus } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type SubmoduleInfo } from '../lib/api';
 
 export function SubmodulesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();
   const [submodules, setSubmodules] = useState<SubmoduleInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addUrl, setAddUrl] = useState('');
+  const [addPath, setAddPath] = useState('');
+  const [addBranch, setAddBranch] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,6 +59,51 @@ export function SubmodulesPage() {
     }
   };
 
+  const handleSync = async (name?: string) => {
+    setBusy(name || 'sync-all');
+    try {
+      await api.git.submoduleSync(repo.path, name);
+      toast.success(`Synced ${name || 'all submodules'} URLs with .gitmodules`);
+      await load();
+    } catch (e) {
+      toast.error('Sync failed', String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDeinit = async (name: string) => {
+    if (!confirm(`Deinit submodule '${name}'?\n\nThe submodule working tree will be removed (the entry stays in .gitmodules). You can re-init it later.`)) return;
+    setBusy(name);
+    try {
+      await api.git.submoduleDeinit(repo.path, name, false);
+      toast.success(`Deinitialized '${name}'`);
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error('Deinit failed', String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleAdd = async () => {
+    if (!addUrl.trim() || !addPath.trim()) { toast.warning('URL and path are required'); return; }
+    setBusy('add');
+    try {
+      await api.git.submoduleAdd(repo.path, addUrl.trim(), addPath.trim(), addBranch.trim() || undefined);
+      toast.success(`Submodule '${addPath.trim()}' added`);
+      setShowAdd(false);
+      setAddUrl(''); setAddPath(''); setAddBranch('');
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error('Add submodule failed', String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
@@ -63,6 +114,22 @@ export function SubmodulesPage() {
         <div className="flex items-center gap-2">
           <button className="icon-btn" title="Refresh" onClick={load}>
             <RefreshCw size={13} />
+          </button>
+          <button
+            className="btn btn-secondary text-xs"
+            onClick={() => handleSync()}
+            disabled={submodules.length === 0}
+            title="Sync remote URLs from .gitmodules for all submodules"
+          >
+            Sync All
+          </button>
+          <button
+            className="btn btn-secondary text-xs"
+            onClick={() => setShowAdd(true)}
+            title="Add a new submodule from a URL"
+          >
+            <Plus size={12} />
+            Add Submodule
           </button>
           <button
             className="btn btn-secondary text-xs"
@@ -146,6 +213,22 @@ export function SubmodulesPage() {
                     >
                       Update
                     </button>
+                    <button
+                      className="btn btn-secondary text-xs"
+                      onClick={() => handleSync(s.name)}
+                      title="Sync URL with .gitmodules"
+                    >
+                      Sync
+                    </button>
+                    {s.initialized && (
+                      <button
+                        className="btn btn-secondary text-xs hover:!text-status-deleted"
+                        onClick={() => handleDeinit(s.name)}
+                        title="Remove the submodule working tree (entry stays in .gitmodules)"
+                      >
+                        Deinit
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -153,6 +236,59 @@ export function SubmodulesPage() {
           ))
         )}
       </div>
+
+      {showAdd && (
+        <div
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => setShowAdd(false)}
+        >
+          <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-medium mb-4">Add Submodule</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">Repository URL</label>
+                <input
+                  type="text"
+                  className="w-full text-sm font-mono"
+                  placeholder="https://github.com/user/repo.git"
+                  value={addUrl}
+                  autoFocus
+                  onChange={(e) => setAddUrl(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">Local path</label>
+                <input
+                  type="text"
+                  className="w-full text-sm font-mono"
+                  placeholder="libs/repo"
+                  value={addPath}
+                  onChange={(e) => setAddPath(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">Branch (optional)</label>
+                <input
+                  type="text"
+                  className="w-full text-sm"
+                  placeholder="default branch"
+                  value={addBranch}
+                  onChange={(e) => setAddBranch(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={handleAdd} disabled={busy === 'add'}>
+                {busy === 'add' ? <Loader size={13} className="animate-spin" /> : <Plus size={13} />}
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

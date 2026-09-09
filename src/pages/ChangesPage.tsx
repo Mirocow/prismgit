@@ -370,7 +370,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
 
   const handleUnstageFile = async (file: string) => {
     try {
-      await api.git.raw(repo.path, ['reset', 'HEAD', '--', file]);
+      // resetFile = git reset <HEAD> -- <file> (unstages exactly this path)
+      await api.git.resetFile(repo.path, file);
       await refreshStatus(repo.path);
     } catch (e) {
       toast.error('Failed to unstage', String(e));
@@ -395,6 +396,87 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       await refreshStatus(repo.path);
     } catch (e) {
       toast.error('Failed to ignore', String(e));
+    }
+  };
+
+  // Reset a staged file back to HEAD (unstage exactly this path via git reset -- <file>)
+  const handleResetFile = async (file: string) => {
+    try {
+      await api.git.resetFile(repo.path, file);
+      toast.success(`'${file}' reset to HEAD (unstaged)`);
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error('Reset file failed', String(e));
+    }
+  };
+
+  // Restore a file from an arbitrary ref (git checkout <ref> -- <file>) — e.g. recover
+  // an older version from another branch or commit without leaving the current branch.
+  const handleCheckoutFileFromRef = async (file: string) => {
+    const ref = prompt(
+      `Restore '${file}' from a ref:\n\nEnter a ref (commit hash, branch, tag, HEAD~1, ...).\nThe working tree copy will be overwritten with that version.`
+    );
+    if (!ref || !ref.trim()) return;
+    try {
+      await api.git.checkoutFile(repo.path, file, ref.trim());
+      toast.success(`'${file}' restored from ${ref.trim()}`);
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error(`Restore from ${ref.trim()} failed`, String(e));
+    }
+  };
+
+  // Check whether a path is excluded by .gitignore rules
+  const handleIsIgnored = async (file: string) => {
+    try {
+      const ignored = await api.git.isIgnored(repo.path, file);
+      if (ignored) toast.info(`'${file}' IS ignored (matches .gitignore rules)`);
+      else toast.info(`'${file}' is NOT ignored`);
+    } catch (e) {
+      toast.error('Check failed', String(e));
+    }
+  };
+
+  // Open the effective ignore file in the system editor
+  const handleEditIgnoreFile = async (scope: 'local' | 'global') => {
+    try {
+      const path = await api.git.editIgnoreFile(repo.path, scope);
+      await api.git.openFile(path);
+      toast.success(`Opened ${scope} ignore file`);
+    } catch (e) {
+      toast.error('Failed to open ignore file', String(e));
+    }
+  };
+
+  // Clean untracked files/directories: dry-run preview first, then confirm
+  const [showCleanDialog, setShowCleanDialog] = useState(false);
+  const [cleanPreview, setCleanPreview] = useState<string[]>([]);
+  const [cleanBusy, setCleanBusy] = useState(false);
+
+  const handleCleanPreview = async () => {
+    setCleanBusy(true);
+    try {
+      const result = await api.git.clean(repo.path, [], true, false, true);
+      setCleanPreview(result);
+      setShowCleanDialog(true);
+    } catch (e) {
+      toast.error('Clean preview failed', String(e));
+    } finally {
+      setCleanBusy(false);
+    }
+  };
+
+  const handleCleanExecute = async () => {
+    setCleanBusy(true);
+    try {
+      const removed = await api.git.clean(repo.path, [], false, true, true);
+      toast.success(`Removed ${removed.length} path${removed.length === 1 ? '' : 's'}`);
+      setShowCleanDialog(false);
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error('Clean failed', String(e));
+    } finally {
+      setCleanBusy(false);
     }
   };
 
@@ -674,12 +756,17 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             items.push({ label: 'Stage', clickId: 'stage' });
             if (!isUntracked) {
               items.push({ label: 'Restore to last commit (discard)', clickId: 'restore' });
+              items.push({ label: 'Restore from ref...', clickId: 'restore-from-ref' });
             }
           }
           items.push({ type: 'separator' });
           if (isUntracked) {
             items.push({ label: 'Add to .gitignore', clickId: 'ignore' });
+            items.push({ label: 'Check if ignored', clickId: 'check-ignored' });
             items.push({ label: 'Delete file', clickId: 'delete' });
+            items.push({ type: 'separator' });
+            items.push({ label: 'Edit .gitignore', clickId: 'edit-ignore-local' });
+            items.push({ label: 'Edit global ignore file', clickId: 'edit-ignore-global' });
           }
           if (isConflict) {
             items.push({ type: 'separator' });
@@ -710,6 +797,10 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               }).catch((e) => toast.error('Discard failed', String(e)));
             }
             else if (action === 'ignore') handleIgnoreFile(file.path);
+            else if (action === 'check-ignored') handleIsIgnored(file.path);
+            else if (action === 'restore-from-ref') handleCheckoutFileFromRef(file.path);
+            else if (action === 'edit-ignore-local') handleEditIgnoreFile('local');
+            else if (action === 'edit-ignore-global') handleEditIgnoreFile('global');
             else if (action === 'delete') handleDeleteFile(file.path);
             else if (action === 'resolve' && onResolveConflict) onResolveConflict(file.path);
             else if (action === 'reveal') handleRevealFile(file.path);
@@ -928,6 +1019,13 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           </button>
           <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={handleRefresh}>
             <RefreshCw size={11} />
+          </button>
+          <button
+            className="icon-btn !w-5 !h-5 hover:!text-status-deleted"
+            title="Clean untracked files and directories (git clean -fd) — shows a preview first"
+            onClick={handleCleanPreview}
+          >
+            <Trash size={11} />
           </button>
           {selectedFiles.size > 1 && (
             <>
@@ -1203,11 +1301,66 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           <>
             <ResizableSplitter direction="horizontal" onResize={handleLeftResize} />
             <div className="flex-1 flex flex-col overflow-hidden">
-              <DiffViewer diff={diff} loading={diffLoading} repoPath={repo.path} filePath={selectedFile || undefined} />
+              <DiffViewer
+                diff={diff}
+                loading={diffLoading}
+                repoPath={repo.path}
+                filePath={selectedFile || undefined}
+                mode={selectedFile && (status?.staged.some((s) => s.path === selectedFile)) ? 'staged' : 'unstaged'}
+                onStaged={() => {
+                  // Reset the skip-guard so the diff-reload effect re-runs when the
+                  // refreshed status arrives (partial staging changes index, not worktree,
+                  // so the fs watcher will NOT fire by itself).
+                  lastLoadedFileRef.current = null;
+                  refreshStatus(repo.path);
+                }}
+              />
             </div>
           </>
         )}
       </div>
+
+      {/* Clean untracked: dry-run preview → confirm → git clean -fd */}
+      {showCleanDialog && (
+        <div
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => setShowCleanDialog(false)}
+        >
+          <div className="panel w-[480px] max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-medium px-4 pt-4">Clean Untracked Files</h3>
+            <div className="px-4 py-2 text-xs text-text-tertiary">
+              The following untracked files and directories will be permanently removed
+              (git clean -fd). This cannot be undone.
+            </div>
+            <div className="flex-1 overflow-y-auto mx-4 border border-border-default rounded bg-bg-tertiary">
+              {cleanPreview.length === 0 ? (
+                <div className="p-4 text-xs text-text-tertiary text-center">
+                  Nothing to clean — no untracked files or directories.
+                </div>
+              ) : (
+                cleanPreview.map((p) => (
+                  <div key={p} className="px-3 py-1 text-xs font-mono border-b border-border-subtle last:border-b-0">
+                    {p}
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3">
+              <button className="btn btn-secondary" onClick={() => setShowCleanDialog(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary hover:!bg-status-deleted"
+                onClick={handleCleanExecute}
+                disabled={cleanBusy || cleanPreview.length === 0}
+              >
+                <Trash size={13} />
+                Clean {cleanPreview.length > 0 ? `${cleanPreview.length} paths` : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

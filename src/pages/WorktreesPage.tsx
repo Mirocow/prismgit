@@ -99,6 +99,23 @@ export function WorktreesPage() {
     await api.git.openFile(wt.path);
   };
 
+  // Move a linked worktree to a new location (git worktree move).
+  // Does not touch the branch or the files inside — just relocates the directory.
+  const handleMove = async (wt: WorktreeInfo) => {
+    const target = prompt(`Move worktree to a new location:\n\nCurrent: ${wt.path}\nNew path:`);
+    if (!target || !target.trim() || target.trim() === wt.path) return;
+    setBusy(wt.path);
+    try {
+      await api.git.worktreeMove(repo.path, wt.path, target.trim());
+      toast.success(`Worktree moved to ${target.trim()}`);
+      await load();
+    } catch (e) {
+      toast.error('Move failed', String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const mainWorktree = worktrees[0];
   const linkedWorktrees = worktrees.slice(1);
 
@@ -220,6 +237,13 @@ export function WorktreesPage() {
                             onClick={() => handleOpen(wt)}
                           >
                             Open
+                          </button>
+                          <button
+                            className="btn btn-secondary text-xs"
+                            onClick={() => handleMove(wt)}
+                            title="Move worktree to a new location (git worktree move)"
+                          >
+                            Move
                           </button>
                           <button
                             className="icon-btn !w-6 !h-6 hover:!text-status-deleted"

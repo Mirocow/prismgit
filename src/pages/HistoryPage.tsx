@@ -322,6 +322,62 @@ export function HistoryPage() {
     } catch (e) { toast.error('Rebase failed', String(e)); }
   };
 
+  // Full commit diff via git diff <hash>^..<hash> — rendered in the compare modal
+  const handleShowCommitDiff = async (entry: LogEntry) => {
+    try {
+      const result = await api.git.diffCommit(repo.path, entry.hash);
+      setCompareDiff({ result, title: `Commit ${shortHash(entry.hash)} vs parent` });
+    } catch (e) { toast.error('Failed to load commit diff', String(e)); }
+  };
+
+  // Start an interactive rebase stopped at this commit ('edit') — the user then
+  // splits the commit by staging parts and continuing via the Rebase panel.
+  const handleStartSplitCommit = async (entry: LogEntry) => {
+    if (!confirm(`Split ${shortHash(entry.hash)}?\n\nThis starts an interactive rebase stopped at this commit ('edit').\nThen: reset parts of the commit, stage pieces, commit repeatedly, and press Continue in the Rebase panel.`)) return;
+    try {
+      const res = await api.git.splitCommit(repo.path, entry.hash);
+      if (res.started) {
+        toast.success('Interactive edit started — use the Rebase panel to continue');
+        await refreshStatus(repo.path); await loadHistory();
+      } else {
+        toast.error('Failed to start split', res.message);
+      }
+    } catch (e) { toast.error('Split failed', String(e)); }
+  };
+
+  // Split-off dialog: move the selected files from this commit into a NEW commit
+  // that is created right after it (git rebase --onto machinery via splitOffFiles).
+  const [showSplitOff, setShowSplitOff] = useState(false);
+  const [splitOffEntry, setSplitOffEntry] = useState<LogEntry | null>(null);
+  const [splitOffSelected, setSplitOffSelected] = useState<Set<string>>(new Set());
+  const [splitOffMessage, setSplitOffMessage] = useState('');
+  const [splitOffFileList, setSplitOffFileList] = useState<CommitFile[]>([]);
+  const [splitOffBusy, setSplitOffBusy] = useState(false);
+
+  const handleOpenSplitOff = (entry: LogEntry) => {
+    setSplitOffEntry(entry);
+    setSplitOffSelected(new Set());
+    setSplitOffMessage(`Split from "${entry.subject}"`);
+    setShowSplitOff(true);
+    api.git.commitFiles(repo.path, entry.hash)
+      .then(setSplitOffFileList)
+      .catch(() => setSplitOffFileList([]));
+  };
+
+  const handleSplitOffExecute = async () => {
+    if (!splitOffEntry) return;
+    if (splitOffSelected.size === 0) { toast.warning('Select at least one file'); return; }
+    if (!splitOffMessage.trim()) { toast.warning('New commit message is required'); return; }
+    setSplitOffBusy(true);
+    try {
+      await api.git.splitOffFiles(repo.path, splitOffEntry.hash, Array.from(splitOffSelected), splitOffMessage.trim());
+      toast.success(`Moved ${splitOffSelected.size} file${splitOffSelected.size > 1 ? 's' : ''} into a new commit`);
+      setShowSplitOff(false);
+      await refreshStatus(repo.path); await loadHistory();
+    } catch (e) { toast.error('Split off failed', String(e)); }
+    finally { setSplitOffBusy(false); }
+  };
+
   const handleCheckout = async (hash: string) => {
     if (!confirm(`Checkout ${shortHash(hash)}?\n\nThis will put you in detached HEAD state. You won't be on any branch.`)) return;
     try {
@@ -382,6 +438,10 @@ export function HistoryPage() {
       { type: 'separator' },
       { label: 'Open in Diff tool...', clickId: 'open-in-diff' },
       { label: 'Compare with Working Tree...', clickId: 'compare-wt' },
+      { label: 'Show Full Commit Diff', clickId: 'show-commit-diff' },
+      { type: 'separator' },
+      { label: 'Split Off Files Into New Commit...', clickId: 'split-off' },
+      { label: 'Start Interactive Edit (split commit)', clickId: 'split-commit' },
       { type: 'separator' },
       { label: 'Copy Short Hash', clickId: 'copy-short' },
       { label: 'Copy Full Hash', clickId: 'copy-full' },
@@ -420,6 +480,9 @@ export function HistoryPage() {
         case 'copy-msg': copyToClipboard(entry.subject); toast.success('Copied'); break;
         case 'edit-msg': handleEditMessage(entry); break;
         case 'browser': handleOpenInBrowser(); break;
+        case 'show-commit-diff': handleShowCommitDiff(entry); break;
+        case 'split-off': handleOpenSplitOff(entry); break;
+        case 'split-commit': handleStartSplitCommit(entry); break;
       }
     });
   };
@@ -1153,6 +1216,65 @@ export function HistoryPage() {
             </div>
             <div className="flex-1 overflow-hidden">
               <DiffViewer diff={compareDiff.result} filePath={compareDiff.title} />
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Split Off Files dialog */}
+      {showSplitOff && splitOffEntry && (
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowSplitOff(false)}>
+          <div className="panel w-[560px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-4 pt-4">
+              <h3 className="text-base font-medium">Split Off Files Into New Commit</h3>
+              <div className="text-xs text-text-tertiary mt-1">
+                From {shortHash(splitOffEntry.hash)} "{splitOffEntry.subject}" — selected files move into a NEW commit right after this one.
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto mx-4 my-3 border border-border-default rounded">
+              {splitOffFileList.length === 0 ? (
+                <div className="p-4 text-xs text-text-tertiary text-center">Loading files...</div>
+              ) : (
+                splitOffFileList.map((f) => (
+                  <label
+                    key={f.path}
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle last:border-b-0 cursor-pointer hover:bg-bg-hover"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={splitOffSelected.has(f.path)}
+                      onChange={(e) => {
+                        const next = new Set(splitOffSelected);
+                        if (e.target.checked) next.add(f.path); else next.delete(f.path);
+                        setSplitOffSelected(next);
+                      }}
+                    />
+                    <span className="badge badge-renamed w-6 text-center flex-shrink-0">{f.status}</span>
+                    <span className="font-mono truncate">{f.path}</span>
+                    <span className="ml-auto flex-shrink-0 text-text-tertiary">
+                      +{f.additions} −{f.deletions}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+            <div className="px-4 pb-3 space-y-2">
+              <input
+                type="text"
+                className="w-full text-sm"
+                placeholder="Message for the new commit"
+                value={splitOffMessage}
+                onChange={(e) => setSplitOffMessage(e.target.value)}
+              />
+              <div className="flex justify-end gap-2">
+                <button className="btn btn-secondary text-xs" onClick={() => setShowSplitOff(false)}>Cancel</button>
+                <button
+                  className="btn btn-primary text-xs"
+                  onClick={handleSplitOffExecute}
+                  disabled={splitOffBusy || splitOffSelected.size === 0}
+                >
+                  {splitOffBusy ? 'Splitting...' : `Split Off ${splitOffSelected.size} File${splitOffSelected.size === 1 ? '' : 's'}`}
+                </button>
+              </div>
             </div>
           </div>
         </div>

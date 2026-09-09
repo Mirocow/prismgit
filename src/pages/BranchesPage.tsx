@@ -117,6 +117,79 @@ export function BranchesPage() {
     } catch (e) { toast.error('Failed', String(e)); }
   };
 
+  // ===== Branch compare dialog =====
+  // Compare an arbitrary branch against the CURRENT branch: ahead/behind counts,
+  // changed file list, unified patch preview, and a jump into the Diff tool.
+  const [compareBranch, setCompareBranch] = useState<BranchInfo | null>(null);
+  const [compareCurrent, setCompareCurrent] = useState<string | null>(null);
+  const [compareCounts, setCompareCounts] = useState<{ ahead: number; behind: number } | null>(null);
+  const [compareFiles, setCompareFiles] = useState<{ status: string; path: string }[]>([]);
+  const [comparePatch, setComparePatch] = useState<string | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+
+  const handleCompare = async (b: BranchInfo) => {
+    setCompareBranch(b);
+    setCompareCounts(null);
+    setCompareFiles([]);
+    setComparePatch(null);
+    setCompareLoading(true);
+    try {
+      const current = await api.git.currentBranch(repo.path);
+      setCompareCurrent(current);
+      if (!current) {
+        toast.warning('Cannot compare — detached HEAD');
+        setCompareLoading(false);
+        return;
+      }
+      const [counts, nameStatus] = await Promise.all([
+        api.git.aheadBehind(repo.path, current, b.name),
+        api.git.raw(repo.path, ['diff', '--name-status', `${current}...${b.name}`]),
+      ]);
+      setCompareCounts(counts);
+      setCompareFiles(
+        nameStatus
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => {
+            const parts = line.split('\t');
+            return { status: parts[0], path: parts.length > 2 ? `${parts[1]} → ${parts[2]}` : parts[1] };
+          })
+      );
+    } catch (e) {
+      toast.error('Compare failed', String(e));
+    } finally {
+      setCompareLoading(false);
+    }
+  };
+
+  const handleComparePreview = async () => {
+    if (!compareBranch || !compareCurrent) return;
+    setCompareLoading(true);
+    try {
+      const patch = await api.git.diffBranches(repo.path, compareCurrent, compareBranch.name);
+      // Render the hunks back to unified text for a lightweight preview
+      const text = patch.hunks
+        .map((h) => `${h.header}\n${h.lines.map((l) => l.content).join('\n')}`)
+        .join('\n');
+      setComparePatch(text || '(no differences in file contents)');
+    } catch (e) {
+      toast.error('Patch preview failed', String(e));
+    } finally {
+      setCompareLoading(false);
+    }
+  };
+
+  const handleCompareOpenInDiff = () => {
+    if (!compareBranch || !compareCurrent) return;
+    useSelectionStore.getState().setDiffRequest({
+      baseRef: compareCurrent,
+      compareRef: compareBranch.name,
+      filePath: '.',
+    });
+    window.location.hash = '#/diff';
+    setCompareBranch(null);
+  };
+
   const toggleGroup = (group: string) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev);
@@ -132,6 +205,7 @@ export function BranchesPage() {
     const items: ContextMenuItem[] = [];
     if (!b.current && !b.remote) {
       items.push({ label: 'Checkout', clickId: 'checkout' });
+      items.push({ label: 'Compare with current branch...', clickId: 'compare' });
       items.push({ type: 'separator' });
       items.push({ label: 'Merge into current', clickId: 'merge' });
       items.push({ label: 'Rebase onto this branch', clickId: 'rebase' });
@@ -142,6 +216,7 @@ export function BranchesPage() {
     } else if (b.remote) {
       items.push({ label: 'Checkout (create local tracking branch)', clickId: 'checkout-remote' });
       items.push({ label: 'Create local branch from...', clickId: 'create-local' });
+      items.push({ label: 'Compare with current branch...', clickId: 'compare' });
       items.push({ type: 'separator' });
       items.push({ label: 'Merge into current', clickId: 'merge' });
       items.push({ type: 'separator' });
@@ -151,6 +226,7 @@ export function BranchesPage() {
     if (items.length > 0) {
       showContextMenu(items, (action) => {
         if (action === 'checkout') handleCheckout(b);
+        else if (action === 'compare') handleCompare(b);
         else if (action === 'checkout-remote') {
           // Create local tracking branch from remote: git checkout -b <local> --track <remote>
           // Local name = part after first slash (e.g. origin/main → main)
@@ -433,6 +509,78 @@ export function BranchesPage() {
       {/* Merge panel */}
       {mergeTarget && (
         <MergePanel targetBranch={mergeTarget} onClose={() => setMergeTarget(null)} />
+      )}
+
+      {/* Compare branches dialog */}
+      {compareBranch && (
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setCompareBranch(null)}>
+          <div className="panel w-[640px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
+              <div>
+                <h3 className="text-base font-medium">Compare Branches</h3>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  <code className="text-accent">{compareCurrent || '?'}</code>
+                  {' ←→ '}
+                  <code className="text-accent">{compareBranch.name}</code>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {compareCounts && (
+                  <>
+                    <span className="badge badge-added">↑ {compareCounts.ahead} ahead</span>
+                    <span className="badge badge-deleted">↓ {compareCounts.behind} behind</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {compareLoading ? (
+                <div className="text-center text-xs text-text-tertiary py-6">Comparing...</div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <button className="btn btn-secondary text-xs" onClick={handleComparePreview}>
+                      Preview unified patch
+                    </button>
+                    <button className="btn btn-secondary text-xs" onClick={handleCompareOpenInDiff}>
+                      Open in Diff tool
+                    </button>
+                  </div>
+                  {comparePatch && (
+                    <pre className="text-2xs font-mono bg-bg-tertiary p-3 rounded max-h-64 overflow-auto whitespace-pre-wrap text-text-secondary border border-border-default">
+                      {comparePatch}
+                    </pre>
+                  )}
+                  <div>
+                    <div className="text-2xs uppercase text-text-tertiary mb-1">
+                      Changed files ({compareFiles.length})
+                    </div>
+                    <div className="border border-border-default rounded max-h-64 overflow-y-auto">
+                      {compareFiles.length === 0 ? (
+                        <div className="p-3 text-xs text-text-tertiary text-center">
+                          No differences between the branches (same tree)
+                        </div>
+                      ) : (
+                        compareFiles.map((f, i) => (
+                          <div key={`${f.path}-${i}`} className="flex items-center gap-2 px-3 py-1 text-xs border-b border-border-subtle last:border-b-0">
+                            <span className={cn(
+                              'badge w-8 text-center flex-shrink-0',
+                              f.status.startsWith('A') ? 'badge-added' : f.status.startsWith('D') ? 'badge-deleted' : 'badge-modified'
+                            )}>{f.status}</span>
+                            <span className="font-mono truncate">{f.path}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex justify-end px-4 py-3 border-t border-border-default">
+              <button className="btn btn-secondary text-xs" onClick={() => setCompareBranch(null)}>Close</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

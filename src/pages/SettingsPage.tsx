@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { Settings as SettingsIcon, Github, LogOut, Sun, Moon, Folder, Plus, RefreshCw } from '../components/icons';
+import { useState, useEffect, useCallback } from 'react';
+import { Settings as SettingsIcon, Github, LogOut, Sun, Moon, Folder, Plus, RefreshCw, Trash, Loader } from '../components/icons';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
-import { api } from '../lib/api';
+import { api, type GitConfigEntry } from '../lib/api';
 import { cn } from '../lib/utils';
 
 export function SettingsPage() {
@@ -15,6 +15,57 @@ export function SettingsPage() {
   const { repos, removeRepo, loadRepos } = useRepositoryStore();
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
+
+  // === Git Config section state ===
+  const [configScope, setConfigScope] = useState<'local' | 'global' | 'system'>('local');
+  const [configEntries, setConfigEntries] = useState<GitConfigEntry[]>([]);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configFilter, setConfigFilter] = useState('');
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [newKey, setNewKey] = useState('');
+  const [newValue, setNewValue] = useState('');
+
+  const loadConfig = useCallback(async () => {
+    if (!currentRepo) return;
+    setConfigLoading(true);
+    try {
+      const entries = await api.git.configList(currentRepo.path, configScope);
+      setConfigEntries(entries);
+    } catch (e) {
+      toast.error('Failed to load git config', String(e));
+      setConfigEntries([]);
+    } finally {
+      setConfigLoading(false);
+    }
+  }, [currentRepo, configScope, toast]);
+
+  useEffect(() => {
+    if (currentRepo) loadConfig();
+  }, [currentRepo, loadConfig]);
+
+  const handleConfigSet = async (key: string, value: string) => {
+    if (!currentRepo) return;
+    try {
+      await api.git.configSet(currentRepo.path, key, value, configScope);
+      toast.success(`Set ${key} (${configScope})`);
+      await loadConfig();
+    } catch (e) {
+      toast.error('Failed to set value', String(e));
+    }
+  };
+
+  const handleConfigUnset = async (key: string) => {
+    if (!currentRepo) return;
+    if (!confirm(`Remove '${key}' from ${configScope} config?`)) return;
+    try {
+      await api.git.configUnset(currentRepo.path, key, configScope);
+      toast.success(`Removed ${key}`);
+      await loadConfig();
+    } catch (e) {
+      toast.error('Failed to unset', String(e));
+    }
+  };
 
   const handleLogin = async () => {
     if (!pat.trim()) {
@@ -458,6 +509,134 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+
+        {/* Git Config */}
+        {currentRepo && (
+          <section className="panel mb-4">
+            <div className="panel-header flex items-center justify-between">
+              <span>Git Config — {currentRepo.name}</span>
+              <div className="flex items-center gap-1">
+                {(['local', 'global', 'system'] as const).map((s) => (
+                  <button
+                    key={s}
+                    className={cn(
+                      'px-2 py-0.5 text-2xs rounded capitalize transition-colors',
+                      configScope === s
+                        ? 'bg-accent text-text-inverse'
+                        : 'text-text-secondary hover:bg-bg-hover'
+                    )}
+                    onClick={() => setConfigScope(s)}
+                  >
+                    {s}
+                  </button>
+                ))}
+                <button className="icon-btn !w-5 !h-5 ml-1" title="Reload config" onClick={loadConfig}>
+                  {configLoading ? <Loader size={11} className="spin" /> : <RefreshCw size={11} />}
+                </button>
+              </div>
+            </div>
+            <div className="p-5 space-y-3">
+              <input
+                type="text"
+                className="w-full text-xs"
+                placeholder="Filter keys..."
+                value={configFilter}
+                onChange={(e) => setConfigFilter(e.target.value)}
+              />
+              <div className="max-h-72 overflow-y-auto border border-border-default rounded">
+                {configEntries.length === 0 ? (
+                  <div className="p-4 text-xs text-text-tertiary text-center">
+                    No {configScope} config entries
+                  </div>
+                ) : (
+                  configEntries
+                    .filter((e) => !configFilter || e.key.toLowerCase().includes(configFilter.toLowerCase()))
+                    .map((entry, i) => (
+                      <div key={`${entry.key}-${i}`} className="group flex items-center gap-2 px-3 py-1.5 border-b border-border-subtle last:border-b-0 text-xs">
+                        <code className="font-mono text-text-secondary flex-shrink-0 w-56 truncate" title={entry.key}>
+                          {entry.key}
+                        </code>
+                        {editingKey === `${entry.key}-${i}` ? (
+                          <>
+                            <input
+                              type="text"
+                              className="flex-1 font-mono"
+                              autoFocus
+                              value={editingValue}
+                              onChange={(e) => setEditingValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleConfigSet(entry.key, editingValue);
+                                  setEditingKey(null);
+                                }
+                                if (e.key === 'Escape') setEditingKey(null);
+                              }}
+                            />
+                            <button
+                              className="icon-btn !w-5 !h-5 hover:!text-status-added"
+                              title="Save (Enter)"
+                              onClick={() => { handleConfigSet(entry.key, editingValue); setEditingKey(null); }}
+                            >
+                              ✓
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <code
+                              className="flex-1 font-mono text-text-primary truncate cursor-pointer hover:text-accent"
+                              title="Click to edit value"
+                              onClick={() => { setEditingKey(`${entry.key}-${i}`); setEditingValue(entry.value); }}
+                            >
+                              {entry.value || <span className="text-text-tertiary italic">(empty)</span>}
+                            </code>
+                            <button
+                              className="icon-btn !w-5 !h-5 opacity-0 group-hover:opacity-100 hover:!text-status-deleted"
+                              title="Remove key (git config --unset)"
+                              onClick={() => handleConfigUnset(entry.key)}
+                            >
+                              <Trash size={10} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ))
+                )}
+              </div>
+              {/* Add new key */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  className="flex-1 font-mono text-xs"
+                  placeholder="new.key (e.g. user.name)"
+                  value={newKey}
+                  onChange={(e) => setNewKey(e.target.value)}
+                />
+                <input
+                  type="text"
+                  className="flex-1 font-mono text-xs"
+                  placeholder="value"
+                  value={newValue}
+                  onChange={(e) => setNewValue(e.target.value)}
+                />
+                <button
+                  className="btn btn-secondary text-xs"
+                  disabled={!newKey.trim() || !newValue.trim()}
+                  onClick={async () => {
+                    await handleConfigSet(newKey.trim(), newValue.trim());
+                    setNewKey(''); setNewValue('');
+                  }}
+                >
+                  <Plus size={11} />
+                  Add
+                </button>
+              </div>
+              <div className="text-2xs text-text-tertiary">
+                Click a value to edit it. Changes apply to the <b>{configScope}</b> scope
+                {configScope === 'local' ? ' (this repository only)' : configScope === 'global' ? ' (your user account)' : ' (whole machine)'}.
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* About */}
         <section className="panel mb-4">

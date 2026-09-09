@@ -22,6 +22,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
   const [targetPath, setTargetPath] = useState('');
   const [branch, setBranch] = useState('');
   const [depth, setDepth] = useState<number | ''>('');
+  const [mirror, setMirror] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<'url' | 'github'>('url');
   const [repos, setRepos] = useState<GithubRepository[]>([]);
@@ -34,6 +35,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
       setTargetPath(settings.defaultCloneDir || '');
       setBranch('');
       setDepth('');
+      setMirror(false);
       if (authenticated) {
         loadRepos();
       }
@@ -104,11 +106,17 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
     setLoading(true);
     try {
       const finalPath = targetPath;
-      await cloneRepository(normalizedUrl, finalPath, {
-        depth: depth ? Number(depth) : undefined,
-        branch: branch || undefined,
-      });
-      toast.success('Repository cloned successfully');
+      if (mirror) {
+        // Mirror clone: copies ALL refs (heads, tags, notes, remotes) — bare backup copy
+        await api.git.mirror(normalizedUrl, finalPath);
+        await useRepositoryStore.getState().openRepository(finalPath);
+      } else {
+        await cloneRepository(normalizedUrl, finalPath, {
+          depth: depth ? Number(depth) : undefined,
+          branch: branch || undefined,
+        });
+      }
+      toast.success(mirror ? 'Mirror clone created successfully' : 'Repository cloned successfully');
       onClose();
     } catch (e) {
       toast.error('Clone failed', String(e));
@@ -242,6 +250,17 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                   />
                 </div>
               </div>
+              <label
+                className="flex items-center gap-2 text-sm cursor-pointer"
+                title="git clone --mirror: copies ALL refs (heads, tags, notes) as a bare repository — useful for backups"
+              >
+                <input
+                  type="checkbox"
+                  checked={mirror}
+                  onChange={(e) => setMirror(e.target.checked)}
+                />
+                Mirror clone (--mirror, all refs, bare)
+              </label>
             </div>
           ) : (
             <div className="space-y-3">

@@ -1,8 +1,9 @@
 import { useState, useMemo, useCallback } from 'react';
 import { type DiffResult, type DiffHunk, type DiffLine } from '../lib/api';
 import { api } from '../lib/api';
+import { useToastStore } from '../stores/toastStore';
 import { cn } from '../lib/utils';
-import { RefreshCw, Copy, ChevronDown, ChevronRight } from './icons';
+import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader } from './icons';
 import { wordDiff, type WordSegment } from '../lib/wordDiff';
 
 interface DiffViewerProps {
@@ -10,7 +11,10 @@ interface DiffViewerProps {
   loading?: boolean;
   repoPath?: string;
   filePath?: string;
-  onStageLines?: (lines: number[]) => void;
+  /** Which diff is being displayed: unstaged (index→worktree, stageable), staged (HEAD→index, unstageable) or commit (read-only). */
+  mode?: 'unstaged' | 'staged' | 'commit';
+  /** Called after partial staging/unstaging so the parent can refresh the status. */
+  onStaged?: () => void;
 }
 
 type ViewMode = 'unified' | 'split';
@@ -99,7 +103,8 @@ function shouldShowLine(line: DiffLine, wsMode: WhitespaceMode): boolean {
   return true;
 }
 
-export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: DiffViewerProps) {
+export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit', onStaged }: DiffViewerProps) {
+  const toast = useToastStore();
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
   const [wsMode, setWsMode] = useState<WhitespaceMode>('normal');
   // Lazy loading: show first N lines per hunk, expand on demand
@@ -108,6 +113,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
   const [collapsedHunks, setCollapsedHunks] = useState<Set<number>>(new Set());
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set());
   const [useWordDiff, setUseWordDiff] = useState(true);
+  const [savingBlob, setSavingBlob] = useState(false);
 
   const lang = useMemo(() => (filePath ? getLangFromFile(filePath) : ''), [filePath]);
 
@@ -187,33 +193,68 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
     });
   }, []);
 
+  /**
+   * Real partial staging: convert the selected lines into contiguous ranges and
+   * stage (unstaged mode) or unstage (staged mode) exactly those lines via
+   * git apply --cached. Mixed add+del hunks are staged as a whole (same as git add -p).
+   */
   const handleApplySelection = useCallback(async () => {
     if (!repoPath || !filePath || selectedLines.size === 0) return;
-    // Collect line ranges from selected lines
-    const lines: number[] = [];
+    if (mode === 'commit') return;
+    const nums: number[] = [];
     selectedLines.forEach(key => {
       const [hunkIdx, lineIdx] = key.split(':').map(Number);
-      const hunk = diff?.hunks[hunkIdx];
-      if (hunk) {
-        const line = hunk.lines[lineIdx];
-        if (line && line.type === 'add' && line.newLineNumber !== null) {
-          lines.push(line.newLineNumber);
-        }
-      }
+      const line = diff?.hunks[hunkIdx]?.lines[lineIdx];
+      if (!line) return;
+      if (line.type === 'add' && line.newLineNumber !== null) nums.push(line.newLineNumber);
+      else if (line.type === 'del' && line.oldLineNumber !== null) nums.push(line.oldLineNumber);
     });
-    if (lines.length === 0) return;
-
-    // Use git apply --cached with a patch
-    // For simplicity, use git add --patch interactive approach via raw command
-    // Actually, the simplest approach: stage the whole file or use git add -p
-    // Here we'll stage the whole file as a fallback
-    try {
-      await api.git.add(repoPath, [filePath]);
-      setSelectedLines(new Set());
-    } catch (e) {
-      console.error('Apply selection failed:', e);
+    if (nums.length === 0) return;
+    // Group into contiguous inclusive ranges for the stageLines API
+    const sorted = [...new Set(nums)].sort((a, b) => a - b);
+    const ranges: { start: number; end: number }[] = [];
+    for (const n of sorted) {
+      const last = ranges[ranges.length - 1];
+      if (last && n === last.end + 1) last.end = n;
+      else ranges.push({ start: n, end: n });
     }
-  }, [repoPath, filePath, selectedLines, diff]);
+    try {
+      if (mode === 'staged') {
+        await api.git.unstageLines(repoPath, filePath, ranges);
+        toast.success(`Unstaged ${sorted.length} line${sorted.length > 1 ? 's' : ''}`);
+      } else {
+        await api.git.stageLines(repoPath, filePath, ranges);
+        toast.success(`Staged ${sorted.length} line${sorted.length > 1 ? 's' : ''}`);
+      }
+      setSelectedLines(new Set());
+      onStaged?.();
+    } catch (e) {
+      toast.error('Partial staging failed', String(e));
+    }
+  }, [repoPath, filePath, selectedLines, diff, mode, onStaged, toast]);
+
+  /** Save the HEAD version of a binary file to disk (git show HEAD:path via showBuffer). */
+  const handleSaveBlob = useCallback(async () => {
+    if (!repoPath || !filePath) return;
+    setSavingBlob(true);
+    try {
+      const buf = await api.git.showBuffer(repoPath, ['HEAD:' + filePath]);
+      // Normalize to a plain Uint8Array<ArrayBuffer> for the Blob constructor
+      const bytes = Uint8Array.from(buf as unknown as ArrayLike<number>);
+      const blob = new Blob([bytes]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filePath.split('/').pop() || 'blob';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Saved ${filePath.split('/').pop()} (${bytes.length} bytes from HEAD)`);
+    } catch (e) {
+      toast.error('Failed to save blob', String(e));
+    } finally {
+      setSavingBlob(false);
+    }
+  }, [repoPath, filePath, toast]);
 
   const rendered = useMemo(() => {
     if (!diff || diff.binary) return null;
@@ -257,12 +298,12 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
                 <div
                   key={li}
                   className={cn(
-                    'flex hover:bg-bg-hover cursor-text group',
+                    'flex hover:bg-bg-hover cursor-pointer group',
                     bg,
                     isSelected && 'ring-1 ring-accent'
                   )}
                   style={{ lineHeight: '20px', minHeight: '20px' }}
-                  onClick={() => line.type === 'add' && toggleLineSelection(hi, li)}
+                  onClick={() => (line.type === 'add' || line.type === 'del') && toggleLineSelection(hi, li)}
                 >
                   <span className="w-12 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
                     {line.oldLineNumber ?? ''}
@@ -328,8 +369,15 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
                   }
                   const bg = line.type === 'del' ? 'bg-status-deleted/10' : '';
                   const color = line.type === 'del' ? 'text-status-deleted' : 'text-text-primary';
+                  const key = `${hi}:${li}`;
+                  const isSelected = selectedLines.has(key);
                   return (
-                    <div key={li} className={cn('flex hover:bg-bg-hover', bg)} style={{ lineHeight: '20px', minHeight: '20px' }}>
+                    <div
+                      key={li}
+                      className={cn('flex hover:bg-bg-hover cursor-pointer', bg, isSelected && 'ring-1 ring-accent')}
+                      style={{ lineHeight: '20px', minHeight: '20px' }}
+                      onClick={() => line.type === 'del' && toggleLineSelection(hi, li)}
+                    >
                       <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
                       <pre className={cn('flex-1 pl-2 whitespace-pre-wrap', color)} style={{ fontFamily: 'inherit' }}>{line.content || ' '}</pre>
                     </div>
@@ -392,8 +440,14 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
 
   if (diff.binary) {
     return (
-      <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
-        Binary file — diff not available
+      <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary text-sm gap-3">
+        <div>Binary file — diff not available</div>
+        {repoPath && filePath && (
+          <button className="btn btn-secondary text-xs" onClick={handleSaveBlob} disabled={savingBlob}>
+            {savingBlob ? <Loader size={12} className="animate-spin" /> : <Download size={12} />}
+            Save version from HEAD
+          </button>
+        )}
       </div>
     );
   }
@@ -451,13 +505,15 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
               Split
             </button>
           </div>
-          {selectedLines.size > 0 && (
+          {selectedLines.size > 0 && repoPath && mode !== 'commit' && (
             <button
               className="btn btn-primary text-2xs !py-0.5 !px-2"
               onClick={handleApplySelection}
-              title="Stage selected lines"
+              title={mode === 'staged'
+                ? 'Unstage the selected lines (mixed add+del hunks are unstaged as a whole)'
+                : 'Stage the selected lines (mixed add+del hunks are staged as a whole)'}
             >
-              Apply Selection ({selectedLines.size})
+              {mode === 'staged' ? 'Unstage' : 'Stage'} Selection ({selectedLines.size})
             </button>
           )}
         </div>

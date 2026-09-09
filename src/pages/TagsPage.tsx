@@ -40,8 +40,14 @@ export function TagsPage() {
       return;
     }
     try {
-      await api.git.createTag(repo.path, name, annotated ? message : undefined, ref || undefined);
-      toast.success(`Tag '${name}' created`);
+      if (annotated) {
+        // addAnnotatedTag returns the tag object hash (createTag is fire-and-forget)
+        const tagHash = await api.git.addAnnotatedTag(repo.path, name, message, ref || undefined);
+        toast.success(`Annotated tag '${name}' created${tagHash ? ` (${tagHash.slice(0, 7)})` : ''}`);
+      } else {
+        await api.git.createTag(repo.path, name, undefined, ref || undefined);
+        toast.success(`Tag '${name}' created`);
+      }
       setShowDialog(false);
       setName('');
       setMessage('');

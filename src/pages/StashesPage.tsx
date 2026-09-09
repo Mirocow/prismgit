@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, RefreshCw, Plus, Trash, Download, Upload, Check, FileText, ChevronDown, ChevronRight, X } from '../components/icons';
+import { Package, RefreshCw, Plus, Trash, Download, Upload, Check, FileText, ChevronDown, ChevronRight, X, GitBranch } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -81,6 +81,23 @@ export function StashesPage() {
       await load();
     } catch (e) {
       toast.error('Stash drop failed', String(e));
+    }
+  };
+
+  // Create a new branch from the stash's base commit and apply the stash there.
+  // Useful when the stash no longer applies cleanly onto the current branch.
+  const handleStashBranch = async (stash: StashEntry) => {
+    const branchName = prompt(
+      `Create a branch from stash@{${stash.index}} and apply it there:\n\n"${stash.message}"\n\nBranch name:`
+    );
+    if (!branchName || !branchName.trim()) return;
+    try {
+      await api.git.stashBranch(repo.path, branchName.trim(), stash.index);
+      toast.success(`Branch '${branchName.trim()}' created from stash@{${stash.index}} and stash applied`);
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error('Stash branch failed', String(e));
     }
   };
 
@@ -176,6 +193,13 @@ export function StashesPage() {
                     onClick={() => handlePop(s)}
                   >
                     <Upload size={12} />
+                  </button>
+                  <button
+                    className="icon-btn !w-6 !h-6"
+                    title="Create branch from stash and apply it there (git stash branch)"
+                    onClick={() => handleStashBranch(s)}
+                  >
+                    <GitBranch size={12} />
                   </button>
                   <button
                     className="icon-btn !w-6 !h-6 hover:!text-status-deleted"

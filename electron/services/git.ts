@@ -1792,23 +1792,168 @@ export async function splitCommit(repoPath: string, hash: string): Promise<{ sta
   }
 }
 
-// ============= Stage/Unstage specific lines =============
+// ============= Stage/Unstage specific lines (real partial staging) =============
 
-export async function stageLines(repoPath: string, file: string, lineRanges: { start: number; end: number }[]): Promise<void> {
-  const git = getGit(repoPath);
-  // Generate a patch for the specific lines and apply it to the index
-  // Use git diff to get the patch, then filter lines, then git apply --cached
-  const diff = await git.raw(['diff', '--unified=0', '--', file]);
-
-  // Parse diff and filter to only requested line ranges
-  // This is complex — for now, stage the whole file as fallback
-  await git.add(file);
+interface UZeroHunk {
+  header: string;
+  lines: string[];
+  type: 'add' | 'del' | 'mixed';
 }
 
+/**
+ * Parse a `git diff --unified=0` output into its file header + hunks.
+ * Line numbers inside -U0 hunks are implicit: old lines are sequential from the
+ * header's -start, new lines sequential from the +start.
+ */
+function parseUnifiedZero(diffOut: string): { header: string; hunks: UZeroHunk[] } {
+  const lines = diffOut.split('\n');
+  const hunkIdx = lines.findIndex((l) => l.startsWith('@@ -'));
+  if (hunkIdx === -1) return { header: '', hunks: [] };
+  const header = lines.slice(0, hunkIdx).join('\n');
+  const hunks: UZeroHunk[] = [];
+  let current: UZeroHunk | null = null;
+  for (let i = hunkIdx; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('@@ -')) {
+      if (current) hunks.push(current);
+      current = { header: line, lines: [], type: 'add' };
+    } else if (current) {
+      if (line.startsWith('diff --git')) break; // next file (defensive; single file expected)
+      if (line.startsWith('+') || line.startsWith('-')) {
+        const isAdd = line.startsWith('+');
+        const isDel = line.startsWith('-');
+        // Track what the hunk contains via explicit flags: a hunk is 'add'
+        // until we see a del and vice versa; both → 'mixed'.
+        if (isAdd && current.lines.some((l) => l.startsWith('-'))) current.type = 'mixed';
+        else if (isDel && current.lines.some((l) => l.startsWith('+'))) current.type = 'mixed';
+        else if (isDel && current.lines.length === 0) current.type = 'del';
+        current.lines.push(line);
+      }
+      // '\ No newline at end of file' and blank trailing lines are ignored
+    }
+  }
+  if (current) hunks.push(current);
+  return { header, hunks };
+}
+
+/** Is `n` inside any of the inclusive ranges? */
+function inRanges(n: number, ranges: { start: number; end: number }[]): boolean {
+  return ranges.some((r) => n >= r.start && n <= r.end);
+}
+
+/**
+ * Filter PURE hunks (only adds or only dels) to the selected line subset and
+ * recompute zero-context hunk headers.
+ * Mixed hunks must NOT be passed here — intra-hunk filtering would shift numbers.
+ */
+function filterPureHunks(hunks: UZeroHunk[], ranges: { start: number; end: number }[]): string[] {
+  const out: string[] = [];
+  for (const hunk of hunks) {
+    if (hunk.type === 'add') {
+      const startNew = parseInt(hunk.header.match(/\+(\d+)/)![1], 10);
+      const keptIdx = hunk.lines.map((_, i) => startNew + i).filter((n) => inRanges(n, ranges));
+      if (keptIdx.length === 0) continue;
+      if (keptIdx.length === hunk.lines.length) {
+        out.push(hunk.header, ...hunk.lines);
+      } else {
+        const minNew = keptIdx[0];
+        const keptLines = hunk.lines.filter((_, i) => inRanges(startNew + i, ranges));
+        out.push(`@@ -${minNew - 1},0 +${minNew},${keptIdx.length} @@`, ...keptLines);
+      }
+    } else {
+      const startOld = parseInt(hunk.header.match(/^@@ -(\d+)/)![1], 10);
+      const keptIdx = hunk.lines.map((_, i) => startOld + i).filter((n) => inRanges(n, ranges));
+      if (keptIdx.length === 0) continue;
+      if (keptIdx.length === hunk.lines.length) {
+        out.push(hunk.header, ...hunk.lines);
+      } else {
+        const minOld = keptIdx[0];
+        const keptLines = hunk.lines.filter((_, i) => inRanges(startOld + i, ranges));
+        out.push(`@@ -${minOld},${keptIdx.length} +${minOld - 1},0 @@`, ...keptLines);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Mixed hunks are all-or-nothing (same as git add -p): keep the hunk only if
+ * at least one add line's new number OR del line's old number is selected.
+ */
+function filterMixedHunks(hunks: UZeroHunk[], ranges: { start: number; end: number }[]): string[] {
+  const out: string[] = [];
+  for (const hunk of hunks) {
+    const startOld = parseInt(hunk.header.match(/^@@ -(\d+)/)![1], 10);
+    const startNew = parseInt(hunk.header.match(/\+(\d+)/)![1], 10);
+    let oldNo = startOld;
+    let newNo = startNew;
+    let selected = false;
+    for (const l of hunk.lines) {
+      if (l.startsWith('+')) {
+        if (inRanges(newNo, ranges)) selected = true;
+        newNo++;
+      } else {
+        if (inRanges(oldNo, ranges)) selected = true;
+        oldNo++;
+      }
+    }
+    if (selected) out.push(hunk.header, ...hunk.lines);
+  }
+  return out;
+}
+
+/** Write `patch` to a temp file (git apply has no stdin via simple-git raw) and apply it to the index. */
+async function applyPatchToIndex(git: ReturnType<typeof getGit>, patch: string, reverse: boolean): Promise<void> {
+  const os = await import('node:os');
+  const tmp = path.join(os.tmpdir(), `smartgit-${reverse ? 'unstage' : 'stage'}-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`);
+  await fs.promises.writeFile(tmp, patch, 'utf8');
+  try {
+    const args = ['apply', '--cached', '--unidiff-zero', '--whitespace=nowarn'];
+    if (reverse) args.push('--reverse');
+    args.push(tmp);
+    await git.raw(args);
+  } finally {
+    await fs.promises.unlink(tmp).catch(() => undefined);
+  }
+}
+
+/**
+ * Stage only the given line ranges of `file` into the index (partial staging).
+ * Uses `git diff -U0` filtered to the selected lines + `git apply --cached`.
+ * Falls back to staging the whole file when the file is untracked (no diff output).
+ */
+export async function stageLines(repoPath: string, file: string, lineRanges: { start: number; end: number }[]): Promise<void> {
+  const git = getGit(repoPath);
+  const diffOut = await git.raw(['diff', '--unified=0', '--no-color', '--', file]);
+  if (!diffOut.trim()) {
+    // Untracked or unchanged file — partial staging impossible, stage whole file.
+    await git.add(file);
+    return;
+  }
+  const { header, hunks } = parseUnifiedZero(diffOut);
+  const pure = filterPureHunks(hunks.filter((h) => h.type !== 'mixed'), lineRanges);
+  const mixed = filterMixedHunks(hunks.filter((h) => h.type === 'mixed'), lineRanges);
+  const body = [...pure, ...mixed];
+  if (body.length === 0) return; // nothing matched the selection
+  const patch = `${header}\n${body.join('\n')}\n`;
+  await applyPatchToIndex(git, patch, false);
+}
+
+/**
+ * Unstage only the given line ranges of `file` from the index (partial unstage).
+ * Reverse-applies a filtered `git diff --cached -U0` patch to the index.
+ */
 export async function unstageLines(repoPath: string, file: string, lineRanges: { start: number; end: number }[]): Promise<void> {
   const git = getGit(repoPath);
-  // Reverse of stageLines
-  await git.raw(['reset', 'HEAD', '--', file]);
+  const diffOut = await git.raw(['diff', '--cached', '--unified=0', '--no-color', '--', file]);
+  if (!diffOut.trim()) return; // nothing staged for this file
+  const { header, hunks } = parseUnifiedZero(diffOut);
+  const pure = filterPureHunks(hunks.filter((h) => h.type !== 'mixed'), lineRanges);
+  const mixed = filterMixedHunks(hunks.filter((h) => h.type === 'mixed'), lineRanges);
+  const body = [...pure, ...mixed];
+  if (body.length === 0) return;
+  const patch = `${header}\n${body.join('\n')}\n`;
+  await applyPatchToIndex(git, patch, true);
 }
 
 // ============= Repository directory tree =============
@@ -1915,10 +2060,15 @@ export async function grep(
  *   - Reverse-apply (--reverse) to undo a patch
  *   - Check without applying (--check)
  *
+ * The `patch` argument accepts a FILE PATH or raw patch CONTENT (detected by
+ * the unified-diff signature). Content is written to a temp file first because
+ * `git apply` has no stdin path through simple-git.
+ *
  * Examples:
  *   applyPatch(repoPath, 'fix.diff')                       → applies patch
  *   applyPatch(repoPath, ['fix.diff', '--reverse'])        → undoes patch
  *   applyPatch(repoPath, 'fix.diff', { '--check': null }) → validates only
+ *   applyPatch(repoPath, 'diff --git a/x b/x\n...', ['--check']) → content
  */
 export async function applyPatch(
   repoPath: string,
@@ -1926,12 +2076,23 @@ export async function applyPatch(
   options: Record<string, null> | string[] = []
 ): Promise<string> {
   const git = getGit(repoPath);
-  // simple-git's applyPatch() accepts: (patchFile: string, options?) OR (args: string[])
-  if (typeof patch === 'string') {
-    if (Array.isArray(options)) {
-      return await git.applyPatch([patch, ...options]);
+  const opts = Array.isArray(options) ? options : Object.keys(options);
+  // Raw patch content → temp file → git apply
+  if (typeof patch === 'string' && (patch.includes('diff --git') || patch.startsWith('--- ') || /\n@@ -\d+/.test(patch))) {
+    const os = await import('node:os');
+    const tmp = path.join(os.tmpdir(), `prismgit-apply-${Date.now()}.patch`);
+    await fs.promises.writeFile(tmp, patch, 'utf8');
+    try {
+      return await git.raw(['apply', ...opts, tmp]);
+    } finally {
+      await fs.promises.unlink(tmp).catch(() => undefined);
     }
-    return await git.applyPatch(patch, options as Record<string, null>);
+  }
+  if (typeof patch === 'string') {
+    if (opts.length > 0) {
+      return await git.raw(['apply', ...opts, patch]);
+    }
+    return await git.applyPatch(patch);
   }
   return await git.applyPatch(patch);
 }
