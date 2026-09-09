@@ -3,7 +3,6 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { WindowStyleSwitcher, useWindowStyleStore } from './WindowStyleSwitcher';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
@@ -66,8 +65,6 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
   const toast = useToastStore();
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
-  const windowStyle = useWindowStyleStore((s) => s.style);
-  const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
 
   const disabled = !currentRepo;
 
@@ -186,13 +183,6 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
         <IconButton icon={GitMerge} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow" />
         <IconButton icon={RotateCcw} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Rebase" />
       </div>
-
-      {/* Window style switcher (Standard/Log/Working Tree) */}
-      {currentRepo && (
-        <div className="flex items-center no-drag ml-2">
-          <WindowStyleSwitcher value={windowStyle} onChange={setWindowStyle} />
-        </div>
-      )}
 
       {/* Center: branch info (draggable area) */}
       <div className="flex-1 flex items-center justify-center titlebar-drag">

@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api, type DiffResult, type FileStatus, type LogEntry } from '../lib/api';
 import { DiffViewer } from '../components/DiffViewer';
 import { ResizableSplitter, useResizableWidth, useResizableHeight } from '../components/ResizableSplitter';
+import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { cn, getStatusColor } from '../lib/utils';
 import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 
@@ -29,6 +30,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [showSplitView, setShowSplitView] = useState(true);
   const { width: leftWidth, handleResize: handleLeftResize } = useResizableWidth(500, 250, 800);
   const { height: journalHeight, handleResize: handleJournalResize } = useResizableHeight(180, 60, 400);
+  const showContextMenu = useContextMenu();
 
   const loadDiff = useCallback(
     async (file: string, staged: boolean) => {
@@ -252,6 +254,45 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           setDraggedFile(null);
         }}
         onClick={() => setSelectedFile(file.path)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setSelectedFile(file.path);
+          const items: ContextMenuItem[] = [];
+          if (isStaged) {
+            items.push({ label: 'Unstage', clickId: 'unstage' });
+          } else {
+            items.push({ label: 'Stage', clickId: 'stage' });
+            if (!isUntracked) {
+              items.push({ label: 'Restore to last commit', clickId: 'restore' });
+            }
+          }
+          items.push({ type: 'separator' });
+          if (isUntracked) {
+            items.push({ label: 'Add to .gitignore', clickId: 'ignore' });
+            items.push({ label: 'Delete file', clickId: 'delete' });
+          }
+          if (isConflict) {
+            items.push({ type: 'separator' });
+            items.push({ label: 'Resolve Conflict...', clickId: 'resolve' });
+          }
+          items.push({ type: 'separator' });
+          items.push({ label: 'Reveal in File Manager', clickId: 'reveal' });
+          items.push({ label: 'Open in Editor', clickId: 'open' });
+          showContextMenu(items, (action) => {
+            if (action === 'stage') handleStageFile(file.path);
+            else if (action === 'unstage') handleUnstageFile(file.path);
+            else if (action === 'restore') handleRestoreFile(file.path);
+            else if (action === 'ignore') handleIgnoreFile(file.path);
+            else if (action === 'delete') handleDeleteFile(file.path);
+            else if (action === 'resolve' && onResolveConflict) onResolveConflict(file.path);
+            else if (action === 'reveal') handleRevealFile(file.path);
+            else if (action === 'open') {
+              const fullPath = `${repo.path}/${file.path}`.replace(/\/+/g, '/');
+              api.git.openFile(fullPath);
+            }
+          });
+        }}
       >
         {/* State icon */}
         <span

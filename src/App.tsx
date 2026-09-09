@@ -13,7 +13,7 @@ import { GitFlowDialog } from './components/GitFlowDialog';
 import { InteractiveRebaseDialog } from './components/InteractiveRebaseDialog';
 import { ConflictSolver } from './components/ConflictSolver';
 import { RepoInfoDialog } from './components/RepoInfoDialog';
-import { WindowStyleSwitcher, useWindowStyleStore } from './components/WindowStyleSwitcher';
+import { useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useAuthStore } from './stores/authStore';
@@ -255,12 +255,6 @@ export default function App() {
         {/* Sidebar always visible — navigation must be accessible */}
         <Sidebar />
         <main className="flex-1 overflow-hidden flex flex-col">
-          {/* Window style switcher bar (only in standard mode) */}
-          {currentRepo && (
-            <div className="flex items-center justify-end px-3 py-0.5 border-b border-border-subtle bg-bg-tertiary" style={{ height: 24 }}>
-              <WindowStyleSwitcher value={windowStyle} onChange={setWindowStyle} />
-            </div>
-          )}
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/" element={<Navigate to={defaultRoute} replace />} />

@@ -22,7 +22,8 @@ import { api, type LogEntry, type CommitFile } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
-import { WindowStyleSwitcher, useWindowStyleStore } from '../components/WindowStyleSwitcher';
+import { useWindowStyleStore } from '../components/WindowStyleSwitcher';
+import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 
 const BRANCH_COLORS = [
   '#5B9BD5', // Steel Blue
@@ -129,6 +130,7 @@ export function HistoryPage() {
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
   const windowStyle = useWindowStyleStore((s) => s.style);
   const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
+  const showContextMenu = useContextMenu();
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
@@ -211,6 +213,11 @@ export function HistoryPage() {
     } catch (e) { toast.error('Failed', String(e)); }
   };
 
+  const handleEditMessage = (entry: LogEntry) => {
+    setEditingMessage(true);
+    setEditMsgValue(`${entry.subject}\n\n${entry.body}`.trim());
+  };
+
   const selected = selectedIdx !== null ? filtered[selectedIdx] : null;
   const hasUncommittedChanges = status && !status.isClean;
 
@@ -223,7 +230,6 @@ export function HistoryPage() {
           <span className="text-2xs text-text-tertiary">{filtered.length} commits</span>
         </div>
         <div className="flex items-center gap-2">
-          <WindowStyleSwitcher value={windowStyle} onChange={setWindowStyle} />
           <input
             type="text"
             placeholder="Filter..."
@@ -350,6 +356,29 @@ export function HistoryPage() {
                     )}
                     style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 2 }}
                     onClick={() => setSelectedIdx(idx)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSelectedIdx(idx);
+                      const items: ContextMenuItem[] = [
+                        { label: 'Cherry Pick', clickId: 'cherry-pick' },
+                        { label: 'Revert', clickId: 'revert' },
+                        { type: 'separator' },
+                        { label: 'Copy Hash', clickId: 'copy-hash' },
+                        { label: 'Copy Full Hash', clickId: 'copy-full-hash' },
+                        { type: 'separator' },
+                        { label: 'Edit Commit Message...', clickId: 'edit-message' },
+                        { label: 'Open in Browser', clickId: 'open-browser' },
+                      ];
+                      showContextMenu(items, (action) => {
+                        if (action === 'cherry-pick') handleCherryPick(entry);
+                        else if (action === 'revert') handleRevert(entry);
+                        else if (action === 'copy-hash') { copyToClipboard(shortHash(entry.hash)); toast.success('Hash copied'); }
+                        else if (action === 'copy-full-hash') { copyToClipboard(entry.hash); toast.success('Full hash copied'); }
+                        else if (action === 'edit-message') handleEditMessage(entry);
+                        else if (action === 'open-browser') handleOpenInBrowser();
+                      });
+                    }}
                   >
                     {/* HEAD indicator */}
                     {isHEAD ? (
