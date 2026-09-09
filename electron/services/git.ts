@@ -834,34 +834,22 @@ export async function tags(repoPath: string): Promise<TagInfo[]> {
     if (parts.length < 4) continue;
     const [name, objectType, objectname, subject, targetHash, taggerDate, taggerName] = parts;
     const isAnnotated = objectType === 'tag';
-    try {
-      // For lightweight tags, objectname is the commit hash; for annotated, objectname is the tag object hash
-      // and *objectname (targetHash) is the commit hash. We want the commit hash in both cases.
-      const commitHash = isAnnotated
-        ? (targetHash || (await git.revparse([`${name}^{commit}`])).trim())
-        : objectname;
-      result.push({
-        name,
-        hash: commitHash,
-        hashAbbrev: commitHash.substring(0, 7),
-        annotation: isAnnotated ? (subject || undefined) : undefined,
-        date: taggerDate || undefined,
-        author: taggerName || undefined,
-        lightweight: !isAnnotated,
-        targetHash: targetHash || undefined,
-      });
-    } catch {
-      result.push({
-        name,
-        hash: objectname || '',
-        hashAbbrev: (objectname || '').substring(0, 7),
-        annotation: isAnnotated ? (subject || undefined) : undefined,
-        date: taggerDate || undefined,
-        author: taggerName || undefined,
-        lightweight: !isAnnotated,
-        targetHash: targetHash || undefined,
-      });
-    }
+    // For lightweight tags: objectname IS the commit hash
+    // For annotated tags: *objectname (targetHash) is the commit hash; if empty, fall back to objectname
+    //   (which is the tag object hash, not commit — but better than nothing, and avoids N+1 revparse)
+    const commitHash = isAnnotated
+      ? (targetHash || objectname)
+      : objectname;
+    result.push({
+      name,
+      hash: commitHash,
+      hashAbbrev: commitHash.substring(0, 7),
+      annotation: isAnnotated ? (subject || undefined) : undefined,
+      date: taggerDate || undefined,
+      author: taggerName || undefined,
+      lightweight: !isAnnotated,
+      targetHash: targetHash || undefined,
+    });
   }
   return result;
 }
@@ -1556,38 +1544,29 @@ export async function findRef(
   const q = query.toLowerCase();
   const result: { name: string; hash: string; type: 'branch' | 'tag' | 'remote' }[] = [];
 
-  // Local branches
+  // Single for-each-ref call for ALL refs — no N+1 revparse
+  // Use %(refname) (full) not %(refname:short) so we can determine type from the prefix
+  const fmt = ['%(refname)', '%(objectname)'].join('\t');
+  let raw = '';
   try {
-    const local = await git.branchLocal();
-    for (const b of local.all) {
-      if (b.toLowerCase().includes(q)) {
-        const hash = await git.revparse([b]);
-        result.push({ name: b, hash, type: 'branch' });
-      }
-    }
+    raw = await git.raw(['for-each-ref', `--format=${fmt}`, 'refs/']);
   } catch { /* ignore */ }
-
-  // Remote branches
-  try {
-    const remote = await git.branch(['-r']);
-    for (const b of remote.all) {
-      if (b.toLowerCase().includes(q)) {
-        const hash = await git.revparse([b]);
-        result.push({ name: b, hash, type: 'remote' });
-      }
+  if (raw.trim()) {
+    for (const line of raw.split('\n').filter(Boolean)) {
+      const [refname, hash] = line.split('\t');
+      if (!refname || !hash) continue;
+      // refname is like "refs/heads/main", "refs/remotes/origin/main", "refs/tags/v1.0.0"
+      const shortName = refname.replace(/^refs\/(heads|remotes|tags)\//, '');
+      if (!shortName.toLowerCase().includes(q)) continue;
+      const isTag = refname.startsWith('refs/tags/');
+      const isRemote = refname.startsWith('refs/remotes/');
+      result.push({
+        name: shortName,
+        hash,
+        type: isTag ? 'tag' : isRemote ? 'remote' : 'branch',
+      });
     }
-  } catch { /* ignore */ }
-
-  // Tags
-  try {
-    const tags = await git.tag();
-    for (const t of tags.split('\n').filter(Boolean)) {
-      if (t.toLowerCase().includes(q)) {
-        const hash = await git.revparse([t]);
-        result.push({ name: t, hash, type: 'tag' });
-      }
-    }
-  } catch { /* ignore */ }
+  }
 
   return result;
 }
