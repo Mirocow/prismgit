@@ -28,7 +28,7 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:fetchAll', (_e, p: string, pr?: boolean) => gitService.fetchAll(p, pr));
 
   // Log & history
-  ipcMain.handle('git:log', (_e, p: string, o?: { maxCount?: number; branch?: string; file?: string; follow?: boolean; all?: boolean }) =>
+  ipcMain.handle('git:log', (_e, p: string, o?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) =>
     gitService.log(p, o || {})
   );
   ipcMain.handle('git:commitFiles', (_e, p: string, h: string) => gitService.commitFiles(p, h));
@@ -61,6 +61,8 @@ export function registerGitIpc(): void {
   );
   ipcMain.handle('git:abortMerge', (_e, p: string) => gitService.abortMerge(p));
   ipcMain.handle('git:continueMerge', (_e, p: string) => gitService.continueMerge(p));
+  ipcMain.handle('git:mergeTree', (_e, p: string, o: string, t: string) => gitService.mergeTree(p, o, t));
+  ipcMain.handle('git:aheadBehind', (_e, p: string, b: string, c: string) => gitService.aheadBehind(p, b, c));
 
   // Diff
   ipcMain.handle('git:diff', (_e, p: string, f: string, o?: { staged?: boolean; ref?: string }) =>

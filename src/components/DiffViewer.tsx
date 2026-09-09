@@ -3,6 +3,7 @@ import { type DiffResult, type DiffHunk, type DiffLine } from '../lib/api';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { RefreshCw, Copy, ChevronDown, ChevronRight } from './icons';
+import { wordDiff, type WordSegment } from '../lib/wordDiff';
 
 interface DiffViewerProps {
   diff: DiffResult | null;
@@ -103,8 +104,63 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
   const [wsMode, setWsMode] = useState<WhitespaceMode>('normal');
   const [collapsedHunks, setCollapsedHunks] = useState<Set<number>>(new Set());
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set());
+  const [useWordDiff, setUseWordDiff] = useState(true);
 
   const lang = useMemo(() => (filePath ? getLangFromFile(filePath) : ''), [filePath]);
+
+  /**
+   * Render a diff line with word-level highlighting.
+   * For paired del+add lines (a common pattern in unified diffs), we compute the word diff
+   * between them and highlight only the changed words.
+   */
+  const renderLineWithWordDiff = useCallback(
+    (line: DiffLine, pairedLine: DiffLine | null): React.ReactNode => {
+      const content = line.content || ' ';
+      if (!useWordDiff || !pairedLine) {
+        return lang ? highlightLine(content, lang) : content;
+      }
+      // Compute word diff against the paired line
+      const oldContent = line.type === 'del' ? content : (pairedLine.content || '');
+      const newContent = line.type === 'add' ? content : (pairedLine.content || '');
+      const { old: oldSegs, new: newSegs } = wordDiff(oldContent, newContent);
+      const segs = line.type === 'del' ? oldSegs : newSegs;
+
+      return segs.map((seg, i) => {
+        if (seg.kind === 'equal') {
+          return <span key={i}>{seg.text}</span>;
+        }
+        // Highlight added/removed word with a stronger background
+        const highlightClass = seg.kind === 'added'
+          ? 'bg-status-added/30 rounded-sm'
+          : 'bg-status-deleted/30 rounded-sm line-through';
+        return <span key={i} className={highlightClass}>{seg.text}</span>;
+      });
+    },
+    [useWordDiff, lang]
+  );
+
+  /**
+   * Find the paired line for word-diff: for a 'del' line, look at the next line;
+   * if it's 'add', they form a pair. For 'add' lines, look at previous.
+   */
+  const findPairedLine = useCallback((lines: DiffLine[], idx: number): DiffLine | null => {
+    const line = lines[idx];
+    if (!line) return null;
+    if (line.type === 'del') {
+      // Look at the next line(s) — skip other 'del' lines
+      for (let i = idx + 1; i < lines.length; i++) {
+        if (lines[i].type === 'add') return lines[i];
+        if (lines[i].type === 'context' || lines[i].type === 'hunk-header') return null;
+      }
+    } else if (line.type === 'add') {
+      // Look at previous line(s)
+      for (let i = idx - 1; i >= 0; i--) {
+        if (lines[i].type === 'del') return lines[i];
+        if (lines[i].type === 'context' || lines[i].type === 'hunk-header') return null;
+      }
+    }
+    return null;
+  }, []);
 
   const toggleHunk = useCallback((idx: number) => {
     setCollapsedHunks(prev => {
@@ -181,6 +237,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
                 'text-text-primary';
               const key = `${hi}:${li}`;
               const isSelected = selectedLines.has(key);
+              const paired = findPairedLine(visibleLines, li);
               return (
                 <div
                   key={li}
@@ -207,7 +264,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
                     className={cn('flex-1 pl-2 whitespace-pre-wrap break-all', color)}
                     style={{ fontFamily: 'inherit' }}
                   >
-                    {lang ? highlightLine(line.content || ' ', lang) : (line.content || ' ')}
+                    {renderLineWithWordDiff(line, paired)}
                   </pre>
                 </div>
               );
@@ -284,7 +341,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
         </div>
       );
     });
-  }, [diff, viewMode, wsMode, collapsedHunks, selectedLines, lang, toggleHunk, toggleLineSelection]);
+  }, [diff, viewMode, wsMode, collapsedHunks, selectedLines, lang, toggleHunk, toggleLineSelection, useWordDiff, renderLineWithWordDiff, findPairedLine]);
 
   if (loading) {
     return (
@@ -339,6 +396,15 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
             <option value="ignore-all">Ignore all WS</option>
             <option value="ignore-trailing">Ignore trailing</option>
           </select>
+          <button
+            className={cn('px-2 py-0.5 text-2xs rounded border', useWordDiff
+              ? 'bg-accent text-text-inverse border-accent'
+              : 'bg-bg-tertiary text-text-secondary border-border-default')}
+            onClick={() => setUseWordDiff(!useWordDiff)}
+            title="Toggle word-level diff highlighting"
+          >
+            Word diff
+          </button>
           <div className="flex bg-bg-tertiary rounded">
             <button
               className={cn('px-2 py-0.5 text-2xs rounded-l', viewMode === 'unified' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}

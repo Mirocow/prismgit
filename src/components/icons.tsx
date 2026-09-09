@@ -419,3 +419,9 @@ export const SkipForward = (p: IconProps) => (
     <line x1="19" y1="5" x2="19" y2="19" />
   </Icon>
 );
+
+export const Filter = (p: IconProps) => (
+  <Icon {...p}>
+    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+  </Icon>
+);

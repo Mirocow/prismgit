@@ -190,16 +190,17 @@ export function BranchesPage() {
         onDrop={(e) => {
           e.preventDefault();
           e.currentTarget.classList.remove('drag-over');
-          if (draggedBranch && draggedBranch !== b.name && !b.current) {
+          if (draggedBranch && draggedBranch !== b.name) {
             // Drop draggedBranch onto b → merge draggedBranch into b
-            // But if b is current, merge draggedBranch into current
+            // If b is current branch — just merge draggedBranch into current.
+            // Otherwise: do NOT auto-checkout; just open the merge panel targeting draggedBranch
+            // (user can decide to checkout first via the panel).
             if (b.current) {
               handleMerge(draggedBranch);
             } else {
-              // Checkout b first, then merge
-              api.git.checkout(repo.path, b.name).then(() => {
-                handleMerge(draggedBranch);
-              });
+              // Open merge panel; user can review before commit
+              handleMerge(draggedBranch);
+              toast.info(`Drop target '${b.name}' is not the current branch — merge will go into current branch.`);
             }
           }
           setDraggedBranch(null);

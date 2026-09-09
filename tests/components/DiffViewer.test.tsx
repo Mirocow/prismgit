@@ -74,10 +74,13 @@ describe('DiffViewer', () => {
 
   it('renders diff content with line numbers', () => {
     const diff = createMockDiff();
-    const { container } = render(<DiffViewer diff={diff} />);
+    render(<DiffViewer diff={diff} />);
     expect(screen.getByText('line1')).toBeInTheDocument();
-    expect(screen.getByText('old line')).toBeInTheDocument();
-    expect(screen.getByText('new line')).toBeInTheDocument();
+    // With word-diff enabled (default), "old line" / "new line" are split into word segments.
+    // "old" is removed (paired with "new" on the add line), "line" is equal.
+    expect(screen.getByText('old')).toBeInTheDocument();
+    expect(screen.getByText('new')).toBeInTheDocument();
+    expect(screen.getAllByText('line').length).toBeGreaterThanOrEqual(2);
   });
 
   it('shows no changes message for empty hunks', () => {

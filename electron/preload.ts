@@ -22,7 +22,7 @@ const api = {
     fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) =>
       ipcRenderer.invoke('git:fetch', repoPath, remote, prune, tags),
     fetchAll: (repoPath: string, prune?: boolean) => ipcRenderer.invoke('git:fetchAll', repoPath, prune),
-    log: (repoPath: string, options?: { maxCount?: number; branch?: string; file?: string; follow?: boolean; all?: boolean }) =>
+    log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) =>
       ipcRenderer.invoke('git:log', repoPath, options),
     commitFiles: (repoPath: string, hash: string) => ipcRenderer.invoke('git:commitFiles', repoPath, hash),
     diffCommit: (repoPath: string, hash: string, parentHash?: string) =>
@@ -42,6 +42,10 @@ const api = {
       ipcRenderer.invoke('git:merge', repoPath, branch, options),
     abortMerge: (repoPath: string) => ipcRenderer.invoke('git:abortMerge', repoPath),
     continueMerge: (repoPath: string) => ipcRenderer.invoke('git:continueMerge', repoPath),
+    mergeTree: (repoPath: string, ours: string, theirs: string) =>
+      ipcRenderer.invoke('git:mergeTree', repoPath, ours, theirs),
+    aheadBehind: (repoPath: string, base: string, compare: string) =>
+      ipcRenderer.invoke('git:aheadBehind', repoPath, base, compare),
     diff: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) =>
       ipcRenderer.invoke('git:diff', repoPath, file, options),
     diffBranches: (repoPath: string, base: string, compare: string) =>

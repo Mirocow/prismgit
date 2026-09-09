@@ -198,7 +198,7 @@ export interface GitApi {
   pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) => Promise<void>;
   fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) => Promise<void>;
   fetchAll: (repoPath: string, prune?: boolean) => Promise<void>;
-  log: (repoPath: string, options?: { maxCount?: number; branch?: string; file?: string; follow?: boolean; all?: boolean }) => Promise<LogEntry[]>;
+  log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) => Promise<LogEntry[]>;
   branches: (repoPath: string) => Promise<BranchInfo[]>;
   remotes: (repoPath: string) => Promise<RemoteInfo[]>;
   checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) => Promise<void>;
@@ -209,6 +209,10 @@ export interface GitApi {
   merge: (repoPath: string, branch: string, options?: { noFf?: boolean; squash?: boolean; ffOnly?: boolean; strategy?: string }) => Promise<{ conflicts: string[]; fastForward: boolean; alreadyUpToDate: boolean }>;
   abortMerge: (repoPath: string) => Promise<void>;
   continueMerge: (repoPath: string) => Promise<void>;
+  /** Pre-merge preview: returns the list of files that would conflict if we merged `theirs` into `ours`. */
+  mergeTree: (repoPath: string, ours: string, theirs: string) => Promise<{ conflicts: string[]; clean: boolean }>;
+  /** Returns ahead/behind counts between two refs without touching the working tree. */
+  aheadBehind: (repoPath: string, base: string, compare: string) => Promise<{ ahead: number; behind: number }>;
   diff: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) => Promise<DiffResult>;
   diffBranches: (repoPath: string, base: string, compare: string) => Promise<DiffResult>;
   diffCommit: (repoPath: string, hash: string, parentHash?: string) => Promise<DiffResult>;

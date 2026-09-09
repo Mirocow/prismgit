@@ -201,77 +201,60 @@ export async function fetchAll(repoPath: string, prune = false): Promise<void> {
 
 export async function log(
   repoPath: string,
-  options: { maxCount?: number; branch?: string; file?: string; follow?: boolean; all?: boolean } = {}
+  options: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean } = {}
 ): Promise<LogEntry[]> {
   const git = getGit(repoPath);
-  const { maxCount = 500, branch, file, follow = false, all = false } = options;
-  const logArgs: Record<string, unknown> = {
-    maxCount,
-    format: {
-      hash: '%H',
-      hashAbbrev: '%h',
-      parents: '%P',
-      parentsAbbrev: '%p',
-      authorName: '%an',
-      authorEmail: '%ae',
-      authorDate: '%aI',
-      committerName: '%cn',
-      committerEmail: '%ce',
-      committerDate: '%cI',
-      subject: '%s',
-      body: '%b',
-      refs: '%D',
-    },
-    '--date': 'iso-strict',
-  };
-  if (branch) logArgs[branch] = null;
-  if (all) logArgs['--all'] = null;
-  if (file) {
-    logArgs['--'] = file;
-    if (follow) {
-      // simple-git does not support --follow natively, use raw
-      const rawArgs = ['log', `-${maxCount}`, '--follow', '--pretty=format:%H%x00%h%x00%P%x00%p%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%s%x00%b%x00%D', '--date=iso-strict', '--', file];
-      const out = await git.raw(rawArgs);
-      return parseRawLog(out);
-    }
+  const { maxCount = 500, branch, branches, file, follow = false, all = false } = options;
+
+  // Use a custom pretty format with record separator \x1e between commits and \x00 between fields.
+  // simple-git's built-in log() uses \n\n to split commits which breaks when body contains blank lines.
+  // Field order: hash, hashAbbrev, parents, parentsAbbrev, authorName, authorEmail, authorDate,
+  //              committerName, committerEmail, committerDate, subject, body, refs
+  const fieldSep = '%x00';
+  const commitSep = '%x1e';
+  const pretty = [
+    '%H', '%h', '%P', '%p',
+    '%an', '%ae', '%aI',
+    '%cn', '%ce', '%cI',
+    '%s', '%b', '%D',
+  ].join(fieldSep);
+
+  const rawArgs = ['log', `-${maxCount}`, `--pretty=format:${pretty}${commitSep}`, '--date=iso-strict'];
+
+  // Multi-branch mode: pass explicit refs to git log.
+  // `git log ref1 ref2 ref3` shows the union of all commits reachable from any of these refs,
+  // in topological order — perfect for multi-branch history view.
+  if (branches && branches.length > 0) {
+    // Don't use --all when explicit branches are given
+    for (const b of branches) rawArgs.push(b);
+  } else if (all) {
+    rawArgs.push('--all');
+  } else if (branch) {
+    rawArgs.push(branch);
   }
 
-  const result = await git.log(logArgs);
-  return result.all.map((entry) => {
-    const e = entry as unknown as Record<string, string>;
-    const authorDate = new Date(e.authorDate || '');
-    const committerDate = new Date(e.committerDate || '');
-    return {
-      hash: e.hash || '',
-      hashAbbrev: e.hashAbbrev || (e.hash || '').substring(0, 7),
-      parents: e.parents ? e.parents.split(' ').filter(Boolean) : [],
-      parentsAbbrev: e.parentsAbbrev ? e.parentsAbbrev.split(' ').filter(Boolean) : [],
-      author: {
-        name: e.authorName || '',
-        email: e.authorEmail || '',
-        date: e.authorDate || '',
-        timestamp: authorDate.getTime(),
-      },
-      committer: {
-        name: e.committerName || '',
-        email: e.committerEmail || '',
-        date: e.committerDate || '',
-        timestamp: committerDate.getTime(),
-      },
-      subject: e.subject || '',
-      body: e.body || '',
-      refs: e.refs ? e.refs.split(',').map((r) => r.trim()).filter(Boolean) : [],
-      message: `${e.subject || ''}\n\n${e.body || ''}`.trim(),
-    } satisfies LogEntry;
-  });
-}
+  if (file) {
+    rawArgs.push('--', file);
+    if (follow) rawArgs.splice(2, 0, '--follow');
+  }
 
-// Helper for parsing raw git log --follow output
+  let out: string;
+  try {
+    out = await git.raw(rawArgs);
+  } catch {
+    return [];
+  }
+  return parseRawLog(out);
+}
 function parseRawLog(raw: string): LogEntry[] {
   if (!raw.trim()) return [];
-  const commits = raw.split('\n\n').filter((c) => c.trim());
+  // Split on \x1e (record separator) — handles bodies with blank lines correctly.
+  const commits = raw.split('\x1e').filter((c) => c.trim());
   return commits.map((c) => {
-    const parts = c.split('\x00');
+    // Strip leading/trailing newlines that git adds around the record.
+    // The trailing \n is added by git before \x1e (between records).
+    const cleaned = c.replace(/^\n+/, '').replace(/\n+$/, '');
+    const parts = cleaned.split('\x00');
     if (parts.length < 13) return null;
     const [
       hash, hashAbbrev, parents, parentsAbbrev,
@@ -279,78 +262,93 @@ function parseRawLog(raw: string): LogEntry[] {
       committerName, committerEmail, committerDate,
       subject, body, refs,
     ] = parts;
+    const authorDateTs = new Date(authorDate || '').getTime();
+    const committerDateTs = new Date(committerDate || '').getTime();
     return {
-      hash, hashAbbrev,
+      hash: hash || '',
+      hashAbbrev: hashAbbrev || (hash || '').substring(0, 7),
       parents: parents ? parents.split(' ').filter(Boolean) : [],
       parentsAbbrev: parentsAbbrev ? parentsAbbrev.split(' ').filter(Boolean) : [],
-      author: { name: authorName, email: authorEmail, date: authorDate, timestamp: new Date(authorDate).getTime() },
-      committer: { name: committerName, email: committerEmail, date: committerDate, timestamp: new Date(committerDate).getTime() },
+      author: { name: authorName || '', email: authorEmail || '', date: authorDate || '', timestamp: isNaN(authorDateTs) ? 0 : authorDateTs },
+      committer: { name: committerName || '', email: committerEmail || '', date: committerDate || '', timestamp: isNaN(committerDateTs) ? 0 : committerDateTs },
       subject: subject || '',
       body: body || '',
       refs: refs ? refs.split(',').map((r) => r.trim()).filter(Boolean) : [],
-      message: `${subject}\n\n${body || ''}`.trim(),
+      message: `${subject || ''}\n\n${body || ''}`.trim(),
     } as LogEntry;
   }).filter(Boolean) as LogEntry[];
 }
 
 export async function branches(repoPath: string): Promise<BranchInfo[]> {
   const git = getGit(repoPath);
-  const [local, remote] = await Promise.all([
-    git.branchLocal(),
-    git.branch(['-r']).catch(() => ({ all: [] as string[], current: false })),
-  ]);
+  const current = await git.status();
+
+  // Use for-each-ref to get all branches in a single git call.
+  // Note: simple-git passes args through to git as-is, so we use real tab characters,
+  // not the %x09 placeholder (which only works in --pretty=format).
+  // Fields: refname, objectname, subject, committerdate, *objectname (for annotated), upstream, HEAD
+  const fmt = [
+    '%(refname)',
+    '%(objectname)',
+    '%(contents:subject)',
+    '%(committerdate:iso-strict)',
+    '%(*objectname)',
+    '%(upstream:short)',
+    '%(HEAD)',
+  ].join('\t');
+  let rawLocal = '';
+  let rawRemote = '';
+  try {
+    rawLocal = await git.raw(['for-each-ref', `--format=${fmt}`, 'refs/heads/']);
+  } catch { /* empty repo */ }
+  try {
+    rawRemote = await git.raw(['for-each-ref', `--format=${fmt}`, 'refs/remotes/']);
+  } catch { /* no remotes */ }
 
   const result: BranchInfo[] = [];
 
-  for (const name of local.all) {
-    const isCurrent = local.current === name;
-    let tracking: string | undefined;
-    let ahead: number | undefined;
-    let behind: number | undefined;
-    if (isCurrent) {
-      try {
-        const statusRes = await git.status();
-        tracking = statusRes.tracking || undefined;
-        ahead = statusRes.ahead;
-        behind = statusRes.behind;
-      } catch {
-        /* ignore */
+  const parseBlock = (raw: string, isRemote: boolean) => {
+    if (!raw.trim()) return;
+    for (const line of raw.split('\n').filter(Boolean)) {
+      const parts = line.split('\t');
+      if (parts.length < 4) continue;
+      const [refname, objectname, subject, committerdate, targetHash, upstream, headMarker] = parts;
+      let name: string;
+      if (isRemote) {
+        name = refname.replace(/^refs\/remotes\//, '');
+      } else {
+        name = refname.replace(/^refs\/heads\//, '');
       }
-    }
-    let lastCommit: BranchInfo['lastCommit'];
-    try {
-      const logRes = await git.log({ maxCount: 1, [name]: null } as Record<string, null>);
-      const e = logRes.latest;
-      if (e) {
-        lastCommit = {
-          hash: e.hash.substring(0, 7),
-          date: e.date || '',
-          message: e.message || '',
-        };
-      }
-    } catch {
-      /* ignore */
-    }
-    result.push({
-      name,
-      current: isCurrent,
-      remote: false,
-      tracking,
-      ahead,
-      behind,
-      lastCommit,
-    });
-  }
+      // Skip symbolic refs like "origin/HEAD"
+      if (name.endsWith('/HEAD')) continue;
+      const isCurrent = headMarker === '*';
+      const commitHash = (isRemote ? (targetHash || objectname) : objectname) || '';
 
-  const remoteBranches = (remote as { all: string[] }).all || [];
-  for (const fullName of remoteBranches) {
-    if (fullName.includes('HEAD ->')) continue;
-    result.push({
-      name: fullName,
-      current: false,
-      remote: true,
-    });
-  }
+      const branchInfo: BranchInfo = {
+        name,
+        current: isCurrent,
+        remote: isRemote,
+        lastCommit: {
+          hash: commitHash.substring(0, 7),
+          date: committerdate || '',
+          message: subject || '',
+        },
+      };
+
+      if (!isRemote && isCurrent) {
+        branchInfo.tracking = current.tracking || undefined;
+        branchInfo.ahead = current.ahead;
+        branchInfo.behind = current.behind;
+      } else if (!isRemote && upstream) {
+        branchInfo.upstream = upstream;
+      }
+
+      result.push(branchInfo);
+    }
+  };
+
+  parseBlock(rawLocal, false);
+  parseBlock(rawRemote, true);
 
   return result;
 }
@@ -434,17 +432,25 @@ export async function merge(
   if (options.strategy) args.push('--strategy', options.strategy);
   args.push(branch);
 
+  // simple-git's git.raw() does NOT throw on conflict — it returns the stderr/stdout
+  // even when git exits non-zero. So we ALWAYS run status() after merge to detect conflicts.
+  let output = '';
   try {
-    const result = await git.raw(args);
-    return {
-      conflicts: [],
-      fastForward: result.includes('Fast-forward'),
-      alreadyUpToDate: result.includes('Already up to date'),
-    };
+    output = await git.raw(args);
   } catch (err) {
-    const statusRes = await status(repoPath);
-    return { conflicts: statusRes.conflicted, fastForward: false, alreadyUpToDate: false };
+    // For --ff-only, git may reject with non-zero exit when not possible to fast-forward.
+    // We capture output from the error if present.
+    output = (err as { stderr?: string; stdout?: string })?.stderr || (err as Error)?.message || '';
+    // If output indicates already-up-to-date or contains "merge" errors, fall through to status check
   }
+
+  const statusRes = await status(repoPath);
+  const hasConflicts = statusRes.conflicted.length > 0;
+  return {
+    conflicts: statusRes.conflicted,
+    fastForward: !hasConflicts && /Fast-forward/i.test(output),
+    alreadyUpToDate: !hasConflicts && /Already up to date/i.test(output),
+  };
 }
 
 export async function abortMerge(repoPath: string): Promise<void> {
@@ -456,6 +462,59 @@ export async function continueMerge(repoPath: string): Promise<void> {
   const git = getGit(repoPath);
   // Continue merge by committing the resolved conflicts
   await git.raw(['commit', '--no-edit']);
+}
+
+/**
+ * Pre-merge preview: determine mergeability without touching the working tree.
+ * Uses `git merge-tree --write-tree` (Git 2.38+) to compute the result of merging
+ * two trees/commits. Returns the list of files that would conflict.
+ *
+ * Adapted from GitHub Desktop's determineMergeability() approach.
+ */
+export async function mergeTree(
+  repoPath: string,
+  ours: string,
+  theirs: string
+): Promise<{ conflicts: string[]; clean: boolean }> {
+  const git = getGit(repoPath);
+  try {
+    // Git 2.38+ syntax: merge-tree --write-tree --name-only --no-messages -z <ours> <theirs>
+    // Exit code: 0 = clean merge, 1 = conflicts
+    const out = await git.raw(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ours, theirs]);
+    // Output format: "<tree-id>\0[<file>\0]*"
+    // If there are conflicts, additional NUL-separated file paths follow the tree-id.
+    // Split on \0; first element is tree-id, remaining elements (excluding trailing empty) are conflicted files.
+    const parts = out.split('\0').filter(Boolean);
+    if (parts.length <= 1) {
+      return { conflicts: [], clean: true };
+    }
+    // On conflict, git outputs: <tree-id>\0<conflicted-file-1>\0<conflicted-file-2>\0...
+    // On clean merge, git outputs only: <tree-id>
+    const conflicts = parts.slice(1);
+    return { conflicts, clean: conflicts.length === 0 };
+  } catch {
+    // Either merge-tree is unsupported (older git) or unrelated histories
+    return { conflicts: [], clean: false };
+  }
+}
+
+/**
+ * Get ahead/behind counts between two refs without modifying state.
+ */
+export async function aheadBehind(
+  repoPath: string,
+  base: string,
+  compare: string
+): Promise<{ ahead: number; behind: number }> {
+  const git = getGit(repoPath);
+  try {
+    const out = await git.raw(['rev-list', '--left-right', '--count', `${base}...${compare}`]);
+    // Output: "<behind>\t<ahead>"  (left = base, right = compare)
+    const [behind, ahead] = out.trim().split(/\s+/).map(n => parseInt(n, 10) || 0);
+    return { ahead, behind };
+  } catch {
+    return { ahead: 0, behind: 0 };
+  }
 }
 
 function parseDiff(rawDiff: string, oldPath: string, newPath: string): { hunks: DiffHunk[]; newFile: boolean; deletedFile: boolean; renamedFile: boolean; modeChange?: { oldMode: number; newMode: number } } {
@@ -730,35 +789,61 @@ export async function stashBranch(repoPath: string, branch: string, index = 0): 
 
 export async function tags(repoPath: string): Promise<TagInfo[]> {
   const git = getGit(repoPath);
-  const tagList = await git.tag(['-n99', '--sort=-creatordate']);
-  if (!tagList.trim()) return [];
-  const lines = tagList.split('\n').filter(Boolean);
+  // Use for-each-ref to reliably distinguish annotated (objecttype=tag) from lightweight (objecttype=commit).
+  // Note: real tab chars in format (not %x09 — simple-git passes args through as-is).
+  // Fields: name, objecttype, objectname, subject, *objectname (target commit for annotated),
+  //         taggerdate, taggername
+  const fmt = [
+    '%(refname:short)',
+    '%(objecttype)',
+    '%(objectname)',
+    '%(contents:subject)',
+    '%(*objectname)',
+    '%(taggerdate:iso-strict)',
+    '%(taggername)',
+  ].join('\t');
+  let rawList = '';
+  try {
+    rawList = await git.raw(['for-each-ref', '--sort=-creatordate', `--format=${fmt}`, 'refs/tags/']);
+  } catch {
+    rawList = '';
+  }
+  if (!rawList.trim()) return [];
+
+  const lines = rawList.split('\n').filter(Boolean);
   const result: TagInfo[] = [];
   for (const line of lines) {
-    const match = line.match(/^(\S+)\s+(.*)$/);
-    if (match) {
-      const name = match[1];
-      const annotation = match[2].trim();
-      try {
-        const hash = await git.revparse([name]);
-        const targetHash = await git.raw(['rev-list', '-n', '1', name]);
-        result.push({
-          name,
-          hash: hash.trim(),
-          hashAbbrev: hash.trim().substring(0, 7),
-          annotation: annotation || undefined,
-          lightweight: annotation === '',
-          targetHash: targetHash.trim(),
-        });
-      } catch {
-        result.push({
-          name,
-          hash: '',
-          hashAbbrev: '',
-          annotation: annotation || undefined,
-          lightweight: annotation === '',
-        });
-      }
+    const parts = line.split('\t');
+    if (parts.length < 4) continue;
+    const [name, objectType, objectname, subject, targetHash, taggerDate, taggerName] = parts;
+    const isAnnotated = objectType === 'tag';
+    try {
+      // For lightweight tags, objectname is the commit hash; for annotated, objectname is the tag object hash
+      // and *objectname (targetHash) is the commit hash. We want the commit hash in both cases.
+      const commitHash = isAnnotated
+        ? (targetHash || (await git.revparse([`${name}^{commit}`])).trim())
+        : objectname;
+      result.push({
+        name,
+        hash: commitHash,
+        hashAbbrev: commitHash.substring(0, 7),
+        annotation: isAnnotated ? (subject || undefined) : undefined,
+        date: taggerDate || undefined,
+        author: taggerName || undefined,
+        lightweight: !isAnnotated,
+        targetHash: targetHash || undefined,
+      });
+    } catch {
+      result.push({
+        name,
+        hash: objectname || '',
+        hashAbbrev: (objectname || '').substring(0, 7),
+        annotation: isAnnotated ? (subject || undefined) : undefined,
+        date: taggerDate || undefined,
+        author: taggerName || undefined,
+        lightweight: !isAnnotated,
+        targetHash: targetHash || undefined,
+      });
     }
   }
   return result;
@@ -1104,11 +1189,11 @@ export async function cherryPick(
   args.push(...hashes);
   try {
     await git.raw(args);
-    return { conflicts: [] };
   } catch {
-    const statusRes = await status(repoPath);
-    return { conflicts: statusRes.conflicted };
+    // simple-git may throw on conflicts, fall through to status check
   }
+  const statusRes = await status(repoPath);
+  return { conflicts: statusRes.conflicted };
 }
 
 export async function cherryPickAbort(repoPath: string): Promise<void> {
@@ -1132,11 +1217,11 @@ export async function revert(
   args.push(...hashes);
   try {
     await git.raw(args);
-    return { conflicts: [] };
   } catch {
-    const statusRes = await status(repoPath);
-    return { conflicts: statusRes.conflicted };
+    // simple-git may throw on conflicts, fall through to status check
   }
+  const statusRes = await status(repoPath);
+  return { conflicts: statusRes.conflicted };
 }
 
 export async function revertAbort(repoPath: string): Promise<void> {
@@ -1254,6 +1339,13 @@ export async function blame(
   let current: Partial<BlameLine> & { content?: string } = {};
   let finalLineNumber = 0;
 
+  const flush = () => {
+    if (current.hash && current.content !== undefined) {
+      lines.push(current as BlameLine);
+    }
+    current = {};
+  };
+
   for (const line of rawLines) {
     if (line.startsWith('author ')) current.author = line.substring(7);
     else if (line.startsWith('author-mail ')) current.authorMail = line.substring(12);
@@ -1264,13 +1356,7 @@ export async function blame(
     else if (line.startsWith('committer-time ')) current.committerTime = line.substring(15);
     else if (line.startsWith('committer-tz ')) current.committerTz = line.substring(13);
     else if (line.startsWith('summary ')) current.summary = line.substring(8);
-    else if (line.startsWith('filename ')) {
-      // end of entry
-      if (current.hash) {
-        lines.push(current as BlameLine);
-      }
-      current = {};
-    } else if (line.match(/^[0-9a-f]{40}/)) {
+    else if (line.match(/^[0-9a-f]{40}/)) {
       const parts = line.split(' ');
       current.hash = parts[0];
       current.hashAbbrev = parts[0].substring(0, 7);
@@ -1279,10 +1365,11 @@ export async function blame(
       current.finalLineNumber = finalLineNumber;
     } else if (line.startsWith('\t')) {
       current.content = line.substring(1);
+      // content line is the last field for this entry, flush now
+      flush();
+    } else if (line.startsWith('filename ')) {
+      // ignore - we flush on content line which always comes after filename
     }
-  }
-  if (current.hash) {
-    lines.push(current as BlameLine);
   }
 
   return {
