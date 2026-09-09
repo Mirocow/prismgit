@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil, AlertCircle, Search, FolderTree, ArrowUp, ArrowDown, X } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
@@ -413,6 +413,26 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
 
   const totalChanged = (status?.files.length ?? 0);
 
+  // SmartGit-style folder highlighting: number of changed files per directory
+  // (every ancestor folder of a changed file gets a counter). Conflicted files
+  // are counted too — they may not be present in status.files.
+  const dirChangeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    const seen = new Set<string>();
+    const add = (path: string) => {
+      if (seen.has(path)) return;
+      seen.add(path);
+      const parts = path.split('/');
+      for (let i = 1; i < parts.length; i++) {
+        const dir = parts.slice(0, i).join('/');
+        counts.set(dir, (counts.get(dir) ?? 0) + 1);
+      }
+    };
+    for (const f of status?.files ?? []) add(f.path);
+    for (const p of status?.conflicted ?? []) add(p);
+    return counts;
+  }, [status]);
+
   // SmartGit-style "N files hidden": tracked files without any changes.
   const changedTrackedCount = (status?.files ?? []).filter((f) => {
     const idx = f.index as string;
@@ -760,6 +780,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                   onToggleExpand={toggleDirExpand}
                   selectedDir={fileScopeDir}
                   onSelectDir={handleSelectDir}
+                  changeCounts={dirChangeCounts}
+                  totalChanges={totalChanged}
                 />
               </div>
             </div>

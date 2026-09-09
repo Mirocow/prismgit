@@ -11,6 +11,22 @@ interface DirTreePanelProps {
   onToggleExpand: (path: string) => void;
   selectedDir: string | null;
   onSelectDir: (dir: string | null) => void;
+  /** Changed-file count per directory path (every ancestor folder included). */
+  changeCounts: Map<string, number>;
+  /** Total number of changed files in the repository (for the root badge). */
+  totalChanges: number;
+}
+
+/** Small rounded counter shown next to folders that contain changed files. */
+function ChangeBadge({ count }: { count: number }) {
+  return (
+    <span
+      className="ml-auto flex-shrink-0 min-w-[16px] text-center rounded-full bg-accent-muted text-accent text-2xs font-semibold px-1 leading-4"
+      title={`${count} changed file${count === 1 ? '' : 's'}`}
+    >
+      {count}
+    </span>
+  );
 }
 
 const ROOT_KEY = '__repo_root__';
@@ -22,6 +38,7 @@ function DirRows({
   onToggleExpand,
   selectedDir,
   onSelectDir,
+  changeCounts,
 }: {
   node: DirNode;
   depth: number;
@@ -29,10 +46,13 @@ function DirRows({
   onToggleExpand: (path: string) => void;
   selectedDir: string | null;
   onSelectDir: (dir: string | null) => void;
+  changeCounts: Map<string, number>;
 }) {
   const open = expanded.has(node.path);
   const hasChildren = node.children.length > 0;
   const selected = selectedDir === node.path;
+  const changeCount = changeCounts.get(node.path) ?? 0;
+  const hasChanges = changeCount > 0;
   return (
     <>
       <div
@@ -58,8 +78,14 @@ function DirRows({
         ) : (
           <span className="w-4 flex-shrink-0" />
         )}
-        <Folder size={12} className="flex-shrink-0" />
-        <span className="truncate">{node.name}</span>
+        <Folder
+          size={12}
+          className={cn('flex-shrink-0', hasChanges ? 'text-accent' : 'text-text-tertiary')}
+        />
+        <span className={cn('truncate', hasChanges && 'text-accent font-semibold')}>
+          {node.name}
+        </span>
+        {hasChanges && <ChangeBadge count={changeCount} />}
       </div>
       {open &&
         hasChildren &&
@@ -72,6 +98,7 @@ function DirRows({
             onToggleExpand={onToggleExpand}
             selectedDir={selectedDir}
             onSelectDir={onSelectDir}
+            changeCounts={changeCounts}
           />
         ))}
     </>
@@ -110,6 +137,7 @@ export function DirTreePanel(p: DirTreePanelProps) {
         <span className="text-text-tertiary truncate">
           ({p.loading && p.branch === null ? '?' : p.branch ?? 'HEAD'})
         </span>
+        {p.totalChanges > 0 && <ChangeBadge count={p.totalChanges} />}
       </div>
 
       {rootOpen &&
@@ -127,6 +155,7 @@ export function DirTreePanel(p: DirTreePanelProps) {
               onToggleExpand={p.onToggleExpand}
               selectedDir={p.selectedDir}
               onSelectDir={p.onSelectDir}
+              changeCounts={p.changeCounts}
             />
           ))
         ))}
