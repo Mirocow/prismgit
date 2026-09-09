@@ -52,7 +52,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 640,
     backgroundColor: '#f8f9fa',
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    frame: false,
     title: 'SmartGit Electron',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -62,7 +62,6 @@ function createWindow(): BrowserWindow {
       spellcheck: true,
     },
     show: false,
-    trafficLightPosition: process.platform === 'darwin' ? { x: 13, y: 11 } : undefined,
   });
 
   // Restore maximized/fullscreen state

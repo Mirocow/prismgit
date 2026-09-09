@@ -7,6 +7,47 @@ import { WindowStyleSwitcher, useWindowStyleStore } from './WindowStyleSwitcher'
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
+// Window control buttons — frameless window
+function WindowControls() {
+  const handleMinimize = () => api.window.minimize();
+  const handleMaximize = async () => {
+    const isMax = await api.window.isMaximized();
+    if (isMax) {
+      // Need to unmaximize — call maximize which toggles
+      api.window.maximize();
+    } else {
+      api.window.maximize();
+    }
+  };
+  const handleClose = () => api.window.close();
+
+  return (
+    <div className="flex items-center no-drag flex-shrink-0">
+      <button
+        className="flex items-center justify-center w-11 h-9 hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-text-secondary"
+        onClick={handleMinimize}
+        title="Minimize"
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor" /></svg>
+      </button>
+      <button
+        className="flex items-center justify-center w-11 h-9 hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-text-secondary"
+        onClick={handleMaximize}
+        title="Maximize"
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" /></svg>
+      </button>
+      <button
+        className="flex items-center justify-center w-11 h-9 hover:bg-red-500 hover:text-white transition-colors text-text-secondary"
+        onClick={handleClose}
+        title="Close"
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" strokeWidth="1.2" /></svg>
+      </button>
+    </div>
+  );
+}
+
 interface ToolbarProps {
   onFind?: () => void;
   onGitFlow?: () => void;
@@ -29,7 +70,6 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
   const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
 
   const disabled = !currentRepo;
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
 
   const handlePush = async () => {
     if (!currentRepo) return;
@@ -87,11 +127,8 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
     <header
       className="flex items-center h-9 bg-bg-tertiary border-b border-border-default flex-shrink-0 select-none titlebar-drag"
     >
-      {/* macOS traffic light spacing */}
-      {isMac && <div className="w-[70px] flex-shrink-0" />}
-
       {/* App name (left, like Ollama Code) */}
-      <div className="flex items-center gap-2 px-2 flex-shrink-0">
+      <div className="flex items-center gap-2 px-3 flex-shrink-0">
         <span className="text-xs font-semibold text-accent">SmartGit</span>
         {currentRepo && (
           <>
@@ -209,8 +246,8 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
         />
       </div>
 
-      {/* Windows/Linux: spacer for native window controls */}
-      {!isMac && <div className="w-[100px] flex-shrink-0 titlebar-drag" />}
+      {/* Window controls (frameless) — minimize, maximize, close */}
+      <WindowControls />
     </header>
   );
 }
