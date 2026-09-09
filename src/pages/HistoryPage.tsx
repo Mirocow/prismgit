@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DiffViewer } from '../components/DiffViewer';
+import { CommitFileTree } from '../components/CommitFileTree';
 import {
   ChevronDown, ChevronRight,
   Copy,
@@ -51,6 +52,8 @@ export function HistoryPage() {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [showFiles, setShowFiles] = useState(true);
   const [filesPage, setFilesPage] = useState(0);
+  const [filesViewMode, setFilesViewMode] = useState<'list' | 'tree'>('list');
+  const [expandedFileDirs, setExpandedFileDirs] = useState<Set<string>>(new Set());
   const [editingMessage, setEditingMessage] = useState(false);
   const [editMsgValue, setEditMsgValue] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -915,18 +918,85 @@ export function HistoryPage() {
                     {showFiles ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
                     <FileText size={10} /> Files ({commitFiles.length})
                   </button>
-                  {/* Pagination for large commits */}
-                  {commitFiles.length > 50 && (
-                    <span className="flex items-center gap-1 normal-case">
-                      <button className="text-2xs hover:text-accent" onClick={() => setFilesPage(Math.max(0, filesPage - 1))} disabled={filesPage === 0}>‹ Prev</button>
-                      <span className="text-2xs">{filesPage * 50 + 1}-{Math.min((filesPage + 1) * 50, commitFiles.length)} / {commitFiles.length}</span>
-                      <button className="text-2xs hover:text-accent" onClick={() => setFilesPage(Math.min(Math.ceil(commitFiles.length / 50) - 1, filesPage + 1))} disabled={filesPage >= Math.ceil(commitFiles.length / 50) - 1}>Next ›</button>
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2 normal-case">
+                    {/* View mode toggle: List / Tree */}
+                    <div className="flex bg-bg-tertiary rounded text-2xs">
+                      <button
+                        className={cn('px-1.5 py-0.5 rounded-l', filesViewMode === 'list' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}
+                        onClick={() => setFilesViewMode('list')}
+                        title="Flat list view"
+                      >List</button>
+                      <button
+                        className={cn('px-1.5 py-0.5 rounded-r', filesViewMode === 'tree' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}
+                        onClick={() => setFilesViewMode('tree')}
+                        title="Tree view (collapsible folders)"
+                      >Tree</button>
+                    </div>
+                    {/* Pagination for large commits */}
+                    {commitFiles.length > 50 && filesViewMode === 'list' && (
+                      <span className="flex items-center gap-1">
+                        <button className="text-2xs hover:text-accent" onClick={() => setFilesPage(Math.max(0, filesPage - 1))} disabled={filesPage === 0}>‹</button>
+                        <span className="text-2xs">{filesPage * 50 + 1}-{Math.min((filesPage + 1) * 50, commitFiles.length)}/{commitFiles.length}</span>
+                        <button className="text-2xs hover:text-accent" onClick={() => setFilesPage(Math.min(Math.ceil(commitFiles.length / 50) - 1, filesPage + 1))} disabled={filesPage >= Math.ceil(commitFiles.length / 50) - 1}>›</button>
+                      </span>
+                    )}
+                  </div>
                 </div>
                 {showFiles && (
                   <div className="space-y-0.5">
                     {loadingFiles ? <div className="text-2xs text-text-tertiary">Loading...</div> :
+                      filesViewMode === 'tree' ? (
+                        <CommitFileTree
+                          files={commitFiles}
+                          expandedDirs={expandedFileDirs}
+                          onToggleDir={(dir) => {
+                            setExpandedFileDirs(prev => {
+                              const next = new Set(prev);
+                              if (next.has(dir)) next.delete(dir);
+                              else next.add(dir);
+                              return next;
+                            });
+                          }}
+                          globalPathFilter={globalPathFilter}
+                          onFileClick={(f) => {
+                            useSelectionStore.getState().selectFile(f.path);
+                            useSelectionStore.getState().setPathFilter(f.path);
+                            window.location.hash = '#/history';
+                          }}
+                          onFileContextMenu={(e, f) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const items: ContextMenuItem[] = [
+                              { label: 'View file history...', clickId: 'file-history' },
+                              { label: 'Open in Diff tool...', clickId: 'open-diff' },
+                              { label: 'Blame this file...', clickId: 'blame' },
+                              { type: 'separator' },
+                              { label: 'Copy path', clickId: 'copy-path' },
+                              { label: 'Copy full path', clickId: 'copy-full-path' },
+                            ];
+                            showContextMenu(items, (action) => {
+                              if (action === 'file-history') {
+                                useSelectionStore.getState().selectFile(f.path);
+                                useSelectionStore.getState().setPathFilter(f.path);
+                                window.location.hash = '#/history';
+                              } else if (action === 'open-diff') {
+                                useSelectionStore.getState().selectFile(f.path);
+                                useSelectionStore.getState().selectCommit(selected.hash);
+                                window.location.hash = '#/diff';
+                              } else if (action === 'blame') {
+                                useSelectionStore.getState().selectFile(f.path);
+                                window.location.hash = '#/blame';
+                              } else if (action === 'copy-path') {
+                                copyToClipboard(f.path);
+                                toast.success('Path copied');
+                              } else if (action === 'copy-full-path') {
+                                copyToClipboard(`${repo.path}/${f.path}`.replace(/\/+/g, '/'));
+                                toast.success('Full path copied');
+                              }
+                            });
+                          }}
+                        />
+                      ) : (
                       commitFiles.slice(filesPage * 50, (filesPage + 1) * 50).map((f, i) => {
                         // Highlight the file that matches the active file-history filter
                         const isHighlighted = globalPathFilter === f.path || globalPathFilter === f.oldPath;
@@ -936,7 +1006,6 @@ export function HistoryPage() {
                           isHighlighted && 'bg-accent-muted border-l-2 border-accent'
                         )}
                           onClick={() => {
-                            // Click on file in commit → set path filter + navigate to file history
                             useSelectionStore.getState().selectFile(f.path);
                             useSelectionStore.getState().setPathFilter(f.path);
                             window.location.hash = '#/history';
@@ -958,7 +1027,6 @@ export function HistoryPage() {
                                 useSelectionStore.getState().setPathFilter(f.path);
                                 window.location.hash = '#/history';
                               } else if (action === 'open-diff') {
-                                // Open Diff tool with this file and the selected commit as base ref
                                 useSelectionStore.getState().selectFile(f.path);
                                 useSelectionStore.getState().selectCommit(selected.hash);
                                 window.location.hash = '#/diff';
@@ -991,6 +1059,7 @@ export function HistoryPage() {
                         </div>
                         );
                       })
+                      )
                     }
                   </div>
                 )}

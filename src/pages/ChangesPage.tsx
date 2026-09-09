@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, Downlo
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { LazyFileList } from '../components/LazyFileList';
+import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
@@ -153,6 +154,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const { width: leftWidth, handleResize: handleLeftResize } = useResizableWidth(500, 250, 800);
   const { width: treeWidth, handleResize: handleTreeResize } = useResizableWidth(210, 140, 380);
   const { height: journalHeight, handleResize: handleJournalResize } = useResizableHeight(180, 60, 400);
+  const { height: commitHeight, handleResize: handleCommitResize } = useResizableHeight(120, 60, 500);
+  const [showMarkdownPreview, setShowMarkdownPreview] = useState(false);
   const [dirTree, setDirTree] = useState<DirNode[]>([]);
   const [dirTreeLoading, setDirTreeLoading] = useState(false);
   const [trackedTotal, setTrackedTotal] = useState(0);
@@ -1133,17 +1136,25 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             </div>
           </div>
 
-          {/* Commit editor */}
-          <div className="border-t border-border-default bg-bg-secondary p-2 flex-shrink-0">
-            <div className="flex items-center gap-2 mb-1">
+          {/* Commit editor — resizable with markdown preview */}
+          <div className="border-t border-border-default bg-bg-secondary flex-shrink-0 flex flex-col" style={{ height: commitHeight }}>
+            <ResizableSplitter direction="vertical" onResize={(d) => handleCommitResize(-d)} />
+            <div className="flex items-center gap-2 px-2 py-1">
               <label className="flex items-center gap-1 text-2xs text-text-secondary cursor-pointer">
                 <input
                   type="checkbox"
                   checked={amend}
                   onChange={(e) => setAmend(e.target.checked)}
                 />
-                Amend last commit
+                Amend
               </label>
+              <button
+                className={cn('text-2xs px-1.5 py-0.5 rounded', showMarkdownPreview ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
+                onClick={() => setShowMarkdownPreview(!showMarkdownPreview)}
+                title="Toggle markdown preview"
+              >
+                MD
+              </button>
               <div className="flex-1" />
               <button
                 className="btn btn-secondary text-xs"
@@ -1164,19 +1175,26 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                 Commit
               </button>
             </div>
-            <textarea
-              className="w-full text-sm font-mono resize-none"
-              placeholder="Commit message..."
-              value={commitMsg}
-              onChange={(e) => setCommitMsg(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                  e.preventDefault();
-                  handleCommit();
-                }
-              }}
-              style={{ height: 48 }}
-            />
+            <div className="flex-1 flex overflow-hidden">
+              <textarea
+                className="flex-1 text-sm font-mono resize-none p-2 bg-bg-primary border-r border-border-subtle"
+                placeholder="Commit message... (supports markdown)"
+                value={commitMsg}
+                onChange={(e) => setCommitMsg(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    handleCommit();
+                  }
+                }}
+                style={{ minHeight: 0 }}
+              />
+              {showMarkdownPreview && (
+                <div className="flex-1 overflow-y-auto p-2 text-xs">
+                  <CommitMarkdownPreview content={commitMsg} />
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
