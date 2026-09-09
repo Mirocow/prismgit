@@ -22,6 +22,7 @@ import { api, type LogEntry, type CommitFile } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
+import { WindowStyleSwitcher, useWindowStyle } from '../components/WindowStyleSwitcher';
 
 const BRANCH_COLORS = [
   '#5B9BD5', // Steel Blue
@@ -35,6 +36,11 @@ const BRANCH_COLORS = [
   '#4472C4', // Blue
   '#E97132', // Orange
 ];
+
+// MUST match the rowHeight used in GraphColumn and commit list rows
+const ROW_HEIGHT = 28;
+const GRAPH_LANE_WIDTH = 22;
+const GRAPH_PADDING = 8;
 
 interface CommitNode {
   entry: LogEntry;
@@ -61,65 +67,38 @@ function computeGraphLanes(entries: LogEntry[]): CommitNode[] {
   for (const entry of entries) {
     let lane = -1;
     for (let i = 0; i < lanes.length; i++) {
-      if (lanes[i] === entry.hash) {
-        lane = i;
-        break;
-      }
+      if (lanes[i] === entry.hash) { lane = i; break; }
     }
-
     if (lane === -1) {
       for (let i = 0; i < lanes.length; i++) {
-        if (lanes[i] === null) {
-          lane = i;
-          break;
-        }
+        if (lanes[i] === null) { lane = i; break; }
       }
-      if (lane === -1) {
-        lane = lanes.length;
-        lanes.push(null);
-      }
+      if (lane === -1) { lane = lanes.length; lanes.push(null); }
     }
 
     let color = BRANCH_COLORS[lane % BRANCH_COLORS.length];
-    if (entry.refs.some((r) => r.includes('HEAD'))) {
-      color = '#2b2b2b'; // Dark for HEAD
-    }
+    if (entry.refs.some((r) => r.includes('HEAD'))) color = '#2b2b2b';
 
     const parentLanes: number[] = [];
     const connections: { fromLane: number; toLane: number; color: string }[] = [];
-
     lanes[lane] = null;
 
     for (let pi = 0; pi < entry.parents.length; pi++) {
       const parentHash = entry.parents[pi];
       let parentLane = -1;
-
       for (let i = 0; i < lanes.length; i++) {
-        if (lanes[i] === parentHash) {
-          parentLane = i;
-          break;
-        }
+        if (lanes[i] === parentHash) { parentLane = i; break; }
       }
-
       if (parentLane === -1) {
-        if (pi === 0) {
-          parentLane = lane;
-          lanes[lane] = parentHash;
-        } else {
+        if (pi === 0) { parentLane = lane; lanes[lane] = parentHash; }
+        else {
           for (let i = 0; i < lanes.length; i++) {
-            if (lanes[i] === null) {
-              parentLane = i;
-              break;
-            }
+            if (lanes[i] === null) { parentLane = i; break; }
           }
-          if (parentLane === -1) {
-            parentLane = lanes.length;
-            lanes.push(null);
-          }
+          if (parentLane === -1) { parentLane = lanes.length; lanes.push(null); }
           lanes[parentLane] = parentHash;
         }
       }
-
       parentLanes.push(parentLane);
       connections.push({
         fromLane: lane,
@@ -127,69 +106,9 @@ function computeGraphLanes(entries: LogEntry[]): CommitNode[] {
         color: pi === 0 ? color : BRANCH_COLORS[parentLane % BRANCH_COLORS.length],
       });
     }
-
     nodes.push({ entry, lane, parentLanes, connections, color });
   }
-
   return nodes;
-}
-
-function GraphColumn({ nodes, selectedIndex }: { nodes: CommitNode[]; selectedIndex: number | null }) {
-  const maxLane = Math.max(0, ...nodes.map((n) => n.lane), ...nodes.flatMap((n) => n.parentLanes));
-  const laneWidth = 20;
-  const rowHeight = 24;
-  const width = (maxLane + 1) * laneWidth + 8;
-
-  return (
-    <div className="relative flex-shrink-0" style={{ width, minHeight: nodes.length * rowHeight }}>
-      <svg width={width} height={nodes.length * rowHeight} className="block">
-        {/* Connection lines */}
-        {nodes.map((node, idx) => {
-          const nextIdx = idx + 1;
-          const fromY = idx * rowHeight + rowHeight / 2;
-          return node.connections.map((conn, ci) => {
-            const targetNode = nodes[nextIdx];
-            if (!targetNode) return null;
-            const toY = nextIdx * rowHeight + rowHeight / 2;
-            const fromX = conn.fromLane * laneWidth + laneWidth / 2 + 4;
-            const toX = conn.toLane * laneWidth + laneWidth / 2 + 4;
-            const isDirect = conn.fromLane === conn.toLane;
-            return (
-              <path
-                key={`${idx}-${ci}`}
-                d={isDirect ? `M ${fromX} ${fromY} L ${toX} ${toY}` : `M ${fromX} ${fromY} C ${fromX} ${(fromY + toY) / 2}, ${toX} ${(fromY + toY) / 2}, ${toX} ${toY}`}
-                stroke={conn.color}
-                strokeWidth={1.5}
-                fill="none"
-                opacity={0.7}
-              />
-            );
-          });
-        })}
-        {/* Commit nodes — hollow circles, filled for selected */}
-        {nodes.map((node, idx) => {
-          const cx = node.lane * laneWidth + laneWidth / 2 + 4;
-          const cy = idx * rowHeight + rowHeight / 2;
-          const isSelected = idx === selectedIndex;
-          const isMerge = node.entry.parents.length > 1;
-          return (
-            <g key={idx}>
-              {isMerge ? (
-                <>
-                  <circle cx={cx} cy={cy} r={5} fill={node.color} stroke="var(--graph-node-border)" strokeWidth={1.5} />
-                  <circle cx={cx} cy={cy} r={2} fill="var(--graph-node-fill)" />
-                </>
-              ) : isSelected ? (
-                <circle cx={cx} cy={cy} r={4} fill="var(--graph-node-selected)" stroke="var(--graph-node-border)" strokeWidth={1} />
-              ) : (
-                <circle cx={cx} cy={cy} r={3.5} fill="var(--graph-node-fill)" stroke={node.color} strokeWidth={1.5} />
-              )}
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
 }
 
 export function HistoryPage() {
@@ -208,6 +127,7 @@ export function HistoryPage() {
   const [editingMessage, setEditingMessage] = useState(false);
   const [editMsgValue, setEditMsgValue] = useState('');
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
+  const { style: windowStyle, setStyle: setWindowStyle } = useWindowStyle();
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
@@ -222,15 +142,10 @@ export function HistoryPage() {
     }
   }, [repo.path, toast]);
 
-  useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
 
   useEffect(() => {
-    if (selectedIdx === null) {
-      setCommitFiles([]);
-      return;
-    }
+    if (selectedIdx === null) { setCommitFiles([]); return; }
     const selected = filtered[selectedIdx];
     if (!selected) return;
     setLoadingFiles(true);
@@ -243,11 +158,10 @@ export function HistoryPage() {
   const filtered = useMemo(() => {
     if (!search.trim()) return entries;
     const q = search.toLowerCase();
-    return entries.filter(
-      (e) =>
-        e.subject.toLowerCase().includes(q) ||
-        e.author.name.toLowerCase().includes(q) ||
-        e.hash.toLowerCase().includes(q)
+    return entries.filter(e =>
+      e.subject.toLowerCase().includes(q) ||
+      e.author.name.toLowerCase().includes(q) ||
+      e.hash.toLowerCase().includes(q)
     );
   }, [entries, search]);
 
@@ -256,55 +170,33 @@ export function HistoryPage() {
     return computeGraphLanes(filtered);
   }, [showGraph, filtered]);
 
+  const maxLane = useMemo(() => {
+    if (graphNodes.length === 0) return 0;
+    return Math.max(0, ...graphNodes.map(n => n.lane), ...graphNodes.flatMap(n => n.parentLanes));
+  }, [graphNodes]);
+
+  const graphWidth = (maxLane + 1) * GRAPH_LANE_WIDTH + GRAPH_PADDING * 2;
+
   const handleCherryPick = async (entry: LogEntry) => {
-    if (!confirm(`Cherry-pick commit ${shortHash(entry.hash)} onto current branch?`)) return;
+    if (!confirm(`Cherry-pick ${shortHash(entry.hash)}?`)) return;
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
-      if (result.conflicts.length > 0) {
-        toast.warning(`Conflicts in ${result.conflicts.length} files`, result.conflicts.join('\n'));
-      } else {
-        toast.success('Cherry-picked successfully');
-      }
+      if (result.conflicts.length > 0) toast.warning(`${result.conflicts.length} conflicts`, result.conflicts.join('\n'));
+      else toast.success('Cherry-picked');
       await refreshStatus(repo.path);
       await loadHistory();
-    } catch (e) {
-      toast.error('Cherry-pick failed', String(e));
-    }
+    } catch (e) { toast.error('Cherry-pick failed', String(e)); }
   };
 
   const handleRevert = async (entry: LogEntry) => {
-    if (!confirm(`Revert commit ${shortHash(entry.hash)}?`)) return;
+    if (!confirm(`Revert ${shortHash(entry.hash)}?`)) return;
     try {
       const result = await api.git.revert(repo.path, [entry.hash]);
-      if (result.conflicts.length > 0) {
-        toast.warning(`Conflicts in ${result.conflicts.length} files`, result.conflicts.join('\n'));
-      } else {
-        toast.success('Reverted successfully');
-      }
+      if (result.conflicts.length > 0) toast.warning(`${result.conflicts.length} conflicts`, result.conflicts.join('\n'));
+      else toast.success('Reverted');
       await refreshStatus(repo.path);
       await loadHistory();
-    } catch (e) {
-      toast.error('Revert failed', String(e));
-    }
-  };
-
-  const handleEditMessage = (entry: LogEntry) => {
-    setEditingMessage(true);
-    setEditMsgValue(`${entry.subject}\n\n${entry.body}`.trim());
-  };
-
-  const handleSaveMessage = async () => {
-    if (selectedIdx === null) return;
-    const selected = filtered[selectedIdx];
-    if (!selected) return;
-    try {
-      await api.git.editCommitMessage(repo.path, selected.hash, editMsgValue);
-      toast.success('Commit message updated');
-      setEditingMessage(false);
-      await loadHistory();
-    } catch (e) {
-      toast.error('Failed to edit message', String(e));
-    }
+    } catch (e) { toast.error('Revert failed', String(e)); }
   };
 
   const handleOpenInBrowser = async () => {
@@ -313,14 +205,9 @@ export function HistoryPage() {
     if (!selected) return;
     try {
       const info = await api.git.extractRepoInfo(repo.path);
-      if (info.webUrl && info.provider !== 'unknown') {
-        api.app.openExternal(`${info.webUrl}/commit/${selected.hash}`);
-      } else {
-        toast.info('Repository has no remote URL');
-      }
-    } catch (e) {
-      toast.error('Failed to open in browser', String(e));
-    }
+      if (info.webUrl) api.app.openExternal(`${info.webUrl}/commit/${selected.hash}`);
+      else toast.info('No remote URL');
+    } catch (e) { toast.error('Failed', String(e)); }
   };
 
   const selected = selectedIdx !== null ? filtered[selectedIdx] : null;
@@ -328,19 +215,20 @@ export function HistoryPage() {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary">
+      {/* Header with graph count + filter + window style switcher */}
+      <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary" style={{ height: 28 }}>
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium">Graph</span>
           <span className="text-2xs text-text-tertiary">{filtered.length} commits</span>
         </div>
         <div className="flex items-center gap-2">
+          <WindowStyleSwitcher value={windowStyle} onChange={setWindowStyle} />
           <input
             type="text"
             placeholder="Filter..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="text-xs w-40 px-2 py-0.5"
+            className="text-xs w-32 px-2 py-0.5"
           />
           <button
             className={cn('icon-btn !w-5 !h-5', showGraph && 'active')}
@@ -356,129 +244,171 @@ export function HistoryPage() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* List */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Graph + Commit list — SINGLE scrollable container, rows aligned */}
+        <div className="flex-1 overflow-y-auto" style={{ position: 'relative' }}>
           {loading ? (
             <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+          ) : filtered.length === 0 ? (
+            <div className="p-8 text-center text-text-tertiary text-sm">
+              {search ? 'No commits match' : 'No commits yet'}
+            </div>
           ) : (
-            <div className="flex">
-              {showGraph && !loading && filtered.length > 0 && (
-                <div className="border-r border-border-subtle bg-bg-secondary">
-                  <GraphColumn nodes={graphNodes} selectedIndex={selectedIdx} />
+            <>
+              {/* Working Tree row */}
+              {hasUncommittedChanges && (
+                <div
+                  className={cn(
+                    'flex items-center gap-2 px-2 border-b border-border-subtle cursor-pointer',
+                    selectedIdx === -1 ? 'bg-bg-selected' : 'hover:bg-bg-hover'
+                  )}
+                  style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8 }}
+                  onClick={() => { setSelectedIdx(-1); window.location.hash = '#/changes'; }}
+                >
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--status-deleted)' }} />
+                  <span className="text-xs font-medium text-text-primary">
+                    Working Tree ({status?.files.length || 0} changed)
+                  </span>
                 </div>
               )}
-              <div className="flex-1">
-                {/* Working Tree row */}
-                {hasUncommittedChanges && (
+
+              {/* Graph SVG overlay — absolutely positioned, aligned with rows */}
+              {showGraph && graphNodes.length > 0 && (
+                <svg
+                  width={graphWidth}
+                  height={graphNodes.length * ROW_HEIGHT}
+                  style={{
+                    position: 'absolute',
+                    top: hasUncommittedChanges ? ROW_HEIGHT : 0,
+                    left: 0,
+                    pointerEvents: 'none',
+                    zIndex: 1,
+                  }}
+                >
+                  {/* Connection lines */}
+                  {graphNodes.map((node, idx) => {
+                    const nextIdx = idx + 1;
+                    const fromY = idx * ROW_HEIGHT + ROW_HEIGHT / 2;
+                    return node.connections.map((conn, ci) => {
+                      const targetNode = graphNodes[nextIdx];
+                      if (!targetNode) return null;
+                      const toY = nextIdx * ROW_HEIGHT + ROW_HEIGHT / 2;
+                      const fromX = conn.fromLane * GRAPH_LANE_WIDTH + GRAPH_LANE_WIDTH / 2 + GRAPH_PADDING;
+                      const toX = conn.toLane * GRAPH_LANE_WIDTH + GRAPH_LANE_WIDTH / 2 + GRAPH_PADDING;
+                      const isDirect = conn.fromLane === conn.toLane;
+                      return (
+                        <path
+                          key={`${idx}-${ci}`}
+                          d={isDirect
+                            ? `M ${fromX} ${fromY} L ${toX} ${toY}`
+                            : `M ${fromX} ${fromY} C ${fromX} ${(fromY + toY) / 2}, ${toX} ${(fromY + toY) / 2}, ${toX} ${toY}`}
+                          stroke={conn.color}
+                          strokeWidth={1.5}
+                          fill="none"
+                          opacity={0.7}
+                        />
+                      );
+                    });
+                  })}
+                  {/* Commit nodes */}
+                  {graphNodes.map((node, idx) => {
+                    const cx = node.lane * GRAPH_LANE_WIDTH + GRAPH_LANE_WIDTH / 2 + GRAPH_PADDING;
+                    const cy = idx * ROW_HEIGHT + ROW_HEIGHT / 2;
+                    const isSelected = selectedIdx === idx;
+                    const isMerge = node.entry.parents.length > 1;
+                    return (
+                      <g key={idx}>
+                        {isMerge ? (
+                          <>
+                            <circle cx={cx} cy={cy} r={5} fill={node.color} stroke="var(--graph-node-border)" strokeWidth={1.5} />
+                            <circle cx={cx} cy={cy} r={2} fill="var(--graph-node-fill)" />
+                          </>
+                        ) : isSelected ? (
+                          <circle cx={cx} cy={cy} r={4.5} fill="var(--graph-node-selected)" stroke="var(--graph-node-border)" strokeWidth={1} />
+                        ) : (
+                          <circle cx={cx} cy={cy} r={4} fill="var(--graph-node-fill)" stroke={node.color} strokeWidth={1.5} />
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              )}
+
+              {/* Commit rows — each row same height as graph nodes */}
+              {graphNodes.map((node, idx) => {
+                const entry = node.entry;
+                const initials = getInitials(entry.author.name);
+                const color = getAuthorColor(entry.author.name);
+                const isSelected = selectedIdx === idx;
+                const isHEAD = entry.refs.some(r => r.includes('HEAD'));
+                return (
                   <div
+                    key={entry.hash}
                     className={cn(
-                      'flex items-center gap-2 px-2 border-b border-border-subtle cursor-pointer',
-                      selectedIdx === -1 ? 'bg-bg-selected' : 'hover:bg-bg-hover'
+                      'flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
+                      isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover'
                     )}
-                    style={{ height: 24 }}
-                    onClick={() => { setSelectedIdx(-1); window.location.hash = '#/changes'; }}
+                    style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 2 }}
+                    onClick={() => setSelectedIdx(idx)}
                   >
+                    {/* HEAD indicator */}
+                    {isHEAD ? (
+                      <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>
+                    ) : (
+                      <span style={{ width: 8 }} className="flex-shrink-0" />
+                    )}
+
+                    {/* Branch labels / tags */}
+                    {entry.refs.length > 0 && (
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {entry.refs.slice(0, 3).map((ref, i) => {
+                          const isTag = ref.startsWith('tag:');
+                          const isHEAD = ref.includes('HEAD');
+                          const isRemote = ref.includes('/');
+                          const label = ref.replace(/^tag:\s*/, '').replace('HEAD -> ', '');
+                          return (
+                            <span
+                              key={i}
+                              className={cn(
+                                'text-2xs px-1.5 py-0.5 rounded border',
+                                isTag ? 'border-tag-border bg-tag-bg text-tag-text' :
+                                isHEAD ? 'border-accent bg-accent-muted text-accent' :
+                                isRemote ? 'border-status-renamed/30 bg-status-renamed/10 text-status-renamed' :
+                                'border-status-added/30 bg-status-added/10 text-status-added'
+                              )}
+                            >
+                              {isTag && <TagIcon size={8} className="inline mr-0.5" />}
+                              {label}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Message */}
+                    <span className={cn('flex-1 truncate text-xs', isSelected && 'font-medium')}>
+                      {entry.subject}
+                    </span>
+
+                    {/* Author badge */}
                     <span
-                      className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: '#c0392b' }}
-                    />
-                    <span className="text-sm font-medium text-text-primary">
-                      Working Tree ({status?.files.length || 0} changed)
+                      className="flex-shrink-0 rounded text-white font-bold text-center"
+                      style={{
+                        backgroundColor: color.bg,
+                        width: 24, height: 16,
+                        fontSize: 8, lineHeight: '16px',
+                      }}
+                    >
+                      {initials}
+                    </span>
+
+                    {/* Date */}
+                    <span className="text-2xs text-text-tertiary flex-shrink-0" style={{ width: 70, textAlign: 'right' }}>
+                      {formatTime(entry.author.date)}
                     </span>
                   </div>
-                )}
-
-                {/* Column header */}
-                <div className="flex items-center gap-2 px-2 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary" style={{ height: 20 }}>
-                  <span style={{ width: showGraph ? 0 : 16 }}></span>
-                  <span className="flex-1">Message</span>
-                  <span style={{ width: 30 }}></span>
-                  <span style={{ width: 80 }} className="text-right">Date</span>
-                </div>
-
-                {/* Commit rows */}
-                {filtered.length === 0 && (
-                  <div className="p-8 text-center text-text-tertiary text-sm">
-                    {search ? 'No commits match the search' : 'No commits yet'}
-                  </div>
-                )}
-                {filtered.map((entry, idx) => {
-                  const initials = getInitials(entry.author.name);
-                  const color = getAuthorColor(entry.author.name);
-                  const isSelected = selectedIdx === idx;
-                  const isHEAD = entry.refs.some(r => r.includes('HEAD'));
-                  return (
-                    <div
-                      key={entry.hash}
-                      className={cn(
-                        'group flex items-center gap-2 px-2 cursor-pointer border-b border-border-subtle',
-                        isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover'
-                      )}
-                      style={{ height: 24 }}
-                      onClick={() => setSelectedIdx(idx)}
-                    >
-                      {/* HEAD indicator */}
-                      {isHEAD ? (
-                        <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>
-                      ) : (
-                        <span style={{ width: 8 }} className="flex-shrink-0" />
-                      )}
-
-                      {/* Branch labels / tags */}
-                      {entry.refs.length > 0 && (
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          {entry.refs.slice(0, 3).map((ref, i) => {
-                            const isTag = ref.startsWith('tag:');
-                            const isHEAD = ref.includes('HEAD');
-                            const isRemote = ref.includes('/');
-                            const label = ref.replace(/^tag:\s*/, '').replace('HEAD -> ', '');
-                            return (
-                              <span
-                                key={i}
-                                className={cn(
-                                  'text-2xs px-1.5 py-0.5 rounded border',
-                                  isTag ? 'border-tag-border bg-tag-bg text-tag-text' :
-                                  isHEAD ? 'border-accent bg-accent-muted text-accent' :
-                                  isRemote ? 'border-status-renamed/30 bg-status-renamed/10 text-status-renamed' :
-                                  'border-status-added/30 bg-status-added/10 text-status-added'
-                                )}
-                              >
-                                {isTag && <TagIcon size={8} className="inline mr-0.5" />}
-                                {label}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {/* Message */}
-                      <span className={cn('flex-1 truncate text-xs', isSelected && 'font-medium')}>
-                        {entry.subject}
-                      </span>
-
-                      {/* Author badge */}
-                      <span
-                        className="flex-shrink-0 rounded text-white font-bold text-center"
-                        style={{
-                          backgroundColor: color.bg,
-                          width: 24,
-                          height: 16,
-                          fontSize: 8,
-                          lineHeight: '16px',
-                        }}
-                      >
-                        {initials}
-                      </span>
-
-                      {/* Date */}
-                      <span className="text-2xs text-text-tertiary flex-shrink-0" style={{ width: 70, textAlign: 'right' }}>
-                        {formatTime(entry.author.date)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+                );
+              })}
+            </>
           )}
         </div>
 
@@ -487,45 +417,18 @@ export function HistoryPage() {
         <div className="border-l border-border-default bg-bg-secondary overflow-y-auto flex-shrink-0" style={{ width: detailWidth }}>
           {selected ? (
             <div className="p-3">
-              {/* Subject */}
               <div className="text-sm font-medium text-text-primary mb-2">{selected.subject}</div>
-
-              {/* Hash + actions */}
               <div className="flex items-center gap-2 mb-3">
-                <code className="text-2xs font-mono px-1.5 py-0.5 bg-bg-tertiary rounded">
-                  {shortHash(selected.hash)}
-                </code>
-                <button
-                  className="icon-btn !w-5 !h-5"
-                  title="Copy hash"
-                  onClick={() => {
-                    copyToClipboard(selected.hash);
-                    toast.success('Hash copied');
-                  }}
-                >
+                <code className="text-2xs font-mono px-1.5 py-0.5 bg-bg-tertiary rounded">{shortHash(selected.hash)}</code>
+                <button className="icon-btn !w-5 !h-5" title="Copy hash" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>
                   <Copy size={10} />
                 </button>
-                <button
-                  className="icon-btn !w-5 !h-5"
-                  title="Open in browser"
-                  onClick={handleOpenInBrowser}
-                >
+                <button className="icon-btn !w-5 !h-5" title="Open in browser" onClick={handleOpenInBrowser}>
                   <ExternalLink size={11} />
                 </button>
               </div>
-
-              {/* Author + date */}
               <div className="flex items-center gap-2 mb-3">
-                <span
-                  className="flex-shrink-0 rounded text-white font-bold text-center"
-                  style={{
-                    backgroundColor: getAuthorColor(selected.author.name).bg,
-                    width: 28,
-                    height: 18,
-                    fontSize: 9,
-                    lineHeight: '18px',
-                  }}
-                >
+                <span className="flex-shrink-0 rounded text-white font-bold text-center" style={{ backgroundColor: getAuthorColor(selected.author.name).bg, width: 28, height: 18, fontSize: 9, lineHeight: '18px' }}>
                   {getInitials(selected.author.name)}
                 </span>
                 <div className="flex-1 min-w-0">
@@ -533,8 +436,6 @@ export function HistoryPage() {
                   <div className="text-2xs text-text-tertiary">{formatTime(selected.author.date)}</div>
                 </div>
               </div>
-
-              {/* Parents */}
               {selected.parents.length > 0 && (
                 <div className="mb-3">
                   <div className="text-2xs uppercase text-text-tertiary mb-1">Parents</div>
@@ -546,67 +447,23 @@ export function HistoryPage() {
                   ))}
                 </div>
               )}
-
-              {/* Body */}
-              {selected.body && !editingMessage && (
+              {selected.body && (
                 <div className="mb-3">
-                  <div className="text-2xs uppercase text-text-tertiary mb-1 flex items-center justify-between">
-                    <span>Message</span>
-                    <button className="icon-btn !w-4 !h-4" title="Edit" onClick={() => handleEditMessage(selected)}>
-                      <Pencil size={9} />
-                    </button>
-                  </div>
-                  <pre className="text-2xs font-mono whitespace-pre-wrap text-text-secondary bg-bg-tertiary p-2 rounded">
-                    {selected.body}
-                  </pre>
+                  <div className="text-2xs uppercase text-text-tertiary mb-1">Message</div>
+                  <pre className="text-2xs font-mono whitespace-pre-wrap text-text-secondary bg-bg-tertiary p-2 rounded">{selected.body}</pre>
                 </div>
               )}
-
-              {editingMessage && (
-                <div className="mb-3">
-                  <div className="text-2xs uppercase text-text-tertiary mb-1">Edit Message</div>
-                  <textarea
-                    className="w-full text-xs font-mono h-20 resize-none mb-1"
-                    value={editMsgValue}
-                    onChange={(e) => setEditMsgValue(e.target.value)}
-                  />
-                  <div className="flex gap-1">
-                    <button className="btn btn-primary text-2xs" onClick={handleSaveMessage}>Save</button>
-                    <button className="btn btn-secondary text-2xs" onClick={() => setEditingMessage(false)}>Cancel</button>
-                  </div>
-                </div>
-              )}
-
-              {/* Actions */}
               <div className="flex flex-wrap gap-1 mb-3 pb-3 border-b border-border-default">
-                <button
-                  className="btn btn-secondary text-2xs"
-                  onClick={() => handleCherryPick(selected)}
-                  title="Cherry-pick onto current branch"
-                >
-                  <GitPullRequest size={10} />
-                  Cherry Pick
+                <button className="btn btn-secondary text-2xs" onClick={() => handleCherryPick(selected)} title="Cherry-pick">
+                  <GitPullRequest size={10} /> Cherry Pick
                 </button>
-                <button
-                  className="btn btn-secondary text-2xs"
-                  onClick={() => handleRevert(selected)}
-                  title="Create a revert commit"
-                >
-                  <Undo size={10} />
-                  Revert
+                <button className="btn btn-secondary text-2xs" onClick={() => handleRevert(selected)} title="Revert">
+                  <Undo size={10} /> Revert
                 </button>
               </div>
-
-              {/* Files */}
               <div>
-                <button
-                  className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-1"
-                  onClick={() => setShowFiles(!showFiles)}
-                >
-                  <span className="flex items-center gap-1">
-                    <FileText size={10} />
-                    Files ({commitFiles.length})
-                  </span>
+                <button className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-1" onClick={() => setShowFiles(!showFiles)}>
+                  <span className="flex items-center gap-1"><FileText size={10} /> Files ({commitFiles.length})</span>
                   {showFiles ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
                 </button>
                 {showFiles && (
@@ -616,12 +473,7 @@ export function HistoryPage() {
                     ) : (
                       commitFiles.map((f, i) => (
                         <div key={i} className="flex items-center gap-1 text-2xs px-1 py-0.5 rounded hover:bg-bg-hover">
-                          <span
-                            className="font-mono font-bold w-3 text-center"
-                            style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}
-                          >
-                            {f.status}
-                          </span>
+                          <span className="font-mono font-bold w-3 text-center" style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>{f.status}</span>
                           <span className="flex-1 truncate font-mono text-text-secondary">{f.path}</span>
                           {!f.binary && (f.additions > 0 || f.deletions > 0) && (
                             <span className="text-2xs flex-shrink-0">
@@ -637,9 +489,7 @@ export function HistoryPage() {
               </div>
             </div>
           ) : (
-            <div className="p-4 text-center text-text-tertiary text-sm">
-              Select a commit to view details
-            </div>
+            <div className="p-4 text-center text-text-tertiary text-sm">Select a commit</div>
           )}
         </div>
       </div>
