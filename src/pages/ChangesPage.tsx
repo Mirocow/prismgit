@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, EyeOff, Folder, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X } from '../components/icons';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
+import { LazyFileList } from '../components/LazyFileList';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
@@ -163,13 +164,25 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     }
   }, [repo.path]);
 
+  // Load diff when selected file changes — debounced to avoid multiple calls
+  // when status refreshes or multiple events fire simultaneously.
+  const lastLoadedFileRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedFile) {
       setDiff(null);
+      lastLoadedFileRef.current = null;
       return;
     }
+    // Skip if we already loaded this exact file (avoids re-load on status refresh)
+    if (lastLoadedFileRef.current === selectedFile) return;
+    lastLoadedFileRef.current = selectedFile;
+
     const isStaged = status?.staged.some((s) => s.path === selectedFile) ?? false;
-    loadDiff(selectedFile, isStaged);
+    // Debounce to avoid multiple rapid calls
+    const timer = setTimeout(() => {
+      loadDiff(selectedFile, isStaged);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [selectedFile, status, loadDiff]);
 
   useEffect(() => {
@@ -960,44 +973,29 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               </div>
             )}
 
-            {/* Staged — limit to 200 for performance on large repos */}
+            {/* Staged — all files rendered, but lazy-loaded via IntersectionObserver */}
             {stagedFiles.length > 0 && (
               <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
                 Staged ({stagedFiles.length})
               </div>
             )}
-            {stagedFiles.slice(0, 200).map((f) => renderFileRow(f, true))}
-            {stagedFiles.length > 200 && (
-              <div className="px-3 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
-                Showing first 200 of {stagedFiles.length} — use filter to narrow
-              </div>
-            )}
+            <LazyFileList files={stagedFiles} isStaged={true} renderRow={renderFileRow} />
 
-            {/* Unstaged — limit to 200 */}
+            {/* Unstaged */}
             {unstagedFiles.length > 0 && (
               <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
                 Changes ({unstagedFiles.length})
               </div>
             )}
-            {unstagedFiles.slice(0, 200).map((f) => renderFileRow(f, false))}
-            {unstagedFiles.length > 200 && (
-              <div className="px-3 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
-                Showing first 200 of {unstagedFiles.length} — use filter to narrow
-              </div>
-            )}
+            <LazyFileList files={unstagedFiles} isStaged={false} renderRow={renderFileRow} />
 
-            {/* Untracked — limit to 200 */}
+            {/* Untracked */}
             {untrackedFiles.length > 0 && (
               <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
                 Untracked ({untrackedFiles.length})
               </div>
             )}
-            {untrackedFiles.slice(0, 200).map((f) => renderFileRow(f, false))}
-            {untrackedFiles.length > 200 && (
-              <div className="px-3 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
-                Showing first 200 of {untrackedFiles.length} — use filter to narrow
-              </div>
-            )}
+            <LazyFileList files={untrackedFiles} isStaged={false} renderRow={renderFileRow} />
 
             {totalChanged === 0 && (
               <div className="flex flex-col items-center justify-center py-12 text-text-tertiary">

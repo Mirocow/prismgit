@@ -102,6 +102,9 @@ function shouldShowLine(line: DiffLine, wsMode: WhitespaceMode): boolean {
 export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: DiffViewerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
   const [wsMode, setWsMode] = useState<WhitespaceMode>('normal');
+  // Lazy loading: show first N lines per hunk, expand on demand
+  const [expandedHunks, setExpandedHunks] = useState<Set<number>>(new Set());
+  const MAX_LINES_PER_HUNK = 100;
   const [collapsedHunks, setCollapsedHunks] = useState<Set<number>>(new Set());
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set());
   const [useWordDiff, setUseWordDiff] = useState(true);
@@ -230,17 +233,23 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
               <span className="truncate">{hunk.header}</span>
               <span className="ml-auto text-2xs">+{hunk.newLines} -{hunk.oldLines}</span>
             </div>
-            {!isCollapsed && visibleLines.map((line, li) => {
-              const bg =
-                line.type === 'add' ? 'bg-status-added/10' :
-                line.type === 'del' ? 'bg-status-deleted/10' : '';
-              const color =
-                line.type === 'add' ? 'text-status-added' :
-                line.type === 'del' ? 'text-status-deleted' :
-                'text-text-primary';
-              const key = `${hi}:${li}`;
-              const isSelected = selectedLines.has(key);
-              const paired = findPairedLine(visibleLines, li);
+            {!isCollapsed && (() => {
+              const isExpanded = expandedHunks.has(hi);
+              const linesToShow = isExpanded ? visibleLines : visibleLines.slice(0, MAX_LINES_PER_HUNK);
+              const hasMore = !isExpanded && visibleLines.length > MAX_LINES_PER_HUNK;
+              return (
+                <>
+                  {linesToShow.map((line, li) => {
+                    const bg =
+                      line.type === 'add' ? 'bg-status-added/10' :
+                      line.type === 'del' ? 'bg-status-deleted/10' : '';
+                    const color =
+                      line.type === 'add' ? 'text-status-added' :
+                      line.type === 'del' ? 'text-status-deleted' :
+                      'text-text-primary';
+                    const key = `${hi}:${li}`;
+                    const isSelected = selectedLines.has(key);
+                    const paired = findPairedLine(visibleLines, li);
               return (
                 <div
                   key={li}
@@ -272,6 +281,21 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
                 </div>
               );
             })}
+                  {hasMore && (
+                    <div
+                      className="flex items-center justify-center py-1 text-2xs text-accent cursor-pointer hover:bg-accent-muted border-b border-border-subtle"
+                      onClick={() => setExpandedHunks(prev => {
+                        const next = new Set(prev);
+                        next.add(hi);
+                        return next;
+                      })}
+                    >
+                      ▼ Show {visibleLines.length - MAX_LINES_PER_HUNK} more lines
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         );
       }
