@@ -60,7 +60,7 @@ function computeGraph(entries: LogEntry[]): { nodes: CommitNode[]; maxLane: numb
 }
 
 export function AnnotatePage() {
-  const repo = useRepositoryStore((s) => s.currentRepo)!;
+  const repo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastStore();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -72,6 +72,7 @@ export function AnnotatePage() {
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
 
   const loadHistory = useCallback(async () => {
+    if (!repo) return;
     setLoading(true);
     try {
       const result = await api.git.log(repo.path, { maxCount: 200, all: true });
@@ -88,7 +89,7 @@ export function AnnotatePage() {
       setFileCounts(counts);
     } catch (e) { toast.error('Failed to load history', String(e)); }
     finally { setLoading(false); }
-  }, [repo.path, toast]);
+  }, [repo, toast]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -110,7 +111,7 @@ export function AnnotatePage() {
   const graphWidth = (maxLane + 1) * LANE_WIDTH + GRAPH_PAD * 2;
 
   useEffect(() => {
-    if (selectedIdx === null || selectedIdx < 0) { setCommitFiles([]); return; }
+    if (!repo || selectedIdx === null || selectedIdx < 0) { setCommitFiles([]); return; }
     const selected = filtered[selectedIdx];
     if (!selected) return;
     setLoadingFiles(true);
@@ -118,9 +119,13 @@ export function AnnotatePage() {
       .then(setCommitFiles)
       .catch(() => setCommitFiles([]))
       .finally(() => setLoadingFiles(false));
-  }, [selectedIdx, repo.path, filtered]);
+  }, [selectedIdx, repo, filtered]);
 
   const selected = selectedIdx !== null && selectedIdx >= 0 ? filtered[selectedIdx] : null;
+
+  if (!repo) {
+    return <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">No repository open</div>;
+  }
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
