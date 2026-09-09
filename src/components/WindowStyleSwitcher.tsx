@@ -1,32 +1,41 @@
-import { useState, useEffect } from 'react';
-import { useSettingsStore } from '../stores/settingsStore';
-import { cn } from '../lib/utils';
+import { create } from 'zustand';
 
 type WindowStyle = 'standard' | 'log' | 'working-tree';
 
 const STORAGE_KEY = 'smartgit-window-style';
 
-export function useWindowStyle() {
-  const [style, setStyleState] = useState<WindowStyle>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY) as WindowStyle;
-      // Default to 'standard' — always show sidebar + full navigation
-      return saved || 'standard';
-    } catch {
-      return 'standard';
-    }
-  });
+interface WindowStyleState {
+  style: WindowStyle;
+  setStyle: (s: WindowStyle) => void;
+}
 
-  const change = (s: WindowStyle) => {
-    setStyleState(s);
+// Initialize from localStorage
+function getInitialStyle(): WindowStyle {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY) as WindowStyle;
+    return saved || 'standard';
+  } catch {
+    return 'standard';
+  }
+}
+
+export const useWindowStyleStore = create<WindowStyleState>((set) => ({
+  style: getInitialStyle(),
+  setStyle: (s) => {
+    set({ style: s });
     try {
       localStorage.setItem(STORAGE_KEY, s);
     } catch {
       /* ignore */
     }
-  };
+  },
+}));
 
-  return { style, setStyle: change };
+// Keep the old hook API for backward compatibility
+export function useWindowStyle() {
+  const style = useWindowStyleStore((s) => s.style);
+  const setStyle = useWindowStyleStore((s) => s.setStyle);
+  return { style, setStyle };
 }
 
 interface WindowStyleSwitcherProps {
@@ -42,18 +51,21 @@ export function WindowStyleSwitcher({ value, onChange }: WindowStyleSwitcherProp
   ];
 
   return (
-    <div className="flex bg-bg-tertiary rounded">
+    <div className="flex bg-bg-tertiary rounded no-drag">
       {styles.map(s => (
         <button
           key={s.key}
           className={cn(
-            'px-2 py-0.5 text-2xs transition-colors',
+            'px-2 py-0.5 text-2xs transition-colors rounded',
             value === s.key
               ? 'bg-accent text-text-inverse'
               : 'text-text-secondary hover:text-text-primary'
           )}
           title={s.title}
-          onClick={() => onChange(s.key)}
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange(s.key);
+          }}
         >
           {s.label}
         </button>
@@ -61,3 +73,6 @@ export function WindowStyleSwitcher({ value, onChange }: WindowStyleSwitcherProp
     </div>
   );
 }
+
+// Re-export cn to avoid circular imports
+import { cn } from '../lib/utils';

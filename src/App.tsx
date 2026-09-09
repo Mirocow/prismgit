@@ -13,7 +13,7 @@ import { GitFlowDialog } from './components/GitFlowDialog';
 import { InteractiveRebaseDialog } from './components/InteractiveRebaseDialog';
 import { ConflictSolver } from './components/ConflictSolver';
 import { RepoInfoDialog } from './components/RepoInfoDialog';
-import { WindowStyleSwitcher, useWindowStyle } from './components/WindowStyleSwitcher';
+import { WindowStyleSwitcher, useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useAuthStore } from './stores/authStore';
@@ -57,7 +57,8 @@ export default function App() {
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const status = useGitStore((s) => s.status);
   const toast = useToastStore();
-  const { style: windowStyle, setStyle: setWindowStyle } = useWindowStyle();
+  const windowStyle = useWindowStyleStore((s) => s.style);
+  const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
   const [showClone, setShowClone] = useState(false);
   const [showInit, setShowInit] = useState(false);
   const [showFind, setShowFind] = useState(false);

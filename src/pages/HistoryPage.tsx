@@ -22,7 +22,7 @@ import { api, type LogEntry, type CommitFile } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
-import { WindowStyleSwitcher, useWindowStyle } from '../components/WindowStyleSwitcher';
+import { WindowStyleSwitcher, useWindowStyleStore } from '../components/WindowStyleSwitcher';
 
 const BRANCH_COLORS = [
   '#5B9BD5', // Steel Blue
@@ -127,7 +127,8 @@ export function HistoryPage() {
   const [editingMessage, setEditingMessage] = useState(false);
   const [editMsgValue, setEditMsgValue] = useState('');
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
-  const { style: windowStyle, setStyle: setWindowStyle } = useWindowStyle();
+  const windowStyle = useWindowStyleStore((s) => s.style);
+  const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
 
   const loadHistory = useCallback(async () => {
     setLoading(true);

@@ -3,7 +3,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { WindowStyleSwitcher, useWindowStyle } from './WindowStyleSwitcher';
+import { WindowStyleSwitcher, useWindowStyleStore } from './WindowStyleSwitcher';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
@@ -25,7 +25,8 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
   const toast = useToastStore();
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
-  const { style: windowStyle, setStyle: setWindowStyle } = useWindowStyle();
+  const windowStyle = useWindowStyleStore((s) => s.style);
+  const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
 
   const disabled = !currentRepo;
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
