@@ -25,6 +25,7 @@ import { api } from './lib/api';
 // Lazy-load pages for smaller initial bundle
 const ChangesPage = lazy(() => import('./pages/ChangesPage').then(m => ({ default: m.ChangesPage })));
 const HistoryPage = lazy(() => import('./pages/HistoryPage').then(m => ({ default: m.HistoryPage })));
+const DiffPage = lazy(() => import('./pages/DiffPage').then(m => ({ default: m.DiffPage })));
 const AnnotatePage = lazy(() => import('./pages/AnnotatePage').then(m => ({ default: m.AnnotatePage })));
 const BlamePage = lazy(() => import('./pages/BlamePage').then(m => ({ default: m.BlamePage })));
 const InvestigatePage = lazy(() => import('./pages/InvestigatePage').then(m => ({ default: m.InvestigatePage })));
@@ -271,6 +272,7 @@ export default function App() {
               <Route path="/" element={<Navigate to={defaultRoute} replace />} />
               <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} />} />
               <Route path="/history" element={<HistoryPage />} />
+              <Route path="/diff" element={<DiffPage />} />
               <Route path="/annotate" element={<AnnotatePage />} />
               <Route path="/investigate" element={<InvestigatePage />} />
               <Route path="/blame" element={<BlamePage />} />

@@ -238,9 +238,9 @@ export function HistoryPage() {
   const [compareDiff, setCompareDiff] = useState<{ result: import('../lib/api').DiffResult; title: string } | null>(null);
   const handleCompareWithWorkingTree = async (entry: LogEntry) => {
     try {
-      // Use diffCommit which compares commit vs its parent. But we want commit vs working tree.
-      // `git diff <commit> -- .` compares the commit tree with the working tree.
-      const result = await api.git.diff(repo.path, '', { ref: entry.hash });
+      // Compare working tree with a commit: `git diff <commit> -- .`
+      // Pass '.' as file path to diff all files (the diff() function handles this).
+      const result = await api.git.diff(repo.path, '.', { ref: entry.hash });
       setCompareDiff({ result, title: `Working Tree vs ${shortHash(entry.hash)} · ${entry.subject}` });
     } catch (e) { toast.error('Failed to compute comparison', String(e)); }
   };

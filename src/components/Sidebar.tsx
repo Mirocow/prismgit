@@ -16,6 +16,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { path: '/changes', label: 'Changes', icon: GitCommit, group: 'Working Tree' },
   { path: '/history', label: 'History', icon: History, group: 'Working Tree' },
+  { path: '/diff', label: 'Diff', icon: FileText, group: 'Working Tree' },
   { path: '/annotate', label: 'Annotate', icon: FileText, group: 'Working Tree' },
   { path: '/investigate', label: 'Investigate', icon: Search, group: 'Working Tree' },
   { path: '/blame', label: 'Blame', icon: FileText, group: 'Working Tree' },

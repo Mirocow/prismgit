@@ -600,7 +600,14 @@ export async function diff(
   const args = ['diff', '--no-color'];
   if (options.staged) args.push('--cached');
   if (options.ref) args.push(options.ref);
-  args.push('--', file);
+  // Only add pathspec if file is non-empty and not '.' — empty pathspec causes
+  // git error "fatal: empty string is not a valid pathspec".
+  // When file is '.' or empty, we diff ALL files in the working tree vs the ref.
+  if (file && file !== '.' && file !== '') {
+    args.push('--', file);
+  } else {
+    args.push('--', '.');
+  }
 
   const rawDiff = await git.raw(args);
   const oldPath = file;

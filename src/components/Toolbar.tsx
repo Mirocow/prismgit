@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, Settings as SettingsIcon, X, EyeOff } from './icons';
+import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, Settings as SettingsIcon, X, EyeOff, FileText } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -154,6 +154,21 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
     </button>
   );
 
+  // Labeled button — icon + text label (like platypusgit)
+  const LabeledButton = ({ icon: Icon, label, onClick, disabled, title }: {
+    icon: typeof RefreshCw; label: string; onClick: () => void; disabled?: boolean; title: string;
+  }) => (
+    <button
+      className="flex items-center gap-1.5 px-2 h-7 rounded hover:bg-bg-hover transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary text-xs"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+    >
+      <Icon size={14} />
+      <span className="hidden md:inline">{label}</span>
+    </button>
+  );
+
   const Divider = () => <div className="w-px h-5 bg-border-subtle mx-1.5" />;
 
   return (
@@ -182,36 +197,36 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
             case 'sync':
               return (
                 <div key={key} className="flex items-center">
-                  <IconButton icon={ArrowDown} onClick={handlePull} disabled={disabled} title="Pull" />
-                  <IconButton icon={Sync} onClick={handleSynchronize} disabled={disabled} title="Sync (fetch+pull+push)" />
-                  <IconButton icon={ArrowUp} onClick={handlePush} disabled={disabled} title="Push" />
+                  <LabeledButton icon={ArrowDown} label="Pull" onClick={handlePull} disabled={disabled} title="Pull from remote" />
+                  <LabeledButton icon={Sync} label="Sync" onClick={handleSynchronize} disabled={disabled} title="Sync (fetch + pull + push)" />
+                  <LabeledButton icon={ArrowUp} label="Push" onClick={handlePush} disabled={disabled} title="Push to remote" />
                   <Divider />
                 </div>
               );
             case 'stage':
               return (
                 <div key={key} className="flex items-center">
-                  <IconButton icon={Plus} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage All" />
-                  <IconButton icon={Minus} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage All" />
-                  <IconButton icon={Trash} onClick={() => {
+                  <LabeledButton icon={Plus} label="Stage All" onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
+                  <LabeledButton icon={Minus} label="Unstage All" onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage all changes" />
+                  <LabeledButton icon={Trash} label="Discard" onClick={() => {
                     if (!currentRepo || !confirm('Discard all uncommitted changes?')) return;
                     api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
                       toast.success('Changes discarded'); refreshStatus(currentRepo.path);
                     }).catch((e) => toast.error('Discard failed', String(e)));
-                  }} disabled={disabled} title="Discard All" />
+                  }} disabled={disabled} title="Discard all changes" />
                   <Divider />
                 </div>
               );
             case 'stash':
               return (
                 <div key={key} className="flex items-center">
-                  <IconButton icon={CloudDownload} onClick={() => {
+                  <LabeledButton icon={CloudDownload} label="Stash" onClick={() => {
                     if (!currentRepo) return;
                     api.git.stashPush(currentRepo.path, undefined, true).then(() => {
                       toast.success('Stash saved'); refreshStatus(currentRepo.path);
                     }).catch((e) => toast.error('Stash failed', String(e)));
-                  }} disabled={disabled} title="Save Stash" />
-                  <IconButton icon={GitPullRequest} onClick={() => {
+                  }} disabled={disabled} title="Save stash" />
+                  <LabeledButton icon={GitPullRequest} label="Pop" onClick={() => {
                     if (!currentRepo) return;
                     api.git.stashList(currentRepo.path).then(stashes => {
                       if (stashes.length === 0) { toast.info('No stashes'); return; }
@@ -219,24 +234,24 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
                         toast.success('Stash applied'); refreshStatus(currentRepo.path);
                       }).catch((e) => toast.error('Apply failed', String(e)));
                     });
-                  }} disabled={disabled} title="Apply Stash" />
+                  }} disabled={disabled} title="Apply latest stash" />
                   <Divider />
                 </div>
               );
             case 'log':
               return (
                 <div key={key} className="flex items-center">
-                  <IconButton icon={GitBranch} onClick={() => { window.location.hash = '#/history'; }} disabled={disabled} title="Log" />
-                  <IconButton icon={Search} onClick={() => { window.location.hash = '#/blame'; }} disabled={disabled} title="Blame" />
-                  <IconButton icon={Search} onClick={() => { window.location.hash = '#/investigate'; }} disabled={disabled} title="Investigate" />
+                  <LabeledButton icon={GitBranch} label="History" onClick={() => { window.location.hash = '#/history'; }} disabled={disabled} title="Commit history" />
+                  <LabeledButton icon={FileText} label="Diff" onClick={() => { window.location.hash = '#/diff'; }} disabled={disabled} title="Compare files between refs" />
+                  <LabeledButton icon={Search} label="Blame" onClick={() => { window.location.hash = '#/blame'; }} disabled={disabled} title="Blame a file" />
                   <Divider />
                 </div>
               );
             case 'workflows':
               return (
                 <div key={key} className="flex items-center">
-                  <IconButton icon={GitMerge} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow" />
-                  <IconButton icon={RotateCcw} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Rebase" />
+                  <LabeledButton icon={GitMerge} label="Git-Flow" onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow operations" />
+                  <LabeledButton icon={RotateCcw} label="Rebase" onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Interactive rebase" />
                 </div>
               );
             default:
@@ -245,7 +260,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
         })}
       </div>
 
-      {/* Center: branch info + global selections (draggable area) */}
+      {/* Center: status badges + global selections (draggable area) */}
       <div className="flex-1 flex items-center justify-center titlebar-drag gap-2">
         {currentRepo && status ? (
           <div className="flex items-center gap-2 text-xs">
@@ -260,15 +275,6 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
                 <AlertCircle size={9} /> BISECTING
               </span>
             )}
-            <button
-              className="flex items-center gap-1 text-text-secondary hover:text-text-primary cursor-pointer"
-              onClick={() => { window.location.hash = '#/history'; }}
-              title="Current HEAD — click to view in History"
-            >
-              <GitBranch size={11} />
-              <span className="font-medium text-text-primary">{status.current || 'HEAD'}</span>
-            </button>
-            {status.tracking && <span className="text-text-tertiary">→ {status.tracking}</span>}
             {(status.ahead > 0 || status.behind > 0) && (
               <div className="flex items-center gap-1.5">
                 {status.ahead > 0 && (
@@ -285,25 +291,6 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
             )}
           </div>
         ) : null}
-        {/* HEAD commit indicator — always visible, clickable to jump to History */}
-        {currentRepo && (
-          <button
-            className="text-2xs px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary font-mono hover:bg-accent-muted hover:border-accent hover:text-accent transition-colors flex items-center gap-1"
-            title="Current HEAD commit — click to view in History"
-            onClick={async () => {
-              try {
-                const h = await api.git.revParse(currentRepo.path, 'HEAD');
-                useSelectionStore.getState().selectCommit(h.trim());
-                window.location.hash = '#/history';
-              } catch (e) {
-                toast.error('Failed to get HEAD', String(e));
-              }
-            }}
-          >
-            <GitCommit size={9} />
-            <span>HEAD</span>
-          </button>
-        )}
         {/* Global selections chips — show what's currently selected across the app */}
         {selectedCommitHash && (
           <span className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1" title={`Selected commit (from any tool): ${selectedCommitHash}`}>
