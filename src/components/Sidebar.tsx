@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star, ChevronLeft, ChevronRight } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { ResizableSplitter, useResizableWidth } from './ResizableSplitter';
@@ -61,6 +61,7 @@ export function Sidebar() {
   const { width: sidebarWidth, handleResize: handleSidebarResize } = useResizableWidth(240, 180, 400);
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     if (!currentRepo) {
@@ -82,9 +83,18 @@ export function Sidebar() {
   return (
     <>
     <aside
-      className="flex flex-col bg-bg-secondary border-r border-border-default flex-shrink-0 no-drag"
-      style={{ width: sidebarWidth }}
+      className="flex flex-col bg-bg-secondary border-r border-border-default flex-shrink-0 no-drag transition-all"
+      style={{ width: collapsed ? 48 : sidebarWidth }}
     >
+      {/* Collapse button */}
+      <button
+        className="absolute -right-3 top-16 z-50 w-6 h-6 rounded-full bg-bg-tertiary border border-border-default flex items-center justify-center hover:bg-accent hover:text-text-inverse no-drag"
+        onClick={() => setCollapsed(!collapsed)}
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar (icons only)'}
+      >
+        {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+      </button>
+
       {/* Repository switcher */}
       <div className="border-b border-border-default">
         <div className="flex items-center justify-between px-3 py-2">
@@ -93,7 +103,7 @@ export function Sidebar() {
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowRepoList(!showRepoList); }}
           >
             <FolderGit size={14} />
-            <span className="truncate">{currentRepo ? currentRepo.name : 'Repositories'}</span>
+            {!collapsed && <span className="truncate">{currentRepo ? currentRepo.name : 'Repositories'}</span>}
             {currentRepo && metadata[currentRepo.path]?.favorite && (
               <Star size={11} className="text-status-modified fill-current" />
             )}
@@ -180,9 +190,11 @@ export function Sidebar() {
         {currentRepo ? (
           Object.entries(groups).map(([groupName, items]) => (
             <div key={groupName} className="mb-2">
-              <div className="px-3 py-1 text-2xs font-semibold uppercase tracking-wider text-text-tertiary">
-                {groupName}
-              </div>
+              {!collapsed && (
+                <div className="px-3 py-1 text-2xs font-semibold uppercase tracking-wider text-text-tertiary">
+                  {groupName}
+                </div>
+              )}
               {items.map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
@@ -199,7 +211,7 @@ export function Sidebar() {
                     title={NAV_TOOLTIPS[item.path] || item.label}
                   >
                     <Icon size={15} />
-                    <span>{item.label}</span>
+                    {!collapsed && <span>{item.label}</span>}
                   </button>
                 );
               })}

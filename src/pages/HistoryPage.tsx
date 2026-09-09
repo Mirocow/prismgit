@@ -377,6 +377,9 @@ export function HistoryPage() {
       { label: 'Create Tag here...', clickId: 'create-tag' },
       { label: 'Create Branch here...', clickId: 'create-branch' },
       { type: 'separator' },
+      { label: 'Open in Diff tool...', clickId: 'open-in-diff' },
+      { label: 'Compare with Working Tree...', clickId: 'compare-wt' },
+      { type: 'separator' },
       { label: 'Copy Short Hash', clickId: 'copy-short' },
       { label: 'Copy Full Hash', clickId: 'copy-full' },
       { label: 'Copy Commit Message', clickId: 'copy-msg' },
@@ -396,6 +399,19 @@ export function HistoryPage() {
         case 'rebase': handleRebase(entry.hash); break;
         case 'create-tag': handleCreateTag(entry); break;
         case 'create-branch': handleCreateBranchAt(entry); break;
+        case 'open-in-diff': {
+          useSelectionStore.getState().selectCommit(entry.hash);
+          useSelectionStore.getState().selectFile('.');
+          window.location.hash = '#/diff';
+          break;
+        }
+        case 'compare-wt': {
+          // Open in Diff tool with all files
+          useSelectionStore.getState().selectCommit(entry.hash);
+          useSelectionStore.getState().selectFile('.');
+          window.location.hash = '#/diff';
+          break;
+        }
         case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success('Copied'); break;
         case 'copy-full': copyToClipboard(entry.hash); toast.success('Copied'); break;
         case 'copy-msg': copyToClipboard(entry.subject); toast.success('Copied'); break;

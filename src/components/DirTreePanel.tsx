@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Folder, FolderGit } from './icons';
+import { ChevronDown, ChevronRight, Folder, FolderOpen, FolderGit } from './icons';
 import type { DirNode } from '../lib/api';
 import { cn } from '../lib/utils';
 
@@ -78,10 +78,17 @@ function DirRows({
         ) : (
           <span className="w-4 flex-shrink-0" />
         )}
-        <Folder
-          size={12}
-          className={cn('flex-shrink-0', hasChanges ? 'text-accent' : 'text-text-tertiary')}
-        />
+        {open ? (
+          <FolderOpen
+            size={12}
+            className={cn('flex-shrink-0', hasChanges ? 'text-accent' : 'text-text-tertiary')}
+          />
+        ) : (
+          <Folder
+            size={12}
+            className={cn('flex-shrink-0', hasChanges ? 'text-accent' : 'text-text-tertiary')}
+          />
+        )}
         <span className={cn('truncate', hasChanges && 'text-accent font-semibold')}>
           {node.name}
         </span>

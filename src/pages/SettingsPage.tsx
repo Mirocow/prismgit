@@ -75,8 +75,8 @@ export function SettingsPage() {
             </div>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Font size</div>
-                <div className="text-xs text-text-tertiary">Base font size in pixels</div>
+                <div className="text-sm font-medium">Font size (base)</div>
+                <div className="text-xs text-text-tertiary">Global base font size in pixels</div>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -89,6 +89,33 @@ export function SettingsPage() {
                 />
                 <span className="text-xs text-text-tertiary">px</span>
               </div>
+            </div>
+            {/* Per-area font sizes */}
+            <div className="border-t border-border-subtle pt-3 mt-3">
+              <div className="text-2xs uppercase text-text-tertiary mb-2">Per-area font sizes</div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center justify-between gap-2">
+                  <span className="text-xs">File tree</span>
+                  <input type="number" min={8} max={20} value={settings.fontSizeTree ?? 12}
+                    onChange={(e) => setSetting('fontSizeTree', Number(e.target.value))} className="w-16 text-xs" />
+                </label>
+                <label className="flex items-center justify-between gap-2">
+                  <span className="text-xs">Commit/branch lists</span>
+                  <input type="number" min={8} max={20} value={settings.fontSizeList ?? 12}
+                    onChange={(e) => setSetting('fontSizeList', Number(e.target.value))} className="w-16 text-xs" />
+                </label>
+                <label className="flex items-center justify-between gap-2">
+                  <span className="text-xs">Diff viewer (code)</span>
+                  <input type="number" min={8} max={20} value={settings.fontSizeDiff ?? 11}
+                    onChange={(e) => setSetting('fontSizeDiff', Number(e.target.value))} className="w-16 text-xs" />
+                </label>
+                <label className="flex items-center justify-between gap-2">
+                  <span className="text-xs">Monospace (hashes/paths)</span>
+                  <input type="number" min={8} max={20} value={settings.fontSizeMonospace ?? 11}
+                    onChange={(e) => setSetting('fontSizeMonospace', Number(e.target.value))} className="w-16 text-xs" />
+                </label>
+              </div>
+              <div className="text-2xs text-text-tertiary mt-2">These apply to the respective UI areas immediately.</div>
             </div>
             <div className="flex items-center justify-between">
               <div>

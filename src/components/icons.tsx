@@ -176,6 +176,12 @@ export const Folder = (p: IconProps) => (
   </Icon>
 );
 
+export const FolderOpen = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h6a2 2 0 0 1 2 2v2" />
+  </Icon>
+);
+
 export const FolderPlus = (p: IconProps) => (
   <Icon {...p}>
     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />

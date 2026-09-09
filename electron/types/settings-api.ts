@@ -32,7 +32,11 @@ export interface RepositoryMetadata {
 
 export interface AppSettings {
   theme: 'dark' | 'light' | 'system';
-  fontSize: number;
+  fontSize: number;          // Global base font size
+  fontSizeTree: number;      // File tree / directory tree font size
+  fontSizeList: number;      // Commit lists, branch lists, tag lists
+  fontSizeDiff: number;      // Diff viewer (code)
+  fontSizeMonospace: number; // Monospace elements (hashes, paths)
   sidebarWidth: number;
   defaultCloneDir: string;
   showReflogInHistory: boolean;

@@ -54,10 +54,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const theme = settings.theme === 'light' ? 'light' : 'dark';
       set({ settings, theme, loading: false });
       get().applyTheme();
-      // Apply fontSize on load
+      // Apply all font sizes on load
       if (settings.fontSize) {
         document.documentElement.style.fontSize = `${settings.fontSize}px`;
+        document.documentElement.style.setProperty('--font-size-base', `${settings.fontSize}px`);
       }
+      if (settings.fontSizeTree) document.documentElement.style.setProperty('--font-size-tree', `${settings.fontSizeTree}px`);
+      if (settings.fontSizeList) document.documentElement.style.setProperty('--font-size-list', `${settings.fontSizeList}px`);
+      if (settings.fontSizeDiff) document.documentElement.style.setProperty('--font-size-diff', `${settings.fontSizeDiff}px`);
+      if (settings.fontSizeMonospace) document.documentElement.style.setProperty('--font-size-mono', `${settings.fontSizeMonospace}px`);
     } catch {
       set({ loading: false });
     }
@@ -72,11 +77,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ theme: t });
       get().applyTheme();
     }
-    // Apply fontSize immediately to DOM
+    // Apply font sizes immediately to CSS variables
     if (key === 'fontSize') {
       document.documentElement.style.fontSize = `${value}px`;
+      document.documentElement.style.setProperty('--font-size-base', `${value}px`);
     }
-    // Apply sidebarWidth immediately
+    if (key === 'fontSizeTree') {
+      document.documentElement.style.setProperty('--font-size-tree', `${value}px`);
+    }
+    if (key === 'fontSizeList') {
+      document.documentElement.style.setProperty('--font-size-list', `${value}px`);
+    }
+    if (key === 'fontSizeDiff') {
+      document.documentElement.style.setProperty('--font-size-diff', `${value}px`);
+    }
+    if (key === 'fontSizeMonospace') {
+      document.documentElement.style.setProperty('--font-size-mono', `${value}px`);
+    }
     if (key === 'sidebarWidth') {
       document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
     }

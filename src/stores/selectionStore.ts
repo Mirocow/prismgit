@@ -45,6 +45,8 @@ export interface GlobalSelectionState {
   authorFilter: string | null;
   /** View mode for file lists: 'tree' | 'flat'. */
   fileViewMode: 'tree' | 'flat';
+  /** View mode for commit lists: 'tree' | 'flat' (tree = grouped by branch, flat = chronological). */
+  commitViewMode: 'tree' | 'flat';
   /** Whether long file paths should be compressed (chain-compression). */
   compressFilePaths: boolean;
   /** File extension filter — null = all, otherwise e.g. '.ts'. */
@@ -77,6 +79,7 @@ export interface GlobalSelectionState {
   setPathFilter: (path: string | null) => void;
   setAuthorFilter: (author: string | null) => void;
   setFileViewMode: (mode: 'tree' | 'flat') => void;
+  setCommitViewMode: (mode: 'tree' | 'flat') => void;
   setCompressFilePaths: (compress: boolean) => void;
   setFileExtensionFilter: (ext: string | null) => void;
   setFileStatusFilter: (filter: 'all' | 'modified' | 'added' | 'deleted' | 'untracked') => void;
@@ -103,6 +106,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   pathFilter: null,
   authorFilter: null,
   fileViewMode: 'flat',
+  commitViewMode: 'tree',
   compressFilePaths: true,
   fileExtensionFilter: null,
   fileStatusFilter: 'all',
@@ -134,6 +138,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   setPathFilter: (path) => set({ pathFilter: path }),
   setAuthorFilter: (author) => set({ authorFilter: author }),
   setFileViewMode: (mode) => set({ fileViewMode: mode }),
+  setCommitViewMode: (mode) => set({ commitViewMode: mode }),
   setCompressFilePaths: (compress) => set({ compressFilePaths: compress }),
   setFileExtensionFilter: (ext) => set({ fileExtensionFilter: ext }),
   setFileStatusFilter: (filter) => set({ fileStatusFilter: filter }),
