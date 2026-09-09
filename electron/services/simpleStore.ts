@@ -17,8 +17,21 @@ export class SimpleStore {
   private writeTimer: NodeJS.Timeout | null = null;
 
   constructor(options: { name: string; defaults?: StoreData } = { name: 'config' }) {
-    // Get userData directory (Electron provides this)
-    const userDataPath = app ? app.getPath('userData') : process.env.HOME || '/tmp';
+    // Get userData directory.
+    //
+    // Priority:
+    //   1. PRISMGIT_USER_DATA env var — used by E2E tests to isolate state
+    //      per test run (so test fixtures don't pollute real user data).
+    //   2. Electron's app.getPath('userData') — the standard location,
+    //      platform-dependent (e.g. ~/.config/PrismGit on Linux).
+    //   3. process.env.HOME / /tmp — fallback for non-Electron contexts
+    //      (some unit tests import this module without a running Electron).
+    const overridePath = process.env.PRISMGIT_USER_DATA;
+    const userDataPath = overridePath
+      ? overridePath
+      : app
+        ? app.getPath('userData')
+        : process.env.HOME || '/tmp';
     this.filePath = path.join(userDataPath, `${options.name}.json`);
     this.data = { ...(options.defaults || {}) };
     this.load();

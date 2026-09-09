@@ -45,3 +45,8 @@ yarn-error.log*
 
 # Debug files
 debug-*.ts
+
+# Playwright E2E test artifacts
+playwright-report/
+test-results/
+tests/e2e/screenshots/
