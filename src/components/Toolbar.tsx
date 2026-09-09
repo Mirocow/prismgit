@@ -173,67 +173,76 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
 
       <Divider />
 
-      {/* Git action buttons — compact, icon-only, customizable visibility */}
+      {/* Git action buttons — rendered in the order saved in localStorage.
+          User can reorder via the customize dropdown (drag-and-drop). */}
       <div className="flex items-center no-drag">
-        {groups.sync && (
-          <>
-            <IconButton icon={ArrowDown} onClick={handlePull} disabled={disabled} title="Pull" />
-            <IconButton icon={Sync} onClick={handleSynchronize} disabled={disabled} title="Sync (fetch+pull+push)" />
-            <IconButton icon={ArrowUp} onClick={handlePush} disabled={disabled} title="Push" />
-            <Divider />
-          </>
-        )}
-
-        {groups.stage && (
-          <>
-            <IconButton icon={Plus} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage All" />
-            <IconButton icon={Minus} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage All" />
-            <IconButton icon={Trash} onClick={() => {
-              if (!currentRepo || !confirm('Discard all uncommitted changes?')) return;
-              api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
-                toast.success('Changes discarded'); refreshStatus(currentRepo.path);
-              }).catch((e) => toast.error('Discard failed', String(e)));
-            }} disabled={disabled} title="Discard All" />
-            <Divider />
-          </>
-        )}
-
-        {groups.stash && (
-          <>
-            <IconButton icon={CloudDownload} onClick={() => {
-              if (!currentRepo) return;
-              api.git.stashPush(currentRepo.path, undefined, true).then(() => {
-                toast.success('Stash saved'); refreshStatus(currentRepo.path);
-              }).catch((e) => toast.error('Stash failed', String(e)));
-            }} disabled={disabled} title="Save Stash" />
-            <IconButton icon={GitPullRequest} onClick={() => {
-              if (!currentRepo) return;
-              api.git.stashList(currentRepo.path).then(stashes => {
-                if (stashes.length === 0) { toast.info('No stashes'); return; }
-                api.git.stashApply(currentRepo.path, 0).then(() => {
-                  toast.success('Stash applied'); refreshStatus(currentRepo.path);
-                }).catch((e) => toast.error('Apply failed', String(e)));
-              });
-            }} disabled={disabled} title="Apply Stash" />
-            <Divider />
-          </>
-        )}
-
-        {groups.log && (
-          <>
-            <IconButton icon={GitBranch} onClick={() => { window.location.hash = '#/history'; }} disabled={disabled} title="Log" />
-            <IconButton icon={Search} onClick={() => { window.location.hash = '#/blame'; }} disabled={disabled} title="Blame" />
-            <IconButton icon={Search} onClick={() => { window.location.hash = '#/investigate'; }} disabled={disabled} title="Investigate" />
-            <Divider />
-          </>
-        )}
-
-        {groups.workflows && (
-          <>
-            <IconButton icon={GitMerge} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow" />
-            <IconButton icon={RotateCcw} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Rebase" />
-          </>
-        )}
+        {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>).map(key => {
+          if (!groups[key]) return null;
+          switch (key) {
+            case 'sync':
+              return (
+                <div key={key} className="flex items-center">
+                  <IconButton icon={ArrowDown} onClick={handlePull} disabled={disabled} title="Pull" />
+                  <IconButton icon={Sync} onClick={handleSynchronize} disabled={disabled} title="Sync (fetch+pull+push)" />
+                  <IconButton icon={ArrowUp} onClick={handlePush} disabled={disabled} title="Push" />
+                  <Divider />
+                </div>
+              );
+            case 'stage':
+              return (
+                <div key={key} className="flex items-center">
+                  <IconButton icon={Plus} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage All" />
+                  <IconButton icon={Minus} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage All" />
+                  <IconButton icon={Trash} onClick={() => {
+                    if (!currentRepo || !confirm('Discard all uncommitted changes?')) return;
+                    api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
+                      toast.success('Changes discarded'); refreshStatus(currentRepo.path);
+                    }).catch((e) => toast.error('Discard failed', String(e)));
+                  }} disabled={disabled} title="Discard All" />
+                  <Divider />
+                </div>
+              );
+            case 'stash':
+              return (
+                <div key={key} className="flex items-center">
+                  <IconButton icon={CloudDownload} onClick={() => {
+                    if (!currentRepo) return;
+                    api.git.stashPush(currentRepo.path, undefined, true).then(() => {
+                      toast.success('Stash saved'); refreshStatus(currentRepo.path);
+                    }).catch((e) => toast.error('Stash failed', String(e)));
+                  }} disabled={disabled} title="Save Stash" />
+                  <IconButton icon={GitPullRequest} onClick={() => {
+                    if (!currentRepo) return;
+                    api.git.stashList(currentRepo.path).then(stashes => {
+                      if (stashes.length === 0) { toast.info('No stashes'); return; }
+                      api.git.stashApply(currentRepo.path, 0).then(() => {
+                        toast.success('Stash applied'); refreshStatus(currentRepo.path);
+                      }).catch((e) => toast.error('Apply failed', String(e)));
+                    });
+                  }} disabled={disabled} title="Apply Stash" />
+                  <Divider />
+                </div>
+              );
+            case 'log':
+              return (
+                <div key={key} className="flex items-center">
+                  <IconButton icon={GitBranch} onClick={() => { window.location.hash = '#/history'; }} disabled={disabled} title="Log" />
+                  <IconButton icon={Search} onClick={() => { window.location.hash = '#/blame'; }} disabled={disabled} title="Blame" />
+                  <IconButton icon={Search} onClick={() => { window.location.hash = '#/investigate'; }} disabled={disabled} title="Investigate" />
+                  <Divider />
+                </div>
+              );
+            case 'workflows':
+              return (
+                <div key={key} className="flex items-center">
+                  <IconButton icon={GitMerge} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow" />
+                  <IconButton icon={RotateCcw} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Rebase" />
+                </div>
+              );
+            default:
+              return null;
+          }
+        })}
       </div>
 
       {/* Center: branch info + global selections (draggable area) */}

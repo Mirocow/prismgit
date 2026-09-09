@@ -75,23 +75,32 @@ export function AnnotatePage() {
     if (!repo) return;
     setLoading(true);
     try {
-      const result = await api.git.log(repo.path, { maxCount: 200, all: true });
+      // Use a smaller maxCount for annotate (it's a per-file annotation tool, not full history)
+      const result = await api.git.log(repo.path, { maxCount: 100, all: true });
       setEntries(result);
       setSelectedIdx(0);
-      // Load file counts for first 30 commits (parallel)
-      const counts: Record<string, number> = {};
-      await Promise.all(result.slice(0, 30).map(async (entry) => {
-        try {
-          const files = await api.git.commitFiles(repo.path, entry.hash);
-          counts[entry.hash] = files.length;
-        } catch { counts[entry.hash] = 0; }
-      }));
-      setFileCounts(counts);
+      // Do NOT fetch file counts for every commit — that caused N parallel IPC calls
+      // and was the main reason Annotate felt slow. Instead, we'll fetch file count
+      // only when a commit is selected (lazy load).
+      setFileCounts({});
     } catch (e) { toast.error('Failed to load history', String(e)); }
     finally { setLoading(false); }
   }, [repo, toast]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // Lazy-load file count for the selected commit only
+  useEffect(() => {
+    if (!repo || selectedIdx === null || selectedIdx < 0) return;
+    const entry = entries[selectedIdx];
+    if (!entry) return;
+    if (fileCounts[entry.hash] !== undefined) return; // already loaded
+    setLoadingFiles(true);
+    api.git.commitFiles(repo.path, entry.hash)
+      .then(files => setFileCounts(prev => ({ ...prev, [entry.hash]: files.length })))
+      .catch(() => setFileCounts(prev => ({ ...prev, [entry.hash]: 0 })))
+      .finally(() => setLoadingFiles(false));
+  }, [repo, selectedIdx, entries, fileCounts]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return entries;

@@ -9,7 +9,7 @@ import { api, type DiffResult, type FileStatus, type LogEntry } from '../lib/api
 import { DiffViewer } from '../components/DiffViewer';
 import { ResizableSplitter, useResizableWidth, useResizableHeight } from '../components/ResizableSplitter';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
-import { cn, getStatusColor } from '../lib/utils';
+import { cn, getStatusColor, copyToClipboard } from '../lib/utils';
 import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 
 interface ChangesPageProps {
@@ -329,10 +329,11 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           const items: ContextMenuItem[] = [];
           if (isStaged) {
             items.push({ label: 'Unstage', clickId: 'unstage' });
+            items.push({ label: 'Discard staged changes', clickId: 'discard-staged' });
           } else {
             items.push({ label: 'Stage', clickId: 'stage' });
             if (!isUntracked) {
-              items.push({ label: 'Restore to last commit', clickId: 'restore' });
+              items.push({ label: 'Restore to last commit (discard)', clickId: 'restore' });
             }
           }
           items.push({ type: 'separator' });
@@ -350,10 +351,22 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           items.push({ type: 'separator' });
           items.push({ label: 'View file history...', clickId: 'file-history' });
           items.push({ label: 'Blame this file...', clickId: 'blame' });
+          items.push({ type: 'separator' });
+          items.push({ label: 'Copy path', clickId: 'copy-path' });
+          items.push({ label: 'Copy full path', clickId: 'copy-full-path' });
           showContextMenu(items, (action) => {
             if (action === 'stage') handleStageFile(file.path);
             else if (action === 'unstage') handleUnstageFile(file.path);
             else if (action === 'restore') handleRestoreFile(file.path);
+            else if (action === 'discard-staged') {
+              if (!confirm(`Discard staged changes for '${file.path}'?\nThis will unstage AND restore the file to HEAD.`)) return;
+              api.git.raw(repo.path, ['reset', 'HEAD', '--', file.path]).then(() =>
+                api.git.restore(repo.path, [file.path])
+              ).then(() => {
+                toast.success('Staged changes discarded');
+                refreshStatus(repo.path);
+              }).catch((e) => toast.error('Discard failed', String(e)));
+            }
             else if (action === 'ignore') handleIgnoreFile(file.path);
             else if (action === 'delete') handleDeleteFile(file.path);
             else if (action === 'resolve' && onResolveConflict) onResolveConflict(file.path);
@@ -371,6 +384,14 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             else if (action === 'blame') {
               useSelectionStore.getState().selectFile(file.path);
               window.location.hash = '#/blame';
+            }
+            else if (action === 'copy-path') {
+              copyToClipboard(file.path);
+              toast.success('Path copied');
+            }
+            else if (action === 'copy-full-path') {
+              copyToClipboard(`${repo.path}/${file.path}`.replace(/\/+/g, '/'));
+              toast.success('Full path copied');
             }
           });
         }}

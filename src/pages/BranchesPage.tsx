@@ -140,6 +140,7 @@ export function BranchesPage() {
       items.push({ label: 'Rename...', clickId: 'rename' });
       items.push({ label: 'Delete', clickId: 'delete' });
     } else if (b.remote) {
+      items.push({ label: 'Checkout (create local tracking branch)', clickId: 'checkout-remote' });
       items.push({ label: 'Create local branch from...', clickId: 'create-local' });
       items.push({ type: 'separator' });
       items.push({ label: 'Merge into current', clickId: 'merge' });
@@ -150,6 +151,17 @@ export function BranchesPage() {
     if (items.length > 0) {
       showContextMenu(items, (action) => {
         if (action === 'checkout') handleCheckout(b);
+        else if (action === 'checkout-remote') {
+          // Create local tracking branch from remote: git checkout -b <local> --track <remote>
+          // Local name = part after first slash (e.g. origin/main → main)
+          const localName = b.name.replace(/^[^/]+\//, '');
+          if (!confirm(`Checkout remote branch '${b.name}'?\n\nThis will create local branch '${localName}' tracking the remote.`)) return;
+          api.git.checkout(repo.path, b.name, { track: true }).then(() => {
+            toast.success(`Checked out '${localName}' (tracking ${b.name})`);
+            load();
+            refreshStatus(repo.path);
+          }).catch((e) => toast.error('Checkout failed', String(e)));
+        }
         else if (action === 'merge') handleMerge(b.name);
         else if (action === 'rebase') api.git.rebase(repo.path, b.name).then(() => { toast.success('Rebase started'); refreshStatus(repo.path); }).catch((e) => toast.error('Rebase failed', String(e)));
         else if (action === 'push') handlePushBranch(b);
