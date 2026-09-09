@@ -1,17 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil, AlertCircle } from '../components/icons';
+import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil, AlertCircle, Search } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
-import { api, type DiffResult, type FileStatus } from '../lib/api';
+import { api, type DiffResult, type FileStatus, type LogEntry } from '../lib/api';
 import { DiffViewer } from '../components/DiffViewer';
 import { cn, getStatusColor } from '../lib/utils';
-
-interface FileGroup {
-  label: string;
-  files: FileStatus[];
-  empty: boolean;
-}
+import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 
 interface ChangesPageProps {
   onResolveConflict?: (file: string) => void;
@@ -26,10 +21,11 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [diffLoading, setDiffLoading] = useState(false);
   const [commitMsg, setCommitMsg] = useState('');
   const [amend, setAmend] = useState(false);
-  const [showStaged, setShowStaged] = useState(true);
-  const [showUnstaged, setShowUnstaged] = useState(true);
   const [fileFilter, setFileFilter] = useState('');
   const [draggedFile, setDraggedFile] = useState<string | null>(null);
+  const [journal, setJournal] = useState<LogEntry[]>([]);
+  const [journalLoading, setJournalLoading] = useState(false);
+  const [showSplitView, setShowSplitView] = useState(true);
 
   const loadDiff = useCallback(
     async (file: string, staged: boolean) => {
@@ -47,17 +43,35 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     [repo.path, toast]
   );
 
+  const loadJournal = useCallback(async () => {
+    setJournalLoading(true);
+    try {
+      const result = await api.git.log(repo.path, { maxCount: 20 });
+      setJournal(result);
+    } catch {
+      /* ignore */
+    } finally {
+      setJournalLoading(false);
+    }
+  }, [repo.path]);
+
   useEffect(() => {
     if (!selectedFile) {
       setDiff(null);
       return;
     }
-    // Determine if file is staged
     const isStaged = status?.staged.some((s) => s.path === selectedFile) ?? false;
     loadDiff(selectedFile, isStaged);
   }, [selectedFile, status, loadDiff]);
 
-  const handleRefresh = () => refreshStatus(repo.path);
+  useEffect(() => {
+    loadJournal();
+  }, [loadJournal]);
+
+  const handleRefresh = () => {
+    refreshStatus(repo.path);
+    loadJournal();
+  };
 
   const handleStageAll = async () => {
     try {
@@ -78,7 +92,6 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
 
   const handleUnstageFile = async (file: string) => {
     try {
-      // Use git reset to unstage
       await api.git.raw(repo.path, ['reset', 'HEAD', '--', file]);
       await refreshStatus(repo.path);
     } catch (e) {
@@ -97,10 +110,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     }
   };
 
-  const handleIgnoreFile = async (file: string, isDir = false) => {
+  const handleIgnoreFile = async (file: string) => {
     try {
-      const pattern = isDir ? `${file}/` : file;
-      await api.git.ignore(repo.path, [pattern]);
+      await api.git.ignore(repo.path, [file]);
       toast.success('Added to .gitignore');
       await refreshStatus(repo.path);
     } catch (e) {
@@ -128,28 +140,6 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     }
   };
 
-  const handleEditIgnore = async () => {
-    try {
-      await api.git.editIgnoreFile(repo.path, 'local');
-      toast.info('.gitignore is ready for editing');
-    } catch (e) {
-      toast.error('Failed to open .gitignore', String(e));
-    }
-  };
-
-  const handleOpenInBrowser = async () => {
-    try {
-      const info = await api.git.extractRepoInfo(repo.path);
-      if (info.webUrl && info.provider !== 'unknown') {
-        api.app.openExternal(info.webUrl);
-      } else {
-        toast.info('Repository has no remote URL');
-      }
-    } catch (e) {
-      toast.error('Failed to open in browser', String(e));
-    }
-  };
-
   const handleCommit = async () => {
     if (!commitMsg.trim()) {
       toast.warning('Commit message is required');
@@ -160,6 +150,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       toast.success('Commit created', `Hash: ${hash.substring(0, 7)}`);
       setCommitMsg('');
       setAmend(false);
+      await loadJournal();
     } catch (e) {
       toast.error('Commit failed', String(e));
     }
@@ -198,6 +189,20 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     return idx === '?' && wd === '?';
   }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()));
 
+  const totalChanged = (status?.files.length ?? 0);
+
+  const getRelativeDir = (filePath: string): string => {
+    const lastSlash = filePath.lastIndexOf('/');
+    if (lastSlash === -1) return '';
+    return filePath.substring(0, lastSlash);
+  };
+
+  const getFileName = (filePath: string): string => {
+    const lastSlash = filePath.lastIndexOf('/');
+    if (lastSlash === -1) return filePath;
+    return filePath.substring(lastSlash + 1);
+  };
+
   const renderFileRow = (file: FileStatus, isStaged: boolean) => {
     const isSelected = selectedFile === file.path;
     const idx = file.index as string;
@@ -213,14 +218,15 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       code === 'C' ? 'copied' :
       'modified';
     const isUntracked = idx === '?' && wd === '?';
-    const isConflict = code === 'U' || (idx === 'U') || (wd === 'U');
+    const isConflict = code === 'U' || idx === 'U' || wd === 'U';
+    const stateLabel = statusCode.charAt(0).toUpperCase() + statusCode.slice(1);
+
     return (
       <div
         key={file.path}
         className={cn(
-          'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs',
-          isSelected ? 'bg-accent-muted' : 'hover:bg-bg-hover',
-          draggedFile === file.path && 'dragging'
+          'group flex items-center gap-2 px-2 py-1 cursor-pointer text-xs border-b border-border-subtle',
+          isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover'
         )}
         draggable
         onDragStart={(e) => {
@@ -232,111 +238,67 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           e.preventDefault();
           e.currentTarget.classList.add('drag-over');
         }}
-        onDragLeave={(e) => {
-          e.currentTarget.classList.remove('drag-over');
-        }}
+        onDragLeave={(e) => e.currentTarget.classList.remove('drag-over')}
         onDrop={(e) => {
           e.preventDefault();
           e.currentTarget.classList.remove('drag-over');
           if (draggedFile && draggedFile !== file.path) {
-            // Drop from one section to another: if target is staged section, stage; if unstaged, unstage
-            if (isStaged) {
-              handleUnstageFile(draggedFile);
-            } else {
-              handleStageFile(draggedFile);
-            }
+            if (isStaged) handleUnstageFile(draggedFile);
+            else handleStageFile(draggedFile);
           }
           setDraggedFile(null);
         }}
         onClick={() => setSelectedFile(file.path)}
       >
+        {/* State icon */}
         <span
-          className="font-mono font-bold w-4 text-center"
+          className="w-4 text-center font-bold flex-shrink-0"
           style={{ color: getStatusColor(statusCode) }}
         >
           {code}
         </span>
-        <span className="flex-1 truncate font-mono">{file.path}</span>
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+        {/* Name */}
+        <span className="flex-1 truncate font-mono">{getFileName(file.path)}</span>
+        {/* State text */}
+        <span className="text-text-tertiary flex-shrink-0 italic" style={{ width: 70 }}>{stateLabel}</span>
+        {/* Relative directory */}
+        <span className="text-text-tertiary flex-shrink-0 text-right" style={{ width: 120 }}>{getRelativeDir(file.path)}</span>
+        {/* Actions */}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
           {isConflict && onResolveConflict && (
             <button
               className="btn btn-primary text-2xs !py-0.5 !px-2"
               title="Open Conflict Solver"
-              onClick={(e) => {
-                e.stopPropagation();
-                onResolveConflict(file.path);
-              }}
+              onClick={(e) => { e.stopPropagation(); onResolveConflict(file.path); }}
             >
               Resolve
             </button>
           )}
           {isStaged ? (
-            <button
-              className="icon-btn !w-5 !h-5"
-              title="Unstage"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleUnstageFile(file.path);
-              }}
-            >
+            <button className="icon-btn !w-5 !h-5" title="Unstage" onClick={(e) => { e.stopPropagation(); handleUnstageFile(file.path); }}>
               <Minus size={11} />
             </button>
           ) : (
             <>
-              <button
-                className="icon-btn !w-5 !h-5"
-                title="Stage"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleStageFile(file.path);
-                }}
-              >
+              <button className="icon-btn !w-5 !h-5" title="Stage" onClick={(e) => { e.stopPropagation(); handleStageFile(file.path); }}>
                 <Plus size={11} />
               </button>
               {!isUntracked && (
-                <button
-                  className="icon-btn !w-5 !h-5"
-                  title="Restore to last commit"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleRestoreFile(file.path);
-                  }}
-                >
+                <button className="icon-btn !w-5 !h-5" title="Restore" onClick={(e) => { e.stopPropagation(); handleRestoreFile(file.path); }}>
                   <RotateCcw size={11} />
                 </button>
               )}
               {isUntracked && (
                 <>
-                  <button
-                    className="icon-btn !w-5 !h-5"
-                    title="Add to .gitignore"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleIgnoreFile(file.path);
-                    }}
-                  >
+                  <button className="icon-btn !w-5 !h-5" title="Ignore" onClick={(e) => { e.stopPropagation(); handleIgnoreFile(file.path); }}>
                     <EyeOff size={11} />
                   </button>
-                  <button
-                    className="icon-btn !w-5 !h-5 hover:!text-status-deleted"
-                    title="Delete file"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteFile(file.path);
-                    }}
-                  >
+                  <button className="icon-btn !w-5 !h-5 hover:!text-status-deleted" title="Delete" onClick={(e) => { e.stopPropagation(); handleDeleteFile(file.path); }}>
                     <Trash size={11} />
                   </button>
                 </>
               )}
-              <button
-                className="icon-btn !w-5 !h-5"
-                title="Reveal in file manager"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRevealFile(file.path);
-                }}
-              >
+              <button className="icon-btn !w-5 !h-5" title="Reveal" onClick={(e) => { e.stopPropagation(); handleRevealFile(file.path); }}>
                 <Folder size={11} />
               </button>
             </>
@@ -346,14 +308,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     );
   };
 
-  const totalChanged = (status?.files.length ?? 0);
-
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
+      <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Changes</span>
+          <span className="text-xs font-medium">Files</span>
           {totalChanged > 0 && (
             <span className="text-2xs text-text-tertiary">
               {stagedFiles.length} staged · {unstagedFiles.length + untrackedFiles.length} unstaged
@@ -363,66 +323,48 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         <div className="flex items-center gap-1">
           <input
             type="text"
-            className="text-xs w-40"
-            placeholder="Filter files..."
+            className="text-xs w-32 px-2 py-0.5"
+            placeholder="File Filter"
             value={fileFilter}
             onChange={(e) => setFileFilter(e.target.value)}
           />
-          <button className="icon-btn" title="Refresh" onClick={handleRefresh}>
-            <RefreshCw size={13} />
+          <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={handleRefresh}>
+            <RefreshCw size={11} />
           </button>
-          <button
-            className="icon-btn"
-            title="Edit .gitignore"
-            onClick={handleEditIgnore}
-          >
-            <Pencil size={13} />
-          </button>
-          <button
-            className="icon-btn"
-            title="Open in browser"
-            onClick={handleOpenInBrowser}
-          >
-            <ExternalLink size={13} />
-          </button>
-          <button
-            className="btn btn-ghost text-xs"
-            title="Stage all"
-            onClick={handleStageAll}
-          >
-            <Plus size={12} />
-            Stage All
+          <button className="icon-btn !w-5 !h-5" title="Stage All" onClick={handleStageAll}>
+            <Plus size={11} />
           </button>
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: File lists + commit editor */}
-        <div className="w-1/2 flex flex-col border-r border-border-default overflow-hidden">
+        {/* Left: File list + Journal + Commit editor */}
+        <div className={cn("flex flex-col border-r border-border-default overflow-hidden", showSplitView ? "w-1/2" : "flex-1")}>
+          {/* File list with table header */}
           <div className="flex-1 overflow-y-auto">
-            {/* Conflicts — show first as it's most urgent */}
+            {/* Table header */}
+            <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary sticky top-0 z-10">
+              <span className="w-4"></span>
+              <span className="flex-1">Name</span>
+              <span style={{ width: 70 }}>State</span>
+              <span style={{ width: 120 }} className="text-right">Relative Directory</span>
+              <span style={{ width: 60 }}></span>
+            </div>
+
+            {/* Conflicts */}
             {status?.conflicted && status.conflicted.length > 0 && (
               <div className="border-b border-status-conflict/30 bg-status-conflict/5">
-                <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-status-conflict bg-status-conflict/10 flex items-center gap-2">
-                  <AlertCircle size={12} />
-                  Merge Conflicts ({status.conflicted.length})
-                </div>
                 {status.conflicted.map((filePath) => (
                   <div
                     key={filePath}
-                    className="group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs hover:bg-bg-hover border-l-2 border-status-conflict"
+                    className="group flex items-center gap-2 px-2 py-1 cursor-pointer text-xs hover:bg-bg-hover border-l-2 border-status-conflict"
                     onClick={() => onResolveConflict && onResolveConflict(filePath)}
                   >
-                    <span className="font-mono font-bold w-4 text-center text-status-conflict">U</span>
+                    <span className="font-bold w-4 text-center text-status-conflict">U</span>
                     <span className="flex-1 truncate font-mono">{filePath}</span>
-                    <button
-                      className="btn btn-primary text-2xs !py-0.5 !px-2"
-                      title="Open Conflict Solver"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onResolveConflict && onResolveConflict(filePath);
-                      }}
-                    >
+                    <span className="text-text-tertiary italic" style={{ width: 70 }}>Conflict</span>
+                    <span style={{ width: 120 }}></span>
+                    <button className="btn btn-primary text-2xs !py-0.5 !px-2" onClick={(e) => { e.stopPropagation(); onResolveConflict && onResolveConflict(filePath); }}>
                       Resolve
                     </button>
                   </div>
@@ -431,58 +373,116 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             )}
 
             {/* Staged */}
-            <div>
-              <button
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary hover:bg-bg-hover"
-                onClick={() => setShowStaged(!showStaged)}
-              >
-                {showStaged ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                Staged Changes ({stagedFiles.length})
-              </button>
-              {showStaged && stagedFiles.map((f) => renderFileRow(f, true))}
-              {showStaged && stagedFiles.length === 0 && (
-                <div className="px-3 py-3 text-xs text-text-tertiary">No staged files</div>
-              )}
-            </div>
+            {stagedFiles.length > 0 && (
+              <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
+                Staged ({stagedFiles.length})
+              </div>
+            )}
+            {stagedFiles.map((f) => renderFileRow(f, true))}
 
             {/* Unstaged */}
-            <div className="border-t border-border-default">
-              <button
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary hover:bg-bg-hover"
-                onClick={() => setShowUnstaged(!showUnstaged)}
-              >
-                {showUnstaged ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {unstagedFiles.length > 0 && (
+              <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
                 Changes ({unstagedFiles.length})
-              </button>
-              {showUnstaged && unstagedFiles.map((f) => renderFileRow(f, false))}
-              {showUnstaged && unstagedFiles.length === 0 && (
-                <div className="px-3 py-3 text-xs text-text-tertiary">No unstaged changes</div>
-              )}
-            </div>
+              </div>
+            )}
+            {unstagedFiles.map((f) => renderFileRow(f, false))}
 
             {/* Untracked */}
             {untrackedFiles.length > 0 && (
-              <div className="border-t border-border-default">
-                <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary">
-                  Untracked ({untrackedFiles.length})
-                </div>
-                {untrackedFiles.map((f) => renderFileRow(f, false))}
+              <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
+                Untracked ({untrackedFiles.length})
               </div>
             )}
+            {untrackedFiles.map((f) => renderFileRow(f, false))}
 
             {totalChanged === 0 && (
-              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-                <GitCommit size={32} className="mb-2 opacity-50" />
+              <div className="flex flex-col items-center justify-center py-12 text-text-tertiary">
+                <GitCommit size={28} className="mb-2 opacity-50" />
                 <div className="text-sm">Working tree clean</div>
                 <div className="text-xs mt-1">No changes to commit</div>
               </div>
             )}
           </div>
 
+          {/* Journal panel (bottom) — shows recent commits like SmartGit */}
+          <div className="border-t border-border-default flex-shrink-0" style={{ height: 180 }}>
+            <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
+              <span className="text-2xs font-semibold uppercase text-text-secondary">Journal</span>
+              <span className="text-2xs text-text-tertiary">{journal.length} commits</span>
+            </div>
+            <div className="overflow-y-auto" style={{ height: 'calc(100% - 24px)' }}>
+              {journalLoading ? (
+                <div className="px-2 py-2 text-xs text-text-tertiary">Loading...</div>
+              ) : journal.length === 0 ? (
+                <div className="px-2 py-2 text-xs text-text-tertiary">No commits yet</div>
+              ) : (
+                journal.map((entry) => {
+                  const initials = getInitials(entry.author.name);
+                  const color = getAuthorColor(entry.author.name);
+                  return (
+                    <div
+                      key={entry.hash}
+                      className="group flex items-center gap-2 px-2 py-1 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
+                      onClick={() => { window.location.hash = '#/history'; }}
+                    >
+                      {/* Author badge */}
+                      <span
+                        className="flex-shrink-0 rounded text-white font-bold text-center"
+                        style={{
+                          backgroundColor: color.bg,
+                          width: 24,
+                          height: 18,
+                          fontSize: 9,
+                          lineHeight: '18px',
+                        }}
+                      >
+                        {initials}
+                      </span>
+                      {/* Message */}
+                      <span className="flex-1 truncate text-text-primary">{entry.subject}</span>
+                      {/* Date */}
+                      <span className="text-text-tertiary flex-shrink-0">{formatTime(entry.author.date)}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
           {/* Commit editor */}
-          <div className="border-t border-border-default bg-bg-secondary p-2">
+          <div className="border-t border-border-default bg-bg-secondary p-2 flex-shrink-0">
+            <div className="flex items-center gap-2 mb-1">
+              <label className="flex items-center gap-1 text-2xs text-text-secondary cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={amend}
+                  onChange={(e) => setAmend(e.target.checked)}
+                />
+                Amend last commit
+              </label>
+              <div className="flex-1" />
+              <button
+                className="btn btn-secondary text-xs"
+                onClick={handleCommitAndPush}
+                disabled={!commitMsg.trim() || stagedFiles.length === 0}
+                title="Commit then push"
+              >
+                <GitPullRequest size={11} />
+                Commit & Push
+              </button>
+              <button
+                className="btn btn-primary text-xs"
+                onClick={handleCommit}
+                disabled={!commitMsg.trim() || stagedFiles.length === 0}
+                title="Ctrl+Enter"
+              >
+                <GitCommit size={11} />
+                Commit
+              </button>
+            </div>
             <textarea
-              className="w-full h-20 text-sm font-mono resize-none"
+              className="w-full text-sm font-mono resize-none"
               placeholder="Commit message..."
               value={commitMsg}
               onChange={(e) => setCommitMsg(e.target.value)}
@@ -492,44 +492,17 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                   handleCommit();
                 }
               }}
+              style={{ height: 48 }}
             />
-            <div className="flex items-center justify-between mt-2">
-              <label className="flex items-center gap-1 text-xs text-text-secondary cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={amend}
-                  onChange={(e) => setAmend(e.target.checked)}
-                />
-                Amend
-              </label>
-              <div className="flex items-center gap-2">
-                <button
-                  className="btn btn-secondary"
-                  onClick={handleCommitAndPush}
-                  disabled={!commitMsg.trim() || stagedFiles.length === 0}
-                  title="Commit then push"
-                >
-                  <GitPullRequest size={13} />
-                  Commit & Push
-                </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleCommit}
-                  disabled={!commitMsg.trim() || stagedFiles.length === 0}
-                  title="Ctrl+Enter"
-                >
-                  <GitCommit size={13} />
-                  Commit
-                </button>
-              </div>
-            </div>
           </div>
         </div>
 
         {/* Right: Diff viewer */}
-        <div className="w-1/2 flex flex-col overflow-hidden">
-          <DiffViewer diff={diff} loading={diffLoading} />
-        </div>
+        {showSplitView && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <DiffViewer diff={diff} loading={diffLoading} repoPath={repo.path} filePath={selectedFile || undefined} />
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,41 +1,52 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { GitCommit, RefreshCw, Copy, GitBranch, Search, GitPullRequest, Undo, Pencil, ExternalLink, FileText, ChevronDown, ChevronRight, Tag as TagIcon, CornerDownRight } from '../components/icons';
+import {
+  GitCommit,
+  RefreshCw,
+  Copy,
+  GitBranch,
+  Search,
+  GitPullRequest,
+  Undo,
+  Pencil,
+  ExternalLink,
+  FileText,
+  ChevronDown,
+  ChevronRight,
+  Tag as TagIcon,
+  CornerDownRight,
+} from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { useGitStore } from '../stores/gitStore';
 import { api, type LogEntry, type CommitFile } from '../lib/api';
-import { cn, formatDate, shortHash, copyToClipboard, getStatusColor } from '../lib/utils';
+import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
+import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 
 const BRANCH_COLORS = [
-  '#0e639c', // blue
-  '#73c991', // green
-  '#e2c08d', // yellow
-  '#c74e39', // red
-  '#69a4ff', // light blue
-  '#aa66cc', // purple
-  '#ff7a45', // orange
-  '#00bcd4', // cyan
-  '#e91e63', // pink
-  '#9c27b0', // magenta
+  '#5B9BD5', // Steel Blue
+  '#C65911', // Brown/Orange
+  '#548235', // Olive Green
+  '#7030A0', // Purple
+  '#BF9000', // Dark Yellow
+  '#2E75B6', // Medium Blue
+  '#C00000', // Dark Red
+  '#385723', // Dark Green
+  '#4472C4', // Blue
+  '#E97132', // Orange
 ];
 
 interface CommitNode {
   entry: LogEntry;
   lane: number;
   parentLanes: number[];
-  // For each parent: which lanes it goes to
   connections: { fromLane: number; toLane: number; color: string }[];
   color: string;
 }
 
 function computeGraphLanes(entries: LogEntry[]): CommitNode[] {
-  // Simple graph layout: assign each commit to a lane
-  // Lane is freed when no children reference it
-  const lanes: (string | null)[] = []; // lane -> hash occupying it (or null if free)
-  const hashToLane = new Map<string, number>();
+  const lanes: (string | null)[] = [];
   const hashToChildren = new Map<string, string[]>();
 
-  // Build child map
   for (const e of entries) {
     for (const p of e.parents) {
       const arr = hashToChildren.get(p) || [];
@@ -47,8 +58,6 @@ function computeGraphLanes(entries: LogEntry[]): CommitNode[] {
   const nodes: CommitNode[] = [];
 
   for (const entry of entries) {
-    // Try to find an existing lane where this commit's hash is already placed
-    // (means a child referenced this commit as parent)
     let lane = -1;
     for (let i = 0; i < lanes.length; i++) {
       if (lanes[i] === entry.hash) {
@@ -58,7 +67,6 @@ function computeGraphLanes(entries: LogEntry[]): CommitNode[] {
     }
 
     if (lane === -1) {
-      // Find a free lane
       for (let i = 0; i < lanes.length; i++) {
         if (lanes[i] === null) {
           lane = i;
@@ -71,29 +79,20 @@ function computeGraphLanes(entries: LogEntry[]): CommitNode[] {
       }
     }
 
-    // Determine the color: use the refs to pick a color, else from lane
     let color = BRANCH_COLORS[lane % BRANCH_COLORS.length];
-    const refInfo = entry.refs.find((r) => r.includes('HEAD') || r.includes('origin/') || !r.startsWith('tag:'));
-    if (refInfo && refInfo.includes('origin/')) {
-      // Remote branches get a distinct color (orange-ish)
-      color = '#ff7a45';
-    } else if (entry.refs.some((r) => r.includes('HEAD ->'))) {
-      color = '#69a4ff';
+    if (entry.refs.some((r) => r.includes('HEAD'))) {
+      color = '#2b2b2b'; // Dark for HEAD
     }
 
-    // Reserve lanes for parents
     const parentLanes: number[] = [];
     const connections: { fromLane: number; toLane: number; color: string }[] = [];
 
-    // Mark current lane as free (we'll reassign to first parent)
     lanes[lane] = null;
 
     for (let pi = 0; pi < entry.parents.length; pi++) {
       const parentHash = entry.parents[pi];
-      let parentLane: number;
+      let parentLane = -1;
 
-      // Check if parent is already in a lane (multi-merge scenario)
-      parentLane = -1;
       for (let i = 0; i < lanes.length; i++) {
         if (lanes[i] === parentHash) {
           parentLane = i;
@@ -102,12 +101,10 @@ function computeGraphLanes(entries: LogEntry[]): CommitNode[] {
       }
 
       if (parentLane === -1) {
-        // First parent goes into current lane (straight line)
         if (pi === 0) {
           parentLane = lane;
           lanes[lane] = parentHash;
         } else {
-          // Find a free lane for other parents
           for (let i = 0; i < lanes.length; i++) {
             if (lanes[i] === null) {
               parentLane = i;
@@ -130,33 +127,22 @@ function computeGraphLanes(entries: LogEntry[]): CommitNode[] {
       });
     }
 
-    hashToLane.set(entry.hash, lane);
-    nodes.push({
-      entry,
-      lane,
-      parentLanes,
-      connections,
-      color,
-    });
+    nodes.push({ entry, lane, parentLanes, connections, color });
   }
 
   return nodes;
 }
 
-function GraphColumn({ nodes }: { nodes: CommitNode[] }) {
+function GraphColumn({ nodes, selectedIndex }: { nodes: CommitNode[]; selectedIndex: number | null }) {
   const maxLane = Math.max(0, ...nodes.map((n) => n.lane), ...nodes.flatMap((n) => n.parentLanes));
-  const laneWidth = 16;
-  const rowHeight = 36;
+  const laneWidth = 20;
+  const rowHeight = 24;
   const width = (maxLane + 1) * laneWidth + 8;
 
   return (
     <div className="relative flex-shrink-0" style={{ width, minHeight: nodes.length * rowHeight }}>
-      <svg
-        width={width}
-        height={nodes.length * rowHeight}
-        className="block"
-      >
-        {/* Draw connection lines */}
+      <svg width={width} height={nodes.length * rowHeight} className="block">
+        {/* Connection lines */}
         {nodes.map((node, idx) => {
           const nextIdx = idx + 1;
           const fromY = idx * rowHeight + rowHeight / 2;
@@ -179,28 +165,23 @@ function GraphColumn({ nodes }: { nodes: CommitNode[] }) {
             );
           });
         })}
-        {/* Draw commit dots */}
+        {/* Commit nodes — hollow circles, filled for selected */}
         {nodes.map((node, idx) => {
           const cx = node.lane * laneWidth + laneWidth / 2 + 4;
           const cy = idx * rowHeight + rowHeight / 2;
+          const isSelected = idx === selectedIndex;
           const isMerge = node.entry.parents.length > 1;
           return (
             <g key={idx}>
-              <circle
-                cx={cx}
-                cy={cy}
-                r={isMerge ? 6 : 4}
-                fill={node.color}
-                stroke="var(--bg-primary)"
-                strokeWidth={1.5}
-              />
-              {isMerge && (
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={2}
-                  fill="var(--bg-primary)"
-                />
+              {isMerge ? (
+                <>
+                  <circle cx={cx} cy={cy} r={5} fill={node.color} stroke="var(--graph-node-border)" strokeWidth={1.5} />
+                  <circle cx={cx} cy={cy} r={2} fill="var(--graph-node-fill)" />
+                </>
+              ) : isSelected ? (
+                <circle cx={cx} cy={cy} r={4} fill="var(--graph-node-selected)" stroke="var(--graph-node-border)" strokeWidth={1} />
+              ) : (
+                <circle cx={cx} cy={cy} r={3.5} fill="var(--graph-node-fill)" stroke={node.color} strokeWidth={1.5} />
               )}
             </g>
           );
@@ -214,9 +195,10 @@ export function HistoryPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const status = useGitStore((s) => s.status);
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<LogEntry | null>(null);
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [showGraph, setShowGraph] = useState(true);
   const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
@@ -230,6 +212,7 @@ export function HistoryPage() {
     try {
       const result = await api.git.log(repo.path, { maxCount: 500, all: true });
       setEntries(result);
+      setSelectedIdx(0);
     } catch (e) {
       toast.error('Failed to load history', String(e));
     } finally {
@@ -241,23 +224,19 @@ export function HistoryPage() {
     loadHistory();
   }, [loadHistory]);
 
-  // Load commit files when selecting
   useEffect(() => {
-    if (!selected) {
+    if (selectedIdx === null) {
       setCommitFiles([]);
       return;
     }
+    const selected = filtered[selectedIdx];
+    if (!selected) return;
     setLoadingFiles(true);
     api.git.commitFiles(repo.path, selected.hash)
       .then(setCommitFiles)
-      .catch((e) => toast.error('Failed to load commit files', String(e)))
+      .catch(() => setCommitFiles([]))
       .finally(() => setLoadingFiles(false));
-  }, [selected, repo.path, toast]);
-
-  const graphNodes = useMemo(() => {
-    if (!showGraph) return [];
-    return computeGraphLanes(filtered);
-  }, [showGraph, entries, search]);
+  }, [selectedIdx, repo.path, toast]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return entries;
@@ -269,6 +248,11 @@ export function HistoryPage() {
         e.hash.toLowerCase().includes(q)
     );
   }, [entries, search]);
+
+  const graphNodes = useMemo(() => {
+    if (!showGraph) return [];
+    return computeGraphLanes(filtered);
+  }, [showGraph, filtered]);
 
   const handleCherryPick = async (entry: LogEntry) => {
     if (!confirm(`Cherry-pick commit ${shortHash(entry.hash)} onto current branch?`)) return;
@@ -287,7 +271,7 @@ export function HistoryPage() {
   };
 
   const handleRevert = async (entry: LogEntry) => {
-    if (!confirm(`Revert commit ${shortHash(entry.hash)}? This creates a new commit that undoes the changes.`)) return;
+    if (!confirm(`Revert commit ${shortHash(entry.hash)}?`)) return;
     try {
       const result = await api.git.revert(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) {
@@ -308,6 +292,8 @@ export function HistoryPage() {
   };
 
   const handleSaveMessage = async () => {
+    if (selectedIdx === null) return;
+    const selected = filtered[selectedIdx];
     if (!selected) return;
     try {
       await api.git.editCommitMessage(repo.path, selected.hash, editMsgValue);
@@ -320,12 +306,13 @@ export function HistoryPage() {
   };
 
   const handleOpenInBrowser = async () => {
+    if (selectedIdx === null) return;
+    const selected = filtered[selectedIdx];
     if (!selected) return;
     try {
       const info = await api.git.extractRepoInfo(repo.path);
       if (info.webUrl && info.provider !== 'unknown') {
-        const commitUrl = `${info.webUrl}/commit/${selected.hash}`;
-        api.app.openExternal(commitUrl);
+        api.app.openExternal(`${info.webUrl}/commit/${selected.hash}`);
       } else {
         toast.info('Repository has no remote URL');
       }
@@ -334,30 +321,34 @@ export function HistoryPage() {
     }
   };
 
+  const selected = selectedIdx !== null ? filtered[selectedIdx] : null;
+  const hasUncommittedChanges = status && !status.isClean;
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">History</span>
-          <span className="text-2xs text-text-tertiary">{entries.length} commits</span>
+          <span className="text-xs font-medium">Graph</span>
+          <span className="text-2xs text-text-tertiary">{filtered.length} commits</span>
         </div>
         <div className="flex items-center gap-2">
           <input
             type="text"
-            placeholder="Search commits..."
+            placeholder="Filter..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="text-xs w-56"
+            className="text-xs w-40 px-2 py-0.5"
           />
           <button
-            className={cn('icon-btn', showGraph && 'active')}
+            className={cn('icon-btn !w-5 !h-5', showGraph && 'active')}
             title="Toggle graph"
             onClick={() => setShowGraph(!showGraph)}
           >
-            <GitBranch size={13} />
+            <GitBranch size={11} />
           </button>
-          <button className="icon-btn" title="Refresh" onClick={loadHistory}>
-            <RefreshCw size={13} />
+          <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={loadHistory}>
+            <RefreshCw size={11} />
           </button>
         </div>
       </div>
@@ -365,251 +356,276 @@ export function HistoryPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* List */}
         <div className="flex-1 overflow-y-auto">
-          {loading && (
+          {loading ? (
             <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
-          )}
-          {!loading && filtered.length === 0 && (
-            <div className="p-8 text-center text-text-tertiary text-sm">
-              {search ? 'No commits match the search' : 'No commits yet'}
-            </div>
-          )}
-          <div className="flex">
-            {showGraph && !loading && filtered.length > 0 && (
-              <div className="border-r border-border-subtle bg-bg-secondary">
-                <GraphColumn nodes={graphNodes} />
-              </div>
-            )}
-            <div className="flex-1">
-              {filtered.map((entry, idx) => (
-                <div
-                  key={entry.hash}
-                  className="group flex items-start gap-2 px-3 cursor-pointer border-b border-border-subtle hover:bg-bg-hover"
-                  style={{ height: 36 }}
-                  onClick={() => setSelected(entry)}
-                >
-                  <div className="flex-1 min-w-0 py-1">
-                    <div className="text-sm text-text-primary truncate">
-                      {entry.subject}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5 text-xs text-text-tertiary">
-                      <span className="font-medium text-text-secondary">
-                        {entry.author.name}
-                      </span>
-                      <span>·</span>
-                      <span>{formatDate(entry.author.date)}</span>
+          ) : (
+            <div className="flex">
+              {showGraph && !loading && filtered.length > 0 && (
+                <div className="border-r border-border-subtle bg-bg-secondary">
+                  <GraphColumn nodes={graphNodes} selectedIndex={selectedIdx} />
+                </div>
+              )}
+              <div className="flex-1">
+                {/* Working Tree row */}
+                {hasUncommittedChanges && (
+                  <div
+                    className={cn(
+                      'flex items-center gap-2 px-2 border-b border-border-subtle cursor-pointer',
+                      selectedIdx === -1 ? 'bg-bg-selected' : 'hover:bg-bg-hover'
+                    )}
+                    style={{ height: 24 }}
+                    onClick={() => { setSelectedIdx(-1); window.location.hash = '#/changes'; }}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: '#c0392b' }}
+                    />
+                    <span className="text-sm font-medium text-text-primary">
+                      Working Tree ({status?.files.length || 0} changed)
+                    </span>
+                  </div>
+                )}
+
+                {/* Column header */}
+                <div className="flex items-center gap-2 px-2 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary" style={{ height: 20 }}>
+                  <span style={{ width: showGraph ? 0 : 16 }}></span>
+                  <span className="flex-1">Message</span>
+                  <span style={{ width: 30 }}></span>
+                  <span style={{ width: 80 }} className="text-right">Date</span>
+                </div>
+
+                {/* Commit rows */}
+                {filtered.length === 0 && (
+                  <div className="p-8 text-center text-text-tertiary text-sm">
+                    {search ? 'No commits match the search' : 'No commits yet'}
+                  </div>
+                )}
+                {filtered.map((entry, idx) => {
+                  const initials = getInitials(entry.author.name);
+                  const color = getAuthorColor(entry.author.name);
+                  const isSelected = selectedIdx === idx;
+                  const isHEAD = entry.refs.some(r => r.includes('HEAD'));
+                  return (
+                    <div
+                      key={entry.hash}
+                      className={cn(
+                        'group flex items-center gap-2 px-2 cursor-pointer border-b border-border-subtle',
+                        isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover'
+                      )}
+                      style={{ height: 24 }}
+                      onClick={() => setSelectedIdx(idx)}
+                    >
+                      {/* HEAD indicator */}
+                      {isHEAD ? (
+                        <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>
+                      ) : (
+                        <span style={{ width: 8 }} className="flex-shrink-0" />
+                      )}
+
+                      {/* Branch labels / tags */}
                       {entry.refs.length > 0 && (
-                        <>
-                          <span>·</span>
-                          <div className="flex items-center gap-1 flex-wrap">
-                            {entry.refs.map((ref, i) => (
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {entry.refs.slice(0, 3).map((ref, i) => {
+                            const isTag = ref.startsWith('tag:');
+                            const isHEAD = ref.includes('HEAD');
+                            const isRemote = ref.includes('/');
+                            const label = ref.replace(/^tag:\s*/, '').replace('HEAD -> ', '');
+                            return (
                               <span
                                 key={i}
                                 className={cn(
-                                  'badge',
-                                  ref.startsWith('tag:')
-                                    ? 'badge-modified'
-                                    : ref.includes('HEAD')
-                                    ? 'badge-renamed'
-                                    : ref.includes('/')
-                                    ? 'badge-renamed'
-                                    : 'badge-added'
+                                  'text-2xs px-1.5 py-0.5 rounded border',
+                                  isTag ? 'border-tag-border bg-tag-bg text-tag-text' :
+                                  isHEAD ? 'border-accent bg-accent-muted text-accent' :
+                                  isRemote ? 'border-status-renamed/30 bg-status-renamed/10 text-status-renamed' :
+                                  'border-status-added/30 bg-status-added/10 text-status-added'
                                 )}
                               >
-                                {ref.includes('HEAD') && <GitBranch size={9} className="mr-0.5" />}
-                                {ref.startsWith('tag:') && <TagIcon size={9} className="mr-0.5" />}
-                                {ref.replace(/^tag:\s*/, '').replace('HEAD -> ', '')}
+                                {isTag && <TagIcon size={8} className="inline mr-0.5" />}
+                                {label}
                               </span>
-                            ))}
-                          </div>
-                        </>
+                            );
+                          })}
+                        </div>
                       )}
+
+                      {/* Message */}
+                      <span className={cn('flex-1 truncate text-xs', isSelected && 'font-medium')}>
+                        {entry.subject}
+                      </span>
+
+                      {/* Author badge */}
+                      <span
+                        className="flex-shrink-0 rounded text-white font-bold text-center"
+                        style={{
+                          backgroundColor: color.bg,
+                          width: 24,
+                          height: 16,
+                          fontSize: 8,
+                          lineHeight: '16px',
+                        }}
+                      >
+                        {initials}
+                      </span>
+
+                      {/* Date */}
+                      <span className="text-2xs text-text-tertiary flex-shrink-0" style={{ width: 70, textAlign: 'right' }}>
+                        {formatTime(entry.author.date)}
+                      </span>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1 flex-shrink-0 py-1">
-                    <code className="text-xs font-mono text-text-tertiary">
-                      {shortHash(entry.hash)}
-                    </code>
-                    <button
-                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5"
-                      title="Copy hash"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        copyToClipboard(entry.hash);
-                        toast.success('Hash copied');
-                      }}
-                    >
-                      <Copy size={10} />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Detail panel */}
-        <div className="w-96 border-l border-border-default bg-bg-secondary overflow-y-auto flex flex-col">
+        <div className="w-80 border-l border-border-default bg-bg-secondary overflow-y-auto flex-shrink-0">
           {selected ? (
-            <div className="p-4 flex-1 overflow-y-auto">
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <div className="text-base font-medium text-text-primary flex-1">
-                  {selected.subject}
-                </div>
-                <button
-                  className="icon-btn"
-                  title="Open in browser"
-                  onClick={handleOpenInBrowser}
-                >
-                  <ExternalLink size={14} />
-                </button>
-              </div>
-              <div className="flex items-center gap-2 mb-4">
-                <code className="text-xs font-mono px-2 py-1 bg-bg-tertiary rounded">
-                  {selected.hash}
+            <div className="p-3">
+              {/* Subject */}
+              <div className="text-sm font-medium text-text-primary mb-2">{selected.subject}</div>
+
+              {/* Hash + actions */}
+              <div className="flex items-center gap-2 mb-3">
+                <code className="text-2xs font-mono px-1.5 py-0.5 bg-bg-tertiary rounded">
+                  {shortHash(selected.hash)}
                 </code>
                 <button
-                  className="icon-btn"
-                  title="Copy"
+                  className="icon-btn !w-5 !h-5"
+                  title="Copy hash"
                   onClick={() => {
                     copyToClipboard(selected.hash);
                     toast.success('Hash copied');
                   }}
                 >
-                  <Copy size={12} />
+                  <Copy size={10} />
+                </button>
+                <button
+                  className="icon-btn !w-5 !h-5"
+                  title="Open in browser"
+                  onClick={handleOpenInBrowser}
+                >
+                  <ExternalLink size={11} />
                 </button>
               </div>
 
-              <div className="space-y-3 text-sm">
-                <div>
-                  <div className="text-xs uppercase text-text-tertiary mb-1">Author</div>
-                  <div className="text-text-primary">{selected.author.name}</div>
-                  <div className="text-xs text-text-secondary">{selected.author.email}</div>
-                  <div className="text-xs text-text-tertiary">
-                    {new Date(selected.author.date).toLocaleString()}
-                  </div>
+              {/* Author + date */}
+              <div className="flex items-center gap-2 mb-3">
+                <span
+                  className="flex-shrink-0 rounded text-white font-bold text-center"
+                  style={{
+                    backgroundColor: getAuthorColor(selected.author.name).bg,
+                    width: 28,
+                    height: 18,
+                    fontSize: 9,
+                    lineHeight: '18px',
+                  }}
+                >
+                  {getInitials(selected.author.name)}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-text-primary">{selected.author.name}</div>
+                  <div className="text-2xs text-text-tertiary">{formatTime(selected.author.date)}</div>
                 </div>
-                {selected.parents.length > 0 && (
-                  <div>
-                    <div className="text-xs uppercase text-text-tertiary mb-1">Parents</div>
-                    {selected.parents.map((p, i) => (
-                      <div key={i} className="flex items-center gap-1">
-                        <CornerDownRight size={11} className="text-text-tertiary" />
-                        <code className="text-xs font-mono text-accent">{shortHash(p)}</code>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {selected.body && !editingMessage && (
-                  <div>
-                    <div className="text-xs uppercase text-text-tertiary mb-1 flex items-center justify-between">
-                      <span>Message</span>
-                      <button
-                        className="icon-btn !w-5 !h-5"
-                        title="Edit commit message"
-                        onClick={() => handleEditMessage(selected)}
-                      >
-                        <Pencil size={10} />
-                      </button>
-                    </div>
-                    <pre className="text-xs font-mono whitespace-pre-wrap text-text-secondary bg-bg-tertiary p-2 rounded">
-                      {selected.body}
-                    </pre>
-                  </div>
-                )}
-                {editingMessage && (
-                  <div>
-                    <div className="text-xs uppercase text-text-tertiary mb-1">Edit Message</div>
-                    <textarea
-                      className="w-full text-xs font-mono h-32 resize-none"
-                      value={editMsgValue}
-                      onChange={(e) => setEditMsgValue(e.target.value)}
-                    />
-                    <div className="flex gap-2 mt-1">
-                      <button
-                        className="btn btn-primary text-xs"
-                        onClick={handleSaveMessage}
-                      >
-                        Save
-                      </button>
-                      <button
-                        className="btn btn-secondary text-xs"
-                        onClick={() => setEditingMessage(false)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
 
-              {/* Actions */}
-              <div className="mt-4 pt-4 border-t border-border-default">
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="btn btn-secondary text-xs"
-                    onClick={() => handleCherryPick(selected)}
-                    title="Cherry-pick onto current branch"
-                  >
-                    <GitPullRequest size={11} />
-                    Cherry Pick
-                  </button>
-                  <button
-                    className="btn btn-secondary text-xs"
-                    onClick={() => handleRevert(selected)}
-                    title="Create a revert commit"
-                  >
-                    <Undo size={11} />
-                    Revert
-                  </button>
+              {/* Parents */}
+              {selected.parents.length > 0 && (
+                <div className="mb-3">
+                  <div className="text-2xs uppercase text-text-tertiary mb-1">Parents</div>
+                  {selected.parents.map((p, i) => (
+                    <div key={i} className="flex items-center gap-1">
+                      <CornerDownRight size={10} className="text-text-tertiary" />
+                      <code className="text-2xs font-mono text-accent">{shortHash(p)}</code>
+                    </div>
+                  ))}
                 </div>
+              )}
+
+              {/* Body */}
+              {selected.body && !editingMessage && (
+                <div className="mb-3">
+                  <div className="text-2xs uppercase text-text-tertiary mb-1 flex items-center justify-between">
+                    <span>Message</span>
+                    <button className="icon-btn !w-4 !h-4" title="Edit" onClick={() => handleEditMessage(selected)}>
+                      <Pencil size={9} />
+                    </button>
+                  </div>
+                  <pre className="text-2xs font-mono whitespace-pre-wrap text-text-secondary bg-bg-tertiary p-2 rounded">
+                    {selected.body}
+                  </pre>
+                </div>
+              )}
+
+              {editingMessage && (
+                <div className="mb-3">
+                  <div className="text-2xs uppercase text-text-tertiary mb-1">Edit Message</div>
+                  <textarea
+                    className="w-full text-xs font-mono h-20 resize-none mb-1"
+                    value={editMsgValue}
+                    onChange={(e) => setEditMsgValue(e.target.value)}
+                  />
+                  <div className="flex gap-1">
+                    <button className="btn btn-primary text-2xs" onClick={handleSaveMessage}>Save</button>
+                    <button className="btn btn-secondary text-2xs" onClick={() => setEditingMessage(false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex flex-wrap gap-1 mb-3 pb-3 border-b border-border-default">
+                <button
+                  className="btn btn-secondary text-2xs"
+                  onClick={() => handleCherryPick(selected)}
+                  title="Cherry-pick onto current branch"
+                >
+                  <GitPullRequest size={10} />
+                  Cherry Pick
+                </button>
+                <button
+                  className="btn btn-secondary text-2xs"
+                  onClick={() => handleRevert(selected)}
+                  title="Create a revert commit"
+                >
+                  <Undo size={10} />
+                  Revert
+                </button>
               </div>
 
               {/* Files */}
-              <div className="mt-4 pt-4 border-t border-border-default">
+              <div>
                 <button
-                  className="w-full flex items-center justify-between text-xs uppercase text-text-tertiary mb-2"
+                  className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-1"
                   onClick={() => setShowFiles(!showFiles)}
                 >
                   <span className="flex items-center gap-1">
-                    <FileText size={11} />
+                    <FileText size={10} />
                     Files ({commitFiles.length})
                   </span>
-                  {showFiles ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                  {showFiles ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
                 </button>
                 {showFiles && (
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {loadingFiles ? (
-                      <div className="text-xs text-text-tertiary">Loading files...</div>
+                      <div className="text-2xs text-text-tertiary">Loading...</div>
                     ) : (
                       commitFiles.map((f, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center gap-2 text-xs px-2 py-1 rounded hover:bg-bg-hover"
-                        >
+                        <div key={i} className="flex items-center gap-1 text-2xs px-1 py-0.5 rounded hover:bg-bg-hover">
                           <span
-                            className="font-mono font-bold w-4 text-center"
-                            style={{ color: getStatusColor(
-                              f.status === 'A' ? 'added' :
-                              f.status === 'D' ? 'deleted' :
-                              f.status === 'R' ? 'renamed' :
-                              f.status === 'C' ? 'copied' : 'modified'
-                            ) }}
+                            className="font-mono font-bold w-3 text-center"
+                            style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}
                           >
                             {f.status}
                           </span>
-                          <span className="flex-1 truncate font-mono text-text-secondary">
-                            {f.path}
-                            {f.oldPath && (
-                              <span className="text-text-tertiary"> ← {f.oldPath}</span>
-                            )}
-                          </span>
+                          <span className="flex-1 truncate font-mono text-text-secondary">{f.path}</span>
                           {!f.binary && (f.additions > 0 || f.deletions > 0) && (
                             <span className="text-2xs flex-shrink-0">
                               <span className="text-status-added">+{f.additions}</span>
                               <span className="text-status-deleted ml-1">-{f.deletions}</span>
                             </span>
                           )}
-                          {f.binary && <span className="text-2xs text-text-tertiary">binary</span>}
                         </div>
                       ))
                     )}
@@ -618,7 +634,7 @@ export function HistoryPage() {
               </div>
             </div>
           ) : (
-            <div className="p-8 text-center text-text-tertiary text-sm">
+            <div className="p-4 text-center text-text-tertiary text-sm">
               Select a commit to view details
             </div>
           )}

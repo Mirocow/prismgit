@@ -17,12 +17,10 @@ interface SettingsState {
 
 function applyThemeToDOM(theme: Theme) {
   const html = document.documentElement;
-  if (theme === 'light') {
-    html.classList.remove('dark');
-    html.classList.add('light');
-  } else {
-    html.classList.remove('light');
+  if (theme === 'dark') {
     html.classList.add('dark');
+  } else {
+    html.classList.remove('dark');
   }
   // Persist for next load
   try {
@@ -35,18 +33,18 @@ function applyThemeToDOM(theme: Theme) {
 // Apply theme immediately on module load (prevents FOUC)
 try {
   const saved = localStorage.getItem('smartgit-theme') as Theme | null;
-  if (saved === 'light' || saved === 'dark') {
+  if (saved === 'dark' || saved === 'light') {
     applyThemeToDOM(saved);
   } else {
-    applyThemeToDOM('dark'); // default
+    applyThemeToDOM('light'); // default to light
   }
 } catch {
-  applyThemeToDOM('dark');
+  applyThemeToDOM('light');
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: {},
-  theme: 'dark',
+  theme: 'light',
   loading: false,
 
   loadSettings: async () => {

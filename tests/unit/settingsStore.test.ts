@@ -102,14 +102,12 @@ describe('settingsStore', () => {
       useSettingsStore.getState().applyTheme();
 
       expect(document.documentElement.classList.contains('dark')).toBe(true);
-      expect(document.documentElement.classList.contains('light')).toBe(false);
     });
 
-    it('adds light class to documentElement', () => {
+    it('removes dark class for light theme', () => {
       useSettingsStore.setState({ theme: 'light' });
       useSettingsStore.getState().applyTheme();
 
-      expect(document.documentElement.classList.contains('light')).toBe(true);
       expect(document.documentElement.classList.contains('dark')).toBe(false);
     });
   });

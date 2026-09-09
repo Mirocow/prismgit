@@ -9,10 +9,13 @@
       // Apply theme before page load to prevent FOUC
       (function() {
         try {
-          var theme = localStorage.getItem('smartgit-theme') || 'dark';
-          document.documentElement.classList.add(theme === 'light' ? 'light' : 'dark');
+          var theme = localStorage.getItem('smartgit-theme') || 'light';
+          if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+          }
+          // Light is default (:root), no class needed
         } catch (e) {
-          document.documentElement.classList.add('dark');
+          // Default to light
         }
       })();
     </script>

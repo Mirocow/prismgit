@@ -1,4 +1,4 @@
-import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star } from './icons';
+import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, EyeOff } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -24,6 +24,8 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
   const toast = useToastStore();
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
+
+  const disabled = !currentRepo;
 
   const handleRefresh = () => {
     if (!currentRepo) return;
@@ -95,118 +97,92 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
     }
   };
 
-  const isMerging = status?.isMerging;
-  const isRebasing = status?.isRebasing;
-  const isCherryPicking = status?.isCherryPicking;
-  const isReverting = status?.isReverting;
+  const isInProgress = status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting;
   const isBisecting = status?.isBisecting;
-  const isInProgress = isMerging || isRebasing || isCherryPicking || isReverting;
+
+  // Toolbar button with text label below icon (SmartGit style)
+  const ToolButton = ({ icon: Icon, label, onClick, disabled, title }: {
+    icon: typeof RefreshCw; label: string; onClick: () => void; disabled?: boolean; title?: string;
+  }) => (
+    <button
+      className="flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded hover:bg-bg-hover transition-colors no-drag disabled:opacity-40 disabled:cursor-not-allowed"
+      onClick={onClick}
+      disabled={disabled}
+      title={title || label}
+    >
+      <Icon size={16} />
+      <span className="text-2xs text-text-secondary">{label}</span>
+    </button>
+  );
+
+  const Divider = () => <div className="w-px h-8 bg-border-default mx-1" />;
 
   return (
-    <header className="titlebar-drag flex items-center gap-1 px-2 h-10 bg-bg-tertiary border-b border-border-default flex-shrink-0">
-      <div className="flex items-center gap-1 no-drag">
-        <button
-          className={cn('icon-btn', !currentRepo && 'opacity-50')}
-          title="Refresh"
-          onClick={handleRefresh}
-          disabled={!currentRepo}
-        >
-          <RefreshCw size={14} />
-        </button>
-        <div className="w-px h-5 bg-border-default mx-1" />
-        <button
-          className="icon-btn"
-          title="Fetch (with prune)"
-          onClick={handleFetch}
-          disabled={!currentRepo}
-        >
-          <CloudDownload size={14} />
-        </button>
-        <button
-          className="icon-btn"
-          title="Pull"
-          onClick={handlePull}
-          disabled={!currentRepo}
-        >
-          <GitPullRequest size={14} />
-        </button>
-        <button
-          className="icon-btn"
-          title="Push"
-          onClick={handlePush}
-          disabled={!currentRepo}
-        >
-          <GitCommit size={14} />
-        </button>
-        <button
-          className="icon-btn"
-          title="Synchronize (fetch + pull + push)"
-          onClick={handleSynchronize}
-          disabled={!currentRepo}
-        >
-          <Sync size={14} />
-        </button>
-        <div className="w-px h-5 bg-border-default mx-1" />
-        <button
-          className="icon-btn"
-          title="Git-Flow (Ctrl+Shift+G)"
-          onClick={() => onGitFlow && onGitFlow()}
-          disabled={!currentRepo}
-        >
-          <GitMerge size={14} />
-        </button>
-        <button
-          className="icon-btn"
-          title="Interactive Rebase (Ctrl+Shift+R)"
-          onClick={() => onInteractiveRebase && onInteractiveRebase()}
-          disabled={!currentRepo}
-        >
-          <RotateCcw size={14} />
-        </button>
-        <div className="w-px h-5 bg-border-default mx-1" />
-        <button
-          className="icon-btn"
-          title="Repository info (description, tags, notes)"
-          onClick={() => onRepoInfo && onRepoInfo()}
-          disabled={!currentRepo}
-        >
-          <Star
-            size={14}
-            className={currentMetadata?.favorite ? 'text-status-modified fill-current' : ''}
-          />
-        </button>
-        <button
-          className="icon-btn"
-          title="Find object (Ctrl+F)"
-          onClick={() => onFind && onFind()}
-          disabled={!currentRepo}
-        >
-          <Search size={14} />
-        </button>
-        <button
-          className="icon-btn"
-          title="Open in browser"
-          onClick={handleOpenInBrowser}
-          disabled={!currentRepo}
-        >
-          <ExternalLink size={14} />
-        </button>
-        <button
-          className="icon-btn"
-          title="Reveal in file manager"
-          onClick={handleRevealInFileManager}
-          disabled={!currentRepo}
-        >
-          <Folder size={14} />
-        </button>
-        <div className="w-px h-5 bg-border-default mx-1" />
-        <button
-          className="icon-btn"
-          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme (Ctrl+Shift+T)`}
-          onClick={() => toggleTheme()}
-        >
-          {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-        </button>
+    <header className="titlebar-drag flex items-center px-2 h-12 bg-bg-tertiary border-b border-border-default flex-shrink-0">
+      {/* Pull / Sync / Push group */}
+      <div className="flex items-center no-drag">
+        <ToolButton icon={ArrowDown} label="Pull" onClick={handlePull} disabled={disabled} />
+        <ToolButton icon={Sync} label="Sync" onClick={handleSynchronize} disabled={disabled} title="Synchronize (fetch + pull + push)" />
+        <ToolButton icon={ArrowUp} label="Push" onClick={handlePush} disabled={disabled} />
+      </div>
+
+      <Divider />
+
+      {/* Stage / Unstage / Discard group */}
+      <div className="flex items-center no-drag">
+        <ToolButton icon={Plus} label="Stage" onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
+        <ToolButton icon={Minus} label="Unstage" onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage all" />
+        <ToolButton icon={Trash} label="Discard" onClick={() => {
+          if (!currentRepo || !confirm('Discard all uncommitted changes? This cannot be undone.')) return;
+          api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
+            toast.success('Changes discarded');
+            refreshStatus(currentRepo.path);
+          }).catch((e) => toast.error('Discard failed', String(e)));
+        }} disabled={disabled} title="Discard all changes" />
+      </div>
+
+      <Divider />
+
+      {/* Stash group */}
+      <div className="flex items-center no-drag">
+        <ToolButton icon={CloudDownload} label="Save Stash" onClick={() => {
+          if (!currentRepo) return;
+          api.git.stashPush(currentRepo.path, undefined, true).then(() => {
+            toast.success('Stash saved');
+            refreshStatus(currentRepo.path);
+          }).catch((e) => toast.error('Stash failed', String(e)));
+        }} disabled={disabled} />
+        <ToolButton icon={GitPullRequest} label="Apply Stash" onClick={() => {
+          if (!currentRepo) return;
+          api.git.stashList(currentRepo.path).then(stashes => {
+            if (stashes.length === 0) {
+              toast.info('No stashes available');
+              return;
+            }
+            api.git.stashApply(currentRepo.path, 0).then(() => {
+              toast.success('Stash applied');
+              refreshStatus(currentRepo.path);
+            }).catch((e) => toast.error('Apply failed', String(e)));
+          });
+        }} disabled={disabled} />
+      </div>
+
+      <Divider />
+
+      {/* Log / Blame / Investigate group */}
+      <div className="flex items-center no-drag">
+        <ToolButton icon={GitBranch} label="Log" onClick={() => { window.location.hash = '#/history'; }} disabled={disabled} title="Open History/Log" />
+        <ToolButton icon={Search} label="Blame" onClick={() => { window.location.hash = '#/blame'; }} disabled={disabled} />
+        <ToolButton icon={Search} label="Investigate" onClick={() => { window.location.hash = '#/investigate'; }} disabled={disabled} />
+      </div>
+
+      <Divider />
+
+      {/* Git-Flow / Merge / Rebase group */}
+      <div className="flex items-center no-drag">
+        <ToolButton icon={GitMerge} label="Git-Flow" onClick={() => onGitFlow && onGitFlow()} disabled={disabled} />
+        <ToolButton icon={GitMerge} label="Merge" onClick={() => { window.location.hash = '#/branches'; }} disabled={disabled} />
+        <ToolButton icon={RotateCcw} label="Rebase" onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} />
       </div>
 
       {/* Center: branch info */}
@@ -216,7 +192,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
             {isInProgress && (
               <span className="badge badge-modified flex items-center gap-1 animate-pulse">
                 <AlertCircle size={10} />
-                {isMerging ? 'MERGING' : isRebasing ? 'REBASING' : isCherryPicking ? 'CHERRY-PICKING' : 'REVERTING'}
+                {status.isMerging ? 'MERGING' : status.isRebasing ? 'REBASING' : status.isCherryPicking ? 'CHERRY-PICKING' : 'REVERTING'}
               </span>
             )}
             {isBisecting && (
@@ -256,13 +232,48 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
         )}
       </div>
 
-      {/* Right: repo name */}
-      <div className="flex items-center gap-2 text-xs text-text-tertiary no-drag">
-        {currentRepo && (
-          <span className="font-mono truncate max-w-xs" title={currentRepo.path}>
-            {currentRepo.path}
-          </span>
-        )}
+      {/* Right: utility buttons */}
+      <div className="flex items-center gap-1 no-drag">
+        <button
+          className="icon-btn"
+          title="Repository info"
+          onClick={() => onRepoInfo && onRepoInfo()}
+          disabled={disabled}
+        >
+          <Star size={14} className={currentMetadata?.favorite ? 'text-status-modified fill-current' : ''} />
+        </button>
+        <button
+          className="icon-btn"
+          title="Find object (Ctrl+F)"
+          onClick={() => onFind && onFind()}
+          disabled={disabled}
+        >
+          <Search size={14} />
+        </button>
+        <button
+          className="icon-btn"
+          title="Open in browser"
+          onClick={handleOpenInBrowser}
+          disabled={disabled}
+        >
+          <ExternalLink size={14} />
+        </button>
+        <button
+          className="icon-btn"
+          title="Reveal in file manager"
+          onClick={handleRevealInFileManager}
+          disabled={disabled}
+        >
+          <Folder size={14} />
+        </button>
+        <div className="w-px h-5 bg-border-default mx-1" />
+        <button
+          className="icon-btn"
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme (Ctrl+Shift+T)`}
+          onClick={() => toggleTheme()}
+        >
+          {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+        </button>
       </div>
     </header>
   );

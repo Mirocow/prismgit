@@ -16,7 +16,73 @@
  */
 
 :root {
-  /* Background tones */
+  /* SmartGit Light theme (default) — matches SmartGit 24 native look */
+  --bg-primary: #f0f0f0;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e8e8e8;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(0, 0, 0, 0.05);
+  --bg-active: #d6e8f5;
+  --bg-selected: #d6e8f5;
+  --bg-sidebar-selected: #e4f0fb;
+
+  --border-default: #cccccc;
+  --border-subtle: #e0e0e0;
+  --border-strong: #b0b0b0;
+  --border-focused: #4a90d9;
+
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --text-tertiary: #999999;
+  --text-inverse: #ffffff;
+  --text-link: #0066cc;
+
+  --accent: #4a90d9;
+  --accent-hover: #3a7bc8;
+  --accent-active: #2a6bb8;
+  --accent-muted: rgba(74, 144, 217, 0.12);
+  --accent-purple: #a37acc;
+  --accent-cyan: #4cbf99;
+  --accent-yellow: #f2ae49;
+  --accent-yellow-dim: #8B7000;
+
+  --status-added: #548235;
+  --status-modified: #c65911;
+  --status-deleted: #c0392b;
+  --status-renamed: #4a90d9;
+  --status-untracked: #548235;
+  --status-conflict: #e74c3c;
+  --status-success: #548235;
+  --status-warning: #f2ae49;
+  --status-error: #c0392b;
+  --status-info: #4a90d9;
+
+  --diff-added-bg: rgba(84, 130, 53, 0.12);
+  --diff-removed-bg: rgba(192, 57, 43, 0.12);
+  --diff-added-line: rgba(84, 130, 53, 0.06);
+  --diff-removed-line: rgba(192, 57, 43, 0.06);
+
+  --tag-bg: #f0e6d2;
+  --tag-border: #c4a882;
+  --tag-text: #5a4a2a;
+
+  --warning-bg: #fef9e7;
+  --warning-icon: #ffa500;
+  --warning-border: #f0e0a0;
+
+  --comment: #888888;
+  --graph-line: #2b2b2b;
+  --graph-node-fill: #ffffff;
+  --graph-node-border: #2b2b2b;
+  --graph-node-selected: #2b2b2b;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.10);
+}
+
+/* Dark theme — Ayu Dark (Ollama-code) */
+.dark {
   --bg-primary: #0b0e14;
   --bg-secondary: #0f1218;
   --bg-tertiary: #131721;
@@ -24,21 +90,19 @@
   --bg-hover: rgba(255, 255, 255, 0.04);
   --bg-active: rgba(57, 186, 230, 0.12);
   --bg-selected: rgba(57, 186, 230, 0.18);
+  --bg-sidebar-selected: rgba(57, 186, 230, 0.15);
 
-  /* Borders */
   --border-default: #1f2530;
   --border-subtle: #161a23;
   --border-strong: #2a313e;
   --border-focused: #39BAE6;
 
-  /* Text */
   --text-primary: #bfbdb6;
   --text-secondary: #8a8f98;
   --text-tertiary: #5c6168;
   --text-inverse: #0b0e14;
   --text-link: #39BAE6;
 
-  /* Accents (Ayu) */
   --accent: #39BAE6;
   --accent-hover: #59C2FF;
   --accent-active: #1c8eb4;
@@ -48,7 +112,6 @@
   --accent-yellow: #FFD700;
   --accent-yellow-dim: #8B7530;
 
-  /* Status colors */
   --status-added: #AAD94C;
   --status-modified: #FFD700;
   --status-deleted: #F26D78;
@@ -60,69 +123,28 @@
   --status-error: #F26D78;
   --status-info: #39BAE6;
 
-  /* Diff */
   --diff-added-bg: rgba(170, 217, 76, 0.12);
   --diff-removed-bg: rgba(242, 109, 120, 0.12);
   --diff-added-line: rgba(170, 217, 76, 0.06);
   --diff-removed-line: rgba(242, 109, 120, 0.06);
 
-  /* Misc */
+  --tag-bg: rgba(255, 215, 0, 0.12);
+  --tag-border: rgba(255, 215, 0, 0.25);
+  --tag-text: #FFD700;
+
+  --warning-bg: rgba(255, 215, 0, 0.08);
+  --warning-icon: #FFD700;
+  --warning-border: rgba(255, 215, 0, 0.2);
+
   --comment: #646A71;
+  --graph-line: #646A71;
+  --graph-node-fill: #0b0e14;
+  --graph-node-border: #bfbdb6;
+  --graph-node-selected: #39BAE6;
+
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
-}
-
-.light {
-  /* Ollama-code light palette (Ayu Light) */
-  --bg-primary: #f8f9fa;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #f0f1f3;
-  --bg-elevated: #ffffff;
-  --bg-hover: rgba(0, 0, 0, 0.04);
-  --bg-active: rgba(57, 158, 230, 0.10);
-  --bg-selected: rgba(57, 158, 230, 0.16);
-
-  --border-default: #e3e4e6;
-  --border-subtle: #ececed;
-  --border-strong: #c8cacf;
-  --border-focused: #399ee6;
-
-  --text-primary: #5c6166;
-  --text-secondary: #8a8f93;
-  --text-tertiary: #a8acb0;
-  --text-inverse: #ffffff;
-  --text-link: #399ee6;
-
-  --accent: #399ee6;
-  --accent-hover: #55b4d4;
-  --accent-active: #1c7eb4;
-  --accent-muted: rgba(57, 158, 230, 0.10);
-  --accent-purple: #a37acc;
-  --accent-cyan: #4cbf99;
-  --accent-yellow: #f2ae49;
-  --accent-yellow-dim: #8B7000;
-
-  --status-added: #86b300;
-  --status-modified: #f2ae49;
-  --status-deleted: #f07171;
-  --status-renamed: #399ee6;
-  --status-untracked: #4cbf99;
-  --status-conflict: #ff6b35;
-  --status-success: #86b300;
-  --status-warning: #f2ae49;
-  --status-error: #f07171;
-  --status-info: #399ee6;
-
-  --diff-added-bg: rgba(134, 179, 0, 0.12);
-  --diff-removed-bg: rgba(240, 113, 113, 0.12);
-  --diff-added-line: rgba(134, 179, 0, 0.05);
-  --diff-removed-line: rgba(240, 113, 113, 0.05);
-
-  --comment: #abadb1;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10);
 }
 
 * {
