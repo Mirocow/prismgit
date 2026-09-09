@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, Settings as SettingsIcon, X, EyeOff, FileText } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
@@ -103,6 +104,16 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
   };
 
   const disabled = !currentRepo;
+  const location = useLocation();
+  const navigate = useNavigate();
+  const currentPath = location.pathname;
+
+  // Color constants for icon colors (matching the screenshot style)
+  const COLOR_BLUE = '#399ee6';
+  const COLOR_GREEN = '#86b300';
+  const COLOR_ORANGE = '#f2ae49';
+  const COLOR_PURPLE = '#a37acc';
+  const COLOR_RED = '#f07171';
 
   const handlePush = async () => {
     if (!currentRepo) return;
@@ -154,12 +165,20 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
     </button>
   );
 
-  // Labeled button — icon + text label (like platypusgit)
-  const LabeledButton = ({ icon: Icon, label, onClick, disabled, title }: {
+  // Labeled button — icon + text label, flat style like platypusgit
+  // iconColor: optional color for the icon (blue/green/orange/purple)
+  const LabeledButton = ({ icon: Icon, label, onClick, disabled, title, iconColor, active }: {
     icon: typeof RefreshCw; label: string; onClick: () => void; disabled?: boolean; title: string;
+    iconColor?: string; active?: boolean;
   }) => (
     <button
-      className="flex items-center gap-1.5 px-2 h-7 rounded hover:bg-bg-hover transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary text-xs"
+      className={cn(
+        'flex items-center gap-1.5 px-2.5 h-7 rounded-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs',
+        active
+          ? 'bg-accent text-text-inverse'
+          : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+      )}
+      style={!active && iconColor ? { color: iconColor } : undefined}
       onClick={onClick}
       disabled={disabled}
       title={title}
@@ -197,18 +216,17 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
             case 'sync':
               return (
                 <div key={key} className="flex items-center">
-                  <LabeledButton icon={ArrowDown} label="Pull" onClick={handlePull} disabled={disabled} title="Pull from remote" />
-                  <LabeledButton icon={Sync} label="Sync" onClick={handleSynchronize} disabled={disabled} title="Sync (fetch + pull + push)" />
-                  <LabeledButton icon={ArrowUp} label="Push" onClick={handlePush} disabled={disabled} title="Push to remote" />
+                  <LabeledButton icon={ArrowDown} label="Fetch" iconColor={COLOR_BLUE} onClick={handlePull} disabled={disabled} title="Fetch + pull from remote" />
+                  <LabeledButton icon={ArrowUp} label="Push" iconColor={COLOR_GREEN} onClick={handlePush} disabled={disabled} title="Push to remote" />
                   <Divider />
                 </div>
               );
             case 'stage':
               return (
                 <div key={key} className="flex items-center">
-                  <LabeledButton icon={Plus} label="Stage All" onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
-                  <LabeledButton icon={Minus} label="Unstage All" onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage all changes" />
-                  <LabeledButton icon={Trash} label="Discard" onClick={() => {
+                  <LabeledButton icon={Plus} label="Stage" iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
+                  <LabeledButton icon={Minus} label="Unstage" iconColor={COLOR_ORANGE} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage all changes" />
+                  <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
                     if (!currentRepo || !confirm('Discard all uncommitted changes?')) return;
                     api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
                       toast.success('Changes discarded'); refreshStatus(currentRepo.path);
@@ -220,13 +238,13 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
             case 'stash':
               return (
                 <div key={key} className="flex items-center">
-                  <LabeledButton icon={CloudDownload} label="Stash" onClick={() => {
+                  <LabeledButton icon={CloudDownload} label="Stash" iconColor={COLOR_PURPLE} onClick={() => {
                     if (!currentRepo) return;
                     api.git.stashPush(currentRepo.path, undefined, true).then(() => {
                       toast.success('Stash saved'); refreshStatus(currentRepo.path);
                     }).catch((e) => toast.error('Stash failed', String(e)));
                   }} disabled={disabled} title="Save stash" />
-                  <LabeledButton icon={GitPullRequest} label="Pop" onClick={() => {
+                  <LabeledButton icon={GitPullRequest} label="Pop" iconColor={COLOR_PURPLE} onClick={() => {
                     if (!currentRepo) return;
                     api.git.stashList(currentRepo.path).then(stashes => {
                       if (stashes.length === 0) { toast.info('No stashes'); return; }
@@ -241,17 +259,17 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
             case 'log':
               return (
                 <div key={key} className="flex items-center">
-                  <LabeledButton icon={GitBranch} label="History" onClick={() => { window.location.hash = '#/history'; }} disabled={disabled} title="Commit history" />
-                  <LabeledButton icon={FileText} label="Diff" onClick={() => { window.location.hash = '#/diff'; }} disabled={disabled} title="Compare files between refs" />
-                  <LabeledButton icon={Search} label="Blame" onClick={() => { window.location.hash = '#/blame'; }} disabled={disabled} title="Blame a file" />
+                  <LabeledButton icon={GitBranch} label="History" iconColor={COLOR_BLUE} onClick={() => navigate('/history')} disabled={disabled} title="Commit history" active={currentPath === '/history'} />
+                  <LabeledButton icon={FileText} label="Diff" iconColor={COLOR_BLUE} onClick={() => navigate('/diff')} disabled={disabled} title="Compare files between refs" active={currentPath === '/diff'} />
+                  <LabeledButton icon={Search} label="Blame" iconColor={COLOR_BLUE} onClick={() => navigate('/blame')} disabled={disabled} title="Blame a file" active={currentPath === '/blame'} />
                   <Divider />
                 </div>
               );
             case 'workflows':
               return (
                 <div key={key} className="flex items-center">
-                  <LabeledButton icon={GitMerge} label="Git-Flow" onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow operations" />
-                  <LabeledButton icon={RotateCcw} label="Rebase" onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Interactive rebase" />
+                  <LabeledButton icon={GitMerge} label="Git-Flow" iconColor={COLOR_ORANGE} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow operations" />
+                  <LabeledButton icon={RotateCcw} label="Rebase" iconColor={COLOR_ORANGE} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Interactive rebase" />
                 </div>
               );
             default:
