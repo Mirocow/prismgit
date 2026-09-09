@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, EyeOff, Folder, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X } from '../components/icons';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { LazyFileList } from '../components/LazyFileList';
@@ -112,7 +112,35 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const fileExtensionFilter = useSelectionStore((s) => s.fileExtensionFilter);
   const setFileExtensionFilter = useSelectionStore((s) => s.setFileExtensionFilter);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  // For diff display — when multi-select, show diff of the last-clicked file
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+
+  const handleFileClick = (e: React.MouseEvent, filePath: string) => {
+    if (e.ctrlKey || e.metaKey) {
+      // Toggle selection in multi-select set
+      setSelectedFiles(prev => {
+        const next = new Set(prev);
+        if (next.has(filePath)) next.delete(filePath);
+        else next.add(filePath);
+        return next;
+      });
+      // Still set the primary selection for diff display
+      setSelectedFile(filePath);
+    } else if (e.shiftKey) {
+      // Range select — simplified: just add to set
+      setSelectedFiles(prev => {
+        const next = new Set(prev);
+        next.add(filePath);
+        return next;
+      });
+      setSelectedFile(filePath);
+    } else {
+      // Single click — clear multi-select, select only this file
+      setSelectedFiles(new Set([filePath]));
+      setSelectedFile(filePath);
+    }
+  };
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [commitMsg, setCommitMsg] = useState('');
@@ -570,7 +598,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   };
 
   const renderFileRow = (file: FileStatus, isStaged: boolean) => {
-    const isSelected = selectedFile === file.path;
+    const isSelected = selectedFiles.has(file.path);
     const idx = file.index as string;
     const wd = file.working_dir as string;
     const code = idx !== ' ' && idx !== '?' ? idx : wd;
@@ -623,7 +651,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           }
           setDraggedFile(null);
         }}
-        onClick={() => setSelectedFile(file.path)}
+        onClick={(e) => handleFileClick(e, file.path)}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -889,6 +917,31 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={handleRefresh}>
             <RefreshCw size={11} />
           </button>
+          {selectedFiles.size > 1 && (
+            <>
+              <button className="icon-btn !w-5 !h-5 hover:!text-status-added" title={`Stage ${selectedFiles.size} selected files`}
+                onClick={async () => {
+                  try {
+                    await stageFiles(repo.path, Array.from(selectedFiles));
+                    toast.success(`Staged ${selectedFiles.size} files`);
+                    setSelectedFiles(new Set());
+                  } catch (e) { toast.error('Stage failed', String(e)); }
+                }}>
+                <Plus size={11} />
+              </button>
+              <button className="icon-btn !w-5 !h-5 hover:!text-status-modified" title={`Stash ${selectedFiles.size} selected files`}
+                onClick={async () => {
+                  try {
+                    await api.git.stashPush(repo.path, `Selected ${selectedFiles.size} files`, false, false, Array.from(selectedFiles));
+                    toast.success(`Stashed ${selectedFiles.size} files`);
+                    setSelectedFiles(new Set());
+                    refreshStatus(repo.path);
+                  } catch (e) { toast.error('Stash failed', String(e)); }
+                }}>
+                <Download size={11} />
+              </button>
+            </>
+          )}
           <button className="icon-btn !w-5 !h-5" title="Stage All" onClick={handleStageAll}>
             <Plus size={11} />
           </button>

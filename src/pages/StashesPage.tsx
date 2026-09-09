@@ -58,6 +58,8 @@ export function StashesPage() {
     try {
       await api.git.stashPop(repo.path, stash.index);
       toast.success(`Stash@{${stash.index}} popped`);
+      setViewingStash(null);
+      setStashDiff(null);
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
@@ -80,6 +82,8 @@ export function StashesPage() {
     try {
       await api.git.stashDrop(repo.path, stash.index);
       toast.success(`Stash@{${stash.index}} dropped`);
+      setViewingStash(null);
+      setStashDiff(null);
       await load();
     } catch (e) {
       toast.error('Stash drop failed', String(e));
