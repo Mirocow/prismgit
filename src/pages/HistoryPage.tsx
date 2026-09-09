@@ -53,6 +53,9 @@ export function HistoryPage() {
   const [selectedBranches, setSelectedBranches] = useState<Set<string>>(new Set());
   const [useRegex, setUseRegex] = useState(false);
   const [showBranchPicker, setShowBranchPicker] = useState(false);
+  // Hash lookup: when the search query looks like a commit hash prefix and no loaded
+  // commit matches, resolve it via git (works for commits outside the loaded window).
+  const [hashHit, setHashHit] = useState<LogEntry | null>(null);
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
   const showContextMenu = useContextMenu();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -133,8 +136,17 @@ export function HistoryPage() {
     }
   }, [selectedCommitHash, entries, selectedIdx]);
 
+  // Search pool: loaded entries + (optionally) the commit resolved by hash prefix lookup.
+  // The hit is prepended so it stays visible even when it's outside the loaded log window.
+  const searchPool = useMemo(() => {
+    if (hashHit && !entries.some(e => e.hash === hashHit.hash)) {
+      return [hashHit, ...entries];
+    }
+    return entries;
+  }, [entries, hashHit]);
+
   const filtered = useMemo(() => {
-    let result = entries;
+    let result = searchPool;
     // Text search (subject, author, hash) — supports regex
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -177,7 +189,7 @@ export function HistoryPage() {
       if (!isNaN(toTs)) result = result.filter(e => e.author.timestamp <= toTs);
     }
     return result;
-  }, [entries, search, authorFilter, pathFilter, dateFrom, dateTo, useRegex]);
+  }, [searchPool, search, authorFilter, pathFilter, dateFrom, dateTo, useRegex]);
 
   const { rows: graphRows, maxLane } = useMemo(() => {
     if (!showGraph || filtered.length === 0) return { rows: [], maxLane: 0 };
@@ -189,13 +201,44 @@ export function HistoryPage() {
     // rewires each hidden parent to its nearest visible ancestor. The link is
     // then drawn as a dashed line, signalling "there were commits here, but
     // they are filtered out".
-    const hasFilter = filtered.length !== entries.length;
+    const hasFilter = filtered.length !== searchPool.length;
     if (hasFilter) {
-      const ancestry = createAncestryResolver(filtered, entries);
+      const ancestry = createAncestryResolver(filtered, searchPool);
       return computeGraph(filtered, { ancestry });
     }
     return computeGraph(filtered);
-  }, [showGraph, filtered, entries]);
+  }, [showGraph, filtered, searchPool]);
+
+  // Debounced hash-prefix lookup: resolves commits outside the loaded log window
+  // (log is capped at maxCount, so an old commit's hash would otherwise never match).
+  useEffect(() => {
+    const q = search.trim().toLowerCase();
+    if (!/^[0-9a-f]{4,40}$/.test(q)) {
+      setHashHit(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const hit = await api.git.findCommit(repo.path, q);
+        setHashHit(prev => (hit && !entries.some(e => e.hash === hit.hash)) ? hit : null);
+      } catch {
+        setHashHit(null);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search, repo.path, entries]);
+
+  // Jump straight to the hash-lookup hit: select it so the list + detail panel show it.
+  const handledHashHitRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hashHit || handledHashHitRef.current === hashHit.hash) return;
+    handledHashHitRef.current = hashHit.hash;
+    const idx = filtered.findIndex(e => e.hash === hashHit.hash);
+    if (idx >= 0) {
+      setSelectedIdx(idx);
+      selectCommit(hashHit.hash);
+    }
+  }, [hashHit, filtered, selectCommit]);
 
   const graphWidth = (maxLane + 1) * LANE_WIDTH + GRAPH_PAD * 2;
 
@@ -452,9 +495,9 @@ export function HistoryPage() {
           )}
         </div>
         <div className="flex items-center gap-1">
-          <input type="text" placeholder={useRegex ? 'Regex...' : 'Filter...'} value={search}
-            onChange={(e) => setSearch(e.target.value)} className="text-xs w-32 px-2 py-0.5 font-mono"
-            title={useRegex ? 'Search using JavaScript regex' : 'Search by subject/author/hash'} />
+          <input type="text" placeholder={useRegex ? 'Regex...' : 'Filter / hash...'} value={search}
+            onChange={(e) => setSearch(e.target.value)} className="text-xs w-40 px-2 py-0.5 font-mono"
+            title={useRegex ? 'Search using JavaScript regex' : 'Search by subject/author/hash — hash prefix resolves across the whole history'} />
           <button className={cn('icon-btn !w-5 !h-5', useRegex && 'active')}
             title="Toggle regex" onClick={() => setUseRegex(!useRegex)}>
             <span className="text-2xs font-mono">.*</span>
@@ -752,6 +795,15 @@ export function HistoryPage() {
                     )}
 
                     <span className={cn('flex-1 truncate text-xs', isSelected && 'font-medium')}>{entry.subject}</span>
+
+                    <span
+                      className="text-2xs font-mono text-text-tertiary flex-shrink-0 truncate cursor-pointer hover:text-accent"
+                      style={{ width: 64 }}
+                      title={`${entry.hash} — click to copy`}
+                      onClick={(e) => { e.stopPropagation(); copyToClipboard(entry.hash); toast.success('Copied'); }}
+                    >
+                      {entry.hashAbbrev || shortHash(entry.hash)}
+                    </span>
 
                     <span className="flex-shrink-0 rounded author-badge text-center"
                       style={{ backgroundColor: color.bg, width: 24, height: 16, fontSize: 8, lineHeight: '16px' }}>

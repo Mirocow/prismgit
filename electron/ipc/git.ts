@@ -32,6 +32,7 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:log', (_e, p: string, o?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) =>
     gitService.log(p, o || {})
   );
+  ipcMain.handle('git:findCommit', (_e, p: string, q: string) => gitService.findCommit(p, q));
   ipcMain.handle('git:commitFiles', (_e, p: string, h: string) => gitService.commitFiles(p, h));
   ipcMain.handle('git:diffCommit', (_e, p: string, h: string, ph?: string) => gitService.diffCommit(p, h, ph));
 

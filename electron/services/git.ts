@@ -280,6 +280,40 @@ function parseRawLog(raw: string): LogEntry[] {
   }).filter(Boolean) as LogEntry[];
 }
 
+/**
+ * Resolve a commit by full or abbreviated hash (prefix search).
+ * Works for ANY commit in the repo — including ones outside the loaded log window.
+ * Returns null when the query is not hash-like, ambiguous or unresolvable.
+ */
+export async function findCommit(repoPath: string, query: string): Promise<LogEntry | null> {
+  const q = query.trim().toLowerCase();
+  if (!/^[0-9a-f]{4,40}$/.test(q)) return null;
+  const git = getGit(repoPath);
+  let full: string;
+  try {
+    full = (await git.raw(['rev-parse', '--quiet', '--verify', `${q}^{commit}`])).trim();
+  } catch {
+    return null; // not found / ambiguous prefix / not a commit
+  }
+  if (!/^[0-9a-f]{40}$/.test(full)) return null;
+  // Reuse the same pretty format + parser as log() so the result is a regular LogEntry.
+  const fieldSep = '%x00';
+  const commitSep = '%x1e';
+  const pretty = [
+    '%H', '%h', '%P', '%p',
+    '%an', '%ae', '%aI',
+    '%cn', '%ce', '%cI',
+    '%s', '%b', '%D',
+  ].join(fieldSep);
+  let out: string;
+  try {
+    out = await git.raw(['log', '-1', `--pretty=format:${pretty}${commitSep}`, '--date=iso-strict', full]);
+  } catch {
+    return null;
+  }
+  return parseRawLog(out)[0] || null;
+}
+
 export async function branches(repoPath: string): Promise<BranchInfo[]> {
   const git = getGit(repoPath);
   const current = await git.status();

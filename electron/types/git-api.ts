@@ -207,6 +207,8 @@ export interface GitApi {
   fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) => Promise<void>;
   fetchAll: (repoPath: string, prune?: boolean) => Promise<void>;
   log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) => Promise<LogEntry[]>;
+  /** Resolve a commit by full/abbreviated hash (prefix search) — null when not found. */
+  findCommit: (repoPath: string, query: string) => Promise<LogEntry | null>;
   branches: (repoPath: string) => Promise<BranchInfo[]>;
   remotes: (repoPath: string) => Promise<RemoteInfo[]>;
   checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) => Promise<void>;
