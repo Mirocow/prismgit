@@ -16,7 +16,7 @@ interface WatcherEntry {
 
 const watchers = new Map<string, WatcherEntry>();
 
-const DEBOUNCE_MS = 300;
+const DEBOUNCE_MS = 500;
 
 function notifyRenderer(repoPath: string, eventType: string) {
   const windows = BrowserWindow.getAllWindows();

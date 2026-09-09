@@ -1,4 +1,4 @@
-import { useEffect, useState, Suspense, lazy, useCallback } from 'react';
+import { useEffect, useState, Suspense, lazy, useCallback, useRef } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Toolbar } from './components/Toolbar';
@@ -157,12 +157,24 @@ export default function App() {
   }, [setWindowStyle]);
 
   // File watcher: start/stop when repo changes + auto-refresh on changes
+  // Use a ref to track in-flight refresh and debounce to avoid loops
+  const refreshInFlight = useRef(false);
+  const lastRefreshTime = useRef(0);
+
   useEffect(() => {
     if (!currentRepo) return;
     api.watcher.start(currentRepo.path);
     const cleanup = api.watcher.onChanged((data) => {
-      // Refresh status when Git state changes
-      refreshStatus(currentRepo.path);
+      // Skip if a refresh is already in-flight
+      if (refreshInFlight.current) return;
+      // Debounce: at least 1 second between watcher-triggered refreshes
+      const now = Date.now();
+      if (now - lastRefreshTime.current < 1000) return;
+      lastRefreshTime.current = now;
+      refreshInFlight.current = true;
+      refreshStatus(currentRepo.path).finally(() => {
+        refreshInFlight.current = false;
+      });
     });
     return () => {
       api.watcher.stop(currentRepo.path);
@@ -170,13 +182,14 @@ export default function App() {
     };
   }, [currentRepo, refreshStatus]);
 
-  // Refresh status when repository changes
+  // Refresh status when repository changes (only once, not on every render)
   useEffect(() => {
     if (currentRepo) {
       refreshStatus(currentRepo.path);
       setDismissRebase(false);
     }
-  }, [currentRepo, refreshStatus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentRepo?.path]);
 
   const showRebasePanel = currentRepo && status?.isRebasing && !dismissRebase;
 
@@ -194,14 +207,20 @@ export default function App() {
         <Toolbar onFind={handleFind} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
-          <div className="flex-1 overflow-auto">
-            <WelcomeScreen />
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <Suspense fallback={<PageLoader />}>
+              <Routes>
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="*" element={<WelcomeScreen />} />
+              </Routes>
+            </Suspense>
           </div>
         </div>
         <StatusBar />
         <ToastContainer />
         <CloneModal open={showClone} onClose={() => setShowClone(false)} />
         <InitModal open={showInit} onClose={() => setShowInit(false)} />
+        <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
       </div>
     );
   }
