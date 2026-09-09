@@ -13,6 +13,7 @@ import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { computeGraph, bezierPath, laneColor, BRANCH_COLORS } from '../lib/gitGraph';
+import { createAncestryResolver } from '../lib/graphAncestry';
 import type { GraphNode } from '../lib/gitGraph';
 
 const ROW_HEIGHT = 28;
@@ -128,8 +129,21 @@ export function HistoryPage() {
 
   const { rows: graphRows, maxLane } = useMemo(() => {
     if (!showGraph || filtered.length === 0) return { rows: [], maxLane: 0 };
+
+    // If a filter is applied, the visible list is a subset of `entries`.
+    // Hidden commits' children still point to them as parents — the lane-assignment
+    // algorithm would wait for parents that never arrive. The ancestry resolver
+    // walks up the true parent chain (from `entries`, the unfiltered list) and
+    // rewires each hidden parent to its nearest visible ancestor. The link is
+    // then drawn as a dashed line, signalling "there were commits here, but
+    // they are filtered out".
+    const hasFilter = filtered.length !== entries.length;
+    if (hasFilter) {
+      const ancestry = createAncestryResolver(filtered, entries);
+      return computeGraph(filtered, { ancestry });
+    }
     return computeGraph(filtered);
-  }, [showGraph, filtered]);
+  }, [showGraph, filtered, entries]);
 
   const graphWidth = (maxLane + 1) * LANE_WIDTH + GRAPH_PAD * 2;
 
@@ -461,6 +475,9 @@ export function HistoryPage() {
                     const rowY = idx * ROW_HEIGHT + wtOffset;
                     const cy = rowY + ROW_HEIGHT / 2;
                     const x = (lane: number) => lane * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_PAD;
+                    // Stroke dash array for dashed (rewired) connections — visual cue that
+                    // intermediate commits were filtered out.
+                    const strokeDash = (d?: boolean) => d ? '4 3' : undefined;
 
                     return (
                       <g key={`r-${idx}`}>
@@ -469,7 +486,8 @@ export function HistoryPage() {
                           <line key={`p-${idx}-${pi}`}
                             x1={x(p.lane)} y1={rowY}
                             x2={x(p.lane)} y2={rowY + ROW_HEIGHT}
-                            stroke={laneColor(p.color)} strokeWidth={1.5} opacity={0.6} />
+                            stroke={laneColor(p.color)} strokeWidth={1.5} opacity={0.6}
+                            strokeDasharray={strokeDash(p.dashed)} />
                         ))}
 
                         {row.node && (
@@ -478,7 +496,8 @@ export function HistoryPage() {
                             {row.node.closing.map((c, ci) => (
                               <path key={`c-${idx}-${ci}`}
                                 d={bezierPath(x(c.lane), rowY, x(row.node!.lane), cy)}
-                                stroke={laneColor(c.color)} strokeWidth={1.5} fill="none" opacity={0.6} />
+                                stroke={laneColor(c.color)} strokeWidth={1.5} fill="none" opacity={0.6}
+                                strokeDasharray={strokeDash(c.dashed)} />
                             ))}
 
                             {/* Incoming vertical line (top of row → node center) */}
@@ -486,7 +505,8 @@ export function HistoryPage() {
                               <line
                                 x1={x(row.node.lane)} y1={rowY}
                                 x2={x(row.node.lane)} y2={cy}
-                                stroke={laneColor(row.node.color)} strokeWidth={1.5} opacity={0.6} />
+                                stroke={laneColor(row.node.color)} strokeWidth={1.5} opacity={0.6}
+                                strokeDasharray={strokeDash(row.node.firstParentDashed)} />
                             )}
 
                             {/* Continues vertical line (node center → bottom of row) */}
@@ -494,14 +514,16 @@ export function HistoryPage() {
                               <line
                                 x1={x(row.node.lane)} y1={cy}
                                 x2={x(row.node.lane)} y2={rowY + ROW_HEIGHT}
-                                stroke={laneColor(row.node.color)} strokeWidth={1.5} opacity={0.6} />
+                                stroke={laneColor(row.node.color)} strokeWidth={1.5} opacity={0.6}
+                                strokeDasharray={strokeDash(row.node.firstParentDashed)} />
                             )}
 
                             {/* Merge curves — lanes created for non-first parents (bottom of row) */}
                             {row.node.merges.map((m, mi) => (
                               <path key={`m-${idx}-${mi}`}
                                 d={bezierPath(x(row.node!.lane), cy, x(m.lane), rowY + ROW_HEIGHT)}
-                                stroke={laneColor(m.color)} strokeWidth={1.5} fill="none" opacity={0.6} />
+                                stroke={laneColor(m.color)} strokeWidth={1.5} fill="none" opacity={0.6}
+                                strokeDasharray={strokeDash(m.dashed)} />
                             ))}
 
                             {/* Node circle */}
@@ -509,6 +531,7 @@ export function HistoryPage() {
                               const cx = x(row.node!.lane);
                               const isSelected = selectedIdx === idx;
                               const isMerge = row.node!.isMerge;
+                              const isTruncated = row.node!.truncated;
                               const r = isMerge ? 5 : 4;
                               return (
                                 <g>
@@ -518,7 +541,8 @@ export function HistoryPage() {
                                   )}
                                   <circle cx={cx} cy={cy} r={r}
                                     fill={isSelected ? laneColor(row.node!.color) : 'var(--graph-node-fill)'}
-                                    stroke={laneColor(row.node!.color)} strokeWidth={1.5} />
+                                    stroke={laneColor(row.node!.color)} strokeWidth={1.5}
+                                    strokeDasharray={isTruncated ? '2 2' : undefined} />
                                 </g>
                               );
                             })()}

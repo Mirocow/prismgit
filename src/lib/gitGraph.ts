@@ -15,12 +15,16 @@
  *   - `continues`:   draw line from node center (y=CY) to bottom (y=ROW_HEIGHT) — node has a first parent further down
  *   - `closing`:     list of {lane, color} that merge INTO this node (curves from top)
  *   - `merges`:      list of {lane, color} that this node creates for non-first parents (curves from bottom)
+ *   - `truncated`:   node has parents but none resolve to a visible commit (lane ends here)
  *
  * Per-row:
  *   - `passing`: list of {lane, color} that pass straight through (vertical line top→bottom)
+ *   - connections may have `dashed: true` if the link was rewired to a nearest visible ancestor
+ *     (i.e., the true parent was hidden by a filter)
  */
 
 import type { LogEntry } from '../../electron/types/git-api';
+import type { ResolvedAncestry } from './graphAncestry';
 
 /** Color palette inspired by GitKraken / SourceTree — accessible on both light & dark themes. */
 export const BRANCH_COLORS = [
@@ -41,11 +45,15 @@ interface ActiveLane {
   expects: string;
   /** Stable color index (one per unique OID). */
   color: number;
+  /** True if the link to this lane's target is "rewired" (parent was hidden, dashed line). */
+  dashed: boolean;
 }
 
 export interface LaneRef {
   lane: number;
   color: number;
+  /** Dashed line — the connection was rewired past hidden commits. */
+  dashed?: boolean;
 }
 
 export interface GraphNode {
@@ -62,6 +70,10 @@ export interface GraphNode {
   closing: LaneRef[];
   /** Lanes created for non-first parents — drawn as bezier curves from bottom. */
   merges: LaneRef[];
+  /** True parents are out of the visible window — lane ends here. */
+  truncated: boolean;
+  /** Connection to first parent is dashed (rewired past hidden commits). */
+  firstParentDashed: boolean;
 }
 
 export interface GraphRow {
@@ -75,6 +87,15 @@ export interface GraphLayout {
   maxLane: number;
 }
 
+export interface LayoutOptions {
+  /**
+   * Optional ancestry resolver. If provided, hidden parents are rewired to their
+   * nearest visible ancestor — the lane is drawn as a dashed line.
+   * If not provided, the layout uses the entry's own `parents[]` directly.
+   */
+  ancestry?: ResolvedAncestry;
+}
+
 export class GraphLayoutBuilder {
   private lanes: (ActiveLane | null)[] = [];
   private rows: GraphRow[] = [];
@@ -82,6 +103,11 @@ export class GraphLayoutBuilder {
   /** Per-OID color assignment — guarantees same OID always has same color. */
   private colorMap = new Map<string, number>();
   private maxLane = 0;
+  private ancestry: ResolvedAncestry | undefined;
+
+  constructor(options: LayoutOptions = {}) {
+    this.ancestry = options.ancestry;
+  }
 
   /** Allocate (or reuse) a color index for a given OID. */
   private allocColor(oid: string): number {
@@ -103,6 +129,33 @@ export class GraphLayoutBuilder {
     return idx;
   }
 
+  /** Resolve the (visible) parents for a commit, using ancestry resolver if available. */
+  private resolveParents(entry: LogEntry): { oids: string[]; dashedFlags: boolean[]; truncated: boolean } {
+    if (this.ancestry) {
+      const resolved = this.ancestry.resolve(entry.hash);
+      const truncated = this.ancestry.isTruncated(entry.hash);
+      // If truncated (no visible ancestors found), fall back to original parents so the lane
+      // at least shows something — but mark as truncated so UI knows.
+      if (resolved.length === 0) {
+        return {
+          oids: entry.parents,
+          dashedFlags: entry.parents.map(() => true),
+          truncated: true,
+        };
+      }
+      return {
+        oids: resolved.map(r => r.oid),
+        dashedFlags: resolved.map(r => r.elided),
+        truncated,
+      };
+    }
+    return {
+      oids: entry.parents,
+      dashedFlags: entry.parents.map(() => false),
+      truncated: false,
+    };
+  }
+
   /** Add one commit to the layout. */
   addOne(entry: LogEntry): void {
     const row = this.rows.length;
@@ -119,14 +172,15 @@ export class GraphLayoutBuilder {
       // Nobody is waiting for this commit — allocate a free lane and a new color
       lane = this.firstFreeLane();
       const color = this.allocColor(entry.hash);
-      this.lanes[lane] = { expects: entry.hash, color };
+      this.lanes[lane] = { expects: entry.hash, color, dashed: false };
     } else {
       // Use the first waiting lane as our lane (keeps color continuity)
       lane = waiting[0];
       // Other waiting lanes "close" into this node
       for (let i = 1; i < waiting.length; i++) {
         const l = waiting[i];
-        closing.push({ lane: l, color: this.lanes[l]!.color });
+        const wl = this.lanes[l]!;
+        closing.push({ lane: l, color: wl.color, dashed: wl.dashed });
         this.lanes[l] = null;
       }
     }
@@ -143,58 +197,55 @@ export class GraphLayoutBuilder {
       if (l === null) continue;
       // Skip lanes that are about to close into this node
       if (closing.some(c => c.lane === i)) continue;
-      passing.push({ lane: i, color: l.color });
+      passing.push({ lane: i, color: l.color, dashed: l.dashed });
     }
 
-    // Now process parents
-    const parents = entry.parents;
+    // Now process parents (with ancestry rewriting if enabled)
+    const { oids: parents, dashedFlags, truncated } = this.resolveParents(entry);
     const merges: LaneRef[] = [];
     let continues = false;
+    let firstParentDashed = false;
     // hasIncoming: was this commit waited for by an existing lane above?
     // If yes, the lane draws a vertical line from top of row into node center.
     let hasIncoming = waiting.length > 0;
 
-    if (parents.length === 0) {
-      // Root commit — no parent. Lane ends here.
+    if (parents.length === 0 || truncated) {
+      // Root commit or truncated — lane ends here.
       this.lanes[lane] = null;
       continues = false;
     } else {
       const firstParent = parents[0];
+      const firstDashed = dashedFlags[0] || false;
       // Check if first parent already has a lane elsewhere
       const firstParentLane = this.lanes.findIndex(l => l?.expects === firstParent);
 
       if (firstParentLane === -1 || firstParentLane === lane) {
         // First parent continues on our lane
-        this.lanes[lane] = { expects: firstParent, color: myColor };
+        this.lanes[lane] = { expects: firstParent, color: myColor, dashed: firstDashed };
         continues = true;
+        firstParentDashed = firstDashed;
       } else {
-        // First parent already has a different lane — we need to move there.
-        // Close our lane (we'll have a curve to the parent's lane).
-        // Actually the standard behavior: our lane ends, parent continues on its lane.
-        // But since first parent is already on another lane, we treat this like a "merge-in".
-        closing.push({ lane: lane, color: myColor });
+        // First parent already has a different lane — close our lane
+        closing.push({ lane: lane, color: myColor, dashed: firstDashed });
         this.lanes[lane] = null;
-        // We still want a curve from our node to the parent's lane — but since first parent
-        // is below, this will be a `passing` lane that connects via the closing curve.
-        // For simplicity, also add as a merge from our position to that lane.
-        // Actually, this case is rare in practice; we just close and let it appear via passing.
         continues = false;
       }
 
       // Process non-first parents (merge parents)
       for (let pi = 1; pi < parents.length; pi++) {
         const parent = parents[pi];
+        const dashed = dashedFlags[pi] || false;
         const existing = this.lanes.findIndex(l => l?.expects === parent);
         if (existing >= 0) {
           // Parent already has a lane — draw a curve to it
-          merges.push({ lane: existing, color: this.lanes[existing]!.color });
+          merges.push({ lane: existing, color: this.lanes[existing]!.color, dashed });
         } else {
           // Allocate a new lane for this parent
           const newLane = this.firstFreeLane();
           const newColor = this.allocColor(parent);
-          this.lanes[newLane] = { expects: parent, color: newColor };
+          this.lanes[newLane] = { expects: parent, color: newColor, dashed };
           this.maxLane = Math.max(this.maxLane, newLane);
-          merges.push({ lane: newLane, color: newColor });
+          merges.push({ lane: newLane, color: newColor, dashed });
         }
       }
     }
@@ -202,16 +253,23 @@ export class GraphLayoutBuilder {
     // For the very first commit (row 0), there is no "incoming" from above
     if (row === 0) hasIncoming = false;
 
+    // isMerge: based on the number of TRUE parents (entry.parents), not resolved ones.
+    // A commit with 2 hidden parents that both rewire to the same visible ancestor
+    // is still visually a merge node.
+    const isMerge = entry.parents.length > 1;
+
     const node: GraphNode = {
       entry,
       row,
       lane,
       color: myColor,
-      isMerge: parents.length > 1,
+      isMerge,
       hasIncoming,
       continues,
       closing,
       merges,
+      truncated,
+      firstParentDashed,
     };
 
     this.rows.push({ node, passing });
@@ -231,9 +289,12 @@ export class GraphLayoutBuilder {
  *
  * Commits MUST be ordered newest-first (i.e. as `git log` returns them).
  * Topological order is assumed.
+ *
+ * @param entries  The visible (possibly filtered) list of commits
+ * @param options  Optional layout options (e.g., ancestry resolver for filtered views)
  */
-export function computeGraph(entries: LogEntry[]): GraphLayout {
-  const builder = new GraphLayoutBuilder();
+export function computeGraph(entries: LogEntry[], options?: LayoutOptions): GraphLayout {
+  const builder = new GraphLayoutBuilder(options);
   builder.add(entries);
   return builder.build();
 }
