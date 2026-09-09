@@ -310,7 +310,7 @@ export function AnnotatePage() {
 
         {/* Detail panel */}
         <ResizableSplitter direction="horizontal" onResize={(d) => handleDetailResize(-d)} />
-        <div className="border-l border-border-default bg-bg-secondary overflow-y-auto flex-shrink-0" style={{ width: detailWidth }}>
+        <div className="bg-bg-secondary overflow-y-auto flex-shrink-0" style={{ width: detailWidth }}>
           {selected ? (
             <div className="p-3">
               <div className="text-sm font-medium mb-2">{selected.subject}</div>

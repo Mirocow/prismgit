@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, Plus, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star, ChevronDown, ChevronLeft, ChevronRight } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, Plus, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star, ChevronDown } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { ResizableSplitter, useResizableWidth } from './ResizableSplitter';
@@ -61,7 +61,6 @@ export function Sidebar() {
   const { width: sidebarWidth, handleResize: handleSidebarResize } = useResizableWidth(240, 180, 400);
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
-  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     if (!currentRepo) {
@@ -83,18 +82,9 @@ export function Sidebar() {
   return (
     <>
     <aside
-      className="flex flex-col bg-bg-secondary border-r border-border-default flex-shrink-0 no-drag transition-all"
-      style={{ width: collapsed ? 48 : sidebarWidth }}
+      className="flex flex-col bg-bg-secondary flex-shrink-0 no-drag"
+      style={{ width: sidebarWidth }}
     >
-      {/* Collapse button */}
-      <button
-        className="absolute -right-3 top-16 z-50 w-6 h-6 rounded-full bg-bg-elevated border border-border-default flex items-center justify-center hover:bg-accent hover:text-text-inverse no-drag shadow-sm transition-colors"
-        onClick={() => setCollapsed(!collapsed)}
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar (icons only)'}
-      >
-        {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
-      </button>
-
       {/* Repository switcher */}
       <div className="border-b border-border-default">
         <div className="flex items-center justify-between px-3 py-2.5">
@@ -103,16 +93,14 @@ export function Sidebar() {
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowRepoList(!showRepoList); }}
           >
             {showRepoList ? <FolderGitOpen size={15} className="text-accent" /> : <FolderGit size={15} className="text-text-secondary" />}
-            {!collapsed && <span className="truncate">{currentRepo ? currentRepo.name : 'Repositories'}</span>}
+            <span className="truncate">{currentRepo ? currentRepo.name : 'Repositories'}</span>
             {currentRepo && metadata[currentRepo.path]?.favorite && (
               <Star size={11} className="text-status-modified fill-current" />
             )}
-            {!collapsed && (
-              <ChevronDown
-                size={12}
-                className={cn('text-text-tertiary transition-transform', showRepoList && 'rotate-180')}
-              />
-            )}
+            <ChevronDown
+              size={12}
+              className={cn('text-text-tertiary transition-transform', showRepoList && 'rotate-180')}
+            />
           </button>
           <div className="flex items-center gap-0.5">
             {currentRepo && (
@@ -198,11 +186,9 @@ export function Sidebar() {
         {currentRepo ? (
           Object.entries(groups).map(([groupName, items]) => (
             <div key={groupName} className="mb-3">
-              {!collapsed && (
-                <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary">
-                  {groupName}
-                </div>
-              )}
+              <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary">
+                {groupName}
+              </div>
               {items.map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
@@ -219,7 +205,7 @@ export function Sidebar() {
                     title={NAV_TOOLTIPS[item.path] || item.label}
                   >
                     <Icon size={15} />
-                    {!collapsed && <span>{item.label}</span>}
+                    <span>{item.label}</span>
                   </button>
                 );
               })}

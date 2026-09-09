@@ -88,9 +88,11 @@
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
 
-  --splitter-color: #d4d4d4;
+  /* Scrollbar — translucent, visually distinct from the 1px splitter hairline */
+  --scrollbar-thumb: rgba(23, 26, 33, 0.22);
+  --scrollbar-thumb-hover: rgba(23, 26, 33, 0.40);
+
   --splitter-color-hover: #399ee6;
-  --splitter-width: 4px;
 }
 
 /* Ollama-code Dark theme (Ayu Dark) */
@@ -164,9 +166,11 @@
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
 
-  --splitter-color: #2a313e;
+  /* Scrollbar — translucent, visually distinct from the 1px splitter hairline */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.14);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+
   --splitter-color-hover: #39BAE6;
-  --splitter-width: 4px;
 }
 
 * {
@@ -228,8 +232,8 @@ input:focus, textarea:focus, select:focus {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
 }
 
 ::-webkit-scrollbar-track {
@@ -237,14 +241,15 @@ input:focus, textarea:focus, select:focus {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+  background: var(--scrollbar-thumb);
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;
+  transition: background 0.15s;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-tertiary);
+  background: var(--scrollbar-thumb-hover);
   background-clip: padding-box;
   border: 2px solid transparent;
 }
@@ -533,11 +538,14 @@ input[type="checkbox"], input[type="radio"] {
 }
 
 /* === Split view divider === */
+/* Crisp 1px hairline (no gray slab). Fat invisible hit area via ::after (7px).
+   Hover/drag paints the accent color — no layout shift, color only.
+   The splitter IS the divider: adjacent panels must NOT add border-r/border-l/border-t. */
 .split-divider {
-  width: var(--splitter-width);
-  background: var(--splitter-color);
+  width: 1px;
+  background: var(--border-default);
   cursor: col-resize;
-  transition: background 0.15s;
+  transition: background 0.12s;
   flex-shrink: 0;
   position: relative;
 }
@@ -552,22 +560,32 @@ input[type="checkbox"], input[type="radio"] {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -4px;
-  right: -4px;
+  left: -3px;
+  right: -3px;
 }
 
 .split-divider-horizontal {
-  height: var(--splitter-width);
+  height: 1px;
   width: 100%;
-  background: var(--splitter-color);
+  background: var(--border-default);
   cursor: row-resize;
-  transition: background 0.15s;
+  transition: background 0.12s;
   flex-shrink: 0;
+  position: relative;
 }
 
 .split-divider-horizontal:hover,
 .split-divider-horizontal.dragging {
   background: var(--splitter-color-hover);
+}
+
+.split-divider-horizontal::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  bottom: -3px;
 }
 
 /* === Resizable panel === */

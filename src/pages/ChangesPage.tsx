@@ -1084,8 +1084,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           </div>
 
           {/* Journal panel (bottom) — shows recent commits like SmartGit */}
-          <div className="border-t border-border-default flex-shrink-0" style={{ height: journalHeight }}>
-            <ResizableSplitter direction="vertical" onResize={handleJournalResize} />
+          <div className="flex-shrink-0" style={{ height: journalHeight }}>
+            <ResizableSplitter direction="vertical" onResize={(d) => handleJournalResize(-d)} />
             <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
               <span className="text-2xs font-semibold uppercase text-text-secondary">Journal</span>
               <span className="text-2xs text-text-tertiary">{journal.length} commits</span>
@@ -1137,7 +1137,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           </div>
 
           {/* Commit editor — resizable with markdown preview */}
-          <div className="border-t border-border-default bg-bg-secondary flex-shrink-0 flex flex-col" style={{ height: commitHeight }}>
+          <div className="bg-bg-secondary flex-shrink-0 flex flex-col" style={{ height: commitHeight }}>
             <ResizableSplitter direction="vertical" onResize={(d) => handleCommitResize(-d)} />
             <div className="flex items-center gap-2 px-2 py-1">
               <label className="flex items-center gap-1 text-2xs text-text-secondary cursor-pointer">

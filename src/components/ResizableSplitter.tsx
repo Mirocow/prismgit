@@ -71,6 +71,10 @@ export function ResizableSplitter({
 /**
  * Hook for managing resizable panel width.
  * Returns current width and resize handler.
+ *
+ * CONVENTION (edge follows mouse — drag toward a panel shrinks it, drag away grows it):
+ *   - Resized panel is LEFT of the splitter  → <ResizableSplitter onResize={handleResize} />
+ *   - Resized panel is RIGHT of the splitter → <ResizableSplitter onResize={(d) => handleResize(-d)} />
  */
 export function useResizableWidth(initialWidth: number, min: number = 200, max: number = 600) {
   const [width, setWidth] = useState(initialWidth);
@@ -87,6 +91,10 @@ export function useResizableWidth(initialWidth: number, min: number = 200, max: 
 
 /**
  * Hook for managing resizable panel height.
+ *
+ * CONVENTION (edge follows mouse):
+ *   - Resized panel is ABOVE the splitter → <ResizableSplitter onResize={handleResize} />
+ *   - Resized panel is BELOW the splitter → <ResizableSplitter onResize={(d) => handleResize(-d)} />
  */
 export function useResizableHeight(initialHeight: number, min: number = 100, max: number = 600) {
   const [height, setHeight] = useState(initialHeight);
