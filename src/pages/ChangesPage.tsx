@@ -1,17 +1,17 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil, AlertCircle, Search, FolderTree, ArrowUp, ArrowDown, X } from '../components/icons';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
-import { useSelectionStore } from '../stores/selectionStore';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DiffViewer } from '../components/DiffViewer';
+import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
+import { ArrowDown, ArrowUp, ChevronDown, EyeOff, Folder, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X } from '../components/icons';
+import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
-import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { DiffViewer } from '../components/DiffViewer';
-import { ResizableSplitter, useResizableWidth, useResizableHeight } from '../components/ResizableSplitter';
+import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
-import { cn, getStatusColor, copyToClipboard } from '../lib/utils';
-import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
+import { cn, copyToClipboard, getStatusColor } from '../lib/utils';
+import { useGitStore } from '../stores/gitStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { useToastStore } from '../stores/toastStore';
 
 interface ChangesPageProps {
   onResolveConflict?: (file: string) => void;
@@ -711,14 +711,6 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               </div>
             )}
           </div>
-          {/* Directory tree panel toggle (folder scope lives in the tree) */}
-          <button
-            className={cn('icon-btn !w-5 !h-5', dirTreeVisible && 'active')}
-            title="Toggle directory tree panel"
-            onClick={toggleDirTreeVisible}
-          >
-            <FolderTree size={11} />
-          </button>
           {/* Extension filter */}
           <input
             type="text"
@@ -728,11 +720,11 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             onChange={(e) => setFileExtensionFilter(e.target.value || null)}
             title="Filter by extension (e.g. .ts, .tsx)"
           />
-          {/* Tree / Flat toggle */}
+          {/* Directory tree panel toggle (folder scope lives in the tree) */}
           <button
-            className={cn('icon-btn !w-5 !h-5', fileViewMode === 'tree' && 'active')}
-            title="Toggle tree view"
-            onClick={() => setFileViewMode(fileViewMode === 'tree' ? 'flat' : 'tree')}
+            className={cn('icon-btn !w-5 !h-5', dirTreeVisible && 'active')}
+            title="Toggle directory tree panel"
+            onClick={toggleDirTreeVisible}
           >
             <Folder size={11} />
           </button>
