@@ -1,106 +1,81 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   GitBranch, RefreshCw, GitCommit, CornerDownRight,
   ChevronDown, ChevronRight, Tag as TagIcon, Search,
 } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { CommitHashLink } from '../components/StatusBar';
 import { api, type LogEntry, type CommitFile } from '../lib/api';
-import { cn, shortHash, formatDate } from '../lib/utils';
+import { cn, shortHash, formatDate, copyToClipboard } from '../lib/utils';
 import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
-
-const BRANCH_COLORS = [
-  '#399ee6', '#86b300', '#f07171', '#a37acc', '#4cbf99',
-  '#f2ae49', '#55b4d4', '#e07b7b', '#7eb852', '#d4a05a',
-];
+import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
+import { computeGraph, bezierPath, laneColor } from '../lib/gitGraph';
+import { useLazyList } from '../lib/useLazyList';
 
 const ROW_HEIGHT = 28;
 const LANE_WIDTH = 20;
 const GRAPH_PAD = 6;
 
-interface CommitNode {
-  entry: LogEntry;
-  lane: number;
-  connections: { fromLane: number; toLane: number; color: string }[];
-  color: string;
-}
-
-function computeGraph(entries: LogEntry[]): { nodes: CommitNode[]; maxLane: number } {
-  const lanes: (string | null)[] = [];
-  const nodes: CommitNode[] = [];
-  for (const entry of entries) {
-    let lane = -1;
-    for (let i = 0; i < lanes.length; i++) { if (lanes[i] === entry.hash) { lane = i; break; } }
-    if (lane === -1) {
-      for (let i = 0; i < lanes.length; i++) { if (lanes[i] === null) { lane = i; break; } }
-      if (lane === -1) { lane = lanes.length; lanes.push(null); }
-    }
-    const color = BRANCH_COLORS[lane % BRANCH_COLORS.length];
-    lanes[lane] = null;
-    const connections: { fromLane: number; toLane: number; color: string }[] = [];
-    for (let pi = 0; pi < entry.parents.length; pi++) {
-      const parentHash = entry.parents[pi];
-      let parentLane = -1;
-      for (let i = 0; i < lanes.length; i++) { if (lanes[i] === parentHash) { parentLane = i; break; } }
-      if (parentLane === -1) {
-        if (pi === 0) { parentLane = lane; lanes[lane] = parentHash; }
-        else {
-          for (let i = 0; i < lanes.length; i++) { if (lanes[i] === null) { parentLane = i; break; } }
-          if (parentLane === -1) { parentLane = lanes.length; lanes.push(null); }
-          lanes[parentLane] = parentHash;
-        }
-      }
-      connections.push({ fromLane: lane, toLane: parentLane, color: pi === 0 ? color : BRANCH_COLORS[parentLane % BRANCH_COLORS.length] });
-    }
-    nodes.push({ entry, lane, connections, color });
-  }
-  const maxLane = Math.max(0, ...nodes.map(n => n.lane), ...nodes.flatMap(n => n.connections.map(c => c.toLane)));
-  return { nodes, maxLane };
-}
-
 export function AnnotatePage() {
   const repo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastStore();
+  const showContextMenu = useContextMenu();
+  // Global selection — sync with History and other tools
+  const selectCommit = useSelectionStore((s) => s.selectCommit);
+  const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
+  const globalPathFilter = useSelectionStore((s) => s.pathFilter);
+
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(0);
   const [search, setSearch] = useState('');
   const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [fileCounts, setFileCounts] = useState<Record<string, number>>({});
+  const [showFiles, setShowFiles] = useState(true);
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
 
   const loadHistory = useCallback(async () => {
     if (!repo) return;
     setLoading(true);
     try {
-      // Use a smaller maxCount for annotate (it's a per-file annotation tool, not full history)
-      const result = await api.git.log(repo.path, { maxCount: 100, all: true });
+      const logOpts: { maxCount: number; all?: boolean; file?: string; follow?: boolean } = { maxCount: 200, all: true };
+      if (globalPathFilter) {
+        logOpts.file = globalPathFilter;
+        logOpts.follow = true;
+      }
+      const result = await api.git.log(repo.path, logOpts);
       setEntries(result);
       setSelectedIdx(0);
-      // Do NOT fetch file counts for every commit — that caused N parallel IPC calls
-      // and was the main reason Annotate felt slow. Instead, we'll fetch file count
-      // only when a commit is selected (lazy load).
+      if (result.length > 0) selectCommit(result[0].hash);
       setFileCounts({});
     } catch (e) { toast.error('Failed to load history', String(e)); }
     finally { setLoading(false); }
-  }, [repo, toast]);
+  }, [repo, toast, globalPathFilter, selectCommit]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // Auto-expand Files when file filter is active
+  useEffect(() => {
+    if (globalPathFilter) setShowFiles(true);
+  }, [globalPathFilter]);
 
   // Lazy-load file count for the selected commit only
   useEffect(() => {
     if (!repo || selectedIdx === null || selectedIdx < 0) return;
     const entry = entries[selectedIdx];
     if (!entry) return;
-    if (fileCounts[entry.hash] !== undefined) return; // already loaded
-    setLoadingFiles(true);
+    if (fileCounts[entry.hash] !== undefined) return;
     api.git.commitFiles(repo.path, entry.hash)
       .then(files => setFileCounts(prev => ({ ...prev, [entry.hash]: files.length })))
-      .catch(() => setFileCounts(prev => ({ ...prev, [entry.hash]: 0 })))
-      .finally(() => setLoadingFiles(false));
+      .catch(() => setFileCounts(prev => ({ ...prev, [entry.hash]: 0 })));
   }, [repo, selectedIdx, entries, fileCounts]);
+
+  // Load commit files when selection changes — uses filteredRef to avoid hoisting issues
+  const filteredRef = useRef<LogEntry[]>([]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return entries;
@@ -111,14 +86,9 @@ export function AnnotatePage() {
       e.hash.toLowerCase().includes(q)
     );
   }, [entries, search]);
+  filteredRef.current = filtered;
 
-  const { nodes: graphNodes, maxLane } = useMemo(() => {
-    if (filtered.length === 0) return { nodes: [], maxLane: 0 };
-    return computeGraph(filtered);
-  }, [filtered]);
-
-  const graphWidth = (maxLane + 1) * LANE_WIDTH + GRAPH_PAD * 2;
-
+  // Load commit files when selection changes
   useEffect(() => {
     if (!repo || selectedIdx === null || selectedIdx < 0) { setCommitFiles([]); return; }
     const selected = filtered[selectedIdx];
@@ -129,6 +99,32 @@ export function AnnotatePage() {
       .catch(() => setCommitFiles([]))
       .finally(() => setLoadingFiles(false));
   }, [selectedIdx, repo, filtered]);
+
+  const { rows: graphRows, maxLane } = useMemo(() => {
+    if (filtered.length === 0) return { rows: [], maxLane: 0 };
+    return computeGraph(filtered);
+  }, [filtered]);
+
+  const graphWidth = (maxLane + 1) * LANE_WIDTH + GRAPH_PAD * 2;
+
+  // Virtualize the commit list
+  const lazyList = useLazyList({
+    itemCount: graphRows.length,
+    estimateRowHeight: ROW_HEIGHT,
+    overscan: 12,
+  });
+  const scrollToIndexRef = useRef<((idx: number) => void) | null>(null);
+  scrollToIndexRef.current = lazyList.scrollToIndex;
+
+  // Auto-scroll to selected commit when global selection changes from another tool
+  useEffect(() => {
+    if (!selectedCommitHash || entries.length === 0) return;
+    const idx = entries.findIndex(e => e.hash === selectedCommitHash);
+    if (idx >= 0 && idx !== selectedIdx) {
+      setSelectedIdx(idx);
+      requestAnimationFrame(() => scrollToIndexRef.current?.(idx));
+    }
+  }, [selectedCommitHash, entries, selectedIdx]);
 
   const selected = selectedIdx !== null && selectedIdx >= 0 ? filtered[selectedIdx] : null;
 
@@ -142,7 +138,13 @@ export function AnnotatePage() {
       <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary" style={{ height: 28 }}>
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium">Annotate</span>
-          <span className="text-2xs text-text-tertiary">{filtered.length} commits · file counts loaded for first 30</span>
+          <span className="text-2xs text-text-tertiary">{filtered.length} commits</span>
+          {globalPathFilter && (
+            <span className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/40 bg-status-modified/10 text-status-modified flex items-center gap-1 ml-2">
+              <Search size={9} />{globalPathFilter}
+              <button onClick={() => useSelectionStore.getState().setPathFilter(null)} title="Clear file filter">✕</button>
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <input type="text" placeholder="Filter..." value={search}
@@ -154,91 +156,154 @@ export function AnnotatePage() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Commit list with file count annotations */}
-        <div className="flex-1 overflow-y-auto" style={{ position: 'relative' }}>
+        {/* Commit list — virtualized */}
+        <div className="flex-1 overflow-y-auto" ref={lazyList.scrollRef} style={{ position: 'relative' }}>
           {loading ? (
             <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
           ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-text-tertiary text-sm">No commits</div>
           ) : (
             <div style={{ position: 'relative' }}>
-              {/* Graph SVG */}
-              {graphNodes.length > 0 && (
-                <svg width={graphWidth} height={graphNodes.length * ROW_HEIGHT}
-                  style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', zIndex: 1 }}>
-                  {graphNodes.map((node, idx) => {
-                    const y = idx * ROW_HEIGHT + ROW_HEIGHT / 2;
-                    return node.connections.map((conn, ci) => {
-                      const nextNode = graphNodes[idx + 1];
-                      if (!nextNode) return null;
-                      const nextY = (idx + 1) * ROW_HEIGHT + ROW_HEIGHT / 2;
-                      const fromX = conn.fromLane * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_PAD;
-                      const toX = conn.toLane * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_PAD;
-                      if (conn.fromLane === conn.toLane)
-                        return <line key={`l-${idx}-${ci}`} x1={fromX} y1={y} x2={toX} y2={nextY} stroke={conn.color} strokeWidth={1.5} opacity={0.6} />;
-                      const midY = (y + nextY) / 2;
-                      return <path key={`l-${idx}-${ci}`} d={`M ${fromX} ${y} C ${fromX} ${midY}, ${toX} ${midY}, ${toX} ${nextY}`} stroke={conn.color} strokeWidth={1.5} fill="none" opacity={0.6} />;
-                    });
-                  })}
-                  {graphNodes.map((node, idx) => {
-                    const cx = node.lane * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_PAD;
-                    const cy = idx * ROW_HEIGHT + ROW_HEIGHT / 2;
-                    const isSelected = selectedIdx === idx;
-                    const isMerge = node.entry.parents.length > 1;
-                    return <g key={`n-${idx}`}>
-                      {isMerge && <circle cx={cx} cy={cy} r={7} fill="none" stroke={node.color} strokeWidth={1} opacity={0.4} />}
-                      <circle cx={cx} cy={cy} r={isMerge ? 5 : 4}
-                        fill={isSelected ? node.color : 'var(--graph-node-fill)'} stroke={node.color} strokeWidth={1.5} />
-                    </g>;
+              {/* Graph SVG — full size, pointer-events: none, zIndex 5 (above row backgrounds) */}
+              {graphRows.length > 0 && (
+                <svg width={graphWidth} height={graphRows.length * ROW_HEIGHT}
+                  style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', zIndex: 5 }}>
+                  {graphRows.map((row, idx) => {
+                    if (!row.node) return null;
+                    const rowY = idx * ROW_HEIGHT;
+                    const cy = rowY + ROW_HEIGHT / 2;
+                    const x = (lane: number) => lane * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_PAD;
+                    return (
+                      <g key={`r-${idx}`}>
+                        {row.passing.map((p, pi) => (
+                          <line key={`p-${idx}-${pi}`} x1={x(p.lane)} y1={rowY} x2={x(p.lane)} y2={rowY + ROW_HEIGHT}
+                            stroke={laneColor(p.color)} strokeWidth={1.5} opacity={0.6} />
+                        ))}
+                        {row.node && (
+                          <>
+                            {row.node.closing.map((c, ci) => (
+                              <path key={`c-${idx}-${ci}`} d={bezierPath(x(c.lane), rowY, x(row.node!.lane), cy)}
+                                stroke={laneColor(c.color)} strokeWidth={1.5} fill="none" opacity={0.6} />
+                            ))}
+                            {row.node.hasIncoming && (
+                              <line x1={x(row.node.lane)} y1={rowY} x2={x(row.node.lane)} y2={cy}
+                                stroke={laneColor(row.node.color)} strokeWidth={1.5} opacity={0.6} />
+                            )}
+                            {row.node.continues && (
+                              <line x1={x(row.node.lane)} y1={cy} x2={x(row.node.lane)} y2={rowY + ROW_HEIGHT}
+                                stroke={laneColor(row.node.color)} strokeWidth={1.5} opacity={0.6} />
+                            )}
+                            {row.node.merges.map((m, mi) => (
+                              <path key={`m-${idx}-${mi}`} d={bezierPath(x(row.node!.lane), cy, x(m.lane), rowY + ROW_HEIGHT)}
+                                stroke={laneColor(m.color)} strokeWidth={1.5} fill="none" opacity={0.6} />
+                            ))}
+                            {(() => {
+                              const cx = x(row.node!.lane);
+                              const isSelected = selectedIdx === idx;
+                              const isMerge = row.node!.isMerge;
+                              const r = isMerge ? 5 : 4;
+                              return (
+                                <g>
+                                  {isMerge && <circle cx={cx} cy={cy} r={r + 2} fill="none" stroke={laneColor(row.node!.color)} strokeWidth={1} opacity={0.4} />}
+                                  <circle cx={cx} cy={cy} r={r}
+                                    fill={isSelected ? laneColor(row.node!.color) : 'var(--graph-node-fill)'}
+                                    stroke={laneColor(row.node!.color)} strokeWidth={1.5} />
+                                </g>
+                              );
+                            })()}
+                          </>
+                        )}
+                      </g>
+                    );
                   })}
                 </svg>
               )}
 
-              {/* Commit rows with file count annotation */}
-              {graphNodes.map((node, idx) => {
-                const entry = node.entry;
-                const initials = getInitials(entry.author.name);
-                const color = getAuthorColor(entry.author.name);
-                const isSelected = selectedIdx === idx;
-                const fileCount = fileCounts[entry.hash];
-                const isHEAD = entry.refs.some(r => r.includes('HEAD'));
-                return (
-                  <div key={entry.hash}
-                    className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
-                      isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover')}
-                    style={{ height: ROW_HEIGHT, paddingLeft: graphWidth + 8, zIndex: 2 }}
-                    onClick={() => setSelectedIdx(idx)}>
-                    {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
-                    {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
-                    {/* File count annotation badge */}
-                    {fileCount !== undefined && fileCount > 0 && (
-                      <span className="text-2xs px-1 py-0 rounded bg-accent-muted text-accent flex-shrink-0" style={{ minWidth: 20, textAlign: 'center' }}>
-                        {fileCount}
-                      </span>
-                    )}
-                    {entry.refs.length > 0 && (
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        {entry.refs.slice(0, 2).map((ref, i) => {
-                          const isTag = ref.startsWith('tag:');
-                          const label = ref.replace(/^tag:\s*/, '').replace('HEAD -> ', '');
-                          return <span key={i} className={cn('text-2xs px-1 py-0.5 rounded border',
-                            isTag ? 'border-tag-border bg-tag-bg text-tag-text' : 'border-accent bg-accent-muted text-accent')}>
-                            {label}
-                          </span>;
-                        })}
+              {/* Commit rows — virtualized */}
+              <div style={{ height: lazyList.totalHeight, position: 'relative' }}>
+                <div style={{ position: 'absolute', top: lazyList.offsetY, left: 0, right: 0 }}>
+                  {graphRows.slice(lazyList.visibleRange.start, lazyList.visibleRange.end).map((row, idx) => {
+                    const realIdx = lazyList.visibleRange.start + idx;
+                    if (!row.node) return null;
+                    const entry = row.node.entry;
+                    const initials = getInitials(entry.author.name);
+                    const color = getAuthorColor(entry.author.name);
+                    const isSelected = selectedIdx === realIdx;
+                    const fileCount = fileCounts[entry.hash];
+                    const isHEAD = entry.refs.some(r => r.includes('HEAD'));
+                    return (
+                      <div key={entry.hash}
+                        className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
+                          isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover')}
+                        style={{ height: ROW_HEIGHT, paddingLeft: graphWidth + 8, zIndex: 4 }}
+                        onClick={() => { setSelectedIdx(realIdx); selectCommit(entry.hash); }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedIdx(realIdx);
+                          selectCommit(entry.hash);
+                          const items: ContextMenuItem[] = [
+                            { label: 'View in History...', clickId: 'view-history' },
+                            { label: 'Create Tag here...', clickId: 'create-tag' },
+                            { type: 'separator' },
+                            { label: 'Copy Short Hash', clickId: 'copy-short' },
+                            { label: 'Copy Full Hash', clickId: 'copy-full' },
+                            { label: 'Copy Commit Message', clickId: 'copy-msg' },
+                          ];
+                          showContextMenu(items, (action) => {
+                            if (action === 'view-history') {
+                              selectCommit(entry.hash);
+                              window.location.hash = '#/history';
+                            } else if (action === 'create-tag') {
+                              selectCommit(entry.hash);
+                              window.location.hash = '#/history';
+                              // History will handle the tag creation via its context menu
+                            } else if (action === 'copy-short') {
+                              copyToClipboard(shortHash(entry.hash));
+                              toast.success('Copied');
+                            } else if (action === 'copy-full') {
+                              copyToClipboard(entry.hash);
+                              toast.success('Copied');
+                            } else if (action === 'copy-msg') {
+                              copyToClipboard(entry.subject);
+                              toast.success('Copied');
+                            }
+                          });
+                        }}
+                        title="Click to select · Right-click for more actions"
+                      >
+                        {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
+                        {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
+                        {fileCount !== undefined && fileCount > 0 && (
+                          <span className="text-2xs px-1 py-0 rounded bg-accent-muted text-accent flex-shrink-0" style={{ minWidth: 20, textAlign: 'center' }}>
+                            {fileCount}
+                          </span>
+                        )}
+                        {entry.refs.length > 0 && (
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {entry.refs.slice(0, 2).map((ref, i) => {
+                              const isTag = ref.startsWith('tag:');
+                              const label = ref.replace(/^tag:\s*/, '').replace('HEAD -> ', '');
+                              return <span key={i} className={cn('text-2xs px-1 py-0.5 rounded border',
+                                isTag ? 'border-tag-border bg-tag-bg text-tag-text' : 'border-accent bg-accent-muted text-accent')}>
+                                {isTag && <TagIcon size={8} className="inline mr-0.5" />}{label}
+                              </span>;
+                            })}
+                          </div>
+                        )}
+                        <span className={cn('flex-1 truncate text-xs', isSelected && 'font-medium')}>{entry.subject}</span>
+                        <span className="flex-shrink-0 rounded author-badge text-center"
+                          style={{ backgroundColor: color.bg, width: 24, height: 16, fontSize: 8, lineHeight: '16px' }}>
+                          {initials}
+                        </span>
+                        <span className="text-2xs text-text-tertiary flex-shrink-0" style={{ width: 70, textAlign: 'right' }}>
+                          {formatTime(entry.author.date)}
+                        </span>
                       </div>
-                    )}
-                    <span className={cn('flex-1 truncate text-xs', isSelected && 'font-medium')}>{entry.subject}</span>
-                    <span className="flex-shrink-0 rounded author-badge text-center"
-                      style={{ backgroundColor: color.bg, width: 24, height: 16, fontSize: 8, lineHeight: '16px' }}>
-                      {initials}
-                    </span>
-                    <span className="text-2xs text-text-tertiary flex-shrink-0" style={{ width: 70, textAlign: 'right' }}>
-                      {formatTime(entry.author.date)}
-                    </span>
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -250,7 +315,10 @@ export function AnnotatePage() {
             <div className="p-3">
               <div className="text-sm font-medium mb-2">{selected.subject}</div>
               <div className="flex items-center gap-2 mb-3">
-                <code className="text-2xs font-mono px-1.5 py-0.5 bg-bg-tertiary rounded">{shortHash(selected.hash)}</code>
+                <CommitHashLink hash={selected.hash} />
+                <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>
+                  <GitCommit size={10} />
+                </button>
               </div>
               <div className="flex items-center gap-2 mb-3">
                 <span className="flex-shrink-0 rounded author-badge text-center"
@@ -268,34 +336,78 @@ export function AnnotatePage() {
                   {selected.parents.map((p, i) => (
                     <div key={i} className="flex items-center gap-1">
                       <CornerDownRight size={10} className="text-text-tertiary" />
-                      <code className="text-2xs font-mono text-accent">{shortHash(p)}</code>
+                      <CommitHashLink hash={p} />
                     </div>
                   ))}
                 </div>
               )}
-              {/* Files with status annotations */}
+              {/* Files with status annotations + context menu */}
               <div className="mt-3 pt-3 border-t border-border-default">
-                <div className="text-2xs uppercase text-text-tertiary mb-2">
-                  Files ({commitFiles.length})
-                </div>
-                {loadingFiles ? <div className="text-2xs text-text-tertiary">Loading...</div> :
+                <button className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-2"
+                  onClick={() => setShowFiles(!showFiles)}>
+                  <span>Files ({commitFiles.length})</span>
+                  {showFiles ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                </button>
+                {showFiles && (
+                  loadingFiles ? <div className="text-2xs text-text-tertiary">Loading...</div> :
                   commitFiles.length === 0 ? <div className="text-2xs text-text-tertiary">No files</div> :
-                  commitFiles.map((f, i) => (
-                    <div key={i} className="flex items-center gap-2 text-2xs py-0.5">
-                      <span className="font-mono font-bold w-4 text-center"
-                        style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
-                        {f.status}
-                      </span>
-                      <span className="flex-1 truncate font-mono text-text-secondary">{f.path}</span>
-                      {!f.binary && (f.additions > 0 || f.deletions > 0) && (
-                        <span className="flex-shrink-0">
-                          <span className="text-status-added">+{f.additions}</span>
-                          <span className="text-status-deleted ml-1">-{f.deletions}</span>
-                        </span>
+                  commitFiles.map((f, i) => {
+                    const isHighlighted = globalPathFilter === f.path || globalPathFilter === f.oldPath;
+                    return (
+                      <div key={i} className={cn(
+                        'flex items-center gap-2 text-2xs py-0.5 px-1 rounded hover:bg-bg-hover cursor-pointer group',
+                        isHighlighted && 'bg-accent-muted border-l-2 border-accent'
                       )}
-                    </div>
-                  ))
-                }
+                        onClick={() => {
+                          useSelectionStore.getState().selectFile(f.path);
+                          useSelectionStore.getState().setPathFilter(f.path);
+                          window.location.hash = '#/history';
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const items: ContextMenuItem[] = [
+                            { label: 'View file history...', clickId: 'file-history' },
+                            { label: 'Blame this file...', clickId: 'blame' },
+                            { type: 'separator' },
+                            { label: 'Copy path', clickId: 'copy-path' },
+                            { label: 'Copy full path', clickId: 'copy-full-path' },
+                          ];
+                          showContextMenu(items, (action) => {
+                            if (action === 'file-history') {
+                              useSelectionStore.getState().selectFile(f.path);
+                              useSelectionStore.getState().setPathFilter(f.path);
+                              window.location.hash = '#/history';
+                            } else if (action === 'blame') {
+                              useSelectionStore.getState().selectFile(f.path);
+                              window.location.hash = '#/blame';
+                            } else if (action === 'copy-path') {
+                              copyToClipboard(f.path);
+                              toast.success('Path copied');
+                            } else if (action === 'copy-full-path') {
+                              copyToClipboard(`${repo.path}/${f.path}`.replace(/\/+/g, '/'));
+                              toast.success('Full path copied');
+                            }
+                          });
+                        }}
+                        title={isHighlighted ? `${f.path} — matches your file-history filter` : 'Click for file history · Right-click for more'}
+                      >
+                        <span className="font-mono font-bold w-4 text-center"
+                          style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
+                          {f.status}
+                        </span>
+                        <span className={cn('flex-1 truncate font-mono text-text-secondary group-hover:text-text-primary',
+                          isHighlighted && 'text-accent font-medium')}>{f.path}</span>
+                        {!f.binary && (f.additions > 0 || f.deletions > 0) && (
+                          <span className="flex-shrink-0">
+                            <span className="text-status-added">+{f.additions}</span>
+                            <span className="text-status-deleted ml-1">-{f.deletions}</span>
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           ) : <div className="p-4 text-center text-text-tertiary text-sm">Select a commit</div>}

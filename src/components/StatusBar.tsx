@@ -7,22 +7,31 @@ import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
 
 /**
- * Clickable commit hash — clicking jumps to History and tries to focus that commit.
- * Used everywhere (StatusBar, Tags, Reflog, Stashes) for cross-tool navigation.
+ * Clickable commit hash — clicking jumps to History and focuses that commit.
+ * Used everywhere (StatusBar, Tags, Reflog, Stashes, journal, detail panel) for
+ * cross-tool navigation.
+ *
+ * Implementation notes:
+ * - Sets selectedCommitHash in global store (History subscribes to it)
+ * - Navigates to /history via window.location.hash (only if not already there)
+ * - History's useEffect on selectedCommitHash will auto-scroll to the commit
+ *   if it's already in the loaded list, otherwise the next loadHistory() will
+ *   include it (or user can search by hash)
  */
 export function CommitHashLink({ hash, short = true, className }: {
   hash: string;
   short?: boolean;
   className?: string;
 }) {
-  const toast = useToastStore();
   const selectCommit = useSelectionStore((s) => s.selectCommit);
   const handleClick = () => {
-    // Set global selection
+    // Set global selection FIRST — History's useEffect will pick this up
+    // and scroll to the commit if it's already loaded, or trigger a reload.
     selectCommit(hash);
-    // Navigate to History
-    window.location.hash = '#/history';
-    toast.info(`Jumped to commit ${hash.substring(0, 7)}`);
+    // Only navigate if we're not already on /history
+    if (!window.location.hash.startsWith('#/history')) {
+      window.location.hash = '#/history';
+    }
   };
   const display = short ? hash.substring(0, 7) : hash;
   return (

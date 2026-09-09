@@ -95,7 +95,13 @@ export function TagsPage() {
             <div className="text-xs mt-1">Create a tag to mark a release or important commit</div>
           </div>
         ) : (
-          tags.map((t) => (
+          <>
+            {tags.length > 200 && (
+              <div className="px-3 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
+                Showing first 200 of {tags.length} tags
+              </div>
+            )}
+            {tags.slice(0, 200).map((t) => (
             <div
               key={t.name}
               className="group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
@@ -131,6 +137,8 @@ export function TagsPage() {
               </button>
             </div>
           ))
+            }
+          </>
         )}
       </div>
 

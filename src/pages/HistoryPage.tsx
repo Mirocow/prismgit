@@ -14,6 +14,7 @@ import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { CommitHashLink } from '../components/StatusBar';
+import { DiffViewer } from '../components/DiffViewer';
 import { computeGraph, bezierPath, laneColor, BRANCH_COLORS } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
 import type { GraphNode } from '../lib/gitGraph';
@@ -231,6 +232,17 @@ export function HistoryPage() {
       else toast.success('Cherry-picked');
       await refreshStatus(repo.path); await loadHistory();
     } catch (e) { toast.error('Cherry-pick failed', String(e)); }
+  };
+
+  // Compare a commit with the current working tree — shows a diff dialog
+  const [compareDiff, setCompareDiff] = useState<{ result: import('../lib/api').DiffResult; title: string } | null>(null);
+  const handleCompareWithWorkingTree = async (entry: LogEntry) => {
+    try {
+      // Use diffCommit which compares commit vs its parent. But we want commit vs working tree.
+      // `git diff <commit> -- .` compares the commit tree with the working tree.
+      const result = await api.git.diff(repo.path, '', { ref: entry.hash });
+      setCompareDiff({ result, title: `Working Tree vs ${shortHash(entry.hash)} · ${entry.subject}` });
+    } catch (e) { toast.error('Failed to compute comparison', String(e)); }
   };
 
   const handleRevert = async (entry: LogEntry) => {
@@ -825,6 +837,10 @@ export function HistoryPage() {
                   title="Reset to this commit (mixed)">
                   <RotateCcw size={10} /> Reset
                 </button>
+                <button className="btn btn-primary text-2xs" onClick={() => handleCompareWithWorkingTree(selected)}
+                  title="Compare this commit with the current working tree">
+                  <FileText size={10} /> Compare with Working Tree
+                </button>
               </div>
               <div>
                 <button className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-1"
@@ -970,6 +986,20 @@ export function HistoryPage() {
               <button className="btn btn-primary" onClick={handleSaveBranch} disabled={!branchName.trim()}>
                 <GitBranch size={13} /> Create Branch
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Compare with Working Tree dialog */}
+      {compareDiff && (
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setCompareDiff(null)}>
+          <div className="panel w-[80vw] h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-2 border-b border-border-default">
+              <h3 className="text-sm font-medium">{compareDiff.title}</h3>
+              <button className="icon-btn" onClick={() => setCompareDiff(null)}>✕</button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <DiffViewer diff={compareDiff.result} filePath={compareDiff.title} />
             </div>
           </div>
         </div>

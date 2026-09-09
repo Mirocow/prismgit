@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Search, FileText, Loader, RefreshCw, GitCommit } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { CommitHashLink } from '../components/StatusBar';
 import { api, type BlameResult } from '../lib/api';
 import { cn, shortHash, formatDate } from '../lib/utils';
 
@@ -12,6 +14,14 @@ export function BlamePage() {
   const [ref, setRef] = useState('HEAD');
   const [blame, setBlame] = useState<BlameResult | null>(null);
   const [loading, setLoading] = useState(false);
+  // Read global file selection — when user clicks "Blame this file" from Changes/History,
+  // the file path is pre-filled here.
+  const globalFilePath = useSelectionStore((s) => s.selectedFilePath);
+  useEffect(() => {
+    if (globalFilePath) {
+      setFilePath(globalFilePath);
+    }
+  }, [globalFilePath]);
 
   const handleBlame = useCallback(async () => {
     if (!filePath.trim()) {
@@ -107,7 +117,7 @@ export function BlamePage() {
                 <div className="w-32 flex-shrink-0 px-2 py-1 border-r border-border-subtle text-text-tertiary truncate">
                   <div className="flex items-center gap-1">
                     <GitCommit size={9} />
-                    <span className="text-accent">{shortHash(line.hash)}</span>
+                    <CommitHashLink hash={line.hash} />
                   </div>
                   <div className="text-2xs mt-0.5">{line.author || 'unknown'}</div>
                 </div>

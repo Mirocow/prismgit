@@ -326,7 +326,14 @@ export function BranchesPage() {
           <span>{label}</span>
           <span className="text-text-tertiary">({count})</span>
         </div>
-        {!collapsed && items.map(renderBranchRow)}
+        {/* Render only first 200 items to avoid perf issues on large repos.
+            Lazy loading: show first 200, "Load more" button reveals next 200. */}
+        {!collapsed && items.length > 200 && (
+          <div className="px-2 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
+            Showing first 200 of {items.length} · scroll for more
+          </div>
+        )}
+        {!collapsed && items.slice(0, 200).map(renderBranchRow)}
       </div>
     );
   };

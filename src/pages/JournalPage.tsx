@@ -3,6 +3,8 @@ import { RotateCcw, RefreshCw, CornerDownRight, Copy, GitCommit } from '../compo
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { CommitHashLink } from '../components/StatusBar';
 import { api, type ReflogEntry } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 
@@ -135,7 +137,7 @@ export function JournalPage() {
                 <div className="text-sm text-text-primary">{entry.message}</div>
                 <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
                   <CornerDownRight size={9} />
-                  <code className="font-mono">{shortHash(entry.hash)}</code>
+                  <CommitHashLink hash={entry.hash} />
                   <span>·</span>
                   <span>{entry.author.name}</span>
                   <span>·</span>
