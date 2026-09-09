@@ -1,4 +1,4 @@
-import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, EyeOff } from './icons';
+import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -26,42 +26,18 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
 
   const disabled = !currentRepo;
-
-  const handleRefresh = () => {
-    if (!currentRepo) return;
-    refreshStatus(currentRepo.path);
-  };
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
 
   const handlePush = async () => {
     if (!currentRepo) return;
-    try {
-      await push(currentRepo.path);
-      toast.success('Pushed successfully');
-    } catch (e) {
-      toast.error('Push failed', String(e));
-    }
+    try { await push(currentRepo.path); toast.success('Pushed successfully'); }
+    catch (e) { toast.error('Push failed', String(e)); }
   };
-
   const handlePull = async () => {
     if (!currentRepo) return;
-    try {
-      await pull(currentRepo.path);
-      toast.success('Pulled successfully');
-    } catch (e) {
-      toast.error('Pull failed', String(e));
-    }
+    try { await pull(currentRepo.path); toast.success('Pulled successfully'); }
+    catch (e) { toast.error('Pull failed', String(e)); }
   };
-
-  const handleFetch = async () => {
-    if (!currentRepo) return;
-    try {
-      await fetch(currentRepo.path, undefined, true);
-      toast.success('Fetch completed');
-    } catch (e) {
-      toast.error('Fetch failed', String(e));
-    }
-  };
-
   const handleSynchronize = async () => {
     if (!currentRepo) return;
     try {
@@ -69,212 +45,163 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
       await pull(currentRepo.path);
       await push(currentRepo.path);
       toast.success('Synchronized successfully');
-    } catch (e) {
-      toast.error('Synchronize failed', String(e));
-    }
+    } catch (e) { toast.error('Synchronize failed', String(e)); }
   };
-
   const handleOpenInBrowser = async () => {
     if (!currentRepo) return;
     try {
       const info = await api.git.extractRepoInfo(currentRepo.path);
-      if (info.webUrl && info.provider !== 'unknown') {
-        api.app.openExternal(info.webUrl);
-      } else {
-        toast.info('Repository has no remote URL');
-      }
-    } catch (e) {
-      toast.error('Failed to open in browser', String(e));
-    }
+      if (info.webUrl && info.provider !== 'unknown') { api.app.openExternal(info.webUrl); }
+      else { toast.info('Repository has no remote URL'); }
+    } catch (e) { toast.error('Failed to open in browser', String(e)); }
   };
-
   const handleRevealInFileManager = async () => {
     if (!currentRepo) return;
-    try {
-      await api.git.revealInFileManager(currentRepo.path);
-    } catch (e) {
-      toast.error('Failed to reveal in file manager', String(e));
-    }
+    try { await api.git.revealInFileManager(currentRepo.path); }
+    catch (e) { toast.error('Failed to reveal in file manager', String(e)); }
   };
 
   const isInProgress = status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting;
   const isBisecting = status?.isBisecting;
 
-  // Toolbar button with text label below icon (SmartGit style)
-  const ToolButton = ({ icon: Icon, label, onClick, disabled, title }: {
-    icon: typeof RefreshCw; label: string; onClick: () => void; disabled?: boolean; title?: string;
+  // Compact icon-only button
+  const IconButton = ({ icon: Icon, onClick, disabled, title }: {
+    icon: typeof RefreshCw; onClick: () => void; disabled?: boolean; title: string;
   }) => (
     <button
-      className="flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded hover:bg-bg-hover transition-colors no-drag disabled:opacity-40 disabled:cursor-not-allowed"
+      className="flex items-center justify-center w-7 h-7 rounded hover:bg-bg-hover transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary"
       onClick={onClick}
       disabled={disabled}
-      title={title || label}
+      title={title}
     >
-      <Icon size={16} />
-      <span className="text-2xs text-text-secondary">{label}</span>
+      <Icon size={15} />
     </button>
   );
 
-  const Divider = () => <div className="w-px h-8 bg-border-default mx-1" />;
+  const Divider = () => <div className="w-px h-5 bg-border-subtle mx-1.5" />;
 
   return (
-    <header className="titlebar-drag flex items-center px-2 h-12 bg-bg-tertiary border-b border-border-default flex-shrink-0">
-      {/* Pull / Sync / Push group */}
-      <div className="flex items-center no-drag">
-        <ToolButton icon={ArrowDown} label="Pull" onClick={handlePull} disabled={disabled} />
-        <ToolButton icon={Sync} label="Sync" onClick={handleSynchronize} disabled={disabled} title="Synchronize (fetch + pull + push)" />
-        <ToolButton icon={ArrowUp} label="Push" onClick={handlePush} disabled={disabled} />
+    <header
+      className="flex items-center h-9 bg-bg-tertiary border-b border-border-default flex-shrink-0 select-none"
+      style={{ '-webkit-app-region': 'drag' } as React.CSSProperties}
+    >
+      {/* macOS traffic light spacing */}
+      {isMac && <div className="w-[70px] flex-shrink-0" />}
+
+      {/* App name (left, like Ollama Code) */}
+      <div className="flex items-center gap-2 px-2 flex-shrink-0">
+        <span className="text-xs font-semibold text-accent">SmartGit</span>
+        {currentRepo && (
+          <>
+            <span className="text-text-tertiary text-xs">/</span>
+            <span className="text-xs text-text-secondary">{currentRepo.name}</span>
+          </>
+        )}
       </div>
 
       <Divider />
 
-      {/* Stage / Unstage / Discard group */}
+      {/* Git action buttons — compact, icon-only */}
       <div className="flex items-center no-drag">
-        <ToolButton icon={Plus} label="Stage" onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
-        <ToolButton icon={Minus} label="Unstage" onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage all" />
-        <ToolButton icon={Trash} label="Discard" onClick={() => {
-          if (!currentRepo || !confirm('Discard all uncommitted changes? This cannot be undone.')) return;
+        <IconButton icon={ArrowDown} onClick={handlePull} disabled={disabled} title="Pull" />
+        <IconButton icon={Sync} onClick={handleSynchronize} disabled={disabled} title="Sync (fetch+pull+push)" />
+        <IconButton icon={ArrowUp} onClick={handlePush} disabled={disabled} title="Push" />
+
+        <Divider />
+
+        <IconButton icon={Plus} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage All" />
+        <IconButton icon={Minus} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage All" />
+        <IconButton icon={Trash} onClick={() => {
+          if (!currentRepo || !confirm('Discard all uncommitted changes?')) return;
           api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
-            toast.success('Changes discarded');
-            refreshStatus(currentRepo.path);
+            toast.success('Changes discarded'); refreshStatus(currentRepo.path);
           }).catch((e) => toast.error('Discard failed', String(e)));
-        }} disabled={disabled} title="Discard all changes" />
-      </div>
+        }} disabled={disabled} title="Discard All" />
 
-      <Divider />
+        <Divider />
 
-      {/* Stash group */}
-      <div className="flex items-center no-drag">
-        <ToolButton icon={CloudDownload} label="Save Stash" onClick={() => {
+        <IconButton icon={CloudDownload} onClick={() => {
           if (!currentRepo) return;
           api.git.stashPush(currentRepo.path, undefined, true).then(() => {
-            toast.success('Stash saved');
-            refreshStatus(currentRepo.path);
+            toast.success('Stash saved'); refreshStatus(currentRepo.path);
           }).catch((e) => toast.error('Stash failed', String(e)));
-        }} disabled={disabled} />
-        <ToolButton icon={GitPullRequest} label="Apply Stash" onClick={() => {
+        }} disabled={disabled} title="Save Stash" />
+        <IconButton icon={GitPullRequest} onClick={() => {
           if (!currentRepo) return;
           api.git.stashList(currentRepo.path).then(stashes => {
-            if (stashes.length === 0) {
-              toast.info('No stashes available');
-              return;
-            }
+            if (stashes.length === 0) { toast.info('No stashes'); return; }
             api.git.stashApply(currentRepo.path, 0).then(() => {
-              toast.success('Stash applied');
-              refreshStatus(currentRepo.path);
+              toast.success('Stash applied'); refreshStatus(currentRepo.path);
             }).catch((e) => toast.error('Apply failed', String(e)));
           });
-        }} disabled={disabled} />
+        }} disabled={disabled} title="Apply Stash" />
+
+        <Divider />
+
+        <IconButton icon={GitBranch} onClick={() => { window.location.hash = '#/history'; }} disabled={disabled} title="Log" />
+        <IconButton icon={Search} onClick={() => { window.location.hash = '#/blame'; }} disabled={disabled} title="Blame" />
+        <IconButton icon={Search} onClick={() => { window.location.hash = '#/investigate'; }} disabled={disabled} title="Investigate" />
+
+        <Divider />
+
+        <IconButton icon={GitMerge} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow" />
+        <IconButton icon={RotateCcw} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Rebase" />
       </div>
 
-      <Divider />
-
-      {/* Log / Blame / Investigate group */}
-      <div className="flex items-center no-drag">
-        <ToolButton icon={GitBranch} label="Log" onClick={() => { window.location.hash = '#/history'; }} disabled={disabled} title="Open History/Log" />
-        <ToolButton icon={Search} label="Blame" onClick={() => { window.location.hash = '#/blame'; }} disabled={disabled} />
-        <ToolButton icon={Search} label="Investigate" onClick={() => { window.location.hash = '#/investigate'; }} disabled={disabled} />
-      </div>
-
-      <Divider />
-
-      {/* Git-Flow / Merge / Rebase group */}
-      <div className="flex items-center no-drag">
-        <ToolButton icon={GitMerge} label="Git-Flow" onClick={() => onGitFlow && onGitFlow()} disabled={disabled} />
-        <ToolButton icon={GitMerge} label="Merge" onClick={() => { window.location.hash = '#/branches'; }} disabled={disabled} />
-        <ToolButton icon={RotateCcw} label="Rebase" onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} />
-      </div>
-
-      {/* Center: branch info */}
-      <div className="flex-1 flex items-center justify-center no-drag">
+      {/* Center: branch info (draggable area) */}
+      <div className="flex-1 flex items-center justify-center" style={{ '-webkit-app-region': 'drag' } as React.CSSProperties}>
         {currentRepo && status ? (
-          <div className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-2 text-xs">
             {isInProgress && (
               <span className="badge badge-modified flex items-center gap-1 animate-pulse">
-                <AlertCircle size={10} />
-                {status.isMerging ? 'MERGING' : status.isRebasing ? 'REBASING' : status.isCherryPicking ? 'CHERRY-PICKING' : 'REVERTING'}
+                <AlertCircle size={9} />
+                {status.isMerging ? 'MERGING' : status.isRebasing ? 'REBASING' : 'CHERRY-PICK'}
               </span>
             )}
             {isBisecting && (
               <span className="badge badge-modified flex items-center gap-1">
-                <AlertCircle size={10} />
-                BISECTING
+                <AlertCircle size={9} /> BISECTING
               </span>
             )}
             <div className="flex items-center gap-1 text-text-secondary">
-              <GitBranch size={12} />
-              <span className="font-medium text-text-primary">
-                {status.current || (status.detached ? 'DETACHED' : 'HEAD')}
-              </span>
+              <GitBranch size={11} />
+              <span className="font-medium text-text-primary">{status.current || 'HEAD'}</span>
             </div>
-            {status.tracking && (
-              <span className="text-text-tertiary">→ {status.tracking}</span>
-            )}
+            {status.tracking && <span className="text-text-tertiary">→ {status.tracking}</span>}
             {(status.ahead > 0 || status.behind > 0) && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 {status.ahead > 0 && (
                   <span className="flex items-center gap-0.5 text-status-added">
-                    <ArrowUp size={11} />
-                    {status.ahead}
+                    <ArrowUp size={10} />{status.ahead}
                   </span>
                 )}
                 {status.behind > 0 && (
                   <span className="flex items-center gap-0.5 text-status-modified">
-                    <ArrowDown size={11} />
-                    {status.behind}
+                    <ArrowDown size={10} />{status.behind}
                   </span>
                 )}
               </div>
             )}
           </div>
-        ) : (
-          <div className="text-xs text-text-tertiary">SmartGit Electron</div>
-        )}
+        ) : null}
       </div>
 
       {/* Right: utility buttons */}
-      <div className="flex items-center gap-1 no-drag">
-        <button
-          className="icon-btn"
-          title="Repository info"
-          onClick={() => onRepoInfo && onRepoInfo()}
-          disabled={disabled}
-        >
-          <Star size={14} className={currentMetadata?.favorite ? 'text-status-modified fill-current' : ''} />
-        </button>
-        <button
-          className="icon-btn"
-          title="Find object (Ctrl+F)"
-          onClick={() => onFind && onFind()}
-          disabled={disabled}
-        >
-          <Search size={14} />
-        </button>
-        <button
-          className="icon-btn"
-          title="Open in browser"
-          onClick={handleOpenInBrowser}
-          disabled={disabled}
-        >
-          <ExternalLink size={14} />
-        </button>
-        <button
-          className="icon-btn"
-          title="Reveal in file manager"
-          onClick={handleRevealInFileManager}
-          disabled={disabled}
-        >
-          <Folder size={14} />
-        </button>
-        <div className="w-px h-5 bg-border-default mx-1" />
-        <button
-          className="icon-btn"
-          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme (Ctrl+Shift+T)`}
+      <div className="flex items-center gap-0.5 no-drag pr-2">
+        <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title="Repository Info" />
+        <IconButton icon={Search} onClick={() => onFind && onFind()} disabled={disabled} title="Find Object (Ctrl+F)" />
+        <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title="Open in Browser" />
+        <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title="Reveal in File Manager" />
+        <Divider />
+        <IconButton
+          icon={theme === 'dark' ? Sun : Moon}
           onClick={() => toggleTheme()}
-        >
-          {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-        </button>
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+        />
       </div>
+
+      {/* Windows/Linux: spacer for native window controls */}
+      {!isMac && <div className="w-[100px] flex-shrink-0" style={{ '-webkit-app-region': 'drag' } as React.CSSProperties} />}
     </header>
   );
 }
