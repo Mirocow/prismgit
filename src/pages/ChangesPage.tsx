@@ -585,7 +585,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         {/* State text */}
         <span className="text-text-tertiary flex-shrink-0 italic" style={{ width: 70 }}>{stateLabel}</span>
         {/* Relative directory */}
-        <span className="text-text-tertiary flex-shrink-0 text-right" style={{ width: 120 }}>{getRelativeDir(file.path)}</span>
+        <span className="text-text-tertiary flex-shrink-0" style={{ width: 120 }}>{getRelativeDir(file.path)}</span>
         {/* Actions */}
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
           {isConflict && onResolveConflict && (
@@ -798,7 +798,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               <span className="w-4"></span>
               <SortableHeader label="Name" sortKey="name" sort={fileSort} onSort={handleSort} />
               <SortableHeader label="State" sortKey="state" sort={fileSort} onSort={handleSort} width={70} />
-              <SortableHeader label="Relative Directory" sortKey="dir" sort={fileSort} onSort={handleSort} width={120} align="right" />
+              <SortableHeader label="Relative Directory" sortKey="dir" sort={fileSort} onSort={handleSort} width={120} />
               <span style={{ width: 60 }}></span>
             </div>
 
