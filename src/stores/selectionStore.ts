@@ -68,6 +68,19 @@ export interface GlobalSelectionState {
   /** Column widths (px) for the Changes file table: State and Relative Directory. */
   colWidths: { state: number; dir: number };
 
+  /**
+   * One-shot diff request — set by other tools (e.g. Stashes → "Open in Diff")
+   * to ask the Diff page to switch to a specific base/compare/file configuration.
+   * Consumed (cleared) by DiffPage on first read, so subsequent DiffPage loads
+   * don't re-apply the request.
+   *
+   * For stash entries, the caller should set:
+   *   { baseRef: `${stashHash}^`, compareRef: stashHash, filePath: '.' }
+   * so we diff the stash against the commit it was based on (parent[0]),
+   * NOT against HEAD (which was the original bug — see StashesPage.handleViewStash).
+   */
+  diffRequest: { baseRef: string; compareRef: string; filePath?: string } | null;
+
   // Actions
   selectCommit: (hash: string | null) => void;
   selectBranch: (name: string | null) => void;
@@ -92,6 +105,8 @@ export interface GlobalSelectionState {
   toggleDirTreeVisible: () => void;
   /** Set the width (px) of one of the resizable Changes table columns. */
   setColWidth: (col: 'state' | 'dir', width: number) => void;
+  /** Set a one-shot diff request — DiffPage consumes it on first render. */
+  setDiffRequest: (req: { baseRef: string; compareRef: string; filePath?: string } | null) => void;
   /** Clear all selections (e.g. when switching repos). */
   clearAll: () => void;
 }
@@ -117,6 +132,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   fileFilterRegex: false,
   dirTreeVisible: true,
   colWidths: { state: 70, dir: 120 },
+  diffRequest: null,
 
   selectCommit: (hash) => set({ selectedCommitHash: hash }),
   selectBranch: (name) => set({
@@ -155,6 +171,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   toggleFileFilterRegex: () => set({ fileFilterRegex: !get().fileFilterRegex }),
   toggleDirTreeVisible: () => set({ dirTreeVisible: !get().dirTreeVisible }),
   setColWidth: (col, width) => set((s) => ({ colWidths: { ...s.colWidths, [col]: width } })),
+  setDiffRequest: (req) => set({ diffRequest: req }),
   clearAll: () => set({
     selectedCommitHash: null,
     selectedBranch: null,
@@ -165,5 +182,6 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
     pathFilter: null,
     authorFilter: null,
     fileScopeDir: null,
+    diffRequest: null,
   }),
 }));

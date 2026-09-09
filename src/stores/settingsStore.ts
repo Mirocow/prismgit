@@ -30,6 +30,33 @@ function applyThemeToDOM(theme: Theme) {
   }
 }
 
+/**
+ * Apply UI contrast as a CSS filter on the root element.
+ *   100 = default (no filter)
+ *   <100 = softer, washed-out
+ *   >100 = punchier, more saturated
+ *
+ * We use `filter: contrast(N%)` which is GPU-accelerated and works on the
+ * whole app including text, backgrounds, and images. Range is clamped to
+ * 50–150 to avoid extreme values that would make text unreadable.
+ *
+ * The contrast is applied to #root (not <html>) to avoid affecting window
+ * chrome like the title bar drag region in some Electron setups.
+ */
+function applyContrastToDOM(contrast: number) {
+  const clamped = Math.max(50, Math.min(150, contrast));
+  const root = document.getElementById('root');
+  if (root) {
+    root.style.filter = clamped === 100 ? '' : `contrast(${clamped}%)`;
+  }
+  // Persist for next load — read in main.tsx before React mounts to avoid FOUC
+  try {
+    localStorage.setItem('smartgit-contrast', String(clamped));
+  } catch {
+    /* ignore */
+  }
+}
+
 // Apply theme immediately on module load (prevents FOUC)
 try {
   const saved = localStorage.getItem('smartgit-theme') as Theme | null;
@@ -63,6 +90,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (settings.fontSizeList) document.documentElement.style.setProperty('--font-size-list', `${settings.fontSizeList}px`);
       if (settings.fontSizeDiff) document.documentElement.style.setProperty('--font-size-diff', `${settings.fontSizeDiff}px`);
       if (settings.fontSizeMonospace) document.documentElement.style.setProperty('--font-size-mono', `${settings.fontSizeMonospace}px`);
+      // Apply UI contrast on load (default to 100 = no filter)
+      applyContrastToDOM(settings.contrast ?? 100);
     } catch {
       set({ loading: false });
     }
@@ -96,6 +125,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
     if (key === 'sidebarWidth') {
       document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
+    }
+    // Apply UI contrast live (slider drags will hit this rapidly — GPU-accelerated filter is cheap)
+    if (key === 'contrast') {
+      applyContrastToDOM(value as number);
     }
   },
 

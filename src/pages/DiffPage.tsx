@@ -23,6 +23,8 @@ import { useLazyList } from '../lib/useLazyList';
  * Connected to global selectionStore:
  *   - selectedFilePath pre-fills the file path
  *   - selectedCommitHash pre-fills the "base" ref
+ *   - diffRequest (one-shot) is consumed on first render — used by Stashes page
+ *     to ask Diff to compare stash^ vs stash (instead of HEAD vs working tree)
  *
  * This is NOT the inline diff in Changes — that stays in Changes.
  * This is a dedicated tool for comparing arbitrary refs.
@@ -33,6 +35,10 @@ export function DiffPage() {
   const globalFilePath = useSelectionStore((s) => s.selectedFilePath);
   const globalCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const globalBranch = useSelectionStore((s) => s.selectedBranch);
+  // One-shot diff request — when set, override local state and clear it.
+  // Used by Stashes (and any future caller) to programmatically configure Diff.
+  const diffRequest = useSelectionStore((s) => s.diffRequest);
+  const clearDiffRequest = useSelectionStore((s) => s.setDiffRequest);
 
   const [filePath, setFilePath] = useState('.');
   const [baseRef, setBaseRef] = useState('HEAD');
@@ -45,9 +51,10 @@ export function DiffPage() {
   // File list for multi-file diff (when filePath === '.')
   const [changedFiles, setChangedFiles] = useState<CommitFile[]>([]);
   const [selectedFileInList, setSelectedFileInList] = useState<string | null>(null);
-
-  // Resizable width of the changed-files tree panel (drag splitter between tree and diff)
-  const { width: treeWidth, handleResize: handleTreeResize } = useResizableWidth(224, 140, 560);
+  // Width of the file-list sidebar — splitter lets the user resize it.
+  // Bug fix: previously the file list was a fixed `w-56` with no splitter, so
+  // users couldn't widen it for long paths. Now we use useResizableWidth.
+  const { width: fileListWidth, handleResize: handleFileListResize } = useResizableWidth(224, 140, 480);
 
   // Pre-fill from global selections
   useEffect(() => {
@@ -59,6 +66,23 @@ export function DiffPage() {
   useEffect(() => {
     if (globalBranch) setBaseRef(globalBranch);
   }, [globalBranch]);
+
+  // Consume one-shot diffRequest — when Stashes (or any tool) sets it,
+  // apply base/compare/filePath to local state, then clear the request.
+  // This must run BEFORE the computeDiff effect so the new state is in place.
+  useEffect(() => {
+    if (!diffRequest) return;
+    setBaseRef(diffRequest.baseRef);
+    setCompareRef(diffRequest.compareRef);
+    setCompareMode('ref');
+    if (diffRequest.filePath) {
+      setFilePath(diffRequest.filePath);
+      // Also sync to global so other consumers see the same path
+      useSelectionStore.getState().selectFile(diffRequest.filePath);
+    }
+    // Clear the request so a subsequent mount of DiffPage doesn't re-apply it.
+    clearDiffRequest(null);
+  }, [diffRequest, clearDiffRequest]);
 
   // Load branches and recent commits for dropdowns
   useEffect(() => {
@@ -95,8 +119,12 @@ export function DiffPage() {
           setDiff(null);
         }
       } else if ((filePath === '.' || filePath === '') && compareMode === 'ref' && compareRef) {
-        // Diff between two refs — get file list
-        const rawFiles = await api.git.raw(repo.path, ['diff', '--name-status', '--no-color', `${baseRef}...${compareRef}`]);
+        // Diff between two refs — get file list.
+        // IMPORTANT: use `..` (double-dot) not `...` (triple-dot) for direct ref
+        // comparison. Triple-dot diff compares from merge-base, which gives
+        // wrong results for stash commits (stash^...stash vs stash^..stash).
+        // Stash commits have parent[0] = base, so direct diff is what we want.
+        const rawFiles = await api.git.raw(repo.path, ['diff', '--name-status', '--no-color', `${baseRef}..${compareRef}`]);
         const files: CommitFile[] = rawFiles.split('\n').filter(Boolean).map(line => {
           const parts = line.split('\t');
           const status = parts[0];
@@ -109,7 +137,7 @@ export function DiffPage() {
         }
         const fileToDiff = selectedFileInList || files[0]?.path;
         if (fileToDiff) {
-          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}...${compareRef}`, '--', fileToDiff]);
+          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', fileToDiff]);
           // Parse
           const result = parseRawDiff(rawDiff, fileToDiff);
           setDiff(result);
@@ -125,7 +153,8 @@ export function DiffPage() {
         } else if (compareMode === 'staged') {
           result = await api.git.diff(repo.path, filePath || '.', { staged: true, ref: baseRef });
         } else {
-          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}...${compareRef}`, '--', filePath || '.']);
+          // Same `..` rationale here — direct ref comparison, not merge-base.
+          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', filePath || '.']);
           result = parseRawDiff(rawDiff, filePath);
         }
         setDiff(result);
@@ -154,7 +183,7 @@ export function DiffPage() {
     try {
       let result: DiffResult;
       if (compareMode === 'ref' && compareRef) {
-        const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}...${compareRef}`, '--', file]);
+        const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', file]);
         result = parseRawDiff(rawDiff, file);
       } else {
         result = await api.git.diff(repo.path, file, { ref: baseRef, staged: compareMode === 'staged' });
@@ -186,7 +215,7 @@ export function DiffPage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header with comparison controls */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border-default bg-bg-tertiary flex-wrap">
-        <span className="text-xs font-medium flex-shrink-0">Diff</span>
+        <span className="text-xs font-semibold flex-shrink-0">Diff</span>
 
         {/* File path input */}
         <div className="flex items-center gap-1 flex-shrink-0">
@@ -196,7 +225,7 @@ export function DiffPage() {
             placeholder="file path (or . for all)"
             value={filePath}
             onChange={(e) => setFilePath(e.target.value)}
-            className="text-xs w-48 px-2 py-0.5 font-mono bg-bg-secondary border border-border-default rounded"
+            className="text-xs w-48 px-2 py-1 font-mono bg-bg-secondary border border-border-default rounded"
             title="File to compare. Use '.' to compare all files."
           />
         </div>
@@ -207,7 +236,7 @@ export function DiffPage() {
           <select
             value={baseRef}
             onChange={(e) => setBaseRef(e.target.value)}
-            className="text-xs px-1 py-0.5 bg-bg-secondary border border-border-default rounded font-mono"
+            className="text-xs px-1.5 py-1 bg-bg-secondary border border-border-default rounded font-mono"
             title="Base reference (what to compare FROM)"
           >
             <option value="HEAD">HEAD</option>
@@ -229,24 +258,24 @@ export function DiffPage() {
         {/* Compare mode selector */}
         <div className="flex items-center gap-0">
           <button
-            className={cn('text-2xs px-2 py-0.5 rounded-l border',
-              compareMode === 'working' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default')}
+            className={cn('text-2xs px-2.5 py-1 rounded-l border',
+              compareMode === 'working' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setCompareMode('working')}
             title="Compare with working tree (unstaged changes)"
           >
             Working Tree
           </button>
           <button
-            className={cn('text-2xs px-2 py-0.5 border-t border-b',
-              compareMode === 'staged' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default')}
+            className={cn('text-2xs px-2.5 py-1 border-t border-b',
+              compareMode === 'staged' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setCompareMode('staged')}
             title="Compare with staged (index)"
           >
             Staged
           </button>
           <button
-            className={cn('text-2xs px-2 py-0.5 rounded-r border',
-              compareMode === 'ref' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default')}
+            className={cn('text-2xs px-2.5 py-1 rounded-r border',
+              compareMode === 'ref' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setCompareMode('ref')}
             title="Compare with another ref (commit/branch)"
           >
@@ -259,7 +288,7 @@ export function DiffPage() {
           <select
             value={compareRef}
             onChange={(e) => setCompareRef(e.target.value)}
-            className="text-xs px-1 py-0.5 bg-bg-secondary border border-border-default rounded font-mono"
+            className="text-xs px-1.5 py-1 bg-bg-secondary border border-border-default rounded font-mono"
             title="Compare TO this reference"
           >
             <option value="">Select ref...</option>
@@ -272,8 +301,8 @@ export function DiffPage() {
           </select>
         )}
 
-        <button className="icon-btn !w-5 !h-5 ml-auto" title="Refresh" onClick={computeDiff}>
-          <RefreshCw size={11} className={loading ? 'spin' : ''} />
+        <button className="icon-btn !w-6 !h-6 ml-auto" title="Refresh" onClick={computeDiff}>
+          <RefreshCw size={12} className={loading ? 'spin' : ''} />
         </button>
       </div>
 
@@ -287,34 +316,40 @@ export function DiffPage() {
         {/* File list sidebar — shown when comparing all files ('.') */}
         {changedFiles.length > 0 && (
           <>
-          <div className="flex-shrink-0 overflow-y-auto bg-bg-secondary" style={{ width: treeWidth }}>
-            <div className="px-2 py-1 text-2xs font-semibold uppercase text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary">
-              Changed Files ({changedFiles.length})
+            <div
+              className="flex-shrink-0 border-r border-border-default overflow-y-auto bg-bg-secondary"
+              style={{ width: fileListWidth }}
+            >
+              <div className="px-2 py-1.5 text-2xs font-bold uppercase tracking-wider text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary">
+                Changed Files ({changedFiles.length})
+              </div>
+              {changedFiles.slice(0, 200).map((f, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    'flex items-center gap-1.5 px-2 py-1 text-2xs cursor-pointer hover:bg-bg-hover transition-colors',
+                    selectedFileInList === f.path && 'bg-bg-selected'
+                  )}
+                  onClick={() => loadFileDiff(f.path)}
+                  title={f.path}
+                >
+                  <span className="font-mono font-bold w-3 text-center flex-shrink-0"
+                    style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
+                    {f.status}
+                  </span>
+                  <span className="flex-1 truncate font-mono text-text-secondary">{f.path}</span>
+                </div>
+              ))}
+              {changedFiles.length > 200 && (
+                <div className="px-2 py-1 text-2xs text-text-tertiary border-t border-border-subtle">
+                  Showing first 200 of {changedFiles.length}
+                </div>
+              )}
             </div>
-            {changedFiles.slice(0, 200).map((f, i) => (
-              <div
-                key={i}
-                className={cn(
-                  'flex items-center gap-1.5 px-2 py-1 text-2xs cursor-pointer hover:bg-bg-hover',
-                  selectedFileInList === f.path && 'bg-bg-selected'
-                )}
-                onClick={() => loadFileDiff(f.path)}
-                title={f.path}
-              >
-                <span className="font-mono font-bold w-3 text-center flex-shrink-0"
-                  style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
-                  {f.status}
-                </span>
-                <span className="flex-1 truncate font-mono text-text-secondary">{f.path}</span>
-              </div>
-            ))}
-            {changedFiles.length > 200 && (
-              <div className="px-2 py-1 text-2xs text-text-tertiary border-t border-border-subtle">
-                Showing first 200 of {changedFiles.length}
-              </div>
-            )}
-          </div>
-          <ResizableSplitter direction="horizontal" onResize={handleTreeResize} />
+            {/* Resizable splitter between file list and diff viewer — fixes the
+                "no splitter between tree and Diff window" complaint. Drag left/right
+                to shrink/grow the file list panel. */}
+            <ResizableSplitter direction="horizontal" onResize={handleFileListResize} />
           </>
         )}
 

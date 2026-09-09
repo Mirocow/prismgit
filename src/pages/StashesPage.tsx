@@ -84,11 +84,26 @@ export function StashesPage() {
     }
   };
 
-  // View stash content — opens in Diff tool (not inline)
+  // View stash content — opens in Diff tool comparing the stash commit against
+  // the commit it was based on (parent[0] = stash^). This shows what the stash
+  // would actually apply if popped, NOT a comparison with the current HEAD.
+  //
+  // Previous bug: we used `selectCommit(stash.hash)` which DiffPage interpreted
+  // as `baseRef = stash.hash`, then computed diff(baseRef, working tree) — that
+  // showed unrelated working-tree changes instead of the stash contents.
   const handleViewStash = (stash: StashEntry) => {
-    // Set stash hash as base ref + navigate to /diff
-    useSelectionStore.getState().selectCommit(stash.hash);
-    useSelectionStore.getState().selectFile('.');
+    useSelectionStore.getState().setDiffRequest({
+      // stash.hash^ is the commit the stash was created on top of (parent[0]).
+      // Stashes are merge commits with 2 parents (or 3 if -u/--include-untracked):
+      //   parent[0] = base commit (HEAD at stash time)
+      //   parent[1] = index state when stashed
+      //   parent[2] (optional) = untracked files commit
+      // Comparing parent[0] vs the stash commit gives the working-tree changes
+      // that were stashed — exactly what users expect to see.
+      baseRef: `${stash.hash}^`,
+      compareRef: stash.hash,
+      filePath: '.',
+    });
     navigate('/diff');
   };
 

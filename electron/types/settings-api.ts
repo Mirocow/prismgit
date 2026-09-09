@@ -38,6 +38,12 @@ export interface AppSettings {
   fontSizeDiff: number;      // Diff viewer (code)
   fontSizeMonospace: number; // Monospace elements (hashes, paths)
   sidebarWidth: number;
+  /**
+   * UI contrast level — 100 = default, lower = softer, higher = punchier.
+   * Range 50–150. Applied as `filter: contrast(N%)` on the root element via
+   * a CSS variable. Useful for low-vision users or for high-glare environments.
+   */
+  contrast: number;
   defaultCloneDir: string;
   showReflogInHistory: boolean;
   maxHistoryLoad: number;

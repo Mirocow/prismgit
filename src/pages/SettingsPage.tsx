@@ -78,6 +78,67 @@ export function SettingsPage() {
                 {theme === 'dark' ? 'Light' : 'Dark'}
               </button>
             </div>
+            {/* UI Contrast slider — applies CSS `filter: contrast(N%)` on #root */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <div className="text-sm font-medium">UI Contrast</div>
+                  <div className="text-xs text-text-tertiary">
+                    Softer ↔ punchier. Applied as a live CSS contrast filter on the whole app.
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-text-tertiary font-mono w-10 text-right">
+                    {settings.contrast ?? 100}%
+                  </span>
+                  <button
+                    className="text-2xs text-accent hover:underline"
+                    onClick={() => setSetting('contrast', 100)}
+                    title="Reset to default (100%)"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 px-1">
+                <span className="text-2xs text-text-tertiary w-8">Soft</span>
+                <input
+                  type="range"
+                  min={50}
+                  max={150}
+                  step={5}
+                  value={settings.contrast ?? 100}
+                  onChange={(e) => setSetting('contrast', Number(e.target.value))}
+                  className="flex-1"
+                  style={{ accentColor: 'var(--accent)' }}
+                  title="Drag left for softer appearance, right for punchier colors"
+                />
+                <span className="text-2xs text-text-tertiary w-12">Punchy</span>
+              </div>
+              {/* Quick presets */}
+              <div className="flex items-center gap-1 mt-2">
+                <span className="text-2xs text-text-tertiary mr-1">Presets:</span>
+                {[
+                  { label: 'Soft', value: 75 },
+                  { label: 'Normal', value: 100 },
+                  { label: 'High', value: 125 },
+                  { label: 'Max', value: 150 },
+                ].map(p => (
+                  <button
+                    key={p.value}
+                    className={cn(
+                      'text-2xs px-2 py-0.5 rounded border transition-colors',
+                      (settings.contrast ?? 100) === p.value
+                        ? 'bg-accent text-text-inverse border-accent'
+                        : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover'
+                    )}
+                    onClick={() => setSetting('contrast', p.value)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium">Font size (base)</div>
