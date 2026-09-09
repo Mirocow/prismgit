@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, Settings as SettingsIcon, X, EyeOff, FileText } from './icons';
+import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, Settings as SettingsIcon, X, EyeOff, FileText, ChevronDown } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { api } from '../lib/api';
+import { api, type BranchInfo } from '../lib/api';
 import { cn } from '../lib/utils';
 
 // Default visible groups — user can toggle these via the customize button
@@ -454,6 +454,239 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
 }
 
 /**
+ * Push dropdown — button + small chevron that opens a menu with:
+ *   - Push to: <branch> (dropdown of local branches)
+ *   - [✓] Force push (--force-with-lease)
+ *   - Push tags
+ */
+function PushDropdown({ disabled }: { disabled: boolean }) {
+  const currentRepo = useRepositoryStore((s) => s.currentRepo);
+  const toast = useToastStore();
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const [open, setOpen] = useState(false);
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState('');
+  const [force, setForce] = useState(false);
+  const [pushTags, setPushTags] = useState(false);
+
+  useEffect(() => {
+    if (!open || !currentRepo) return;
+    api.git.branches(currentRepo.path).then(brs => {
+      setBranches(brs.filter(b => !b.remote));
+      // Default to current branch
+      const cur = brs.find(b => b.current);
+      setSelectedBranch(cur?.name || '');
+    }).catch(() => {});
+  }, [open, currentRepo]);
+
+  const doPush = async (branch?: string) => {
+    if (!currentRepo) return;
+    const b = branch || selectedBranch;
+    try {
+      await api.git.push(currentRepo.path, 'origin', b || undefined, false, force, pushTags);
+      toast.success(`Pushed ${b || 'current'}${force ? ' (force)' : ''}${pushTags ? ' + tags' : ''}`);
+      refreshStatus(currentRepo.path);
+    } catch (e) {
+      toast.error('Push failed', String(e));
+    }
+    setOpen(false);
+    setForce(false);
+    setPushTags(false);
+  };
+
+  return (
+    <div className="relative">
+      <div className="flex items-center">
+        <button
+          className="flex items-center gap-1.5 px-2.5 h-7 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
+          style={{ color: '#86b300' }}
+          onClick={() => doPush()}
+          disabled={disabled}
+          title="Push current branch to origin"
+        >
+          <ArrowUp size={14} />
+          <span className="hidden md:inline">Push</span>
+        </button>
+        <button
+          className="flex items-center px-1 h-7 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
+          onClick={() => setOpen(!open)}
+          disabled={disabled}
+          title="Push options — select branch, force push, tags"
+        >
+          <ChevronDown size={12} />
+        </button>
+      </div>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded-md shadow-lg z-50 min-w-64">
+            <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
+              Push to origin
+            </div>
+            <div className="p-2">
+              <label className="text-2xs text-text-tertiary block mb-1">Branch</label>
+              <select
+                className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                value={selectedBranch}
+                onChange={(e) => setSelectedBranch(e.target.value)}
+              >
+                {branches.map(b => (
+                  <option key={b.name} value={b.name}>
+                    {b.name}{b.current ? ' (current)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="px-3 py-1">
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+                <span className="text-status-deleted">Force push (--force-with-lease)</span>
+              </label>
+            </div>
+            <div className="px-3 py-1">
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" checked={pushTags} onChange={(e) => setPushTags(e.target.checked)} />
+                <span>Push tags</span>
+              </label>
+            </div>
+            <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
+              <button
+                className="btn btn-primary text-xs flex-1"
+                onClick={() => doPush()}
+                disabled={!selectedBranch}
+              >
+                <ArrowUp size={12} /> Push{force ? ' (force)' : ''}
+              </button>
+              <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>Cancel</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Pull dropdown — button + small chevron that opens a menu with:
+ *   - Pull from: <branch> (dropdown of remote branches)
+ *   - [✓] Rebase instead of merge
+ *   - [✓] No fast-forward
+ */
+function PullDropdown({ disabled }: { disabled: boolean }) {
+  const currentRepo = useRepositoryStore((s) => s.currentRepo);
+  const toast = useToastStore();
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const [open, setOpen] = useState(false);
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState('');
+  const [useRebase, setUseRebase] = useState(false);
+  const [noFF, setNoFF] = useState(false);
+
+  useEffect(() => {
+    if (!open || !currentRepo) return;
+    api.git.branches(currentRepo.path).then(brs => {
+      const remotes = brs.filter(b => b.remote);
+      setBranches(remotes);
+      // Default to origin/<current>
+      const cur = brs.find(b => b.current);
+      if (cur) {
+        const match = remotes.find(r => r.name === `origin/${cur.name}`);
+        setSelectedBranch(match?.name || remotes[0]?.name || '');
+      } else {
+        setSelectedBranch(remotes[0]?.name || '');
+      }
+    }).catch(() => {});
+  }, [open, currentRepo]);
+
+  const doPull = async () => {
+    if (!currentRepo || !selectedBranch) return;
+    try {
+      // Extract remote + branch from "origin/branch-name"
+      const parts = selectedBranch.split('/');
+      const remote = parts[0];
+      const branch = parts.slice(1).join('/');
+      await api.git.pull(currentRepo.path, remote, branch, useRebase, noFF);
+      toast.success(`Pulled from ${selectedBranch}${useRebase ? ' (rebase)' : ''}`);
+      refreshStatus(currentRepo.path);
+    } catch (e) {
+      toast.error('Pull failed', String(e));
+    }
+    setOpen(false);
+    setUseRebase(false);
+    setNoFF(false);
+  };
+
+  return (
+    <div className="relative">
+      <div className="flex items-center">
+        <button
+          className="flex items-center gap-1.5 px-2.5 h-7 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
+          style={{ color: '#399ee6' }}
+          onClick={() => doPull()}
+          disabled={disabled}
+          title="Pull from origin (current branch)"
+        >
+          <ArrowDown size={14} />
+          <span className="hidden md:inline">Pull</span>
+        </button>
+        <button
+          className="flex items-center px-1 h-7 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
+          onClick={() => setOpen(!open)}
+          disabled={disabled}
+          title="Pull options — select branch, rebase, no-ff"
+        >
+          <ChevronDown size={12} />
+        </button>
+      </div>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded-md shadow-lg z-50 min-w-64">
+            <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
+              Pull from remote
+            </div>
+            <div className="p-2">
+              <label className="text-2xs text-text-tertiary block mb-1">Remote branch</label>
+              <select
+                className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                value={selectedBranch}
+                onChange={(e) => setSelectedBranch(e.target.value)}
+              >
+                {branches.map(b => (
+                  <option key={b.name} value={b.name}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="px-3 py-1">
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" checked={useRebase} onChange={(e) => setUseRebase(e.target.checked)} />
+                <span>Rebase instead of merge</span>
+              </label>
+            </div>
+            <div className="px-3 py-1">
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" checked={noFF} onChange={(e) => setNoFF(e.target.checked)} />
+                <span>No fast-forward (always create merge commit)</span>
+              </label>
+            </div>
+            <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
+              <button
+                className="btn btn-primary text-xs flex-1"
+                onClick={() => doPull()}
+                disabled={!selectedBranch}
+              >
+                <ArrowDown size={12} /> Pull{useRebase ? ' (rebase)' : ''}
+              </button>
+              <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>Cancel</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
  * Git Toolbar — second row, below the main Toolbar.
  * Contains the colored git operation buttons (Fetch, Push, Stage, Stash, History, Diff, Blame, Git-Flow, Rebase).
  * This is the toolbar the user wants to be separate from the app-level header.
@@ -529,8 +762,8 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           case 'sync':
             return (
               <div key={key} className="flex items-center">
-                <LabeledButton icon={ArrowDown} label="Fetch" iconColor={COLOR_BLUE} onClick={handlePull} disabled={disabled} title="Fetch + pull from remote" />
-                <LabeledButton icon={ArrowUp} label="Push" iconColor={COLOR_GREEN} onClick={handlePush} disabled={disabled} title="Push to remote" />
+                <PullDropdown disabled={disabled} />
+                <PushDropdown disabled={disabled} />
                 <Divider />
               </div>
             );
