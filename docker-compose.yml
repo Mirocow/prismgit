@@ -1,0 +1,77 @@
+# =============================================================================
+# SmartGit Electron — Multi-platform Docker Build Orchestration
+# =============================================================================
+# Build all platforms in parallel:
+#   docker compose up --build
+#
+# Or build individual platforms:
+#   docker compose run --rm build-linux
+#   docker compose run --rm build-win
+#   docker compose run --rm build-mac
+# =============================================================================
+
+services:
+  build-linux:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: linux
+        ARCH: x64
+    image: smartgit-electron:linux
+    container_name: smartgit-build-linux
+    volumes:
+      - ./release/linux:/release
+    environment:
+      - GH_TOKEN=${GH_TOKEN:-}
+      - CSC_LINK=${CSC_LINK:-}
+      - CSC_KEY_PASSWORD=${CSC_KEY_PASSWORD:-}
+
+  build-win:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: win
+        ARCH: x64
+    image: smartgit-electron:win
+    container_name: smartgit-build-win
+    volumes:
+      - ./release/win:/release
+    environment:
+      - GH_TOKEN=${GH_TOKEN:-}
+      - CSC_LINK=${CSC_LINK:-}
+      - CSC_KEY_PASSWORD=${CSC_KEY_PASSWORD:-}
+      # Wine configuration for Windows builds
+      - WINEPREFIX=/tmp/wine
+      - WINEDEBUG=-all
+
+  build-mac:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: mac
+        ARCH: x64
+    image: smartgit-electron:mac
+    container_name: smartgit-build-mac
+    volumes:
+      - ./release/mac:/release
+    environment:
+      - GH_TOKEN=${GH_TOKEN:-}
+      - CSC_LINK=${CSC_LINK:-}
+      - CSC_KEY_PASSWORD=${CSC_KEY_PASSWORD:-}
+      # Note: macOS builds on Linux produce unsigned .zip and .dmg
+      # For signed/notarized builds, use a macOS runner
+
+  build-mac-arm64:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: mac
+        ARCH: arm64
+    image: smartgit-electron:mac-arm64
+    container_name: smartgit-build-mac-arm64
+    volumes:
+      - ./release/mac-arm64:/release

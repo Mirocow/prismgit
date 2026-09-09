@@ -74,46 +74,55 @@
 }
 
 .light {
-  --bg-primary: #fafafa;
-  --bg-secondary: #f5f5f5;
-  --bg-tertiary: #efefef;
+  /* Ollama-code light palette (Ayu Light) */
+  --bg-primary: #f8f9fa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f0f1f3;
   --bg-elevated: #ffffff;
   --bg-hover: rgba(0, 0, 0, 0.04);
-  --bg-active: rgba(57, 186, 230, 0.12);
-  --bg-selected: rgba(57, 186, 230, 0.18);
+  --bg-active: rgba(57, 158, 230, 0.10);
+  --bg-selected: rgba(57, 158, 230, 0.16);
 
-  --border-default: #e0e0e0;
-  --border-subtle: #efefef;
-  --border-strong: #c4c4c4;
-  --border-focused: #39BAE6;
+  --border-default: #e3e4e6;
+  --border-subtle: #ececed;
+  --border-strong: #c8cacf;
+  --border-focused: #399ee6;
 
-  --text-primary: #2c2c2c;
-  --text-secondary: #5a5a5a;
-  --text-tertiary: #8a8a8a;
+  --text-primary: #5c6166;
+  --text-secondary: #8a8f93;
+  --text-tertiary: #a8acb0;
   --text-inverse: #ffffff;
-  --text-link: #1c8eb4;
+  --text-link: #399ee6;
 
-  --accent: #1c8eb4;
-  --accent-hover: #39BAE6;
-  --accent-active: #146384;
-  --accent-muted: rgba(28, 142, 180, 0.12);
+  --accent: #399ee6;
+  --accent-hover: #55b4d4;
+  --accent-active: #1c7eb4;
+  --accent-muted: rgba(57, 158, 230, 0.10);
+  --accent-purple: #a37acc;
+  --accent-cyan: #4cbf99;
+  --accent-yellow: #f2ae49;
+  --accent-yellow-dim: #8B7000;
 
-  --status-added: #6cab26;
-  --status-modified: #c98e00;
-  --status-deleted: #d6336c;
-  --status-renamed: #1c8eb4;
-  --status-untracked: #6cab26;
+  --status-added: #86b300;
+  --status-modified: #f2ae49;
+  --status-deleted: #f07171;
+  --status-renamed: #399ee6;
+  --status-untracked: #4cbf99;
   --status-conflict: #ff6b35;
+  --status-success: #86b300;
+  --status-warning: #f2ae49;
+  --status-error: #f07171;
+  --status-info: #399ee6;
 
-  --diff-added-bg: rgba(108, 171, 38, 0.15);
-  --diff-removed-bg: rgba(214, 51, 108, 0.15);
-  --diff-added-line: rgba(108, 171, 38, 0.06);
-  --diff-removed-line: rgba(214, 51, 108, 0.06);
+  --diff-added-bg: rgba(134, 179, 0, 0.12);
+  --diff-removed-bg: rgba(240, 113, 113, 0.12);
+  --diff-added-line: rgba(134, 179, 0, 0.05);
+  --diff-removed-line: rgba(240, 113, 113, 0.05);
 
-  --comment: #8a8a8a;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --comment: #abadb1;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10);
 }
 
 * {

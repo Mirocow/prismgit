@@ -59,8 +59,41 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
     }
   };
 
+  // SmartGit 24: tolerant URL parsing — strip "git clone " prefix
+  const normalizeUrl = (input: string): string => {
+    let u = input.trim();
+    // Strip leading "git clone "
+    if (u.toLowerCase().startsWith('git clone ')) {
+      u = u.substring('git clone '.length).trim();
+    }
+    // Strip surrounding quotes
+    if ((u.startsWith('"') && u.endsWith('"')) || (u.startsWith("'") && u.endsWith("'"))) {
+      u = u.substring(1, u.length - 1);
+    }
+    // Strip trailing .git if user wants to (keep .git by default, it's valid)
+    return u;
+  };
+
+  // Auto-derive target directory from URL (SmartGit 24: preselect active branch is done by git itself)
+  const handleUrlChange = (input: string) => {
+    const normalized = normalizeUrl(input);
+    setUrl(normalized);
+    // Auto-fill target path if empty or if it was auto-derived from previous URL
+    const basePath = settings.defaultCloneDir || '';
+    if (basePath && normalized) {
+      // Extract repo name from URL
+      const match = normalized.match(/\/([^/]+?)(?:\.git)?(?:\?|#|$)/);
+      if (match && match[1]) {
+        const repoName = match[1];
+        const newPath = `${basePath}/${repoName}`.replace(/\/+/g, '/');
+        setTargetPath(newPath);
+      }
+    }
+  };
+
   const handleClone = async () => {
-    if (!url.trim()) {
+    const normalizedUrl = normalizeUrl(url);
+    if (!normalizedUrl) {
       toast.warning('Repository URL is required');
       return;
     }
@@ -71,7 +104,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
     setLoading(true);
     try {
       const finalPath = targetPath;
-      await cloneRepository(url, finalPath, {
+      await cloneRepository(normalizedUrl, finalPath, {
         depth: depth ? Number(depth) : undefined,
         branch: branch || undefined,
       });
@@ -161,7 +194,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                   placeholder="https://github.com/user/repo.git"
                   value={url}
                   autoFocus
-                  onChange={(e) => setUrl(e.target.value)}
+                  onChange={(e) => handleUrlChange(e.target.value)}
                 />
               </div>
               <div>

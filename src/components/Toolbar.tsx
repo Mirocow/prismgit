@@ -1,11 +1,16 @@
-import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle } from './icons';
+import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
-export function Toolbar() {
+interface ToolbarProps {
+  onFind?: () => void;
+}
+
+export function Toolbar({ onFind }: ToolbarProps = {}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const status = useGitStore((s) => s.status);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -13,6 +18,8 @@ export function Toolbar() {
   const pull = useGitStore((s) => s.pull);
   const fetch = useGitStore((s) => s.fetch);
   const toast = useToastStore();
+  const theme = useSettingsStore((s) => s.theme);
+  const toggleTheme = useSettingsStore((s) => s.toggleTheme);
 
   const handleRefresh = () => {
     if (!currentRepo) return;
@@ -138,6 +145,14 @@ export function Toolbar() {
         <div className="w-px h-5 bg-border-default mx-1" />
         <button
           className="icon-btn"
+          title="Find object (Ctrl+F)"
+          onClick={() => onFind && onFind()}
+          disabled={!currentRepo}
+        >
+          <Search size={14} />
+        </button>
+        <button
+          className="icon-btn"
           title="Open in browser"
           onClick={handleOpenInBrowser}
           disabled={!currentRepo}
@@ -151,6 +166,14 @@ export function Toolbar() {
           disabled={!currentRepo}
         >
           <Folder size={14} />
+        </button>
+        <div className="w-px h-5 bg-border-default mx-1" />
+        <button
+          className="icon-btn"
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme (Ctrl+Shift+T)`}
+          onClick={() => toggleTheme()}
+        >
+          {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
         </button>
       </div>
 

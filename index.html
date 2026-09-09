@@ -1,10 +1,21 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.github.com https://github.com;" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SmartGit Electron</title>
+    <script>
+      // Apply theme before page load to prevent FOUC
+      (function() {
+        try {
+          var theme = localStorage.getItem('smartgit-theme') || 'dark';
+          document.documentElement.classList.add(theme === 'light' ? 'light' : 'dark');
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

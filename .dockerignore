@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+
+# Dependencies (will be installed in container)
+node_modules/
+
+# Build artifacts
+dist/
+dist-electron/
+release/
+.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Cache
+.cache/
+.parcel-cache/
+.turbo/
+
+# Scripts (only needed during development)
+scripts/__pycache__/
+*.pyc
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Docs
+*.md
+!README.md
+
+# Test
+coverage/
+.nyc_output/
+
+# Env
+.env
+.env.local

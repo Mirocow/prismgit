@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { cn } from '../lib/utils';
 
 interface NavItem {
@@ -14,7 +15,9 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { path: '/changes', label: 'Changes', icon: GitCommit, group: 'Working Tree' },
   { path: '/history', label: 'History', icon: History, group: 'Working Tree' },
+  { path: '/investigate', label: 'Investigate', icon: Search, group: 'Working Tree' },
   { path: '/blame', label: 'Blame', icon: FileText, group: 'Working Tree' },
+  { path: '/journal', label: 'Journal', icon: RotateCcw, group: 'Working Tree' },
   { path: '/branches', label: 'Branches', icon: GitBranch, group: 'Refs' },
   { path: '/tags', label: 'Tags', icon: Tag, group: 'Refs' },
   { path: '/worktrees', label: 'Worktrees', icon: FolderTree, group: 'Refs' },
@@ -149,8 +152,16 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* Bottom settings */}
-      <div className="border-t border-border-default p-2">
+      {/* Bottom: theme toggle + settings */}
+      <div className="border-t border-border-default p-2 space-y-1">
+        <button
+          className="w-full flex items-center gap-3 px-3 py-2 text-sm rounded transition-colors text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+          onClick={() => useSettingsStore.getState().toggleTheme()}
+          title="Toggle theme (Ctrl+Shift+T)"
+        >
+          {useSettingsStore.getState().theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          <span>{useSettingsStore.getState().theme === 'dark' ? 'Light Theme' : 'Dark Theme'}</span>
+        </button>
         <button
           className={cn(
             'w-full flex items-center gap-3 px-3 py-2 text-sm rounded transition-colors',

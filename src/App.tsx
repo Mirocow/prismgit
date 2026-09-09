@@ -1,4 +1,4 @@
-import { useEffect, useState, Suspense, lazy } from 'react';
+import { useEffect, useState, Suspense, lazy, useCallback } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Toolbar } from './components/Toolbar';
@@ -8,6 +8,7 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { CloneModal } from './components/CloneModal';
 import { InitModal } from './components/InitModal';
 import { RebasePanel } from './components/RebasePanel';
+import { FindObjectDialog } from './components/FindObjectDialog';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useAuthStore } from './stores/authStore';
@@ -18,6 +19,8 @@ import { useGitStore } from './stores/gitStore';
 const ChangesPage = lazy(() => import('./pages/ChangesPage').then(m => ({ default: m.ChangesPage })));
 const HistoryPage = lazy(() => import('./pages/HistoryPage').then(m => ({ default: m.HistoryPage })));
 const BlamePage = lazy(() => import('./pages/BlamePage').then(m => ({ default: m.BlamePage })));
+const InvestigatePage = lazy(() => import('./pages/InvestigatePage').then(m => ({ default: m.InvestigatePage })));
+const JournalPage = lazy(() => import('./pages/JournalPage').then(m => ({ default: m.JournalPage })));
 const BranchesPage = lazy(() => import('./pages/BranchesPage').then(m => ({ default: m.BranchesPage })));
 const StashesPage = lazy(() => import('./pages/StashesPage').then(m => ({ default: m.StashesPage })));
 const TagsPage = lazy(() => import('./pages/TagsPage').then(m => ({ default: m.TagsPage })));
@@ -44,6 +47,7 @@ export default function App() {
   const toast = useToastStore();
   const [showClone, setShowClone] = useState(false);
   const [showInit, setShowInit] = useState(false);
+  const [showFind, setShowFind] = useState(false);
   const [dismissRebase, setDismissRebase] = useState(false);
 
   useEffect(() => {
@@ -100,6 +104,26 @@ export default function App() {
     return () => cleanups.forEach((fn) => fn && fn());
   }, [toast]);
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      // Ctrl+F: Find object (only when not in input)
+      const target = e.target as HTMLElement;
+      const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f' && !isInInput) {
+        e.preventDefault();
+        setShowFind(true);
+      }
+      // Ctrl+Shift+T: Toggle theme
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'T') {
+        e.preventDefault();
+        useSettingsStore.getState().toggleTheme();
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, []);
+
   // Refresh status when repository changes
   useEffect(() => {
     if (currentRepo) {
@@ -122,7 +146,7 @@ export default function App() {
   if (!currentRepo) {
     return (
       <div className="flex flex-col h-screen">
-        <Toolbar />
+        <Toolbar onFind={() => setShowFind(true)} />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex-1 overflow-auto">
@@ -139,7 +163,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen">
-      <Toolbar />
+      <Toolbar onFind={() => setShowFind(true)} />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-hidden flex flex-col">
@@ -148,7 +172,9 @@ export default function App() {
               <Route path="/" element={<Navigate to="/changes" replace />} />
               <Route path="/changes" element={<ChangesPage />} />
               <Route path="/history" element={<HistoryPage />} />
+              <Route path="/investigate" element={<InvestigatePage />} />
               <Route path="/blame" element={<BlamePage />} />
+              <Route path="/journal" element={<JournalPage />} />
               <Route path="/branches" element={<BranchesPage />} />
               <Route path="/stashes" element={<StashesPage />} />
               <Route path="/tags" element={<TagsPage />} />
@@ -164,6 +190,7 @@ export default function App() {
       <ToastContainer />
       <CloneModal open={showClone} onClose={() => setShowClone(false)} />
       <InitModal open={showInit} onClose={() => setShowInit(false)} />
+      <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
       {showRebasePanel && (
         <RebasePanel onClose={() => setDismissRebase(true)} />
       )}

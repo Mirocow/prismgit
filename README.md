@@ -1,96 +1,126 @@
 # SmartGit Electron
 
-A modern, cross-platform Git client built on Electron + React + TypeScript, inspired by SmartGit 20-24 with **Ollama-code** design language (Ayu Dark palette).
+A modern, cross-platform Git client built on Electron + React + TypeScript, inspired by SmartGit 20-24 with **Ollama-code** design language (Ayu Dark/Light palettes).
 
-## v2.0 — Lightweight & Fast
+## v3.0 — Docker Builds + SmartGit 24 Features
 
-### Optimizations
-- **-30% bundle size** (205KB main bundle, 64KB gzipped)
-- **Lazy-loaded pages** — only load what you need
-- **Custom SVG icons** (15KB) instead of lucide-react (1MB)
-- **No Monaco editor** — uses native textarea for messages
-- **No @electron/remote** — pure IPC
-- **No diff library** — custom parser
-- **Auto-refresh** every 30s when repo is open
-- **Reduced-motion support** for accessibility
+### Docker-сборка для всех платформ
 
-### Design — Ollama-code (Ayu Dark)
-- Background: `#0b0e14` (deep blue-black)
-- Foreground: `#bfbdb6` (warm gray)
-- Accent Blue: `#39BAE6`
-- Accent Green: `#AAD94C` (diff additions)
-- Accent Red: `#F26D78` (diff deletions)
-- Mono font: JetBrains Mono
+Все сборки выполняются **только в Docker контейнерах**, поддерживая:
 
-### Features
-
-#### Working Tree
-- **Changes** — stage/unstage/restore/ignore/delete/reveal with file actions
-- **History** — commit log with **graph visualization**, search, file tree per commit
-- **Blame** — line-by-line authorship with commit colors
-
-#### Refs
-- Branches, Tags, **Worktrees**, **Reflog**, Stashes, Submodules
-- Each with full CRUD operations
-
-#### SmartGit-like Merge & Rebase
-- **MergePanel** — bottom panel showing conflicts, continue/abort/skip
-- **RebasePanel** — same UX as SmartGit for in-progress rebases
-- Conflict resolver with file open action
-- Auto-detected state indicators in toolbar
-
-#### Commit Operations
-- Cherry Pick, Revert, Edit Commit Message, Split Off Files, Reset
-
-#### Repository State Detection
-- Merge / Rebase / Cherry-Pick / Revert / Bisect indicators
-- Auto-show panels when operation is in progress
-
-#### Network
-- Fetch (prune, tags), Fetch All, Pull (rebase, no-ff), Push (force, tags, upstream)
-- Synchronize (fetch + pull + push)
-
-#### Integrations
-- GitHub (PAT/OAuth, repository browser, PRs)
-- Open in Browser, Reveal in File Manager
-
-## Tech Stack
-- Electron 32, React 18, TypeScript 5.6, Vite 5
-- Tailwind CSS 3, Zustand, simple-git, electron-store
-- Custom SVG icons (no icon library dependency)
-
-## Getting Started
+| Платформа | Механизм | Артифакты |
+|-----------|----------|-----------|
+| Linux | Нативная сборка | AppImage, .deb, .rpm |
+| Windows | Кросс-компиляция через Wine | .exe (NSIS), .msi |
+| macOS Intel | electron-builder на Linux | .dmg, .zip (unsigned) |
+| macOS Apple Silicon | electron-builder на Linux | .dmg, .zip (unsigned) |
 
 ```bash
-npm install
-npm run dev          # development
-npm run build        # production build
-npm run package      # current OS
-npm run package:win  # Windows
-npm run package:mac  # macOS
-npm run package:linux # Linux
+# Сборка всех платформ:
+./scripts/docker-build.sh all
+
+# Или через docker compose:
+docker compose up --build
 ```
 
-## Project Structure
+Подробности в [docs/DOCKER-BUILD.md](docs/DOCKER-BUILD.md).
+
+### 2 темы (как в ollama-code)
+
+- **Dark** (по умолчанию) — Ayu Dark: `#0b0e14` фон, `#bfbdb6` текст, `#39BAE6` акцент
+- **Light** — Ayu Light: `#f8f9fa` фон, `#5c6166` текст, `#399ee6` акцент
+
+Переключение:
+- Кнопка в тулбаре (Sun/Moon иконка)
+- Кнопка внизу sidebar
+- Горячая клавиша **Ctrl+Shift+T**
+- Автосохранение в localStorage + настройках приложения
+
+### SmartGit 24 функции
+
+**新增新增新增 Новые функции:**
+
+- **Investigate** (File Log) — история файла с follow renames, как в SmartGit 24
+- **Journal** — журнал операций с фильтрами (commit/checkout/merge/rebase/reset/other)
+- **Find Object** (Ctrl+F) — поиск по branch/tag/remote refs с навигацией стрелками
+- **Tolerant Clone URL** — автонормализация URL (strip "git clone ", кавычек, авто-имя папки)
+- **Edit Commit Message** с inline editor
+- **Cherry Pick / Revert** с conflict detection
+- **Reset to ref** из Journal
+- **Open in Browser** для коммитов, веток, репозитория
+- **Drag file to external app** — через reveal in file manager
+
+**SmartGit-подобный UI для Merge & Rebase:**
+
+- `RebasePanel` — автоматически показывается при rebase в процессе
+  - Список конфликтующих файлов с кнопкой "Open"
+  - Continue / Skip / Abort кнопки
+- `MergePanel` — то же для merge, с опциями No-FF / Squash
+- Индикаторы состояния в тулбаре: MERGING / REBASING / CHERRY-PICKING / REVERTING / BISECTING
+
+### Оптимизации (сохранены из v2.0)
+
+- **Main bundle: 211KB** (gzip 65KB)
+- **Lazy-loaded pages** — все страницы загружаются по требованию
+- **Custom SVG icons** (15KB) вместо lucide-react (1MB)
+- **No Monaco editor, no @electron/remote, no diff library**
+- **Auto-refresh** статуса каждые 30s
+- **prefers-reduced-motion** поддержка
+
+## Технологии
+
+- Electron 32, React 18, TypeScript 5.6, Vite 5
+- Tailwind CSS 3, Zustand, simple-git, electron-store
+- Custom SVG icons (без icon library)
+- Docker + Wine для кросс-платформенной сборки
+
+## Структура проекта
 
 ```
-├── electron/         # Main process (35KB compiled)
+├── Dockerfile                # Multi-stage сборка (Linux + Wine для Windows)
+├── docker-compose.yml        # 4 сервиса: linux, win, mac, mac-arm64
+├── scripts/
+│   ├── docker-build.sh       # Оркестратор сборки
+│   ├── replace-icons.py      # Миграция иконок (dev)
+│   └── replace-icon-usage.py # Миграция иконок (dev)
+├── docs/
+│   └── DOCKER-BUILD.md       # Подробная документация по Docker-сборке
+├── electron/                 # Main process
 │   ├── main.ts
-│   ├── preload.ts    # 7.5KB compiled — context bridge
-│   ├── ipc/          # 5 IPC modules
-│   ├── services/     # git, github, storage
-│   └── types/        # API contracts
-├── src/              # Renderer (205KB main + lazy chunks)
-│   ├── App.tsx       # Root with lazy routes
-│   ├── components/   # UI components + icons.tsx
-│   ├── pages/        # Lazy-loaded pages
-│   ├── stores/       # Zustand stores
-│   ├── lib/          # API + utils
-│   └── styles/       # globals.css (Ollama-code theme)
+│   ├── preload.ts
+│   ├── ipc/                  # 5 IPC модулей
+│   ├── services/             # git, github, storage
+│   └── types/                # API контракты
+├── src/                      # Renderer
+│   ├── App.tsx               # Root с lazy routes + global hotkeys
+│   ├── components/
+│   │   ├── icons.tsx         # 50+ SVG иконок
+│   │   ├── Sidebar.tsx       # Навигация + theme toggle
+│   │   ├── Toolbar.tsx       # Actions + Find + Theme
+│   │   ├── RebasePanel.tsx   # SmartGit-like rebase UI
+│   │   ├── MergePanel.tsx    # SmartGit-like merge UI
+│   │   ├── FindObjectDialog.tsx  # SmartGit 24 Find Object
+│   │   └── ...
+│   ├── pages/
+│   │   ├── ChangesPage.tsx
+│   │   ├── HistoryPage.tsx       # Graph visualization
+│   │   ├── InvestigatePage.tsx   # SmartGit 24 File Log
+│   │   ├── JournalPage.tsx       # SmartGit 24 Journal
+│   │   ├── BlamePage.tsx
+│   │   ├── BranchesPage.tsx
+│   │   ├── TagsPage.tsx
+│   │   ├── WorktreesPage.tsx
+│   │   ├── ReflogPage.tsx
+│   │   ├── StashesPage.tsx
+│   │   ├── SubmodulesPage.tsx
+│   │   └── SettingsPage.tsx
+│   ├── stores/               # Zustand stores
+│   ├── lib/                  # API + utils
+│   └── styles/globals.css    # Ollama-code dark + light themes
 └── package.json
 ```
 
-## Keyboard Shortcuts
+## Горячие клавиши
 
 | Shortcut | Action |
 |----------|--------|
@@ -102,8 +132,37 @@ npm run package:linux # Linux
 | Ctrl+Shift+F | Fetch |
 | Ctrl+Shift+N | New Branch |
 | Ctrl+Alt+S | Stash |
-| Ctrl+Shift+T | Toggle Theme |
+| **Ctrl+Shift+T** | **Toggle Theme** |
+| **Ctrl+F** | **Find Object** |
+| Esc | Close dialog |
 
-## License
+## Запуск локально (без Docker)
+
+```bash
+npm install
+npm run dev          # development
+npm run build        # production build
+```
+
+## Сборка в Docker
+
+```bash
+# Все платформы:
+./scripts/docker-build.sh all
+
+# Конкретная платформа:
+./scripts/docker-build.sh linux
+./scripts/docker-build.sh win
+./scripts/docker-build.sh mac
+./scripts/docker-build.sh mac-arm64
+```
+
+## GitHub Integration
+
+1. Settings → GitHub Integration
+2. Создать PAT на github.com/settings/tokens (scopes: repo, read:user)
+3. Вставить токен и нажать Connect
+
+## Лицензия
 
 MIT
