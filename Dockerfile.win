@@ -1,5 +1,5 @@
 # =============================================================================
-# SmartGit Electron — Windows Build (cross-compile via Wine)
+# PrismGit — Windows Build (cross-compile via Wine)
 # =============================================================================
 # Builds Windows installers: .exe (NSIS), .msi
 # Uses Wine for cross-compilation on Linux

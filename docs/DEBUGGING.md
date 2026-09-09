@@ -1,6 +1,6 @@
 # Debugging Guide
 
-SmartGit Electron has full VS Code debugging support for both the main process and renderer process.
+PrismGit has full VS Code debugging support for both the main process and renderer process.
 
 ## Quick Start
 

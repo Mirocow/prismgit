@@ -1,6 +1,6 @@
 # Testing
 
-SmartGit Electron uses [Vitest](https://vitest.dev/) with [Testing Library](https://testing-library.com/) for testing.
+PrismGit uses [Vitest](https://vitest.dev/) with [Testing Library](https://testing-library.com/) for testing.
 
 ## Strategy Overview
 

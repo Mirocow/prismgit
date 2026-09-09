@@ -1,5 +1,5 @@
 # =============================================================================
-# SmartGit Electron — Makefile
+# PrismGit — Makefile
 # =============================================================================
 # All-in-one entry point for development, build, and packaging.
 #
@@ -48,7 +48,7 @@ COLOR_CYAN   := \033[36m
 .PHONY: help
 help: ## Show this help message
 	@echo ""
-	@echo "$(COLOR_BOLD)SmartGit Electron — Makefile$(COLOR_RESET)"
+	@echo "$(COLOR_BOLD)PrismGit — Makefile$(COLOR_RESET)"
 	@echo ""
 	@echo "$(COLOR_CYAN)Development:$(COLOR_RESET)"
 	@grep -E '^[a-zA-Z_-]+:.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(COLOR_GREEN)%-20s$(COLOR_RESET) %s\n", $$1, $$2}' | sort

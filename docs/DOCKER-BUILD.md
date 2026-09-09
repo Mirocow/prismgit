@@ -1,6 +1,6 @@
 # Docker Build Guide
 
-SmartGit Electron поддерживает сборку в Docker для всех платформ: **Linux, Windows, macOS**.
+PrismGit поддерживает сборку в Docker для всех платформ: **Linux, Windows, macOS**.
 
 ## Требования
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-SmartGit Electron follows a standard Electron architecture with clear separation between main process, preload script, and renderer process.
+PrismGit follows a standard Electron architecture with clear separation between main process, preload script, and renderer process.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

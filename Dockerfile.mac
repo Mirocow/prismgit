@@ -1,5 +1,5 @@
 # =============================================================================
-# SmartGit Electron — macOS Build
+# PrismGit — macOS Build
 # =============================================================================
 # Builds macOS installers: .dmg, .zip (unsigned)
 # Note: For signed/notarized builds, use a macOS runner

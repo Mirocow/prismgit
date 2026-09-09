@@ -1,5 +1,5 @@
 # =============================================================================
-# SmartGit Electron — Multi-platform Docker Build Orchestration
+# PrismGit — Multi-platform Docker Build Orchestration
 # =============================================================================
 # Build all platforms:
 #   docker compose up --build

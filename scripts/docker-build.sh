@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# SmartGit Electron — Multi-platform Docker Build Script
+# PrismGit — Multi-platform Docker Build Script
 # =============================================================================
 # Usage:
 #   ./scripts/docker-build.sh              # build all platforms
