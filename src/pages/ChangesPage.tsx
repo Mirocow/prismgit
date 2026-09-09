@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, EyeOff, Folder, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, EyeOff, Folder, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X } from '../components/icons';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
@@ -27,6 +27,7 @@ function SortableHeader({
   onSort,
   width,
   align,
+  onResizeStart,
 }: {
   label: string;
   sortKey: FileSortKey;
@@ -34,12 +35,14 @@ function SortableHeader({
   onSort: (key: FileSortKey) => void;
   width?: number;
   align?: 'right';
+  /** When set, renders a drag handle on the right edge to resize the column. */
+  onResizeStart?: (e: ReactMouseEvent) => void;
 }) {
   const active = sort.key === sortKey;
   return (
     <button
       className={cn(
-        'flex items-center gap-0.5 uppercase hover:text-text-primary',
+        'relative flex items-center gap-0.5 uppercase hover:text-text-primary',
         active && 'text-accent',
         align === 'right' && 'justify-end'
       )}
@@ -52,6 +55,18 @@ function SortableHeader({
         sort.dir === 1 ? <ArrowUp size={9} /> : <ArrowDown size={9} />
       ) : (
         <ChevronDown size={9} className="opacity-40" />
+      )}
+      {onResizeStart && (
+        <span
+          className="absolute -right-1.5 -top-1 -bottom-1 w-3 z-20 cursor-col-resize hover:bg-accent/30"
+          title="Drag to resize column"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onResizeStart(e);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
       )}
     </button>
   );
@@ -91,6 +106,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const toggleFileFilterRegex = useSelectionStore((s) => s.toggleFileFilterRegex);
   const dirTreeVisible = useSelectionStore((s) => s.dirTreeVisible);
   const toggleDirTreeVisible = useSelectionStore((s) => s.toggleDirTreeVisible);
+  const colWidths = useSelectionStore((s) => s.colWidths);
+  const setColWidth = useSelectionStore((s) => s.setColWidth);
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const fileExtensionFilter = useSelectionStore((s) => s.fileExtensionFilter);
   const setFileExtensionFilter = useSelectionStore((s) => s.setFileExtensionFilter);
@@ -110,6 +127,11 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [dirTree, setDirTree] = useState<DirNode[]>([]);
   const [dirTreeLoading, setDirTreeLoading] = useState(false);
   const [trackedTotal, setTrackedTotal] = useState(0);
+  // Per-file line-change counts for the Changes table (+N -M), like History.
+  const [numstat, setNumstat] = useState<{ staged: Map<string, { add: number; del: number; binary: boolean }>; unstaged: Map<string, { add: number; del: number; binary: boolean }> }>({
+    staged: new Map(),
+    unstaged: new Map(),
+  });
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set([ROOT_KEY]));
   const showContextMenu = useContextMenu();
 
@@ -175,10 +197,40 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     }
   }, [repo.path]);
 
+  // Load line-change counts (+N -M) for working tree and index in one go.
+  const loadNumstat = useCallback(async () => {
+    try {
+      const [unstagedOut, stagedOut] = await Promise.all([
+        api.git.raw(repo.path, ['diff', '--numstat']),
+        api.git.raw(repo.path, ['diff', '--cached', '--numstat']),
+      ]);
+      const parse = (out: string) => {
+        const map = new Map<string, { add: number; del: number; binary: boolean }>();
+        for (const line of out.split('\n')) {
+          if (!line.trim()) continue;
+          const parts = line.split('\t');
+          if (parts.length < 3) continue;
+          let p = parts.slice(2).join('\t');
+          if (p.startsWith('"') && p.endsWith('"')) p = p.slice(1, -1);
+          map.set(p, {
+            add: parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0,
+            del: parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0,
+            binary: parts[0] === '-' || parts[1] === '-',
+          });
+        }
+        return map;
+      };
+      setNumstat({ staged: parse(stagedOut), unstaged: parse(unstagedOut) });
+    } catch {
+      setNumstat({ staged: new Map(), unstaged: new Map() });
+    }
+  }, [repo.path]);
+
   useEffect(() => {
     loadDirTree();
     loadTrackedCount();
-  }, [loadDirTree, loadTrackedCount, lastRefresh]);
+    loadNumstat();
+  }, [loadDirTree, loadTrackedCount, loadNumstat, lastRefresh, status]);
 
   // Reset folder scope and tree expansion when switching repositories
   useEffect(() => {
@@ -193,6 +245,45 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       else next.add(path);
       return next;
     });
+  };
+
+  // Collect every folder path that has children (for "expand all").
+  const collectDirPaths = (nodes: DirNode[], acc: string[] = []): string[] => {
+    for (const n of nodes) {
+      if (n.children.length > 0) acc.push(n.path);
+      collectDirPaths(n.children, acc);
+    }
+    return acc;
+  };
+
+  const expandAllDirs = () => {
+    setExpandedDirs(new Set([ROOT_KEY, ...collectDirPaths(dirTree)]));
+  };
+
+  const collapseAllDirs = () => {
+    setExpandedDirs(new Set([ROOT_KEY]));
+  };
+
+  // Column resize: drag the handle on a column header's right edge.
+  const startColResize = (e: ReactMouseEvent, col: 'state' | 'dir') => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = colWidths[col];
+    const min = col === 'state' ? 46 : 50;
+    const max = col === 'state' ? 220 : 480;
+    const onMove = (ev: MouseEvent) => {
+      setColWidth(col, Math.max(min, Math.min(max, startWidth + (ev.clientX - startX))));
+    };
+    const onUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   };
 
   const handleSelectDir = (dir: string | null) => {
@@ -482,6 +573,15 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     const isUntracked = idx === '?' && wd === '?';
     const isConflict = code === 'U' || idx === 'U' || wd === 'U';
     const stateLabel = statusCode.charAt(0).toUpperCase() + statusCode.slice(1);
+    // Untracked directories come from porcelain as 'dir/' — show the folder
+    // itself as the name and its parent as the relative directory.
+    const isDirEntry = file.path.endsWith('/');
+    const displayName = isDirEntry
+      ? file.path.slice(file.path.lastIndexOf('/', file.path.length - 2) + 1)
+      : getFileName(file.path);
+    const relDir = getRelativeDir(isDirEntry ? file.path.slice(0, -1) : file.path);
+    // Line-change counts (+N -M) from numstat; untracked files have none.
+    const stats = isUntracked ? undefined : (isStaged ? numstat.staged : numstat.unstaged).get(file.path);
 
     return (
       <div
@@ -593,13 +693,26 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           {code}
         </span>
         {/* Name */}
-        <span className="flex-1 truncate font-mono">{getFileName(file.path)}</span>
+        <span className="flex-1 truncate font-mono whitespace-nowrap">{displayName}</span>
+        {/* Line-change counts (+N -M) — reserved width keeps columns aligned */}
+        <span
+          className="text-2xs flex-shrink-0 text-right tabular-nums whitespace-nowrap overflow-hidden"
+          style={{ width: 74 }}
+          title="Lines added / removed"
+        >
+          {stats && !stats.binary && (stats.add > 0 || stats.del > 0) && (
+            <>
+              <span className="text-status-added">+{stats.add}</span>
+              <span className="text-status-deleted ml-1">-{stats.del}</span>
+            </>
+          )}
+        </span>
         {/* State text */}
-        <span className="text-text-tertiary flex-shrink-0 italic" style={{ width: 70 }}>{stateLabel}</span>
+        <span className="text-text-tertiary flex-shrink-0 italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>{stateLabel}</span>
         {/* Relative directory */}
-        <span className="text-text-tertiary flex-shrink-0" style={{ width: 120 }}>{getRelativeDir(file.path)}</span>
-        {/* Actions */}
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
+        <span className="text-text-tertiary flex-shrink-0 truncate whitespace-nowrap" style={{ width: colWidths.dir }}>{relDir}</span>
+        {/* Actions — fixed width so all rows stay column-aligned */}
+        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0 overflow-hidden" style={{ width: 92 }}>
           {isConflict && onResolveConflict && (
             <button
               className="btn btn-primary text-2xs !py-0.5 !px-2"
@@ -764,15 +877,31 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: treeWidth }}>
               <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
                 <span className="text-2xs font-semibold uppercase text-text-secondary">Repositories</span>
-                {fileScopeDir && (
+                <div className="flex items-center gap-0.5">
                   <button
                     className="icon-btn !w-4 !h-4"
-                    title="Clear folder scope — show all files"
-                    onClick={() => setFileScopeDir(null)}
+                    title="Expand all folders"
+                    onClick={expandAllDirs}
                   >
-                    <X size={10} />
+                    <ChevronsUpDown size={11} />
                   </button>
-                )}
+                  <button
+                    className="icon-btn !w-4 !h-4"
+                    title="Collapse all folders"
+                    onClick={collapseAllDirs}
+                  >
+                    <ChevronsDownUp size={11} />
+                  </button>
+                  {fileScopeDir && (
+                    <button
+                      className="icon-btn !w-4 !h-4"
+                      title="Clear folder scope — show all files"
+                      onClick={() => setFileScopeDir(null)}
+                    >
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex-1 overflow-y-auto">
                 <DirTreePanel
@@ -801,9 +930,10 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary sticky top-0 z-10">
               <span className="w-4"></span>
               <SortableHeader label="Name" sortKey="name" sort={fileSort} onSort={handleSort} />
-              <SortableHeader label="State" sortKey="state" sort={fileSort} onSort={handleSort} width={70} />
-              <SortableHeader label="Relative Directory" sortKey="dir" sort={fileSort} onSort={handleSort} width={120} />
-              <span style={{ width: 60 }}></span>
+              <span style={{ width: 74 }} title="Added/removed lines"></span>
+              <SortableHeader label="State" sortKey="state" sort={fileSort} onSort={handleSort} width={colWidths.state} onResizeStart={(e) => startColResize(e, 'state')} />
+              <SortableHeader label="Relative Directory" sortKey="dir" sort={fileSort} onSort={handleSort} width={colWidths.dir} onResizeStart={(e) => startColResize(e, 'dir')} />
+              <span style={{ width: 92 }}></span>
             </div>
 
             {/* Conflicts */}
@@ -816,12 +946,15 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                     onClick={() => onResolveConflict && onResolveConflict(filePath)}
                   >
                     <span className="font-bold w-4 text-center text-status-conflict">U</span>
-                    <span className="flex-1 truncate font-mono">{filePath}</span>
-                    <span className="text-text-tertiary italic" style={{ width: 70 }}>Conflict</span>
-                    <span style={{ width: 120 }}></span>
-                    <button className="btn btn-primary text-2xs !py-0.5 !px-2" onClick={(e) => { e.stopPropagation(); onResolveConflict && onResolveConflict(filePath); }}>
-                      Resolve
-                    </button>
+                    <span className="flex-1 truncate font-mono whitespace-nowrap">{filePath}</span>
+                    <span style={{ width: 74 }}></span>
+                    <span className="text-text-tertiary italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>Conflict</span>
+                    <span className="truncate whitespace-nowrap" style={{ width: colWidths.dir }}></span>
+                    <span className="flex justify-end flex-shrink-0 overflow-hidden" style={{ width: 92 }}>
+                      <button className="btn btn-primary text-2xs !py-0.5 !px-2" onClick={(e) => { e.stopPropagation(); onResolveConflict && onResolveConflict(filePath); }}>
+                        Resolve
+                      </button>
+                    </span>
                   </div>
                 ))}
               </div>
