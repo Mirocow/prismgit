@@ -61,6 +61,18 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { status, lastRefresh, refreshStatus, stageFiles, stageAll, commit, push, pull } = useGitStore();
   const toast = useToastStore();
+
+  // Listen for conflict resolution requests from GitToolbar
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.file && onResolveConflict) {
+        onResolveConflict(detail.file);
+      }
+    };
+    window.addEventListener('smartgit:resolve-conflict', handler);
+    return () => window.removeEventListener('smartgit:resolve-conflict', handler);
+  }, [onResolveConflict]);
   // Global UI state for file filtering and tree mode
   const fileViewMode = useSelectionStore((s) => s.fileViewMode);
   const setFileViewMode = useSelectionStore((s) => s.setFileViewMode);

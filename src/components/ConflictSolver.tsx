@@ -180,7 +180,7 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50">
         <div className="text-text-tertiary text-sm flex items-center gap-2">
           <Loader size={16} className="spin" />
           Loading 3-way conflict...
@@ -191,7 +191,7 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
 
   if (hunks.length === 0) {
     return (
-      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
         <div className="panel p-8 text-center" onClick={(e) => e.stopPropagation()}>
           <AlertCircle size={32} className="mx-auto mb-3 text-status-modified" />
           <div className="text-sm font-medium mb-1">No conflict markers found</div>
@@ -226,7 +226,7 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
   );
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex flex-col z-50 animate-fade-in">
+    <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex flex-col z-50 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-bg-secondary border-b border-border-default flex-shrink-0">
         <div className="flex items-center gap-3">

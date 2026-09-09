@@ -683,8 +683,35 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
 
   if (!currentRepo) return null;
 
+  // Show conflict resolution button when conflicts exist
+  const hasConflicts = status?.conflicted && status.conflicted.length > 0;
+  const handleResolveConflicts = () => {
+    if (status?.conflicted && status.conflicted.length > 0) {
+      // Navigate to Changes and trigger conflict solver on first conflicted file
+      navigate('/changes');
+      // Set a global event that ChangesPage picks up
+      window.dispatchEvent(new CustomEvent('smartgit:resolve-conflict', {
+        detail: { file: status.conflicted[0] }
+      }));
+    }
+  };
+
   return (
     <div className="flex items-center h-8 bg-bg-secondary border-b border-border-default flex-shrink-0 no-drag px-2 gap-0.5">
+      {/* Conflict resolution button — only shown when conflicts exist */}
+      {hasConflicts && (
+        <>
+          <button
+            className="flex items-center gap-1.5 px-2.5 h-7 rounded-md transition-colors no-drag text-xs bg-status-conflict/15 text-status-conflict border border-status-conflict/40 hover:bg-status-conflict/25 font-medium"
+            onClick={handleResolveConflicts}
+            title={`${status?.conflicted?.length || 0} conflicted file(s) — click to resolve`}
+          >
+            <AlertCircle size={14} />
+            <span>Resolve {status?.conflicted?.length || 0} Conflicts</span>
+          </button>
+          <Divider />
+        </>
+      )}
       {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>).map(key => {
         if (!groups[key]) return null;
         switch (key) {
