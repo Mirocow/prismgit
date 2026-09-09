@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X } from '../components/icons';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { LazyFileList } from '../components/LazyFileList';
@@ -808,8 +808,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                   </button>
                 </>
               )}
-              <button className="icon-btn !w-5 !h-5" title="Reveal" onClick={(e) => { e.stopPropagation(); handleRevealFile(file.path); }}>
-                <Folder size={11} />
+              <button className="icon-btn !w-5 !h-5" title="Reveal in file manager" onClick={(e) => { e.stopPropagation(); handleRevealFile(file.path); }}>
+                <FolderOpen size={11} />
               </button>
             </>
           )}
@@ -913,7 +913,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             title="Toggle directory tree panel"
             onClick={toggleDirTreeVisible}
           >
-            <Folder size={11} />
+            {dirTreeVisible ? <FolderOpen size={11} /> : <Folder size={11} />}
           </button>
           {/* Path compression toggle — EyeOff = hide relative dir column */}
           <button

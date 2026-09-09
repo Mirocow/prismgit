@@ -198,6 +198,14 @@ export const FolderGit = (p: IconProps) => (
   </Icon>
 );
 
+export const FolderGitOpen = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h6a2 2 0 0 1 2 2v2" />
+    <circle cx="12" cy="14" r="1.5" />
+    <line x1="12" y1="15.5" x2="12" y2="17" />
+  </Icon>
+);
+
 export const Pin = (p: IconProps) => (
   <Icon {...p}>
     <line x1="12" y1="17" x2="12" y2="22" />

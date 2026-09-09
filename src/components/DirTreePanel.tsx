@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Folder, FolderOpen, FolderGit } from './icons';
+import { ChevronDown, ChevronRight, Folder, FolderOpen, FolderGit, FolderGitOpen } from './icons';
 import type { DirNode } from '../lib/api';
 import { cn } from '../lib/utils';
 
@@ -139,7 +139,7 @@ export function DirTreePanel(p: DirTreePanelProps) {
         >
           {rootOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         </button>
-        <FolderGit size={13} className="text-accent flex-shrink-0" />
+        {rootOpen ? <FolderGitOpen size={13} className="text-accent flex-shrink-0" /> : <FolderGit size={13} className="text-accent flex-shrink-0" />}
         <span className="truncate font-medium">{p.repoName}</span>
         <span className="text-text-tertiary truncate">
           ({p.loading && p.branch === null ? '?' : p.branch ?? 'HEAD'})

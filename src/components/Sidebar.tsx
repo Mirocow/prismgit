@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star, ChevronLeft, ChevronRight } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Pin, PinOff, X, FolderTree, RotateCcw, FileText, Search, Sun, Moon, Star, ChevronLeft, ChevronRight } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { ResizableSplitter, useResizableWidth } from './ResizableSplitter';
@@ -102,7 +102,7 @@ export function Sidebar() {
             className="flex items-center gap-2 text-sm font-medium hover:text-accent truncate"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowRepoList(!showRepoList); }}
           >
-            <FolderGit size={14} />
+            {showRepoList ? <FolderGitOpen size={14} /> : <FolderGit size={14} />}
             {!collapsed && <span className="truncate">{currentRepo ? currentRepo.name : 'Repositories'}</span>}
             {currentRepo && metadata[currentRepo.path]?.favorite && (
               <Star size={11} className="text-status-modified fill-current" />
@@ -153,7 +153,7 @@ export function Sidebar() {
                     onClick={(e) => { e.stopPropagation(); openRepository(repo.path); }}
                     title={repo.path}
                   >
-                    <FolderGit size={12} className="text-text-tertiary flex-shrink-0" />
+                    {currentRepo?.path === repo.path ? <FolderGitOpen size={12} className="text-accent flex-shrink-0" /> : <FolderGit size={12} className="text-text-tertiary flex-shrink-0" />}
                     <span className="flex-1 truncate">{repo.name}</span>
                     {meta?.favorite && (
                       <Star size={10} className="text-status-modified fill-current flex-shrink-0" />
