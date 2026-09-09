@@ -870,6 +870,7 @@ export function HistoryPage() {
                             e.stopPropagation();
                             const items: ContextMenuItem[] = [
                               { label: 'View file history...', clickId: 'file-history' },
+                              { label: 'Open in Diff tool...', clickId: 'open-diff' },
                               { label: 'Blame this file...', clickId: 'blame' },
                               { type: 'separator' },
                               { label: 'Copy path', clickId: 'copy-path' },
@@ -880,6 +881,11 @@ export function HistoryPage() {
                                 useSelectionStore.getState().selectFile(f.path);
                                 useSelectionStore.getState().setPathFilter(f.path);
                                 window.location.hash = '#/history';
+                              } else if (action === 'open-diff') {
+                                // Open Diff tool with this file and the selected commit as base ref
+                                useSelectionStore.getState().selectFile(f.path);
+                                useSelectionStore.getState().selectCommit(selected.hash);
+                                window.location.hash = '#/diff';
                               } else if (action === 'blame') {
                                 useSelectionStore.getState().selectFile(f.path);
                                 window.location.hash = '#/blame';

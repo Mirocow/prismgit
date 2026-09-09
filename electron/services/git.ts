@@ -373,7 +373,16 @@ export async function checkout(
   if (options.force) args.push('--force');
   if (options.track) args.push('--track');
   args.push(branch);
-  await git.raw(args);
+  try {
+    await git.raw(args);
+  } catch (e) {
+    // Extract meaningful error message from git output
+    const err = e as { stderr?: string; message?: string };
+    const msg = err?.stderr || err?.message || String(e);
+    // Filter out simple-git noise — keep the actual git error line
+    const lines = msg.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
+    throw new Error(lines.length > 0 ? lines.join('\n') : msg);
+  }
 }
 
 export async function checkoutFile(repoPath: string, file: string, ref?: string): Promise<void> {
@@ -1337,7 +1346,11 @@ export async function blame(
   const git = getGit(repoPath);
   const format = '%H%x00%h%x00%an%x00%ae%x00%aI%x00%aZ%x00%cn%x00%ce%x00%cI%x00%cZ%x00%s%x00%N';
   const args = ['blame', '--line-porcelain', '-w'];
-  if (ref) args.unshift(ref);
+  if (ref) {
+    // ref must come AFTER 'blame' but BEFORE '--' and file path
+    // git blame [<options>] [<rev>] [--] <file>
+    args.push(ref);
+  }
   args.push('--', file);
   const out = await git.raw(args);
 
