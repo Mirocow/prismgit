@@ -3,7 +3,7 @@
 # Tests ALL git operations on ollama-code repo
 
 
-REPO="/home/z/my-project/repos/ollama-code"
+REPO="${1:-/home/z/my-project/repos/ollama-code}"
 cd "$REPO"
 
 # Save original state
@@ -14,7 +14,7 @@ pass=0
 fail=0
 errors=()
 
-test() {
+check() {
   local name="$1"
   local cmd="$2"
   if eval "$cmd" 2>/dev/null; then
@@ -37,23 +37,23 @@ git add test-reset-file.txt
 git commit -q -m "test: commit for reset testing"
 COMMIT_TO_RESET=$(git rev-parse HEAD~1)
 
-test "1.1 Reset Soft" "git reset --soft $COMMIT_TO_RESET"
-test "1.2 Verify staged after soft reset" "git diff --cached --name-only | grep -q test-reset-file.txt"
+check "1.1 Reset Soft" "git reset --soft $COMMIT_TO_RESET"
+check "1.2 Verify staged after soft reset" "git diff --cached --name-only | grep -q test-reset-file.txt"
 
-test "1.3 Reset Mixed" "git reset --mixed $COMMIT_TO_RESET"
-test "1.4 Verify unstaged after mixed reset" "git status --porcelain | grep -q '?? test-reset-file.txt'"
+check "1.3 Reset Mixed" "git reset --mixed $COMMIT_TO_RESET"
+check "1.4 Verify unstaged after mixed reset" "git status --porcelain | grep -q '?? test-reset-file.txt'"
 
 # Re-add and commit for hard reset test
 git add test-reset-file.txt
 git commit -q -m "test: commit for hard reset"
-test "1.5 Reset Hard" "git reset --hard $COMMIT_TO_RESET"
-test "1.6 Verify clean tree after hard reset" "test -z \"\$(git status --porcelain)\""
+check "1.5 Reset Hard" "git reset --hard $COMMIT_TO_RESET"
+check "1.6 Verify clean tree after hard reset" "test -z \"\$(git status --porcelain)\""
 
 # Test keep reset
 echo "test-keep" > test-keep-file.txt
 git add test-keep-file.txt
 git commit -q -m "test: commit for keep reset"
-test "1.7 Reset Keep" "git reset --keep $COMMIT_TO_RESET"
+check "1.7 Reset Keep" "git reset --keep $COMMIT_TO_RESET"
 
 # Cleanup
 git checkout -q -- . 2>/dev/null || true
@@ -72,19 +72,19 @@ git commit -q -m "test: merge feature commit"
 FEATURE_COMMIT=$(git rev-parse HEAD)
 
 git checkout -q main
-test "2.1 Merge (no-ff)" "git merge --no-ff test-merge-feature -m 'test: merge no-ff'"
-test "2.2 Verify merge commit" "git log --oneline -1 | grep -q 'merge no-ff'"
+check "2.1 Merge (no-ff)" "git merge --no-ff test-merge-feature -m 'test: merge no-ff'"
+check "2.2 Verify merge commit" "git log --oneline -1 | grep -q 'merge no-ff'"
 
 # Undo merge
 git reset -q --hard HEAD~1
 
-test "2.3 Merge (squash)" "git merge --squash test-merge-feature"
-test "2.4 Verify squash staged" "git diff --cached --name-only | grep -q test-merge.txt"
+check "2.3 Merge (squash)" "git merge --squash test-merge-feature"
+check "2.4 Verify squash staged" "git diff --cached --name-only | grep -q test-merge.txt"
 git reset -q HEAD . 2>/dev/null || true
 git checkout -q -- . 2>/dev/null || true
 rm -f test-merge.txt 2>/dev/null || true
 
-test "2.5 Merge (ff-only) — should fail if not FF" "git merge --ff-only test-merge-feature 2>/dev/null || true"
+check "2.5 Merge (ff-only) — should fail if not FF" "git merge --ff-only test-merge-feature 2>/dev/null || true"
 
 # Conflict test
 git checkout -q -b test-conflict-a main
@@ -98,24 +98,29 @@ git add test-conflict.txt
 git commit -q -m "test: conflict version B"
 
 git checkout -q test-conflict-a
-test "2.6 Merge with conflict" "git merge test-conflict-b 2>/dev/null; test -f .git/MERGE_HEAD"
-test "2.7 Verify conflict markers" "grep -q '<<<<<<<' test-conflict.txt"
-test "2.8 Abort merge" "git merge --abort"
-test "2.9 Verify abort cleaned state" "test ! -f .git/MERGE_HEAD"
+check "2.6 Merge with conflict" "git merge test-conflict-b 2>/dev/null; test -f .git/MERGE_HEAD"
+check "2.7 Verify conflict markers" "grep -q '<<<<<<<' test-conflict.txt"
+check "2.8 Abort merge" "git merge --abort"
+check "2.9 Verify abort cleaned state" "test ! -f .git/MERGE_HEAD"
 
 # Cleanup
 git checkout -q main 2>/dev/null || true
 git branch -q -D test-merge-feature test-conflict-a test-conflict-b 2>/dev/null || true
-rm -f test-merge.txt test-conflict.txt 2>/dev/null || true
+# test-merge.txt is TRACKED on main after 2.5's ff-only merge — restore it
+# instead of just rm'ing (a bare rm would leave a dirty tree and stall rebase)
+git checkout -q HEAD -- test-merge.txt 2>/dev/null || rm -f test-merge.txt 2>/dev/null || true
+rm -f test-conflict.txt src/conflict-test.txt 2>/dev/null || true
 
 echo ""
 echo "=== Блок 3: Rebase ==="
 echo ""
 
 # Create branches for rebase
+# (base touches its own file — add/add of the same file on both sides would
+#  always conflict and stall the rebase before 3.3's intentional conflict test)
 git checkout -q -b test-rebase-base main
-echo "base line" > test-rebase.txt
-git add test-rebase.txt
+echo "base line" > test-rebase-base.txt
+git add test-rebase-base.txt
 git commit -q -m "test: rebase base"
 
 git checkout -q -b test-rebase-feature main
@@ -126,8 +131,8 @@ echo "feature line 2" >> test-rebase.txt
 git add test-rebase.txt
 git commit -q -m "test: rebase feature 2"
 
-test "3.1 Rebase onto base" "git rebase test-rebase-base"
-test "3.2 Verify rebased commits" "git log --oneline | grep -q 'rebase feature 1'"
+check "3.1 Rebase onto base" "git rebase test-rebase-base"
+check "3.2 Verify rebased commits" "git log --oneline | grep -q 'rebase feature 1'"
 
 # Rebase with conflict
 git checkout -q -b test-rebase-conflict main
@@ -140,14 +145,16 @@ echo "DIFFERENT_LINE" > test-rebase-conflict.txt
 git add test-rebase-conflict.txt
 git commit -q -m "test: rebase conflict target"
 
-test "3.3 Rebase with conflict" "git rebase test-rebase-target 2>/dev/null; test -d .git/rebase-merge || test -d .git/rebase-apply"
-test "3.4 Rebase abort" "git rebase --abort"
-test "3.5 Verify abort cleaned" "test ! -d .git/rebase-merge && test ! -d .git/rebase-apply"
+# rebase the SOURCE branch onto target (script previously stayed on target — rebase was a noop)
+git checkout -q test-rebase-conflict
+check "3.3 Rebase with conflict" "git rebase test-rebase-target 2>/dev/null; test -d .git/rebase-merge || test -d .git/rebase-apply"
+check "3.4 Rebase abort" "git rebase --abort"
+check "3.5 Verify abort cleaned" "test ! -d .git/rebase-merge && test ! -d .git/rebase-apply"
 
 # Cleanup
 git checkout -q main 2>/dev/null || true
 git branch -q -D test-rebase-base test-rebase-feature test-rebase-conflict test-rebase-target 2>/dev/null || true
-rm -f test-rebase.txt test-rebase-conflict.txt 2>/dev/null || true
+rm -f test-rebase.txt test-rebase-base.txt test-rebase-conflict.txt 2>/dev/null || true
 
 echo ""
 echo "=== Блок 4: Branches (multi-merge + octopus) ==="
@@ -158,7 +165,7 @@ git branch -f test-multi-a main
 git branch -f test-multi-b main
 git branch -f test-multi-c main
 
-test "4.1 Create 3 branches" "git branch | grep -q test-multi-a && git branch | grep -q test-multi-b && git branch | grep -q test-multi-c"
+check "4.1 Create 3 branches" "git branch | grep -q test-multi-a && git branch | grep -q test-multi-b && git branch | grep -q test-multi-c"
 
 # Checkout and add commits
 git checkout -q test-multi-a
@@ -176,11 +183,14 @@ echo "c-content" > test-multi-c.txt
 git add test-multi-c.txt
 git commit -q -m "test: multi-c commit"
 
-test "4.2 Merge multi-a" "git merge --no-ff test-multi-a -m 'test: merge multi-a'"
-test "4.3 Merge multi-b" "git merge --no-ff test-multi-b -m 'test: merge multi-b'"
-test "4.4 Merge multi-c (3-way merge)" "git merge --no-ff test-multi-c -m 'test: merge multi-c'"
+check "4.2 Merge multi-a" "git merge --no-ff test-multi-a -m 'test: merge multi-a'"
+check "4.3 Merge multi-b" "git merge --no-ff test-multi-b -m 'test: merge multi-b'"
 
-test "4.5 Verify 3 merge commits" "git log --oneline | grep -c 'merge multi' | grep -q 3"
+# move to main so multi-c merge is a real 3-way merge (not a self-merge noop)
+git checkout -q main
+check "4.4 Merge multi-c (3-way merge)" "git merge --no-ff test-multi-c -m 'test: merge multi-c'"
+
+check "4.5 Verify 3 merge commits" "git log --oneline | grep -c 'merge multi' | grep -q 3"
 
 # Octopus merge (multiple heads at once)
 git checkout -q main
@@ -198,8 +208,8 @@ git commit -q -m "test: octopus 2"
 OCTOPUS_HEAD_2=$(git rev-parse HEAD)
 
 git checkout -q main
-test "4.6 Octopus merge (2 branches)" "git merge --no-ff test-octopus test-octopus-2 -m 'test: octopus merge'"
-test "4.7 Verify octopus merge commit (2 parents)" "git cat-file commit HEAD | grep -c '^parent ' | grep -q 2"
+check "4.6 Octopus merge (2 branches)" "git merge --no-ff test-octopus test-octopus-2 -m 'test: octopus merge'"
+check "4.7 Verify octopus merge commit (3 parents: main + 2 heads)" "git cat-file commit HEAD | grep -c '^parent ' | grep -q 3"
 
 # Cleanup
 git checkout -q main 2>/dev/null || true
@@ -212,24 +222,24 @@ echo "=== Блок 5: Tags + Stash + Stage + Reset ==="
 echo ""
 
 # Tags
-test "5.1 Create annotated tag" "git tag -a v-test-annotated -m 'test annotated tag'"
-test "5.2 Create lightweight tag" "git tag v-test-light"
-test "5.3 Verify tags exist" "git tag | grep -q v-test-annotated && git tag | grep -q v-test-light"
-test "5.4 Verify annotated has message" "git tag -l --format='%(contents:subject)' v-test-annotated | grep -q 'test annotated tag'"
-test "5.5 Verify lightweight has no message" "test -z \"\$(git tag -l --format='%(contents:subject)' v-test-light)\""
+check "5.1 Create annotated tag" "git tag -a v-test-annotated -m 'test annotated tag'"
+check "5.2 Create lightweight tag" "git tag v-test-light"
+check "5.3 Verify tags exist" "git tag | grep -q v-test-annotated && git tag | grep -q v-test-light"
+check "5.4 Verify annotated has message" "git tag -l --format='%(contents:subject)' v-test-annotated | grep -q 'test annotated tag'"
+check "5.5 Verify lightweight has no message" "test \"\$(git for-each-ref refs/tags/v-test-light --format='%(*objecttype)%(objecttype)')\" = commit"
 
-test "5.6 Delete annotated tag" "git tag -d v-test-annotated"
-test "5.7 Delete lightweight tag" "git tag -d v-test-light"
+check "5.6 Delete annotated tag" "git tag -d v-test-annotated"
+check "5.7 Delete lightweight tag" "git tag -d v-test-light"
 
 # Stash
 echo "stash-content" > test-stash.txt
 git add test-stash.txt
-test "5.8 Stash push" "git stash push -m 'test stash' --include-untracked"
-test "5.9 Verify stash exists" "git stash list | grep -q 'test stash'"
-test "5.10 Stash apply" "git stash apply"
-test "5.11 Verify stash still in list (apply doesn't drop)" "git stash list | grep -q 'test stash'"
-test "5.12 Stash drop" "git stash drop"
-test "5.13 Verify stash dropped" "test -z \"\$(git stash list)\""
+check "5.8 Stash push" "git stash push -m 'test stash' --include-untracked"
+check "5.9 Verify stash exists" "git stash list | grep -q 'test stash'"
+check "5.10 Stash apply" "git stash apply"
+check "5.11 Verify stash still in list (apply doesn't drop)" "git stash list | grep -q 'test stash'"
+check "5.12 Stash drop" "git stash drop"
+check "5.13 Verify stash dropped" "test -z \"\$(git stash list)\""
 rm -f test-stash.txt 2>/dev/null || true
 git checkout -q -- . 2>/dev/null || true
 git reset -q --hard $ORIG_HEAD 2>/dev/null || true
@@ -237,50 +247,50 @@ git reset -q --hard $ORIG_HEAD 2>/dev/null || true
 # Stage/Unstage
 echo "stage-test" > test-stage.txt
 git add test-stage.txt
-test "5.14 Stage file" "git diff --cached --name-only | grep -q test-stage.txt"
+check "5.14 Stage file" "git diff --cached --name-only | grep -q test-stage.txt"
 git reset -q HEAD test-stage.txt
-test "5.15 Unstage file" "test -z \"\$(git diff --cached --name-only | grep test-stage.txt)\""
-test "5.16 Restore file (discard)" "git checkout -- test-stage.txt 2>/dev/null; rm -f test-stage.txt"
+check "5.15 Unstage file" "test -z \"\$(git diff --cached --name-only | grep test-stage.txt)\""
+check "5.16 Restore file (discard)" "git checkout -- test-stage.txt 2>/dev/null; rm -f test-stage.txt"
 
 # Tag from specific commit
 LATEST_COMMIT=$(git log -1 --format=%H)
-test "5.17 Create tag at specific commit" "git tag v-commit-tag $LATEST_COMMIT"
-test "5.18 Verify tag points to commit" "git rev-parse v-commit-tag | grep -q $LATEST_COMMIT"
+check "5.17 Create tag at specific commit" "git tag v-commit-tag $LATEST_COMMIT"
+check "5.18 Verify tag points to commit" "git rev-parse v-commit-tag | grep -q $LATEST_COMMIT"
 git tag -d v-commit-tag 2>/dev/null || true
 
 echo ""
 echo "=== Блок 6: Git operations via simple-git (service layer) ==="
 echo ""
 
-test "6.1 status" "git status --porcelain"
-test "6.2 log -500 --all" "git log -500 --all --pretty=format:%H | head -1"
-test "6.3 branches via for-each-ref" "git for-each-ref --format='%(refname)' refs/heads/ | head -1"
-test "6.4 tags via for-each-ref" "git for-each-ref --format='%(refname:short)' refs/tags/ | head -1"
-test "6.5 blame README.md" "git blame --line-porcelain -w -- README.md | head -1"
-test "6.6 diff HEAD -- ." "git diff --no-color HEAD -- . | head -1"
-test "6.7 reflog -50" "git reflog -50 --pretty=format:%H | head -1"
-test "6.8 remotes" "git remote -v"
-test "6.9 revParse HEAD" "git rev-parse HEAD"
-test "6.10 show --name-status HEAD" "git show --name-status --format= HEAD"
-test "6.11 stash list" "git stash list"
-test "6.12 merge-tree (pre-merge preview)" "git merge-tree --write-tree HEAD HEAD 2>/dev/null | head -1 || true"
+check "6.1 status" "git status --porcelain"
+check "6.2 log -500 --all" "git log -500 --all --pretty=format:%H | head -1"
+check "6.3 branches via for-each-ref" "git for-each-ref --format='%(refname)' refs/heads/ | head -1"
+check "6.4 tags via for-each-ref" "git for-each-ref --format='%(refname:short)' refs/tags/ | head -1"
+check "6.5 blame README.md" "git blame --line-porcelain -w -- README.md | head -1"
+check "6.6 diff HEAD -- ." "git diff --no-color HEAD -- . | head -1"
+check "6.7 reflog -50" "git reflog -50 --pretty=format:%H | head -1"
+check "6.8 remotes" "git remote -v"
+check "6.9 revParse HEAD" "git rev-parse HEAD"
+check "6.10 show --name-status HEAD" "git show --name-status --format= HEAD"
+check "6.11 stash list" "git stash list"
+check "6.12 merge-tree (pre-merge preview)" "git merge-tree --write-tree HEAD HEAD 2>/dev/null | head -1 || true"
 
 echo ""
 echo "=== Блок 7: Edge cases ==="
 echo ""
 
-test "7.1 Checkout to detached HEAD" "git checkout HEAD~1 2>/dev/null; test \"\$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)\" = detached"
+check "7.1 Checkout to detached HEAD" "git checkout HEAD~1 2>/dev/null; test \"\$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)\" = detached"
 git checkout -q main 2>/dev/null || git checkout -q $ORIG_BRANCH 2>/dev/null || true
 
-test "7.2 Empty commit (--allow-empty)" "git commit --allow-empty -q -m 'test: empty commit'; git log --oneline -1 | grep -q 'empty commit'"
+check "7.2 Empty commit (--allow-empty)" "git commit --allow-empty -q -m 'test: empty commit'; git log --oneline -1 | grep -q 'empty commit'"
 git reset -q --hard HEAD~1 2>/dev/null || true
 
-test "7.3 Cherry-pick" "git cherry-pick --no-commit HEAD 2>/dev/null; git reset -q HEAD 2>/dev/null; true"
+check "7.3 Cherry-pick" "git cherry-pick --no-commit HEAD 2>/dev/null; git reset -q HEAD 2>/dev/null; true"
 
-test "7.4 Branch with slash in name" "git branch test/slash/name && git branch | grep -q 'test/slash/name'"
+check "7.4 Branch with slash in name" "git branch test/slash/name && git branch | grep -q 'test/slash/name'"
 git branch -q -D test/slash/name 2>/dev/null || true
 
-test "7.5 Tag with special chars (v1.0.0-rc1)" "git tag v1.0.0-rc1 && git tag | grep -q 'v1.0.0-rc1'"
+check "7.5 Tag with special chars (v1.0.0-rc1)" "git tag v1.0.0-rc1 && git tag | grep -q 'v1.0.0-rc1'"
 git tag -d v1.0.0-rc1 2>/dev/null || true
 
 echo ""

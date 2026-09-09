@@ -528,7 +528,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) {
       const wd = f.working_dir as string;
-      return wd !== ' ' && wd !== '!';
+      // Exclude untracked ('??') — they render in their own Untracked section;
+      // including them here duplicated every untracked file in both sections.
+      return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');
     }
     const wd = staged.working_dir as string;
     return wd !== ' ' && wd !== '!';
@@ -553,7 +555,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     return idx === '?' && wd === '?';
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-    .filter((f) => matchesDirScope(f.path)));
+    .filter((f) => matchesDirScope(f.path))
+    .filter((f) => matchesStatusSet(f, false))
+    .filter(() => {
+      if (fileStatusFilter === 'all' || fileStatusFilter === 'untracked') return true;
+      return false;
+    }));
 
   const totalChanged = (status?.files.length ?? 0);
 

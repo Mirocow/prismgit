@@ -722,9 +722,13 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                 <LabeledButton icon={Minus} label="Unstage" iconColor={COLOR_ORANGE} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage all changes" />
                 <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
                   if (!currentRepo || !confirm('Discard ALL uncommitted changes?\n\nThis will permanently discard all staged and unstaged changes. This cannot be undone.')) return;
-                  api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
-                    toast.success('Changes discarded'); refreshStatus(currentRepo.path);
-                  }).catch((e) => toast.error('Discard failed', String(e)));
+                  // checkout -- . restores tracked files; clean -fd also removes untracked ones
+                  // (otherwise "Discard all" left untracked files behind and the tree stayed dirty)
+                  api.git.raw(currentRepo.path, ['checkout', '--', '.'])
+                    .then(() => api.git.raw(currentRepo.path, ['clean', '-fd']))
+                    .then(() => {
+                      toast.success('Changes discarded'); refreshStatus(currentRepo.path);
+                    }).catch((e) => toast.error('Discard failed', String(e)));
                 }} disabled={disabled} title="Discard all changes" />
                 <Divider />
               </div>
@@ -742,11 +746,12 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                   if (!currentRepo) return;
                   api.git.stashList(currentRepo.path).then(stashes => {
                     if (stashes.length === 0) { toast.info('No stashes'); return; }
-                    api.git.stashApply(currentRepo.path, 0).then(() => {
-                      toast.success('Stash applied'); refreshStatus(currentRepo.path);
-                    }).catch((e) => toast.error('Apply failed', String(e)));
+                    // Pop = apply + drop (the button previously only applied, stash never left the list)
+                    api.git.stashPop(currentRepo.path, 0).then(() => {
+                      toast.success('Stash popped'); refreshStatus(currentRepo.path);
+                    }).catch((e) => toast.error('Pop failed', String(e)));
                   });
-                }} disabled={disabled} title="Apply latest stash" />
+                }} disabled={disabled} title="Pop latest stash (apply + drop)" />
                 <Divider />
               </div>
             );
