@@ -62,7 +62,7 @@ function createWindow(): BrowserWindow {
       spellcheck: true,
     },
     show: false,
-    trafficLightPosition: process.platform === 'darwin' ? { x: 13, y: 13 } : undefined,
+    trafficLightPosition: process.platform === 'darwin' ? { x: 13, y: 11 } : undefined,
   });
 
   // Restore maximized/fullscreen state

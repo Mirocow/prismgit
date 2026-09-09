@@ -18,7 +18,7 @@ interface FindObjectDialogProps {
 }
 
 export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogProps) {
-  const repo = useRepositoryStore((s) => s.currentRepo)!;
+  const repo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastStore();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoundRef[]>([]);
@@ -27,7 +27,7 @@ export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogPr
   const inputRef = useRef<HTMLInputElement>(null);
 
   const search = useCallback(async (q: string) => {
-    if (!q.trim()) {
+    if (!repo || !q.trim()) {
       setResults([]);
       return;
     }
@@ -41,7 +41,7 @@ export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogPr
     } finally {
       setLoading(false);
     }
-  }, [repo.path, toast]);
+  }, [repo, toast]);
 
   useEffect(() => {
     if (open) {

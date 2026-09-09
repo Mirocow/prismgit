@@ -5,23 +5,10 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.github.com https://github.com;" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SmartGit Electron</title>
-    <script>
-      // Apply theme before page load to prevent FOUC
-      (function() {
-        try {
-          var theme = localStorage.getItem('smartgit-theme') || 'light';
-          if (theme === 'dark') {
-            document.documentElement.classList.add('dark');
-          }
-          // Light is default (:root), no class needed
-        } catch (e) {
-          // Default to light
-        }
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="/src/theme-init.ts"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

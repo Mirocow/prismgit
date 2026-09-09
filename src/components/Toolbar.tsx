@@ -84,8 +84,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
 
   return (
     <header
-      className="flex items-center h-9 bg-bg-tertiary border-b border-border-default flex-shrink-0 select-none"
-      style={{ '-webkit-app-region': 'drag' } as React.CSSProperties}
+      className="flex items-center h-9 bg-bg-tertiary border-b border-border-default flex-shrink-0 select-none titlebar-drag"
     >
       {/* macOS traffic light spacing */}
       {isMac && <div className="w-[70px] flex-shrink-0" />}
@@ -158,7 +157,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
       )}
 
       {/* Center: branch info (draggable area) */}
-      <div className="flex-1 flex items-center justify-center" style={{ '-webkit-app-region': 'drag' } as React.CSSProperties}>
+      <div className="flex-1 flex items-center justify-center titlebar-drag">
         {currentRepo && status ? (
           <div className="flex items-center gap-2 text-xs">
             {isInProgress && (
@@ -210,7 +209,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
       </div>
 
       {/* Windows/Linux: spacer for native window controls */}
-      {!isMac && <div className="w-[100px] flex-shrink-0" style={{ '-webkit-app-region': 'drag' } as React.CSSProperties} />}
+      {!isMac && <div className="w-[100px] flex-shrink-0 titlebar-drag" />}
     </header>
   );
 }
