@@ -7,6 +7,7 @@ import {
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { useGitStore } from '../stores/gitStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type LogEntry, type CommitFile, type BranchInfo } from '../lib/api';
 import { cn, shortHash, copyToClipboard } from '../lib/utils';
 import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
@@ -52,11 +53,17 @@ export function HistoryPage() {
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
   const showContextMenu = useContextMenu();
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Global selection — selecting a commit here propagates to Tags, Annotate, etc.
+  const selectCommit = useSelectionStore((s) => s.selectCommit);
+  const selectBranch = useSelectionStore((s) => s.selectBranch);
+  const selectTag = useSelectionStore((s) => s.selectTag);
+  const globalPathFilter = useSelectionStore((s) => s.pathFilter);
+  const setGlobalPathFilter = useSelectionStore((s) => s.setPathFilter);
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const logOpts: { maxCount: number; all?: boolean; branch?: string; branches?: string[] } = { maxCount: 500 };
+      const logOpts: { maxCount: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = { maxCount: 500 };
       // Multi-branch selection takes precedence over single branch filter
       if (selectedBranches.size > 0) {
         logOpts.branches = Array.from(selectedBranches);
@@ -64,6 +71,12 @@ export function HistoryPage() {
         logOpts.all = true;
       } else {
         logOpts.branch = branchFilter;
+      }
+      // File-history mode: when a global path filter is set (e.g. user clicked "View file history"
+      // from Changes view), pass it to git log -- <path> with --follow to track renames.
+      if (globalPathFilter) {
+        logOpts.file = globalPathFilter;
+        logOpts.follow = true;
       }
       const result = await api.git.log(repo.path, logOpts);
       setEntries(result);
@@ -75,9 +88,11 @@ export function HistoryPage() {
         /* ignore */
       }
       setSelectedIdx(0);
+      // Propagate first commit's selection to global store
+      if (result.length > 0) selectCommit(result[0].hash);
     } catch (e) { toast.error('Failed to load history', String(e)); }
     finally { setLoading(false); }
-  }, [repo.path, toast, branchFilter, selectedBranches]);
+  }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -251,6 +266,9 @@ export function HistoryPage() {
       { type: 'separator' },
       { label: 'Rebase onto this commit', clickId: 'rebase' },
       { type: 'separator' },
+      { label: 'Create Tag here...', clickId: 'create-tag' },
+      { label: 'Create Branch here...', clickId: 'create-branch' },
+      { type: 'separator' },
       { label: 'Copy Short Hash', clickId: 'copy-short' },
       { label: 'Copy Full Hash', clickId: 'copy-full' },
       { label: 'Copy Commit Message', clickId: 'copy-msg' },
@@ -268,6 +286,8 @@ export function HistoryPage() {
         case 'reset-hard': handleReset(entry.hash, 'hard'); break;
         case 'reset-keep': handleReset(entry.hash, 'keep'); break;
         case 'rebase': handleRebase(entry.hash); break;
+        case 'create-tag': handleCreateTag(entry); break;
+        case 'create-branch': handleCreateBranchAt(entry); break;
         case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success('Copied'); break;
         case 'copy-full': copyToClipboard(entry.hash); toast.success('Copied'); break;
         case 'copy-msg': copyToClipboard(entry.subject); toast.success('Copied'); break;
@@ -275,6 +295,56 @@ export function HistoryPage() {
         case 'browser': handleOpenInBrowser(); break;
       }
     });
+  };
+
+  // Tag-from-commit dialog state
+  const [showTagDialog, setShowTagDialog] = useState(false);
+  const [tagTarget, setTagTarget] = useState<string | null>(null);
+  const [tagName, setTagName] = useState('');
+  const [tagMessage, setTagMessage] = useState('');
+  const [tagAnnotated, setTagAnnotated] = useState(true);
+
+  const handleCreateTag = (entry: LogEntry) => {
+    setTagTarget(entry.hash);
+    setTagName('');
+    setTagMessage('');
+    setTagAnnotated(true);
+    setShowTagDialog(true);
+  };
+
+  const handleSaveTag = async () => {
+    if (!tagTarget || !tagName.trim()) return;
+    try {
+      await api.git.createTag(repo.path, tagName.trim(), tagMessage || undefined, tagTarget, false, tagAnnotated);
+      toast.success(`Tag '${tagName}' created`, `Points to ${shortHash(tagTarget)}`);
+      setShowTagDialog(false);
+      // Refresh history so the tag decoration appears immediately
+      await loadHistory();
+    } catch (e) { toast.error('Failed to create tag', String(e)); }
+  };
+
+  // Branch-from-commit dialog state
+  const [showBranchDialog, setShowBranchDialog] = useState(false);
+  const [branchTarget, setBranchTarget] = useState<string | null>(null);
+  const [branchName, setBranchName] = useState('');
+  const [branchCheckout, setBranchCheckout] = useState(true);
+
+  const handleCreateBranchAt = (entry: LogEntry) => {
+    setBranchTarget(entry.hash);
+    setBranchName('');
+    setBranchCheckout(true);
+    setShowBranchDialog(true);
+  };
+
+  const handleSaveBranch = async () => {
+    if (!branchTarget || !branchName.trim()) return;
+    try {
+      await api.git.createBranch(repo.path, branchName.trim(), branchTarget);
+      if (branchCheckout) await api.git.checkout(repo.path, branchName.trim());
+      toast.success(`Branch '${branchName}' created`, `From ${shortHash(branchTarget)}`);
+      setShowBranchDialog(false);
+      await loadHistory();
+    } catch (e) { toast.error('Failed to create branch', String(e)); }
   };
 
   const selected = selectedIdx !== null && selectedIdx >= 0 ? filtered[selectedIdx] : null;
@@ -309,6 +379,14 @@ export function HistoryPage() {
                 <span className="text-2xs text-text-tertiary">+{selectedBranches.size - 3} more</span>
               )}
             </div>
+          )}
+          {globalPathFilter && (
+            <span className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/40 bg-status-modified/10 text-status-modified flex items-center gap-1 ml-2">
+              <FileText size={9} />{globalPathFilter}
+              <button onClick={() => setGlobalPathFilter(null)} title="Clear file filter">
+                <X size={8} />
+              </button>
+            </span>
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -581,7 +659,7 @@ export function HistoryPage() {
                     className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
                       isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover')}
                     style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 2 }}
-                    onClick={() => setSelectedIdx(idx)}
+                    onClick={() => { setSelectedIdx(idx); selectCommit(entry.hash); }}
                     onContextMenu={(e) => showCommitContextMenu(e, entry, idx)}
                   >
                     {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
@@ -725,6 +803,77 @@ export function HistoryPage() {
           )}
         </div>
       </div>
+
+      {/* Create Tag dialog */}
+      {showTagDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowTagDialog(false)}>
+          <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-medium mb-1 flex items-center gap-2">
+              <TagIcon size={16} /> Create Tag at {shortHash(tagTarget || '')}
+            </h3>
+            <div className="text-2xs text-text-tertiary mb-4">Tag will point to this commit.</div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">Tag name</label>
+                <input type="text" className="w-full text-sm font-mono" placeholder="v1.0.0"
+                  value={tagName} autoFocus
+                  onChange={(e) => setTagName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveTag()} />
+              </div>
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">Message (optional, for annotated tags)</label>
+                <textarea className="w-full text-sm h-20 resize-none"
+                  value={tagMessage}
+                  onChange={(e) => setTagMessage(e.target.value)}
+                  placeholder="Release 1.0.0" />
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={tagAnnotated}
+                  onChange={(e) => setTagAnnotated(e.target.checked)} />
+                <span>Annotated tag (recommended — stores tagger + date + message)</span>
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button className="btn btn-secondary" onClick={() => setShowTagDialog(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSaveTag} disabled={!tagName.trim()}>
+                <TagIcon size={13} /> Create Tag
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Branch dialog */}
+      {showBranchDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowBranchDialog(false)}>
+          <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-medium mb-1 flex items-center gap-2">
+              <GitBranch size={16} /> Create Branch at {shortHash(branchTarget || '')}
+            </h3>
+            <div className="text-2xs text-text-tertiary mb-4">Branch will start from this commit.</div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">Branch name</label>
+                <input type="text" className="w-full text-sm font-mono" placeholder="feature/my-branch"
+                  value={branchName} autoFocus
+                  onChange={(e) => setBranchName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveBranch()} />
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={branchCheckout}
+                  onChange={(e) => setBranchCheckout(e.target.checked)} />
+                <span>Checkout after creation</span>
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button className="btn btn-secondary" onClick={() => setShowBranchDialog(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSaveBranch} disabled={!branchName.trim()}>
+                <GitBranch size={13} /> Create Branch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

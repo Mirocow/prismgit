@@ -3,6 +3,7 @@ import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRe
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type DiffResult, type FileStatus, type LogEntry } from '../lib/api';
 import { DiffViewer } from '../components/DiffViewer';
 import { ResizableSplitter, useResizableWidth, useResizableHeight } from '../components/ResizableSplitter';
@@ -18,6 +19,15 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { status, refreshStatus, stageFiles, stageAll, commit, push, pull } = useGitStore();
   const toast = useToastStore();
+  // Global UI state for file filtering and tree mode
+  const fileViewMode = useSelectionStore((s) => s.fileViewMode);
+  const setFileViewMode = useSelectionStore((s) => s.setFileViewMode);
+  const compressFilePaths = useSelectionStore((s) => s.compressFilePaths);
+  const setCompressFilePaths = useSelectionStore((s) => s.setCompressFilePaths);
+  const fileStatusFilter = useSelectionStore((s) => s.fileStatusFilter);
+  const setFileStatusFilter = useSelectionStore((s) => s.setFileStatusFilter);
+  const fileExtensionFilter = useSelectionStore((s) => s.fileExtensionFilter);
+  const setFileExtensionFilter = useSelectionStore((s) => s.setFileExtensionFilter);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
@@ -176,7 +186,18 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     if (!staged) return false;
     const idx = staged.index as string;
     return idx !== ' ' && idx !== '?' && idx !== '!';
-  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()));
+  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()))
+    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+    .filter(f => {
+      if (fileStatusFilter === 'all') return true;
+      const idx = f.index as string;
+      const code = idx !== ' ' && idx !== '?' ? idx : (f.working_dir as string);
+      if (fileStatusFilter === 'modified') return code === 'M' || code === 'R' || code === 'C' || code === 'T';
+      if (fileStatusFilter === 'added') return code === 'A';
+      if (fileStatusFilter === 'deleted') return code === 'D';
+      if (fileStatusFilter === 'untracked') return code === '?';
+      return true;
+    });
 
   const unstagedFiles: FileStatus[] = (status?.files || []).filter((f) => {
     const staged = status?.staged.find((s) => s.path === f.path);
@@ -186,13 +207,25 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     }
     const wd = staged.working_dir as string;
     return wd !== ' ' && wd !== '!';
-  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()));
+  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()))
+    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+    .filter(f => {
+      if (fileStatusFilter === 'all') return true;
+      const idx = f.index as string;
+      const code = idx !== ' ' && idx !== '?' ? idx : (f.working_dir as string);
+      if (fileStatusFilter === 'modified') return code === 'M' || code === 'R' || code === 'C' || code === 'T';
+      if (fileStatusFilter === 'added') return code === 'A';
+      if (fileStatusFilter === 'deleted') return code === 'D';
+      if (fileStatusFilter === 'untracked') return code === '?';
+      return true;
+    });
 
   const untrackedFiles: FileStatus[] = (status?.files || []).filter((f) => {
     const idx = f.index as string;
     const wd = f.working_dir as string;
     return idx === '?' && wd === '?';
-  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()));
+  }).filter(f => !fileFilter || f.path.toLowerCase().includes(fileFilter.toLowerCase()))
+    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()));
 
   const totalChanged = (status?.files.length ?? 0);
 
@@ -279,6 +312,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           items.push({ type: 'separator' });
           items.push({ label: 'Reveal in File Manager', clickId: 'reveal' });
           items.push({ label: 'Open in Editor', clickId: 'open' });
+          items.push({ type: 'separator' });
+          items.push({ label: 'View file history...', clickId: 'file-history' });
+          items.push({ label: 'Blame this file...', clickId: 'blame' });
           showContextMenu(items, (action) => {
             if (action === 'stage') handleStageFile(file.path);
             else if (action === 'unstage') handleUnstageFile(file.path);
@@ -290,6 +326,16 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             else if (action === 'open') {
               const fullPath = `${repo.path}/${file.path}`.replace(/\/+/g, '/');
               api.git.openFile(fullPath);
+            }
+            else if (action === 'file-history') {
+              // Set global path filter and navigate to History page
+              useSelectionStore.getState().selectFile(file.path);
+              useSelectionStore.getState().setPathFilter(file.path);
+              window.location.hash = '#/history';
+            }
+            else if (action === 'blame') {
+              useSelectionStore.getState().selectFile(file.path);
+              window.location.hash = '#/blame';
             }
           });
         }}
@@ -372,6 +418,44 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             value={fileFilter}
             onChange={(e) => setFileFilter(e.target.value)}
           />
+          {/* Status filter dropdown */}
+          <select
+            className="text-2xs bg-bg-tertiary border border-border-default rounded px-1 py-0.5"
+            value={fileStatusFilter}
+            onChange={(e) => setFileStatusFilter(e.target.value as 'all' | 'modified' | 'added' | 'deleted' | 'untracked')}
+            title="Filter by status"
+          >
+            <option value="all">All</option>
+            <option value="modified">Modified</option>
+            <option value="added">Added</option>
+            <option value="deleted">Deleted</option>
+            <option value="untracked">Untracked</option>
+          </select>
+          {/* Extension filter */}
+          <input
+            type="text"
+            className="text-2xs w-12 px-1 py-0.5 bg-bg-tertiary border border-border-default rounded"
+            placeholder=".ts"
+            value={fileExtensionFilter || ''}
+            onChange={(e) => setFileExtensionFilter(e.target.value || null)}
+            title="Filter by extension (e.g. .ts, .tsx)"
+          />
+          {/* Tree / Flat toggle */}
+          <button
+            className={cn('icon-btn !w-5 !h-5', fileViewMode === 'tree' && 'active')}
+            title="Toggle tree view"
+            onClick={() => setFileViewMode(fileViewMode === 'tree' ? 'flat' : 'tree')}
+          >
+            <Folder size={11} />
+          </button>
+          {/* Path compression toggle */}
+          <button
+            className={cn('icon-btn !w-5 !h-5', compressFilePaths && 'active')}
+            title="Toggle path compression (collapse single-child folders)"
+            onClick={() => setCompressFilePaths(!compressFilePaths)}
+          >
+            <EyeOff size={11} />
+          </button>
           <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={handleRefresh}>
             <RefreshCw size={11} />
           </button>

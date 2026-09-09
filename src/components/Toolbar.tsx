@@ -1,10 +1,33 @@
-import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash } from './icons';
+import { useState } from 'react';
+import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, Settings as SettingsIcon, X } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
+
+// Default visible groups — user can toggle these via the customize button
+const DEFAULT_TOOLBAR_GROUPS = {
+  sync: true,
+  stage: true,
+  stash: true,
+  log: true,
+  workflows: true,
+  utils: true,
+};
+
+function loadToolbarGroups(): typeof DEFAULT_TOOLBAR_GROUPS {
+  try {
+    const raw = localStorage.getItem('toolbar-groups');
+    if (raw) return { ...DEFAULT_TOOLBAR_GROUPS, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return DEFAULT_TOOLBAR_GROUPS;
+}
+function saveToolbarGroups(g: typeof DEFAULT_TOOLBAR_GROUPS) {
+  try { localStorage.setItem('toolbar-groups', JSON.stringify(g)); } catch { /* ignore */ }
+}
 
 // Window control buttons — frameless window
 function WindowControls() {
@@ -65,6 +88,19 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
   const toast = useToastStore();
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
+  // Read global selection — show file-history chip in header if set
+  const globalPathFilter = useSelectionStore((s) => s.pathFilter);
+  const setGlobalPathFilter = useSelectionStore((s) => s.setPathFilter);
+  const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
+  const selectedBranch = useSelectionStore((s) => s.selectedBranch);
+  // Toolbar customization state
+  const [groups, setGroups] = useState(loadToolbarGroups);
+  const [showCustomize, setShowCustomize] = useState(false);
+  const setGroup = (key: keyof typeof DEFAULT_TOOLBAR_GROUPS, value: boolean) => {
+    const next = { ...groups, [key]: value };
+    setGroups(next);
+    saveToolbarGroups(next);
+  };
 
   const disabled = !currentRepo;
 
@@ -137,55 +173,71 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
 
       <Divider />
 
-      {/* Git action buttons — compact, icon-only */}
+      {/* Git action buttons — compact, icon-only, customizable visibility */}
       <div className="flex items-center no-drag">
-        <IconButton icon={ArrowDown} onClick={handlePull} disabled={disabled} title="Pull" />
-        <IconButton icon={Sync} onClick={handleSynchronize} disabled={disabled} title="Sync (fetch+pull+push)" />
-        <IconButton icon={ArrowUp} onClick={handlePush} disabled={disabled} title="Push" />
+        {groups.sync && (
+          <>
+            <IconButton icon={ArrowDown} onClick={handlePull} disabled={disabled} title="Pull" />
+            <IconButton icon={Sync} onClick={handleSynchronize} disabled={disabled} title="Sync (fetch+pull+push)" />
+            <IconButton icon={ArrowUp} onClick={handlePush} disabled={disabled} title="Push" />
+            <Divider />
+          </>
+        )}
 
-        <Divider />
+        {groups.stage && (
+          <>
+            <IconButton icon={Plus} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage All" />
+            <IconButton icon={Minus} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage All" />
+            <IconButton icon={Trash} onClick={() => {
+              if (!currentRepo || !confirm('Discard all uncommitted changes?')) return;
+              api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
+                toast.success('Changes discarded'); refreshStatus(currentRepo.path);
+              }).catch((e) => toast.error('Discard failed', String(e)));
+            }} disabled={disabled} title="Discard All" />
+            <Divider />
+          </>
+        )}
 
-        <IconButton icon={Plus} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage All" />
-        <IconButton icon={Minus} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage All" />
-        <IconButton icon={Trash} onClick={() => {
-          if (!currentRepo || !confirm('Discard all uncommitted changes?')) return;
-          api.git.raw(currentRepo.path, ['checkout', '--', '.']).then(() => {
-            toast.success('Changes discarded'); refreshStatus(currentRepo.path);
-          }).catch((e) => toast.error('Discard failed', String(e)));
-        }} disabled={disabled} title="Discard All" />
+        {groups.stash && (
+          <>
+            <IconButton icon={CloudDownload} onClick={() => {
+              if (!currentRepo) return;
+              api.git.stashPush(currentRepo.path, undefined, true).then(() => {
+                toast.success('Stash saved'); refreshStatus(currentRepo.path);
+              }).catch((e) => toast.error('Stash failed', String(e)));
+            }} disabled={disabled} title="Save Stash" />
+            <IconButton icon={GitPullRequest} onClick={() => {
+              if (!currentRepo) return;
+              api.git.stashList(currentRepo.path).then(stashes => {
+                if (stashes.length === 0) { toast.info('No stashes'); return; }
+                api.git.stashApply(currentRepo.path, 0).then(() => {
+                  toast.success('Stash applied'); refreshStatus(currentRepo.path);
+                }).catch((e) => toast.error('Apply failed', String(e)));
+              });
+            }} disabled={disabled} title="Apply Stash" />
+            <Divider />
+          </>
+        )}
 
-        <Divider />
+        {groups.log && (
+          <>
+            <IconButton icon={GitBranch} onClick={() => { window.location.hash = '#/history'; }} disabled={disabled} title="Log" />
+            <IconButton icon={Search} onClick={() => { window.location.hash = '#/blame'; }} disabled={disabled} title="Blame" />
+            <IconButton icon={Search} onClick={() => { window.location.hash = '#/investigate'; }} disabled={disabled} title="Investigate" />
+            <Divider />
+          </>
+        )}
 
-        <IconButton icon={CloudDownload} onClick={() => {
-          if (!currentRepo) return;
-          api.git.stashPush(currentRepo.path, undefined, true).then(() => {
-            toast.success('Stash saved'); refreshStatus(currentRepo.path);
-          }).catch((e) => toast.error('Stash failed', String(e)));
-        }} disabled={disabled} title="Save Stash" />
-        <IconButton icon={GitPullRequest} onClick={() => {
-          if (!currentRepo) return;
-          api.git.stashList(currentRepo.path).then(stashes => {
-            if (stashes.length === 0) { toast.info('No stashes'); return; }
-            api.git.stashApply(currentRepo.path, 0).then(() => {
-              toast.success('Stash applied'); refreshStatus(currentRepo.path);
-            }).catch((e) => toast.error('Apply failed', String(e)));
-          });
-        }} disabled={disabled} title="Apply Stash" />
-
-        <Divider />
-
-        <IconButton icon={GitBranch} onClick={() => { window.location.hash = '#/history'; }} disabled={disabled} title="Log" />
-        <IconButton icon={Search} onClick={() => { window.location.hash = '#/blame'; }} disabled={disabled} title="Blame" />
-        <IconButton icon={Search} onClick={() => { window.location.hash = '#/investigate'; }} disabled={disabled} title="Investigate" />
-
-        <Divider />
-
-        <IconButton icon={GitMerge} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow" />
-        <IconButton icon={RotateCcw} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Rebase" />
+        {groups.workflows && (
+          <>
+            <IconButton icon={GitMerge} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow" />
+            <IconButton icon={RotateCcw} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Rebase" />
+          </>
+        )}
       </div>
 
-      {/* Center: branch info (draggable area) */}
-      <div className="flex-1 flex items-center justify-center titlebar-drag">
+      {/* Center: branch info + global selections (draggable area) */}
+      <div className="flex-1 flex items-center justify-center titlebar-drag gap-2">
         {currentRepo && status ? (
           <div className="flex items-center gap-2 text-xs">
             {isInProgress && (
@@ -220,20 +272,77 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
             )}
           </div>
         ) : null}
+        {/* Global selections chips — show what's currently selected across the app */}
+        {selectedCommitHash && (
+          <span className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1" title={`Commit selected: ${selectedCommitHash}`}>
+            <GitCommit size={9} />{selectedCommitHash.substring(0, 7)}
+          </span>
+        )}
+        {selectedBranch && (
+          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-added/40 bg-status-added/10 text-status-added flex items-center gap-1" title={`Branch selected: ${selectedBranch}`}>
+            <GitBranch size={9} />{selectedBranch}
+          </span>
+        )}
+        {globalPathFilter && (
+          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/40 bg-status-modified/10 text-status-modified flex items-center gap-1" title={`File history filter: ${globalPathFilter}`}>
+            File: {globalPathFilter}
+            <button onClick={() => setGlobalPathFilter(null)} title="Clear file filter">
+              <X size={8} />
+            </button>
+          </span>
+        )}
       </div>
 
-      {/* Right: utility buttons */}
-      <div className="flex items-center gap-0.5 no-drag pr-2">
-        <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title="Repository Info" />
-        <IconButton icon={Search} onClick={() => onFind && onFind()} disabled={disabled} title="Find Object (Ctrl+F)" />
-        <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title="Open in Browser" />
-        <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title="Reveal in File Manager" />
-        <Divider />
+      {/* Right: utility buttons + customize */}
+      <div className="flex items-center gap-0.5 no-drag pr-2 relative">
+        {groups.utils && (
+          <>
+            <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title="Repository Info" />
+            <IconButton icon={Search} onClick={() => onFind && onFind()} disabled={disabled} title="Find Object (Ctrl+F)" />
+            <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title="Open in Browser" />
+            <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title="Reveal in File Manager" />
+            <Divider />
+          </>
+        )}
         <IconButton
           icon={theme === 'dark' ? Sun : Moon}
           onClick={() => toggleTheme()}
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
         />
+        {/* Customize toolbar button */}
+        <button
+          className="flex items-center justify-center w-7 h-7 rounded hover:bg-bg-hover transition-colors no-drag text-text-secondary hover:text-text-primary"
+          onClick={() => setShowCustomize(!showCustomize)}
+          title="Customize toolbar"
+        >
+          <SettingsIcon size={15} />
+        </button>
+        {showCustomize && (
+          <div className="absolute top-full right-2 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-56">
+            <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
+              Toolbar customization
+            </div>
+            <div className="py-1">
+              {(Object.keys(DEFAULT_TOOLBAR_GROUPS) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>).map(key => (
+                <label key={key} className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs">
+                  <input type="checkbox" checked={groups[key]}
+                    onChange={(e) => setGroup(key, e.target.checked)} />
+                  <span className="capitalize">{key}</span>
+                </label>
+              ))}
+            </div>
+            <div className="px-3 py-1 border-t border-border-subtle flex justify-between">
+              <button className="text-2xs text-accent"
+                onClick={() => { setGroups(DEFAULT_TOOLBAR_GROUPS); saveToolbarGroups(DEFAULT_TOOLBAR_GROUPS); }}>
+                Reset
+              </button>
+              <button className="text-2xs btn btn-primary !py-0.5 !px-2"
+                onClick={() => setShowCustomize(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Window controls (frameless) — minimize, maximize, close */}
