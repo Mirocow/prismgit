@@ -16,7 +16,6 @@ export default defineConfig({
               external: [
                 'electron',
                 'simple-git',
-                'electron-store',
                 'https',
                 'http',
                 'url',

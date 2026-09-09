@@ -1,7 +1,7 @@
-import Store from 'electron-store';
 import * as path from 'path';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata } from '../types/settings-api.js';
 import simpleGit from 'simple-git';
+import { SimpleStore } from './simpleStore.js';
 
 interface StoreSchema {
   settings: Partial<AppSettings>;
@@ -9,7 +9,7 @@ interface StoreSchema {
   repoMetadata: Record<string, RepositoryMetadata>;
 }
 
-const store = new Store<StoreSchema>({
+const store = new SimpleStore({
   name: 'smartgit-settings',
   defaults: {
     settings: {
@@ -29,27 +29,28 @@ const store = new Store<StoreSchema>({
 // ============= Settings =============
 
 export function getSetting<T = unknown>(key: string): T | undefined {
-  return store.get('settings')[key as keyof AppSettings] as T | undefined;
+  const settings = store.get('settings') as Partial<AppSettings> | undefined;
+  return settings ? settings[key as keyof AppSettings] as T : undefined;
 }
 
 export function setSetting(key: string, value: unknown): void {
-  const settings = store.get('settings');
+  const settings = (store.get('settings') || {}) as Partial<AppSettings>;
   (settings as Record<string, unknown>)[key] = value;
   store.set('settings', settings);
 }
 
 export function getAllSettings(): Partial<AppSettings> {
-  return store.get('settings');
+  return (store.get('settings') || {}) as Partial<AppSettings>;
 }
 
 // ============= Repositories =============
 
 export function getRepos(): RepositoryEntry[] {
-  return store.get('repositories');
+  return (store.get('repositories') || []) as RepositoryEntry[];
 }
 
 export function addRepo(repo: { path: string; name: string }): void {
-  const repos = store.get('repositories');
+  const repos = (store.get('repositories') || []) as RepositoryEntry[];
   const existing = repos.findIndex((r) => r.path === repo.path);
   const entry: RepositoryEntry = {
     path: repo.path,
@@ -64,7 +65,7 @@ export function addRepo(repo: { path: string; name: string }): void {
   store.set('repositories', repos);
 
   // Also create metadata entry if it doesn't exist
-  const metadata = store.get('repoMetadata');
+  const metadata = (store.get('repoMetadata') || {}) as Record<string, RepositoryMetadata>;
   if (!metadata[repo.path]) {
     metadata[repo.path] = {
       path: repo.path,
@@ -80,16 +81,15 @@ export function addRepo(repo: { path: string; name: string }): void {
 }
 
 export function removeRepo(repoPath: string): void {
-  const repos = store.get('repositories').filter((r) => r.path !== repoPath);
+  const repos = ((store.get('repositories') || []) as RepositoryEntry[]).filter((r) => r.path !== repoPath);
   store.set('repositories', repos);
-  // Also remove metadata
-  const metadata = store.get('repoMetadata');
+  const metadata = (store.get('repoMetadata') || {}) as Record<string, RepositoryMetadata>;
   delete metadata[repoPath];
   store.set('repoMetadata', metadata);
 }
 
 export function updateRepo(repoPath: string, updates: Record<string, unknown>): void {
-  const repos = store.get('repositories');
+  const repos = (store.get('repositories') || []) as RepositoryEntry[];
   const idx = repos.findIndex((r) => r.path === repoPath);
   if (idx >= 0) {
     repos[idx] = { ...repos[idx], ...updates, lastOpened: Date.now() };
@@ -104,17 +104,17 @@ export function touchRepo(repoPath: string): void {
 // ============= Repository Metadata =============
 
 export function getRepoMetadata(repoPath: string): RepositoryMetadata | null {
-  const metadata = store.get('repoMetadata');
+  const metadata = (store.get('repoMetadata') || {}) as Record<string, RepositoryMetadata>;
   return metadata[repoPath] || null;
 }
 
 export function getRepoMetadataAll(): RepositoryMetadata[] {
-  const metadata = store.get('repoMetadata');
+  const metadata = (store.get('repoMetadata') || {}) as Record<string, RepositoryMetadata>;
   return Object.values(metadata);
 }
 
 export function setRepoMetadata(repoPath: string, updates: Partial<RepositoryMetadata>): void {
-  const metadata = store.get('repoMetadata');
+  const metadata = (store.get('repoMetadata') || {}) as Record<string, RepositoryMetadata>;
   const existing = metadata[repoPath] || {
     path: repoPath,
     name: path.basename(repoPath),
@@ -138,7 +138,7 @@ export function updateRepoMetadata(repoPath: string, updates: Partial<Repository
 }
 
 export function deleteRepoMetadata(repoPath: string): void {
-  const metadata = store.get('repoMetadata');
+  const metadata = (store.get('repoMetadata') || {}) as Record<string, RepositoryMetadata>;
   delete metadata[repoPath];
   store.set('repoMetadata', metadata);
 }

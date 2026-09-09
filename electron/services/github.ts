@@ -1,7 +1,7 @@
 import * as https from 'https';
 import * as http from 'http';
 import { URL } from 'url';
-import Store from 'electron-store';
+import { SimpleStore } from './simpleStore.js';
 import type { GithubUser, GithubRepository, GithubPullRequest } from '../types/github-api.js';
 
 interface AuthState {
@@ -9,13 +9,13 @@ interface AuthState {
   user?: GithubUser;
 }
 
-const store = new Store<{ github?: AuthState; settings?: { githubPAT?: string } }>({
+const store = new SimpleStore({
   name: 'smartgit-github',
   defaults: {},
 });
 
 function getAuthState(): AuthState {
-  return store.get('github') || {};
+  return (store.get('github') || {}) as AuthState;
 }
 
 function setAuthState(state: AuthState): void {

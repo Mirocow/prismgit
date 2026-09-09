@@ -1,12 +1,12 @@
 import { app, BrowserWindow, Menu, ipcMain, dialog, shell, nativeImage } from 'electron';
 import * as path from 'path';
-import Store from 'electron-store';
 import { registerGitIpc } from './ipc/git.js';
 import { registerFsIpc } from './ipc/fs.js';
 import { registerGithubIpc } from './ipc/github.js';
 import { registerWindowIpc } from './ipc/window.js';
 import { registerSettingsIpc } from './ipc/settings.js';
 import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
+import { SimpleStore } from './services/simpleStore.js';
 import { buildAppMenu } from './menu.js';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
@@ -18,7 +18,7 @@ interface WindowState {
   isFullScreen?: boolean;
 }
 
-const windowStateStore = new Store<{ windowState?: WindowState }>({
+const windowStateStore = new SimpleStore({
   name: 'smartgit-window-state',
   defaults: {},
 });
@@ -41,7 +41,7 @@ function saveWindowState(): void {
 }
 
 function createWindow(): BrowserWindow {
-  const savedState = windowStateStore.get('windowState') || {};
+  const savedState = (windowStateStore.get('windowState') || {}) as WindowState;
   const bounds = savedState.bounds || { width: 1440, height: 900, x: undefined, y: undefined };
 
   const win = new BrowserWindow({
