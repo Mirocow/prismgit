@@ -129,11 +129,14 @@ export function DiffViewer({ diff, loading, repoPath, filePath, onStageLines }: 
         if (seg.kind === 'equal') {
           return <span key={i}>{seg.text}</span>;
         }
-        // Highlight added/removed word with a stronger background
+        // Highlight added/removed word with a stronger background — theme-aware via CSS variables
         const highlightClass = seg.kind === 'added'
-          ? 'bg-status-added/30 rounded-sm'
-          : 'bg-status-deleted/30 rounded-sm line-through';
-        return <span key={i} className={highlightClass}>{seg.text}</span>;
+          ? 'rounded-sm'
+          : 'rounded-sm line-through';
+        const highlightStyle = seg.kind === 'added'
+          ? { backgroundColor: 'var(--diff-added-word)' }
+          : { backgroundColor: 'var(--diff-removed-word)' };
+        return <span key={i} className={highlightClass} style={highlightStyle}>{seg.text}</span>;
       });
     },
     [useWordDiff, lang]

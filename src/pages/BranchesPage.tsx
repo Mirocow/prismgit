@@ -389,7 +389,7 @@ export function BranchesPage() {
 
       {/* New branch dialog */}
       {showNewDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowNewDialog(false)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowNewDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-4 flex items-center gap-2">
               <GitBranch size={16} /> New Branch

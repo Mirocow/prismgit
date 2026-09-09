@@ -667,7 +667,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                     >
                       {/* Author badge */}
                       <span
-                        className="flex-shrink-0 rounded text-white font-bold text-center"
+                        className="flex-shrink-0 rounded author-badge text-center"
                         style={{
                           backgroundColor: color.bg,
                           width: 24,

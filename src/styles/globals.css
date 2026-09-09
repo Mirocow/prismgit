@@ -61,10 +61,12 @@
   --status-error: #f07171;
   --status-info: #399ee6;
 
-  --diff-added-bg: rgba(134, 179, 0, 0.12);
-  --diff-removed-bg: rgba(240, 113, 113, 0.12);
-  --diff-added-line: rgba(134, 179, 0, 0.05);
-  --diff-removed-line: rgba(240, 113, 113, 0.05);
+  --diff-added-bg: rgba(134, 179, 0, 0.22);
+  --diff-removed-bg: rgba(240, 113, 113, 0.22);
+  --diff-added-line: rgba(134, 179, 0, 0.10);
+  --diff-removed-line: rgba(240, 113, 113, 0.10);
+  --diff-added-word: rgba(134, 179, 0, 0.40);
+  --diff-removed-word: rgba(240, 113, 113, 0.40);
 
   --tag-bg: rgba(57, 158, 230, 0.08);
   --tag-border: rgba(57, 158, 230, 0.3);
@@ -135,10 +137,12 @@
   --status-error: #F26D78;
   --status-info: #39BAE6;
 
-  --diff-added-bg: rgba(170, 217, 76, 0.12);
-  --diff-removed-bg: rgba(242, 109, 120, 0.12);
-  --diff-added-line: rgba(170, 217, 76, 0.06);
-  --diff-removed-line: rgba(242, 109, 120, 0.06);
+  --diff-added-bg: rgba(170, 217, 76, 0.18);
+  --diff-removed-bg: rgba(242, 109, 120, 0.18);
+  --diff-added-line: rgba(170, 217, 76, 0.08);
+  --diff-removed-line: rgba(242, 109, 120, 0.08);
+  --diff-added-word: rgba(170, 217, 76, 0.35);
+  --diff-removed-word: rgba(242, 109, 120, 0.35);
 
   --tag-bg: rgba(57, 186, 230, 0.10);
   --tag-border: rgba(57, 186, 230, 0.3);
@@ -289,6 +293,31 @@ input:focus, textarea:focus, select:focus {
 
 .btn-danger:hover {
   background-color: #ff7a85;
+}
+
+/* Author badge — colored background with theme-aware text color.
+   In light theme: dark text on light colored backgrounds for contrast.
+   In dark theme: white text on dark colored backgrounds. */
+.author-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  border-radius: 2px;
+  color: var(--author-text, #ffffff);
+  flex-shrink: 0;
+}
+
+:root {
+  --author-text: #ffffff;
+  --overlay-bg: rgba(0, 0, 0, 0.30);
+  --overlay-backdrop: blur(2px);
+}
+
+.dark {
+  --author-text: #ffffff;
+  --overlay-bg: rgba(0, 0, 0, 0.55);
+  --overlay-backdrop: blur(2px);
 }
 
 .icon-btn {

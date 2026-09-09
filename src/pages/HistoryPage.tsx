@@ -718,7 +718,7 @@ export function HistoryPage() {
 
                     <span className={cn('flex-1 truncate text-xs', isSelected && 'font-medium')}>{entry.subject}</span>
 
-                    <span className="flex-shrink-0 rounded text-white font-bold text-center"
+                    <span className="flex-shrink-0 rounded author-badge text-center"
                       style={{ backgroundColor: color.bg, width: 24, height: 16, fontSize: 8, lineHeight: '16px' }}>
                       {initials}
                     </span>
@@ -748,7 +748,7 @@ export function HistoryPage() {
                 </button>
               </div>
               <div className="flex items-center gap-2 mb-3">
-                <span className="flex-shrink-0 rounded text-white font-bold text-center"
+                <span className="flex-shrink-0 rounded author-badge text-center"
                   style={{ backgroundColor: getAuthorColor(selected.author.name).bg, width: 28, height: 18, fontSize: 9, lineHeight: '18px' }}>
                   {getInitials(selected.author.name)}
                 </span>
@@ -873,7 +873,7 @@ export function HistoryPage() {
 
       {/* Create Tag dialog */}
       {showTagDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowTagDialog(false)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowTagDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-1 flex items-center gap-2">
               <TagIcon size={16} /> Create Tag at {shortHash(tagTarget || '')}
@@ -912,7 +912,7 @@ export function HistoryPage() {
 
       {/* Create Branch dialog */}
       {showBranchDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowBranchDialog(false)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowBranchDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-1 flex items-center gap-2">
               <GitBranch size={16} /> Create Branch at {shortHash(branchTarget || '')}
