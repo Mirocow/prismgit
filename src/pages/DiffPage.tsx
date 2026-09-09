@@ -6,6 +6,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type DiffResult, type LogEntry, type BranchInfo, type CommitFile } from '../lib/api';
 import { DiffViewer } from '../components/DiffViewer';
+import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { cn, shortHash } from '../lib/utils';
 import { useLazyList } from '../lib/useLazyList';
 
@@ -44,6 +45,9 @@ export function DiffPage() {
   // File list for multi-file diff (when filePath === '.')
   const [changedFiles, setChangedFiles] = useState<CommitFile[]>([]);
   const [selectedFileInList, setSelectedFileInList] = useState<string | null>(null);
+
+  // Resizable width of the changed-files tree panel (drag splitter between tree and diff)
+  const { width: treeWidth, handleResize: handleTreeResize } = useResizableWidth(224, 140, 560);
 
   // Pre-fill from global selections
   useEffect(() => {
@@ -278,11 +282,12 @@ export function DiffPage() {
         {loading ? 'Computing diff...' : title} · {selectedFileInList || filePath}
       </div>
 
-      {/* Body: file list (left, when multi-file) + diff viewer (right) */}
+      {/* Body: file list (left, when multi-file) + splitter + diff viewer (right) */}
       <div className="flex-1 flex overflow-hidden">
         {/* File list sidebar — shown when comparing all files ('.') */}
         {changedFiles.length > 0 && (
-          <div className="w-56 flex-shrink-0 border-r border-border-default overflow-y-auto bg-bg-secondary">
+          <>
+          <div className="flex-shrink-0 overflow-y-auto bg-bg-secondary" style={{ width: treeWidth }}>
             <div className="px-2 py-1 text-2xs font-semibold uppercase text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary">
               Changed Files ({changedFiles.length})
             </div>
@@ -309,6 +314,8 @@ export function DiffPage() {
               </div>
             )}
           </div>
+          <ResizableSplitter direction="horizontal" onResize={handleTreeResize} />
+          </>
         )}
 
         {/* Diff viewer — scrollable */}
