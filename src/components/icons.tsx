@@ -142,6 +142,20 @@ export const ChevronUp = (p: IconProps) => (
   </Icon>
 );
 
+export const ChevronsUpDown = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="7 15 12 20 17 15" />
+    <polyline points="7 9 12 4 17 9" />
+  </Icon>
+);
+
+export const ChevronsDownUp = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="7 20 12 15 17 20" />
+    <polyline points="7 4 12 9 17 4" />
+  </Icon>
+);
+
 export const Search = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="11" cy="11" r="8" />

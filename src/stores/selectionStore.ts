@@ -63,6 +63,8 @@ export interface GlobalSelectionState {
   fileFilterRegex: boolean;
   /** Whether the directory tree panel is visible on the Changes page. */
   dirTreeVisible: boolean;
+  /** Column widths (px) for the Changes file table: State and Relative Directory. */
+  colWidths: { state: number; dir: number };
 
   // Actions
   selectCommit: (hash: string | null) => void;
@@ -85,6 +87,8 @@ export interface GlobalSelectionState {
   setFileSort: (sort: { key: 'name' | 'state' | 'dir'; dir: 1 | -1 }) => void;
   toggleFileFilterRegex: () => void;
   toggleDirTreeVisible: () => void;
+  /** Set the width (px) of one of the resizable Changes table columns. */
+  setColWidth: (col: 'state' | 'dir', width: number) => void;
   /** Clear all selections (e.g. when switching repos). */
   clearAll: () => void;
 }
@@ -108,6 +112,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   fileSort: { key: 'name', dir: 1 },
   fileFilterRegex: false,
   dirTreeVisible: true,
+  colWidths: { state: 70, dir: 120 },
 
   selectCommit: (hash) => set({ selectedCommitHash: hash }),
   selectBranch: (name) => set({
@@ -144,6 +149,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   setFileSort: (sort) => set({ fileSort: sort }),
   toggleFileFilterRegex: () => set({ fileFilterRegex: !get().fileFilterRegex }),
   toggleDirTreeVisible: () => set({ dirTreeVisible: !get().dirTreeVisible }),
+  setColWidth: (col, width) => set((s) => ({ colWidths: { ...s.colWidths, [col]: width } })),
   clearAll: () => set({
     selectedCommitHash: null,
     selectedBranch: null,
