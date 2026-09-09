@@ -13,6 +13,7 @@ import { cn, shortHash, copyToClipboard } from '../lib/utils';
 import { getInitials, getAuthorColor, formatTime } from '../lib/authorBadges';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
+import { CommitHashLink } from '../components/StatusBar';
 import { computeGraph, bezierPath, laneColor, BRANCH_COLORS } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
 import type { GraphNode } from '../lib/gitGraph';
@@ -738,7 +739,7 @@ export function HistoryPage() {
             <div className="p-3">
               <div className="text-sm font-medium text-text-primary mb-2">{selected.subject}</div>
               <div className="flex items-center gap-2 mb-3">
-                <code className="text-2xs font-mono px-1.5 py-0.5 bg-bg-tertiary rounded">{shortHash(selected.hash)}</code>
+                <CommitHashLink hash={selected.hash} />
                 <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>
                   <Copy size={10} />
                 </button>
@@ -762,7 +763,7 @@ export function HistoryPage() {
                   {selected.parents.map((p, i) => (
                     <div key={i} className="flex items-center gap-1">
                       <CornerDownRight size={10} className="text-text-tertiary" />
-                      <code className="text-2xs font-mono text-accent">{shortHash(p)}</code>
+                      <CommitHashLink hash={p} />
                     </div>
                   ))}
                 </div>
@@ -810,12 +811,47 @@ export function HistoryPage() {
                   <div className="space-y-0.5">
                     {loadingFiles ? <div className="text-2xs text-text-tertiary">Loading...</div> :
                       commitFiles.map((f, i) => (
-                        <div key={i} className="flex items-center gap-1 text-2xs px-1 py-0.5 rounded hover:bg-bg-hover">
+                        <div key={i} className="flex items-center gap-1 text-2xs px-1 py-0.5 rounded hover:bg-bg-hover cursor-pointer group"
+                          onClick={() => {
+                            // Click on file in commit → set path filter + navigate to file history
+                            useSelectionStore.getState().selectFile(f.path);
+                            useSelectionStore.getState().setPathFilter(f.path);
+                            window.location.hash = '#/history';
+                          }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const items: ContextMenuItem[] = [
+                              { label: 'View file history...', clickId: 'file-history' },
+                              { label: 'Blame this file...', clickId: 'blame' },
+                              { type: 'separator' },
+                              { label: 'Copy path', clickId: 'copy-path' },
+                              { label: 'Copy full path', clickId: 'copy-full-path' },
+                            ];
+                            showContextMenu(items, (action) => {
+                              if (action === 'file-history') {
+                                useSelectionStore.getState().selectFile(f.path);
+                                useSelectionStore.getState().setPathFilter(f.path);
+                                window.location.hash = '#/history';
+                              } else if (action === 'blame') {
+                                useSelectionStore.getState().selectFile(f.path);
+                                window.location.hash = '#/blame';
+                              } else if (action === 'copy-path') {
+                                copyToClipboard(f.path);
+                                toast.success('Path copied');
+                              } else if (action === 'copy-full-path') {
+                                copyToClipboard(`${repo.path}/${f.path}`.replace(/\/+/g, '/'));
+                                toast.success('Full path copied');
+                              }
+                            });
+                          }}
+                          title="Click to view file history · Right-click for more actions"
+                        >
                           <span className="font-mono font-bold w-3 text-center"
                             style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
                             {f.status}
                           </span>
-                          <span className="flex-1 truncate font-mono text-text-secondary">{f.path}</span>
+                          <span className="flex-1 truncate font-mono text-text-secondary group-hover:text-text-primary">{f.path}</span>
                           {!f.binary && (f.additions > 0 || f.deletions > 0) && (
                             <span className="text-2xs flex-shrink-0">
                               <span className="text-status-added">+{f.additions}</span>
