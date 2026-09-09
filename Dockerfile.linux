@@ -1,0 +1,74 @@
+# =============================================================================
+# SmartGit Electron — Linux Build
+# =============================================================================
+# Builds Linux installers: AppImage, .deb, .rpm
+# =============================================================================
+
+FROM docker.io/library/node:20-bookworm-slim AS builder
+
+# Install native build dependencies for Electron on Linux
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    pkg-config \
+    git \
+    ca-certificates \
+    # Electron native dependencies
+    libsecret-1-dev \
+    libgtk-3-dev \
+    libnotify-dev \
+    libnss3-dev \
+    libxss1 \
+    libxtst-dev \
+    xauth \
+    xvfb \
+    libgbm-dev \
+    libasound2-dev \
+    libdbus-1-dev \
+    libxkbcommon-dev \
+    libwayland-dev \
+    # Image tools for icons
+    icnsutils \
+    imagemagick \
+    graphicsmagick \
+    # Helper tools
+    curl \
+    unzip \
+    rsync \
+    # For .rpm generation
+    rpm \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package files first (better layer caching)
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --no-audit --no-fund
+
+# Copy source code
+COPY . .
+
+# Build the renderer and main process
+RUN npm run build
+
+# Build Linux installers
+RUN npx electron-builder --linux --x64
+
+# =============================================================================
+# Runtime stage — minimal image with built artifacts
+# =============================================================================
+FROM docker.io/library/debian:bookworm-slim AS runtime
+
+# Copy release artifacts from builder
+COPY --from=builder /app/release /release
+
+# Add a simple entrypoint script that lists artifacts
+RUN echo '#!/bin/sh\nls -lh /release/\nfind /release -type f -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" | while read f; do echo "$f"; done' > /usr/local/bin/list-artifacts \
+  && chmod +x /usr/local/bin/list-artifacts
+
+CMD ["list-artifacts"]

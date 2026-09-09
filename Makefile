@@ -144,9 +144,24 @@ package-mac: build ## Package for macOS (dmg, zip)
 # =============================================================================
 
 .PHONY: docker-build
-docker-build: ## Build Docker image (Linux base, with Wine)
-        @echo "$(COLOR_YELLOW)→ Building Docker image...$(COLOR_RESET)"
-        $(DOCKER) build -t $(APP_NAME):builder .
+docker-build: ## Build Docker image for Linux (default)
+        @echo "$(COLOR_BOLD)$(COLOR_BLUE)→ Building Linux Docker image...$(COLOR_RESET)"
+        $(DOCKER) build -t $(APP_NAME):linux -f Dockerfile.linux .
+
+.PHONY: docker-build-win
+docker-build-win: ## Build Docker image for Windows (with Wine)
+        @echo "$(COLOR_BOLD)$(COLOR_BLUE)→ Building Windows Docker image...$(COLOR_RESET)"
+        $(DOCKER) build -t $(APP_NAME):win -f Dockerfile.win .
+
+.PHONY: docker-build-mac
+docker-build-mac: ## Build Docker image for macOS
+        @echo "$(COLOR_BOLD)$(COLOR_BLUE)→ Building macOS Docker image...$(COLOR_RESET)"
+        $(DOCKER) build -t $(APP_NAME):mac -f Dockerfile.mac --build-arg ARCH=x64 .
+
+.PHONY: docker-build-mac-arm64
+docker-build-mac-arm64: ## Build Docker image for macOS ARM64
+        @echo "$(COLOR_BOLD)$(COLOR_BLUE)→ Building macOS ARM64 Docker image...$(COLOR_RESET)"
+        $(DOCKER) build -t $(APP_NAME):mac-arm64 -f Dockerfile.mac --build-arg ARCH=arm64 .
 
 .PHONY: docker-all
 docker-all: docker-linux docker-win docker-mac docker-mac-arm64 ## Build all platforms via Docker

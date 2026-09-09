@@ -1,0 +1,86 @@
+# =============================================================================
+# SmartGit Electron — Windows Build (cross-compile via Wine)
+# =============================================================================
+# Builds Windows installers: .exe (NSIS), .msi
+# Uses Wine for cross-compilation on Linux
+# =============================================================================
+
+FROM docker.io/library/node:20-bookworm-slim AS builder
+
+# Enable i386 architecture for Wine32 (required for some Windows tooling)
+RUN dpkg --add-architecture i386 \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    pkg-config \
+    git \
+    ca-certificates \
+    # Electron native dependencies
+    libsecret-1-dev \
+    libgtk-3-dev \
+    libnotify-dev \
+    libnss3-dev \
+    libxss1 \
+    libxtst-dev \
+    libgbm-dev \
+    libasound2-dev \
+    libdbus-1-dev \
+    # Image tools for icons
+    icnsutils \
+    imagemagick \
+    graphicsmagick \
+    # Wine for Windows cross-compile (i386 + amd64)
+    # NOTE: winetricks is not available in Bookworm — we don't need it
+    wine64 \
+    wine32 \
+    wine \
+    # Helper tools
+    curl \
+    unzip \
+    rsync \
+    # For unzip of zip archives
+    p7zip-full \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+# Initialize Wine prefix (avoids first-run prompts during build)
+ENV WINEPREFIX=/tmp/wine
+ENV WINEDEBUG=-all
+ENV DISPLAY=
+
+# Create wine prefix non-interactively
+RUN mkdir -p $WINEPREFIX \
+  && wineboot --init 2>/dev/null || true \
+  && wineserver --wait 2>/dev/null || true
+
+WORKDIR /app
+
+# Copy package files first (better layer caching)
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --no-audit --no-fund
+
+# Copy source code
+COPY . .
+
+# Build the renderer and main process
+RUN npm run build
+
+# Build Windows installers
+# electron-builder uses Wine internally for NSIS
+RUN npx electron-builder --win --x64
+
+# =============================================================================
+# Runtime stage — minimal image with built artifacts
+# =============================================================================
+FROM docker.io/library/debian:bookworm-slim AS runtime
+
+COPY --from=builder /app/release /release
+
+RUN echo '#!/bin/sh\nls -lh /release/\nfind /release -type f \( -name "*.exe" -o -name "*.msi" \) | while read f; do echo "$f"; done' > /usr/local/bin/list-artifacts \
+  && chmod +x /usr/local/bin/list-artifacts
+
+CMD ["list-artifacts"]

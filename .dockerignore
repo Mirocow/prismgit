@@ -34,14 +34,15 @@ npm-debug.log*
 scripts/__pycache__/
 *.pyc
 
-# Docker
-Dockerfile
+# Docker (avoid recursive context)
+Dockerfile*
+docker-compose*.yml
 .dockerignore
-docker-compose.yml
 
 # Docs
 *.md
 !README.md
+docs/
 
 # Test
 coverage/
@@ -50,3 +51,6 @@ coverage/
 # Env
 .env
 .env.local
+
+# Release directories (per platform)
+release/

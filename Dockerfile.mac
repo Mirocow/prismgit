@@ -1,0 +1,76 @@
+# =============================================================================
+# SmartGit Electron — macOS Build
+# =============================================================================
+# Builds macOS installers: .dmg, .zip (unsigned)
+# Note: For signed/notarized builds, use a macOS runner
+# =============================================================================
+
+FROM docker.io/library/node:20-bookworm-slim AS builder
+
+# Install build dependencies
+# Note: macOS builds don't need Wine, only electron-builder
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    pkg-config \
+    git \
+    ca-certificates \
+    # Electron native dependencies
+    libsecret-1-dev \
+    libgtk-3-dev \
+    libnotify-dev \
+    libnss3-dev \
+    libxss1 \
+    libxtst-dev \
+    libgbm-dev \
+    libasound2-dev \
+    libdbus-1-dev \
+    # Image tools for icons (icns for macOS .icns)
+    icnsutils \
+    imagemagick \
+    graphicsmagick \
+    # Helper tools
+    curl \
+    unzip \
+    rsync \
+    # For extracting macOS DMG (hdiutil alternative)
+    p7zip-full \
+    liblzma-dev \
+    zlib1g \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package files first (better layer caching)
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --no-audit --no-fund
+
+# Copy source code
+COPY . .
+
+# Build the renderer and main process
+RUN npm run build
+
+# Accept the build arch as an argument (x64 or arm64)
+ARG ARCH=x64
+
+# Build macOS installers
+# Note: produces unsigned .dmg and .zip
+RUN npx electron-builder --mac --${ARCH}
+
+# =============================================================================
+# Runtime stage — minimal image with built artifacts
+# =============================================================================
+FROM docker.io/library/debian:bookworm-slim AS runtime
+
+COPY --from=builder /app/release /release
+
+RUN echo '#!/bin/sh\nls -lh /release/\nfind /release -type f \( -name "*.dmg" -o -name "*.zip" \) | while read f; do echo "$f"; done' > /usr/local/bin/list-artifacts \
+  && chmod +x /usr/local/bin/list-artifacts
+
+CMD ["list-artifacts"]
