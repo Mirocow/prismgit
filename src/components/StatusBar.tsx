@@ -73,7 +73,12 @@ export function StatusBar() {
           <span className="w-1.5 h-1.5 rounded-full bg-status-success inline-block" />
           Ready
         </span>
-        <span className="font-mono">PrismGit v2.0</span>
+        <span className="flex items-center gap-3">
+          <span className="hidden sm:inline">
+            Press <kbd>Ctrl</kbd>+<kbd>?</kbd> for shortcuts
+          </span>
+          <span className="font-mono">PrismGit v2.0</span>
+        </span>
       </footer>
     );
   }

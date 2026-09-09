@@ -924,9 +924,19 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             </span>
           )}
           {hiddenCount > 0 && (
-            <span className="text-2xs text-text-tertiary" title="Tracked files without changes">
+            <button
+              className="clickable-text text-2xs"
+              title="Tracked files without changes. Click to toggle visibility."
+              onClick={() => {
+                // Toggle showing all tracked files (even unchanged).
+                // We piggyback on the file status filter — when ALL is set,
+                // the file list includes unchanged tracked files too.
+                const store = useSelectionStore.getState();
+                store.setFileStatusFilter(store.fileStatusFilter === 'all' ? 'modified' : 'all');
+              }}
+            >
               {hiddenCount.toLocaleString()} files hidden
-            </span>
+            </button>
           )}
         </div>
         <div className="flex items-center gap-1">

@@ -93,12 +93,18 @@ export function TagsPage() {
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+          <div className="empty-state">
+            <div className="spinner mb-3" />
+            <div className="empty-state-title">Loading tags...</div>
+          </div>
         ) : tags.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-            <TagIcon size={32} className="mb-2 opacity-50" />
-            <div className="text-sm">No tags</div>
-            <div className="text-xs mt-1">Create a tag to mark a release or important commit</div>
+          <div className="empty-state">
+            <TagIcon size={48} className="empty-state-icon" />
+            <div className="empty-state-title">No tags yet</div>
+            <div className="empty-state-desc">
+              Tags mark specific commits — useful for releases, milestones, or
+              important checkpoints. Click "New Tag" above to create one.
+            </div>
           </div>
         ) : (
           <>

@@ -87,6 +87,13 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
             getMainWindow()?.webContents.send('menu:toggleTheme');
           },
         },
+        {
+          label: 'Keyboard Shortcuts...',
+          accelerator: 'CmdOrCtrl+/',
+          click: () => {
+            getMainWindow()?.webContents.send('menu:showShortcuts');
+          },
+        },
       ],
     },
     {

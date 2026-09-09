@@ -8,7 +8,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToolbarStore, DEFAULT_TOOLBAR_GROUPS, type ToolbarGroups, type ToolbarGroupKey } from '../stores/toolbarStore';
 import { useToastStore } from '../stores/toastStore';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, ExternalLink, EyeOff, FilePlus, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -60,10 +60,10 @@ interface ToolbarProps {
   onGitFlow?: () => void;
   onInteractiveRebase?: () => void;
   onRepoInfo?: () => void;
-  onApplyPatch?: () => void;
+  onShowShortcuts?: () => void;
 }
 
-export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, onApplyPatch }: ToolbarProps = {}) {
+export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts }: ToolbarProps = {}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const currentMetadata = useRepositoryStore((s) => s.currentMetadata);
   const status = useGitStore((s) => s.status);
@@ -251,10 +251,14 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
             <IconButton icon={Search} onClick={() => onFind && onFind()} disabled={disabled} title="Find Object (Ctrl+F)" />
             <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title="Open in Browser" />
             <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title="Reveal in File Manager" />
-            <IconButton icon={FilePlus} onClick={() => onApplyPatch && onApplyPatch()} disabled={disabled} title="Apply Patch (git apply)" />
             <Divider />
           </>
         )}
+        <IconButton
+          icon={Keyboard}
+          onClick={() => onShowShortcuts && onShowShortcuts()}
+          title="Keyboard Shortcuts (Ctrl+?)"
+        />
         <IconButton
           icon={theme === 'dark' ? Sun : Moon}
           onClick={() => toggleTheme()}

@@ -13,8 +13,7 @@ import { GitFlowDialog } from './components/GitFlowDialog';
 import { InteractiveRebaseDialog } from './components/InteractiveRebaseDialog';
 import { ConflictSolver } from './components/ConflictSolver';
 import { RepoInfoDialog } from './components/RepoInfoDialog';
-import { SequencerPanel } from './components/SequencerPanel';
-import { ApplyPatchModal } from './components/ApplyPatchModal';
+import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSettingsStore } from './stores/settingsStore';
@@ -42,8 +41,6 @@ const TagsPage = lazy(() => import('./pages/TagsPage').then(m => ({ default: m.T
 const SubmodulesPage = lazy(() => import('./pages/SubmodulesPage').then(m => ({ default: m.SubmodulesPage })));
 const WorktreesPage = lazy(() => import('./pages/WorktreesPage').then(m => ({ default: m.WorktreesPage })));
 const ReflogPage = lazy(() => import('./pages/ReflogPage').then(m => ({ default: m.ReflogPage })));
-const RemotesPage = lazy(() => import('./pages/RemotesPage').then(m => ({ default: m.RemotesPage })));
-const BisectPage = lazy(() => import('./pages/BisectPage').then(m => ({ default: m.BisectPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
 
 function PageLoader() {
@@ -72,9 +69,9 @@ export default function App() {
   const [showGitFlow, setShowGitFlow] = useState(false);
   const [showIRebase, setShowIRebase] = useState(false);
   const [showRepoInfo, setShowRepoInfo] = useState(false);
-  const [showApplyPatch, setShowApplyPatch] = useState(false);
   const [conflictFile, setConflictFile] = useState<string | null>(null);
   const [dismissRebase, setDismissRebase] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   useEffect(() => {
     loadRepos();
@@ -128,6 +125,7 @@ export default function App() {
     const handleToggleTheme = () => useSettingsStore.getState().toggleTheme();
     const handleGitFlow = () => setShowGitFlow(true);
     const handleIRebase = () => setShowIRebase(true);
+    const handleShowShortcuts = () => setShowShortcuts(true);
 
     const cleanups = [
       window.smartgit.events.on('menu:openRepository', (path) => handleOpenRepo(path as string)),
@@ -140,6 +138,7 @@ export default function App() {
       window.smartgit.events.on('menu:toggleTheme', handleToggleTheme),
       window.smartgit.events.on('menu:gitFlow', handleGitFlow),
       window.smartgit.events.on('menu:interactiveRebase', handleIRebase),
+      window.smartgit.events.on('menu:showShortcuts', handleShowShortcuts),
     ];
     return () => cleanups.forEach((fn) => fn && fn());
   }, [toast]);
@@ -164,6 +163,29 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'R' && !isInInput) {
         e.preventDefault();
         setShowIRebase(true);
+      }
+      // Keyboard shortcuts overlay: Ctrl+? (Shift+/ produces ?) or Ctrl+/
+      if ((e.ctrlKey || e.metaKey) && (e.key === '?' || e.key === '/')) {
+        e.preventDefault();
+        setShowShortcuts(s => !s);
+      }
+      // Alt+number navigation: Alt+1=Changes, Alt+2=History, Alt+3=Diff,
+      // Alt+4=Branches, Alt+5=Tags, Alt+6=Stashes, Alt+, =Settings
+      if (e.altKey && !isInInput && currentRepo) {
+        const altMap: Record<string, string> = {
+          '1': '/changes',
+          '2': '/history',
+          '3': '/diff',
+          '4': '/branches',
+          '5': '/tags',
+          '6': '/stashes',
+          ',': '/settings',
+        };
+        const target = altMap[e.key];
+        if (target) {
+          e.preventDefault();
+          navigate(target);
+        }
       }
       // Window style shortcuts: Ctrl+Shift+1/2/3
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && !isInInput) {
@@ -239,7 +261,7 @@ export default function App() {
   if (!currentRepo) {
     return (
       <div className="flex flex-col h-screen">
-        <Toolbar onFind={handleFind} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onApplyPatch={() => setShowApplyPatch(true)} />
+        <Toolbar onFind={handleFind} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onShowShortcuts={() => setShowShortcuts(true)} />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex-1 overflow-hidden flex flex-col">
@@ -267,7 +289,7 @@ export default function App() {
         onGitFlow={() => setShowGitFlow(true)}
         onInteractiveRebase={() => setShowIRebase(true)}
         onRepoInfo={() => setShowRepoInfo(true)}
-        onApplyPatch={() => setShowApplyPatch(true)}
+        onShowShortcuts={() => setShowShortcuts(true)}
       />
       <GitToolbar
         onGitFlow={() => setShowGitFlow(true)}
@@ -297,8 +319,6 @@ export default function App() {
               <Route path="/submodules" element={<SubmodulesPage />} />
               <Route path="/worktrees" element={<WorktreesPage />} />
               <Route path="/reflog" element={<ReflogPage />} />
-              <Route path="/remotes" element={<RemotesPage />} />
-              <Route path="/bisect" element={<BisectPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </Suspense>
@@ -312,19 +332,12 @@ export default function App() {
       <GitFlowDialog open={showGitFlow} onClose={() => setShowGitFlow(false)} />
       <InteractiveRebaseDialog open={showIRebase} onClose={() => setShowIRebase(false)} />
       <RepoInfoDialog open={showRepoInfo} onClose={() => setShowRepoInfo(false)} />
-      <ApplyPatchModal open={showApplyPatch} onClose={() => setShowApplyPatch(false)} />
+      <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       {conflictFile && (
         <ConflictSolver filePath={conflictFile} onClose={() => setConflictFile(null)} />
       )}
       {showRebasePanel && (
         <RebasePanel onClose={() => setDismissRebase(true)} />
-      )}
-      {/* Cherry-pick / revert in progress — continue/abort controls */}
-      {currentRepo && status?.isCherryPicking && (
-        <SequencerPanel kind="cherry-pick" repoPath={currentRepo.path} onClose={() => {}} />
-      )}
-      {currentRepo && status?.isReverting && (
-        <SequencerPanel kind="revert" repoPath={currentRepo.path} onClose={() => {}} />
       )}
     </div>
   );

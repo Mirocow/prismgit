@@ -147,12 +147,18 @@ export function StashesPage() {
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+          <div className="empty-state">
+            <div className="spinner mb-3" />
+            <div className="empty-state-title">Loading stashes...</div>
+          </div>
         ) : stashes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-            <Package size={32} className="mb-2 opacity-50" />
-            <div className="text-sm">No stashes</div>
-            <div className="text-xs mt-1">Stash your changes to save them temporarily</div>
+          <div className="empty-state">
+            <Package size={48} className="empty-state-icon" />
+            <div className="empty-state-title">No stashes yet</div>
+            <div className="empty-state-desc">
+              Stashes save your uncommitted changes temporarily so you can switch
+              branches or pull updates without losing work. Click "Stash Changes" above.
+            </div>
           </div>
         ) : (
           stashes.map((s) => (

@@ -592,3 +592,348 @@ input[type="checkbox"], input[type="radio"] {
 .resizable-panel {
   position: relative;
 }
+
+/* ===========================================================================
+ * UX Polish: Focus rings + keyboard nav affordances
+ * ===========================================================================
+ *
+ * Visible focus indicators are critical for keyboard users. We use a
+ * 2px accent-colored ring with a 1px offset so it doesn't overlap the
+ * element's border. This matches Windows 11 / macOS system focus rings.
+ *
+ * We only show focus rings when the user is navigating by keyboard
+ * (:focus-visible), not on every mouse click (which would be noisy).
+ */
+
+/* Focus-visible: only shown when navigating by keyboard (Tab/Shift+Tab) */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 3px;
+  z-index: 1;
+  position: relative;
+}
+
+/* Remove the default browser outline (we replace it with focus-visible above) */
+*:focus {
+  outline: none;
+}
+
+/* Buttons get a subtle box-shadow on focus-visible for extra prominence */
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+
+/* Inputs: use a thinner focus ring (they already have a border) */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+/* List items (sidebar nav, file rows, commit rows): left accent border */
+.list-item:focus-visible,
+[role="option"]:focus-visible,
+[role="treeitem"]:focus-visible,
+aside nav button:focus-visible {
+  outline: none;
+  background-color: var(--bg-active);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* ===========================================================================
+ * UX Polish: Hover states — make interactive elements feel tactile
+ * ===========================================================================
+ */
+
+/* Smooth transition on all interactive elements */
+button,
+a,
+[role="button"],
+.list-item,
+select {
+  transition: background-color 0.15s ease, color 0.15s ease,
+    border-color 0.15s ease, box-shadow 0.15s ease, transform 0.08s ease;
+}
+
+/* Buttons: subtle press feedback */
+button:active:not(:disabled),
+[role="button"]:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* ===========================================================================
+ * UX Polish: Tooltip shortcut hints
+ * ===========================================================================
+ *
+ * When a button has title="... (Ctrl+K)" the shortcut is shown in a
+ * subtle grey below the main tooltip text. This is handled by the
+ * native title attribute + a kbd-styled span where applicable.
+ */
+
+/* kbd element styling — for keyboard shortcut hints in tooltips */
+kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-secondary);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  box-shadow: 0 1px 0 var(--border-subtle);
+}
+
+/* ===========================================================================
+ * UX Polish: Empty states — make "nothing here" feel intentional
+ * ===========================================================================
+ *
+ * When a list/panel is empty (clean working tree, no commits, no tags),
+ * show a friendly illustration + actionable hint instead of a blank void.
+ */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 12px;
+  opacity: 0.4;
+  color: var(--text-tertiary);
+}
+
+.empty-state-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.empty-state-desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.empty-state-action {
+  margin-top: 16px;
+}
+
+/* ===========================================================================
+ * UX Polish: Loading states — spinners + skeleton screens
+ * ===========================================================================
+ */
+
+/* Pulse animation for skeleton placeholders */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.skeleton {
+  background-color: var(--bg-tertiary);
+  border-radius: 4px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Loading spinner — small, accent-colored */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+/* ===========================================================================
+ * UX Polish: Scrollbar improvements — thin + auto-hide on mac
+ * ===========================================================================
+ */
+
+/* On macOS, scrollbars auto-hide by default. On Windows/Linux, they're
+ * always visible. We make them thin (6px) and only show on hover. */
+
+/* Thin scrollbar variant — applied to tight panels (file trees, sidebars) */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* ===========================================================================
+ * UX Polish: Clickable "N files hidden" — turns into a button
+ * ===========================================================================
+ *
+ * In the Changes view, "8 files hidden" is shown when the file filter
+ * excludes files (e.g., ignored files, or files outside the current dir
+ * scope). Make it look clickable so users know they can click to reveal.
+ */
+
+.clickable-text {
+  cursor: pointer;
+  color: var(--accent);
+  text-decoration: none;
+  transition: color 0.15s ease, text-decoration 0.15s ease;
+}
+
+.clickable-text:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+/* ===========================================================================
+ * UX Polish: Keyboard shortcut overlay (Ctrl+? / Cmd+?)
+ * ===========================================================================
+ *
+ * Modal overlay that shows all available keyboard shortcuts. Triggered by
+ * Ctrl+? or Cmd+? (or Ctrl+/ on some layouts). Rendered by App.tsx.
+ */
+
+.shortcut-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--overlay-bg, rgba(0, 0, 0, 0.4));
+  backdrop-filter: var(--overlay-backdrop, blur(2px));
+  -webkit-backdrop-filter: var(--overlay-backdrop, blur(2px));
+}
+
+.shortcut-overlay-panel {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.2s ease-out;
+}
+
+.shortcut-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.shortcut-overlay-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.shortcut-overlay-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.shortcut-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 12.5px;
+}
+
+.shortcut-row-desc {
+  color: var(--text-secondary);
+}
+
+.shortcut-row-keys {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.shortcut-row-keys kbd {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+/* ===========================================================================
+ * UX Polish: Selection highlight for commit/file rows
+ * ===========================================================================
+ */
+
+/* When a row is "selected" (clicked), show a stronger highlight than hover */
+.row-selected {
+  background-color: var(--bg-selected) !important;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Hover state for rows — subtle background change */
+.row-hoverable:hover {
+  background-color: var(--bg-hover);
+  cursor: pointer;
+}
+
+/* ===========================================================================
+ * UX Polish: Reduced motion — respect user's OS preference
+ * ===========================================================================
+ *
+ * If the user has "Reduce motion" enabled in their OS settings, disable
+ * all transitions and animations. This is an accessibility requirement.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

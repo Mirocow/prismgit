@@ -222,6 +222,43 @@ export function HistoryPage() {
     return computeGraph(filtered);
   }, [showGraph, filtered, searchPool]);
 
+  // Keyboard navigation: j/k (or ArrowUp/Down) to move commit selection,
+  // Esc to clear. Only when not typing in an input.
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      if (isInInput) return;
+      if (filtered.length === 0) return;
+
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = selectedIdx === null ? 0 : Math.min(selectedIdx + 1, filtered.length - 1);
+        setSelectedIdx(next);
+        const entry = filtered[next];
+        if (entry) {
+          selectCommit(entry.hash);
+          requestAnimationFrame(() => scrollToIndexRef.current?.(next));
+        }
+      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prev = selectedIdx === null ? filtered.length - 1 : Math.max(selectedIdx - 1, 0);
+        setSelectedIdx(prev);
+        const entry = filtered[prev];
+        if (entry) {
+          selectCommit(entry.hash);
+          requestAnimationFrame(() => scrollToIndexRef.current?.(prev));
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setSelectedIdx(null);
+        selectCommit(null);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [filtered, selectedIdx, selectCommit]);
+
   // Debounced hash-prefix lookup: resolves commits outside the loaded log window
   // (log is capped at maxCount, so an old commit's hash would otherwise never match).
   useEffect(() => {

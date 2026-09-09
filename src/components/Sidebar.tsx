@@ -186,11 +186,11 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-2">
+      <nav className="flex-1 overflow-y-auto py-2 scrollbar-thin" role="navigation" aria-label="Main navigation">
         {currentRepo ? (
           Object.entries(groups).map(([groupName, items]) => (
             <div key={groupName} className="mb-3">
-              <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary">
+              <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary" role="heading" aria-level={3}>
                 {groupName}
               </div>
               {items.map((item) => {
@@ -207,6 +207,8 @@ export function Sidebar() {
                     )}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate(item.path); }}
                     title={NAV_TOOLTIPS[item.path] || item.label}
+                    aria-current={isActive ? 'page' : undefined}
+                    aria-label={item.label}
                   >
                     <Icon size={15} />
                     <span>{item.label}</span>
