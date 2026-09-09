@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil, AlertCircle, Search, FolderTree, ArrowUp, ArrowDown, X } from '../components/icons';
+import { useState, useEffect, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
+import { GitCommit, RefreshCw, Plus, Minus, ChevronDown, ChevronRight, ChevronsUpDown, ChevronsDownUp, GitPullRequest, RotateCcw, EyeOff, Folder, ExternalLink, Trash, Pencil, AlertCircle, Search, FolderTree, ArrowUp, ArrowDown, X } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -27,6 +27,7 @@ function SortableHeader({
   onSort,
   width,
   align,
+  onResizeStart,
 }: {
   label: string;
   sortKey: FileSortKey;
@@ -34,12 +35,14 @@ function SortableHeader({
   onSort: (key: FileSortKey) => void;
   width?: number;
   align?: 'right';
+  /** When set, renders a drag handle on the right edge to resize the column. */
+  onResizeStart?: (e: ReactMouseEvent) => void;
 }) {
   const active = sort.key === sortKey;
   return (
     <button
       className={cn(
-        'flex items-center gap-0.5 uppercase hover:text-text-primary',
+        'relative flex items-center gap-0.5 uppercase hover:text-text-primary',
         active && 'text-accent',
         align === 'right' && 'justify-end'
       )}
@@ -52,6 +55,18 @@ function SortableHeader({
         sort.dir === 1 ? <ArrowUp size={9} /> : <ArrowDown size={9} />
       ) : (
         <ChevronDown size={9} className="opacity-40" />
+      )}
+      {onResizeStart && (
+        <span
+          className="absolute -right-1.5 -top-1 -bottom-1 w-3 z-20 cursor-col-resize hover:bg-accent/30"
+          title="Drag to resize column"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onResizeStart(e);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
       )}
     </button>
   );
@@ -79,6 +94,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const toggleFileFilterRegex = useSelectionStore((s) => s.toggleFileFilterRegex);
   const dirTreeVisible = useSelectionStore((s) => s.dirTreeVisible);
   const toggleDirTreeVisible = useSelectionStore((s) => s.toggleDirTreeVisible);
+  const colWidths = useSelectionStore((s) => s.colWidths);
+  const setColWidth = useSelectionStore((s) => s.setColWidth);
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const fileExtensionFilter = useSelectionStore((s) => s.fileExtensionFilter);
   const setFileExtensionFilter = useSelectionStore((s) => s.setFileExtensionFilter);
@@ -181,6 +198,45 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       else next.add(path);
       return next;
     });
+  };
+
+  // Collect every folder path that has children (for "expand all").
+  const collectDirPaths = (nodes: DirNode[], acc: string[] = []): string[] => {
+    for (const n of nodes) {
+      if (n.children.length > 0) acc.push(n.path);
+      collectDirPaths(n.children, acc);
+    }
+    return acc;
+  };
+
+  const expandAllDirs = () => {
+    setExpandedDirs(new Set([ROOT_KEY, ...collectDirPaths(dirTree)]));
+  };
+
+  const collapseAllDirs = () => {
+    setExpandedDirs(new Set([ROOT_KEY]));
+  };
+
+  // Column resize: drag the handle on a column header's right edge.
+  const startColResize = (e: ReactMouseEvent, col: 'state' | 'dir') => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = colWidths[col];
+    const min = col === 'state' ? 46 : 50;
+    const max = col === 'state' ? 220 : 480;
+    const onMove = (ev: MouseEvent) => {
+      setColWidth(col, Math.max(min, Math.min(max, startWidth + (ev.clientX - startX))));
+    };
+    const onUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   };
 
   const handleSelectDir = (dir: string | null) => {
@@ -583,9 +639,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         {/* Name */}
         <span className="flex-1 truncate font-mono">{getFileName(file.path)}</span>
         {/* State text */}
-        <span className="text-text-tertiary flex-shrink-0 italic" style={{ width: 70 }}>{stateLabel}</span>
+        <span className="text-text-tertiary flex-shrink-0 italic" style={{ width: colWidths.state }}>{stateLabel}</span>
         {/* Relative directory */}
-        <span className="text-text-tertiary flex-shrink-0" style={{ width: 120 }}>{getRelativeDir(file.path)}</span>
+        <span className="text-text-tertiary flex-shrink-0" style={{ width: colWidths.dir }}>{getRelativeDir(file.path)}</span>
         {/* Actions */}
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
           {isConflict && onResolveConflict && (
@@ -760,15 +816,31 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: treeWidth }}>
               <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
                 <span className="text-2xs font-semibold uppercase text-text-secondary">Repositories</span>
-                {fileScopeDir && (
+                <div className="flex items-center gap-0.5">
                   <button
                     className="icon-btn !w-4 !h-4"
-                    title="Clear folder scope — show all files"
-                    onClick={() => setFileScopeDir(null)}
+                    title="Expand all folders"
+                    onClick={expandAllDirs}
                   >
-                    <X size={10} />
+                    <ChevronsUpDown size={11} />
                   </button>
-                )}
+                  <button
+                    className="icon-btn !w-4 !h-4"
+                    title="Collapse all folders"
+                    onClick={collapseAllDirs}
+                  >
+                    <ChevronsDownUp size={11} />
+                  </button>
+                  {fileScopeDir && (
+                    <button
+                      className="icon-btn !w-4 !h-4"
+                      title="Clear folder scope — show all files"
+                      onClick={() => setFileScopeDir(null)}
+                    >
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex-1 overflow-y-auto">
                 <DirTreePanel
@@ -797,8 +869,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary sticky top-0 z-10">
               <span className="w-4"></span>
               <SortableHeader label="Name" sortKey="name" sort={fileSort} onSort={handleSort} />
-              <SortableHeader label="State" sortKey="state" sort={fileSort} onSort={handleSort} width={70} />
-              <SortableHeader label="Relative Directory" sortKey="dir" sort={fileSort} onSort={handleSort} width={120} />
+              <SortableHeader label="State" sortKey="state" sort={fileSort} onSort={handleSort} width={colWidths.state} onResizeStart={(e) => startColResize(e, 'state')} />
+              <SortableHeader label="Relative Directory" sortKey="dir" sort={fileSort} onSort={handleSort} width={colWidths.dir} onResizeStart={(e) => startColResize(e, 'dir')} />
               <span style={{ width: 60 }}></span>
             </div>
 
@@ -813,8 +885,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                   >
                     <span className="font-bold w-4 text-center text-status-conflict">U</span>
                     <span className="flex-1 truncate font-mono">{filePath}</span>
-                    <span className="text-text-tertiary italic" style={{ width: 70 }}>Conflict</span>
-                    <span style={{ width: 120 }}></span>
+                    <span className="text-text-tertiary italic" style={{ width: colWidths.state }}>Conflict</span>
+                    <span style={{ width: colWidths.dir }}></span>
                     <button className="btn btn-primary text-2xs !py-0.5 !px-2" onClick={(e) => { e.stopPropagation(); onResolveConflict && onResolveConflict(filePath); }}>
                       Resolve
                     </button>
