@@ -17,6 +17,7 @@ import { CommitHashLink } from '../components/StatusBar';
 import { computeGraph, bezierPath, laneColor, BRANCH_COLORS } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
 import type { GraphNode } from '../lib/gitGraph';
+import { useLazyList } from '../lib/useLazyList';
 
 const ROW_HEIGHT = 28;
 const LANE_WIDTH = 20;
@@ -60,6 +61,13 @@ export function HistoryPage() {
   const selectTag = useSelectionStore((s) => s.selectTag);
   const globalPathFilter = useSelectionStore((s) => s.pathFilter);
   const setGlobalPathFilter = useSelectionStore((s) => s.setPathFilter);
+  // When viewing file history (globalPathFilter is set), auto-expand Files section
+  // so user immediately sees which file in the commit matches the filter.
+  useEffect(() => {
+    if (globalPathFilter) {
+      setShowFiles(true);
+    }
+  }, [globalPathFilter]);
   // Global selected branch — when user clicks a branch in Branches page (with Ctrl),
   // it's stored here; we apply it as a filter on next load.
   const globalSelectedBranch = useSelectionStore((s) => s.selectedBranch);
@@ -111,19 +119,15 @@ export function HistoryPage() {
   // Auto-scroll to selected commit when global selection changes from another tool
   // (e.g. user clicked a tag in Tags page → navigates to History → we should scroll to that commit)
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
+  const scrollToIndexRef = useRef<((idx: number) => void) | null>(null);
   useEffect(() => {
     if (!selectedCommitHash || entries.length === 0) return;
     const idx = entries.findIndex(e => e.hash === selectedCommitHash);
     if (idx >= 0 && idx !== selectedIdx) {
       setSelectedIdx(idx);
-      // Scroll into view
+      // Scroll into view via lazyList's scrollToIndex (works with virtualized list)
       requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          const rowTop = idx * ROW_HEIGHT;
-          const viewport = scrollRef.current;
-          // Center the row in the viewport
-          viewport.scrollTop = Math.max(0, rowTop - viewport.clientHeight / 2 + ROW_HEIGHT / 2);
-        }
+        scrollToIndexRef.current?.(idx);
       });
     }
   }, [selectedCommitHash, entries, selectedIdx]);
@@ -193,6 +197,20 @@ export function HistoryPage() {
   }, [showGraph, filtered, entries]);
 
   const graphWidth = (maxLane + 1) * LANE_WIDTH + GRAPH_PAD * 2;
+
+  // Virtualize the commit list — only render rows that are in the visible scroll window.
+  // SVG graph is kept full-size (browser handles SVG efficiently), but commit rows
+  // (which are heavy DOM elements with badges, buttons, etc.) are windowed.
+  const lazyList = useLazyList({
+    itemCount: graphRows.length,
+    estimateRowHeight: ROW_HEIGHT,
+    overscan: 12,
+  });
+  // Keep scrollToIndex in a ref so the auto-scroll useEffect (declared above) can call it
+  // without creating a dependency cycle.
+  scrollToIndexRef.current = lazyList.scrollToIndex;
+  // Override scrollRef to use lazyList's ref (which tracks scroll position)
+  const listScrollRef = lazyList.scrollRef;
 
   useEffect(() => {
     if (selectedIdx === null || selectedIdx < 0) { setCommitFiles([]); return; }
@@ -565,7 +583,7 @@ export function HistoryPage() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Graph + Commit list */}
-        <div className="flex-1 overflow-y-auto" ref={scrollRef} style={{ position: 'relative' }}>
+        <div className="flex-1 overflow-y-auto" ref={listScrollRef} style={{ position: 'relative' }}>
           {loading ? (
             <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
           ) : filtered.length === 0 ? (
@@ -677,13 +695,18 @@ export function HistoryPage() {
                 </div>
               )}
 
-              {/* Commit rows */}
-              {graphRows.map((row, idx) => {
-                if (!row.node) return null;
-                const entry = row.node.entry;
-                const initials = getInitials(entry.author.name);
+              {/* Commit rows — virtualized: only render visible window + overscan.
+                  The container has a spacer div with totalHeight to maintain scrollbar,
+                  and an inner div with translateY(offsetY) to position the visible rows. */}
+              <div style={{ height: lazyList.totalHeight, position: 'relative' }}>
+                <div style={{ position: 'absolute', top: lazyList.offsetY, left: 0, right: 0 }}>
+                  {graphRows.slice(lazyList.visibleRange.start, lazyList.visibleRange.end).map((row, idx) => {
+                    const realIdx = lazyList.visibleRange.start + idx;
+                    if (!row.node) return null;
+                    const entry = row.node.entry;
+                    const initials = getInitials(entry.author.name);
                 const color = getAuthorColor(entry.author.name);
-                const isSelected = selectedIdx === idx;
+                const isSelected = selectedIdx === realIdx;
                 const isHEAD = entry.refs.some(r => r.includes('HEAD'));
                 return (
                   <div
@@ -691,8 +714,8 @@ export function HistoryPage() {
                     className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
                       isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover')}
                     style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 4 }}
-                    onClick={() => { setSelectedIdx(idx); selectCommit(entry.hash); }}
-                    onContextMenu={(e) => showCommitContextMenu(e, entry, idx)}
+                    onClick={() => { setSelectedIdx(realIdx); selectCommit(entry.hash); }}
+                    onContextMenu={(e) => showCommitContextMenu(e, entry, realIdx)}
                   >
                     {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
                     {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
@@ -728,6 +751,8 @@ export function HistoryPage() {
                   </div>
                 );
               })}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -810,8 +835,14 @@ export function HistoryPage() {
                 {showFiles && (
                   <div className="space-y-0.5">
                     {loadingFiles ? <div className="text-2xs text-text-tertiary">Loading...</div> :
-                      commitFiles.map((f, i) => (
-                        <div key={i} className="flex items-center gap-1 text-2xs px-1 py-0.5 rounded hover:bg-bg-hover cursor-pointer group"
+                      commitFiles.map((f, i) => {
+                        // Highlight the file that matches the active file-history filter
+                        const isHighlighted = globalPathFilter === f.path || globalPathFilter === f.oldPath;
+                        return (
+                        <div key={i} className={cn(
+                          'flex items-center gap-1 text-2xs px-1 py-0.5 rounded hover:bg-bg-hover cursor-pointer group',
+                          isHighlighted && 'bg-accent-muted border-l-2 border-accent'
+                        )}
                           onClick={() => {
                             // Click on file in commit → set path filter + navigate to file history
                             useSelectionStore.getState().selectFile(f.path);
@@ -845,13 +876,14 @@ export function HistoryPage() {
                               }
                             });
                           }}
-                          title="Click to view file history · Right-click for more actions"
+                          title={isHighlighted ? `${f.path} — matches your file-history filter` : 'Click to view file history · Right-click for more actions'}
                         >
                           <span className="font-mono font-bold w-3 text-center"
                             style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
                             {f.status}
                           </span>
-                          <span className="flex-1 truncate font-mono text-text-secondary group-hover:text-text-primary">{f.path}</span>
+                          <span className={cn('flex-1 truncate font-mono text-text-secondary group-hover:text-text-primary',
+                            isHighlighted && 'text-accent font-medium')}>{f.path}</span>
                           {!f.binary && (f.additions > 0 || f.deletions > 0) && (
                             <span className="text-2xs flex-shrink-0">
                               <span className="text-status-added">+{f.additions}</span>
@@ -859,7 +891,8 @@ export function HistoryPage() {
                             </span>
                           )}
                         </div>
-                      ))
+                        );
+                      })
                     }
                   </div>
                 )}
