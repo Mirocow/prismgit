@@ -1881,4 +1881,180 @@ export async function listDirectories(repoPath: string, maxDepth = 1024): Promis
   return buildDirLevel(repoPath, '', 1, maxDepth, budget);
 }
 
+/**
+ * Grep — search for a pattern across tracked files (or with --cached/--untracked).
+ *
+ * Wraps `git grep` so the UI can do "find all TODOs" or "where is this symbol used".
+ *
+ * Returns the raw grep output as a string. Callers parse line-by-line.
+ * For structured access, callers can pass `--count` and parse the per-file counts.
+ *
+ * Examples:
+ *   grep(repoPath, 'TODO')                       → all matches, raw output
+ *   grep(repoPath, 'TODO', ['--count'])          → "path/to/file:N" per line
+ *   grep(repoPath, 'TODO', ['--cached'])         → only staged files
+ *   grep(repoPath, 'TODO', ['--untracked'])     → include untracked files
+ *   grep(repoPath, 'TODO', ['-i', '--line-number']) → case-insensitive with line numbers
+ */
+export async function grep(
+  repoPath: string,
+  pattern: string,
+  options: string[] = []
+): Promise<string> {
+  const git = getGit(repoPath);
+  // simple-git's grep() returns a GrepResult object; we just want the raw text output.
+  // Use raw() to get the raw git grep output as a string.
+  return await git.raw(['grep', ...options, '--', pattern]);
+}
+
+/**
+ * Apply a patch file — wraps `git apply`.
+ *
+ * Use cases:
+ *   - Apply a saved .diff file to the working tree
+ *   - Reverse-apply (--reverse) to undo a patch
+ *   - Check without applying (--check)
+ *
+ * Examples:
+ *   applyPatch(repoPath, 'fix.diff')                       → applies patch
+ *   applyPatch(repoPath, ['fix.diff', '--reverse'])        → undoes patch
+ *   applyPatch(repoPath, 'fix.diff', { '--check': null }) → validates only
+ */
+export async function applyPatch(
+  repoPath: string,
+  patch: string | string[],
+  options: Record<string, null> | string[] = []
+): Promise<string> {
+  const git = getGit(repoPath);
+  // simple-git's applyPatch() accepts: (patchFile: string, options?) OR (args: string[])
+  if (typeof patch === 'string') {
+    if (Array.isArray(options)) {
+      return await git.applyPatch([patch, ...options]);
+    }
+    return await git.applyPatch(patch, options as Record<string, null>);
+  }
+  return await git.applyPatch(patch);
+}
+
+/**
+ * Show arbitrary git content via `git show`.
+ *
+ * Two forms:
+ *   show(repoPath, ['HEAD:path/to/file'])     → file content at HEAD
+ *   show(repoPath, ['--stat', 'HEAD'])        → commit stat
+ *   show(repoPath, ['--format=%H', 'HEAD'])  → custom format
+ *
+ * Returns the raw output as a string. For binary content use showBuffer().
+ */
+export async function show(repoPath: string, args: string[]): Promise<string> {
+  const git = getGit(repoPath);
+  return await git.show(args);
+}
+
+/**
+ * Show arbitrary git content as a Buffer (binary-safe).
+ *
+ * Use for `git archive --format=zip HEAD` or other commands that produce
+ * binary output where utf-8 decoding would corrupt the data.
+ */
+export async function showBuffer(repoPath: string, args: string[]): Promise<Buffer> {
+  const git = getGit(repoPath);
+  return await git.showBuffer(args);
+}
+
+/**
+ * Mirror-clone a remote repository — wraps `git clone --mirror`.
+ *
+ * A mirror clone copies ALL refs (heads, tags, notes, remotes) and sets up
+ * the local repo as a pure mirror. Useful for backup workflows.
+ *
+ * Returns when the clone is complete.
+ */
+export async function mirror(remoteUrl: string, targetPath: string): Promise<void> {
+  const git = simpleGit();
+  await git.mirror(remoteUrl, targetPath);
+}
+
+/**
+ * rev-parse with arbitrary args — wraps `git rev-parse`.
+ *
+ * Examples:
+ *   revParseArgs(repoPath, ['--short', 'HEAD'])            → short hash
+ *   revParseArgs(repoPath, ['--show-toplevel'])             → repo root
+ *   revParseArgs(repoPath, ['--is-bare-repository'])       → 'true'/'false'
+ *   revParseArgs(repoPath, ['--abbrev-ref', 'HEAD'])        → current branch name
+ */
+export async function revParseArgs(repoPath: string, args: string[]): Promise<string> {
+  const git = getGit(repoPath);
+  return await git.revparse(args);
+}
+
+/**
+ * count-objects — wraps `git count-objects -v`.
+ *
+ * Returns repository size statistics. Useful for showing repo footprint in
+ * the status bar or a repo info dialog.
+ *
+ * Output format:
+ *   count: 12
+ *   size: 24
+ *   in-pack: 0
+ *   packs: 0
+ *   size-pack: 0
+ *   prune-packable: 0
+ *   garbage: 0
+ *   size-garbage: 0
+ */
+export async function countObjects(repoPath: string, verbose = true): Promise<string> {
+  const git = getGit(repoPath);
+  return await git.raw(['count-objects', ...(verbose ? ['-v'] : [])]);
+}
+
+/**
+ * Update server info — wraps `git update-server-info`.
+ *
+ * Required for dumb HTTP transports. Rarely needed in practice but part
+ * of the complete git CLI surface.
+ */
+export async function updateServerInfo(repoPath: string): Promise<string> {
+  const git = getGit(repoPath);
+  return await git.updateServerInfo();
+}
+
+/**
+ * list-remote — wraps `git ls-remote`.
+ *
+ * Returns the refs available on a remote WITHOUT cloning. Useful for
+ * checking what branches/tags exist before deciding to clone.
+ */
+export async function listRemote(repoPath: string, remote: string = 'origin'): Promise<string> {
+  const git = getGit(repoPath);
+  return await git.listRemote([remote]);
+}
+
+/**
+ * Add an annotated tag — wraps `git tag -a -m`.
+ *
+ * Annotated tags store metadata (tagger, date, message) in addition to
+ * the commit pointer, unlike lightweight tags which are just a ref.
+ *
+ * Returns the tag name on success.
+ */
+export async function addAnnotatedTag(
+  repoPath: string,
+  name: string,
+  message: string,
+  ref: string = 'HEAD'
+): Promise<string> {
+  const git = getGit(repoPath);
+  // simple-git's addAnnotatedTag(name, message) tags HEAD; for a specific ref,
+  // fall back to raw.
+  if (ref === 'HEAD') {
+    const result = await git.addAnnotatedTag(name, message);
+    return typeof result === 'string' ? result : name;
+  }
+  await git.raw(['tag', '-a', name, '-m', message, ref]);
+  return name;
+}
+
 export { invalidateCache };

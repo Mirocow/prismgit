@@ -1,6 +1,6 @@
-# SmartGit Electron
+# PrismGit
 
-A modern, cross-platform Git client built on Electron + React + TypeScript, inspired by SmartGit 20-24 with **Ollama-code** design language (Ayu Dark/Light palettes).
+A modern, cross-platform Git client built on Electron + React + TypeScript, inspired by SmartGit 20–24 with **Ollama-code** design language (Ayu Dark/Light palettes).
 
 [![Tests](https://img.shields.io/badge/tests-161%20passing-brightgreen)](tests/) [![Bundle](https://img.shields.io/badge/bundle-240KB%20gzip%2072KB-blue)](#) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -9,7 +9,7 @@ A modern, cross-platform Git client built on Electron + React + TypeScript, insp
 ```bash
 # Clone and install
 git clone <repo-url>
-cd smartgit-electron
+cd prismgit-electron
 make install
 
 # Development

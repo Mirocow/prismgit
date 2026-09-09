@@ -252,7 +252,19 @@ export interface GitApi {
   isRepo: (targetPath: string) => Promise<boolean>;
   currentBranch: (repoPath: string) => Promise<string | null>;
   revParse: (repoPath: string, ref: string) => Promise<string>;
+  revParseArgs: (repoPath: string, args: string[]) => Promise<string>;
   raw: (repoPath: string, args: string[]) => Promise<string>;
+
+  // New: full git CLI surface coverage (added per simple-git comprehensive test spec)
+  grep: (repoPath: string, pattern: string, options?: string[]) => Promise<string>;
+  applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => Promise<string>;
+  show: (repoPath: string, args: string[]) => Promise<string>;
+  showBuffer: (repoPath: string, args: string[]) => Promise<Buffer>;
+  mirror: (remoteUrl: string, targetPath: string) => Promise<void>;
+  countObjects: (repoPath: string, verbose?: boolean) => Promise<string>;
+  updateServerInfo: (repoPath: string) => Promise<string>;
+  listRemote: (repoPath: string, remote?: string) => Promise<string>;
+  addAnnotatedTag: (repoPath: string, name: string, message: string, ref?: string) => Promise<string>;
 
   // SmartGit 20-24 extended features
   worktrees: (repoPath: string) => Promise<WorktreeInfo[]>;

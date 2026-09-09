@@ -88,7 +88,18 @@ const api = {
     isRepo: (targetPath: string) => ipcRenderer.invoke('git:isRepo', targetPath),
     currentBranch: (repoPath: string) => ipcRenderer.invoke('git:currentBranch', repoPath),
     revParse: (repoPath: string, ref: string) => ipcRenderer.invoke('git:revParse', repoPath, ref),
+    revParseArgs: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:revParseArgs', repoPath, args),
     raw: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:raw', repoPath, args),
+    // New: full git CLI surface coverage
+    grep: (repoPath: string, pattern: string, options?: string[]) => ipcRenderer.invoke('git:grep', repoPath, pattern, options),
+    applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => ipcRenderer.invoke('git:applyPatch', repoPath, patch, options),
+    show: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:show', repoPath, args),
+    showBuffer: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:showBuffer', repoPath, args),
+    mirror: (remoteUrl: string, targetPath: string) => ipcRenderer.invoke('git:mirror', remoteUrl, targetPath),
+    countObjects: (repoPath: string, verbose?: boolean) => ipcRenderer.invoke('git:countObjects', repoPath, verbose),
+    updateServerInfo: (repoPath: string) => ipcRenderer.invoke('git:updateServerInfo', repoPath),
+    listRemote: (repoPath: string, remote?: string) => ipcRenderer.invoke('git:listRemote', repoPath, remote),
+    addAnnotatedTag: (repoPath: string, name: string, message: string, ref?: string) => ipcRenderer.invoke('git:addAnnotatedTag', repoPath, name, message, ref),
 
     // SmartGit 20-24 extended
     worktrees: (repoPath: string) => ipcRenderer.invoke('git:worktrees', repoPath),

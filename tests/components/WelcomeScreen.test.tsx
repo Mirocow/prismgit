@@ -11,7 +11,7 @@ vi.mock('../../src/stores/repositoryStore', () => ({
 describe('WelcomeScreen', () => {
   it('renders app title', () => {
     render(<WelcomeScreen />);
-    expect(screen.getByText('SmartGit Electron')).toBeInTheDocument();
+    expect(screen.getByText('PrismGit')).toBeInTheDocument();
   });
 
   it('renders description', () => {

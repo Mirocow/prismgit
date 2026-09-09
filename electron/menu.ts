@@ -154,7 +154,7 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
           click: () => shell.openExternal('https://git-scm.com/docs'),
         },
         {
-          label: 'SmartGit Electron on GitHub',
+          label: 'PrismGit on GitHub',
           click: () => shell.openExternal('https://github.com'),
         },
         {
@@ -164,8 +164,8 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
             if (!win) return;
             dialog.showMessageBox(win, {
               type: 'info',
-              title: 'About SmartGit Electron',
-              message: 'SmartGit Electron',
+              title: 'About PrismGit',
+              message: 'PrismGit',
               detail: `Version: ${app.getVersion()}\nElectron-based Git client\n\nPlatform: ${process.platform}\nArchitecture: ${process.arch}`,
               buttons: ['OK'],
             });

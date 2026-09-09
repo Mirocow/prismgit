@@ -1,8 +1,8 @@
 {
-  "name": "smartgit-electron",
+  "name": "prismgit-electron",
   "version": "2.0.0",
-  "description": "Lightweight SmartGit 20-24 inspired Git client built on Electron + React + TypeScript",
-  "author": "SmartGit Electron Team",
+  "description": "A modern Git client built on Electron + React + TypeScript — visual history, smart merges, and a clean Ayu palette.",
+  "author": "PrismGit Team",
   "license": "MIT",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -53,8 +53,8 @@
     "vitest": "^2.1.2"
   },
   "build": {
-    "appId": "com.smartgit.electron",
-    "productName": "SmartGit Electron",
+    "appId": "com.prismgit.electron",
+    "productName": "PrismGit",
     "directories": {
       "output": "release"
     },

@@ -108,7 +108,18 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:isRepo', (_e, p: string) => gitService.isRepo(p));
   ipcMain.handle('git:currentBranch', (_e, p: string) => gitService.currentBranch(p));
   ipcMain.handle('git:revParse', (_e, p: string, r: string) => gitService.revParse(p, r));
+  ipcMain.handle('git:revParseArgs', (_e, p: string, a: string[]) => gitService.revParseArgs(p, a));
   ipcMain.handle('git:raw', (_e, p: string, a: string[]) => gitService.raw(p, a));
+  // New: full git CLI surface coverage (added per simple-git comprehensive test spec)
+  ipcMain.handle('git:grep', (_e, p: string, pat: string, opts?: string[]) => gitService.grep(p, pat, opts));
+  ipcMain.handle('git:applyPatch', (_e, p: string, patch: string | string[], opts?: Record<string, null> | string[]) => gitService.applyPatch(p, patch, opts));
+  ipcMain.handle('git:show', (_e, p: string, a: string[]) => gitService.show(p, a));
+  ipcMain.handle('git:showBuffer', (_e, p: string, a: string[]) => gitService.showBuffer(p, a));
+  ipcMain.handle('git:mirror', (_e, url: string, target: string) => gitService.mirror(url, target));
+  ipcMain.handle('git:countObjects', (_e, p: string, verbose?: boolean) => gitService.countObjects(p, verbose));
+  ipcMain.handle('git:updateServerInfo', (_e, p: string) => gitService.updateServerInfo(p));
+  ipcMain.handle('git:listRemote', (_e, p: string, remote?: string) => gitService.listRemote(p, remote));
+  ipcMain.handle('git:addAnnotatedTag', (_e, p: string, name: string, msg: string, ref?: string) => gitService.addAnnotatedTag(p, name, msg, ref));
 
   // Worktrees (SmartGit 20+)
   ipcMain.handle('git:worktrees', (_e, p: string) => gitService.worktrees(p));

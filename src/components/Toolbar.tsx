@@ -181,7 +181,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
           <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-purple) 100%)' }}>
             <GitBranch size={11} className="text-white" strokeWidth={2.5} />
           </div>
-          <span className="text-xs font-bold text-text-primary tracking-tight">SmartGit</span>
+          <span className="text-xs font-bold text-text-primary tracking-tight">PrismGit</span>
         </div>
         {currentRepo && (
           <>

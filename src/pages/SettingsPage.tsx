@@ -291,7 +291,7 @@ export function SettingsPage() {
                       href="#"
                       onClick={(e) => {
                         e.preventDefault();
-                        api.app.openExternal('https://github.com/settings/tokens/new?scopes=repo,read:user&description=SmartGit%20Electron');
+                        api.app.openExternal('https://github.com/settings/tokens/new?scopes=repo,read:user&description=PrismGit');
                       }}
                       className="text-accent hover:underline"
                     >

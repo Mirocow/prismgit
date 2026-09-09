@@ -61,11 +61,13 @@ export function WelcomeScreen() {
             </div>
           </div>
           <h1 className="text-3xl font-bold text-text-primary mb-3 tracking-tight">
-            SmartGit Electron
+            PrismGit
           </h1>
           <p className="text-sm text-text-secondary mb-8 max-w-md mx-auto leading-relaxed">
-            A modern, cross-platform Git client inspired by SmartGit 20–24. Open a repository to
-            start managing branches, commits, and history with a fast, keyboard-friendly workflow.
+            A modern, cross-platform Git client built on Electron + React + TypeScript.
+            Visual history with passing-lane graphs, smart merges, and a clean Ayu palette.
+            Open a repository to start managing branches, commits, and history with a
+            fast, keyboard-friendly workflow.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 max-w-sm mx-auto">

@@ -53,7 +53,7 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     backgroundColor: '#f8f9fa',
     frame: false,
-    title: 'SmartGit Electron',
+    title: 'PrismGit',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

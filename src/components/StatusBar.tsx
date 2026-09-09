@@ -73,7 +73,7 @@ export function StatusBar() {
           <span className="w-1.5 h-1.5 rounded-full bg-status-success inline-block" />
           Ready
         </span>
-        <span className="font-mono">SmartGit Electron v2.0</span>
+        <span className="font-mono">PrismGit v2.0</span>
       </footer>
     );
   }
