@@ -54,6 +54,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const theme = settings.theme === 'light' ? 'light' : 'dark';
       set({ settings, theme, loading: false });
       get().applyTheme();
+      // Apply fontSize on load
+      if (settings.fontSize) {
+        document.documentElement.style.fontSize = `${settings.fontSize}px`;
+      }
     } catch {
       set({ loading: false });
     }
@@ -67,6 +71,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const t = value === 'light' ? 'light' : 'dark';
       set({ theme: t });
       get().applyTheme();
+    }
+    // Apply fontSize immediately to DOM
+    if (key === 'fontSize') {
+      document.documentElement.style.fontSize = `${value}px`;
+    }
+    // Apply sidebarWidth immediately
+    if (key === 'sidebarWidth') {
+      document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
     }
   },
 
