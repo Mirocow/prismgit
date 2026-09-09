@@ -7,6 +7,7 @@ import { MergePanel } from '../components/MergePanel';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type BranchInfo } from '../lib/api';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { cn, formatDate, shortHash } from '../lib/utils';
@@ -205,7 +206,17 @@ export function BranchesPage() {
           }
           setDraggedBranch(null);
         }}
-        onClick={() => !b.current && handleCheckout(b)}
+        onClick={(e) => {
+          // Ctrl/Cmd-click: select branch in global store (no checkout) — propagates to History filter
+          if (e.ctrlKey || e.metaKey) {
+            useSelectionStore.getState().selectBranch(b.name);
+            toast.info(`Selected branch '${b.name}' — visible in History filter`);
+            return;
+          }
+          // Plain click: select in global store AND navigate to History to see this branch's log
+          useSelectionStore.getState().selectBranch(b.name);
+          if (!b.current) handleCheckout(b);
+        }}
         onContextMenu={(e) => showBranchContextMenu(e, b)}
       >
         {/* Current branch indicator */}

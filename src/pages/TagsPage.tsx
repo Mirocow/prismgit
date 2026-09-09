@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Tag as TagIcon, Plus, Trash, RefreshCw, Check } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { CommitHashLink } from '../components/StatusBar';
 import { api, type TagInfo } from '../lib/api';
 import { shortHash } from '../lib/utils';
 
@@ -96,7 +98,12 @@ export function TagsPage() {
           tags.map((t) => (
             <div
               key={t.name}
-              className="group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover"
+              className="group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
+              onClick={() => {
+                useSelectionStore.getState().selectCommit(t.hash);
+                window.location.hash = '#/history';
+              }}
+              title="Click to view this tag's commit in History"
             >
               <TagIcon size={14} className="text-status-modified flex-shrink-0" />
               <div className="flex-1 min-w-0">
@@ -112,7 +119,7 @@ export function TagsPage() {
                   </div>
                 )}
                 <div className="text-xs text-text-tertiary mt-0.5">
-                  <code className="font-mono">{shortHash(t.hash)}</code>
+                  <CommitHashLink hash={t.hash} />
                 </div>
               </div>
               <button

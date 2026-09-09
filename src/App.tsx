@@ -191,11 +191,10 @@ export default function App() {
     // Only navigate if style actually changed (not on first render)
     if (prevStyle.current !== windowStyle) {
       prevStyle.current = windowStyle;
-      if (windowStyle === 'log') {
-        navigate('/history');
-      } else {
-        navigate('/changes');
-      }
+      // Per user request: Changes should always be the default landing page,
+      // even when window style is 'log' (which only affects visual chrome).
+      // Users who want History can navigate there manually.
+      navigate('/changes');
     }
   }, [windowStyle, currentRepo, navigate]);
 
@@ -204,7 +203,7 @@ export default function App() {
     if (currentRepo) {
       refreshStatus(currentRepo.path);
       setDismissRebase(false);
-      // Navigate to Changes view when repo opens (default landing page)
+      // Always navigate to Changes view when repo opens (default landing page)
       if (window.location.hash === '#/' || window.location.hash === '') {
         window.location.hash = '#/changes';
       }
@@ -216,11 +215,8 @@ export default function App() {
 
   const handleFind = useCallback(() => setShowFind(true), []);
 
-  // Determine default route based on window style
-  // Standard: Changes (working tree) — default
-  // Log: History
-  // Working Tree: Changes
-  const defaultRoute = windowStyle === 'log' ? '/history' : '/changes';
+  // Default route is always Changes (per user request — window style only affects chrome)
+  const defaultRoute = '/changes';
 
   if (!currentRepo) {
     return (

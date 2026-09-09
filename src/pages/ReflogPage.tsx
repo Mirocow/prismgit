@@ -4,6 +4,8 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type ReflogEntry } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
+import { useSelectionStore } from '../stores/selectionStore';
+import { CommitHashLink } from '../components/StatusBar';
 
 const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
 
@@ -118,7 +120,7 @@ export function ReflogPage() {
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-text-primary">{entry.message}</div>
                 <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
-                  <code className="font-mono">{shortHash(entry.hash)}</code>
+                  <CommitHashLink hash={entry.hash} />
                   <span>·</span>
                   <span>{entry.author.name}</span>
                   <span>·</span>

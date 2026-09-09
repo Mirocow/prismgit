@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, Settings as SettingsIcon, X } from './icons';
+import { RefreshCw, GitBranch, ArrowUp, ArrowDown, GitCommit, GitPullRequest, CloudDownload, Sync, ExternalLink, Folder, AlertCircle, Search, Sun, Moon, GitMerge, RotateCcw, Star, Plus, Minus, Trash, Settings as SettingsIcon, X, EyeOff } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -251,10 +251,14 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
                 <AlertCircle size={9} /> BISECTING
               </span>
             )}
-            <div className="flex items-center gap-1 text-text-secondary">
+            <button
+              className="flex items-center gap-1 text-text-secondary hover:text-text-primary cursor-pointer"
+              onClick={() => { window.location.hash = '#/history'; }}
+              title="Current HEAD — click to view in History"
+            >
               <GitBranch size={11} />
               <span className="font-medium text-text-primary">{status.current || 'HEAD'}</span>
-            </div>
+            </button>
             {status.tracking && <span className="text-text-tertiary">→ {status.tracking}</span>}
             {(status.ahead > 0 || status.behind > 0) && (
               <div className="flex items-center gap-1.5">
@@ -272,15 +276,40 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
             )}
           </div>
         ) : null}
+        {/* HEAD commit indicator — always visible, clickable to jump to History */}
+        {currentRepo && (
+          <button
+            className="text-2xs px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary font-mono hover:bg-accent-muted hover:border-accent hover:text-accent transition-colors flex items-center gap-1"
+            title="Current HEAD commit — click to view in History"
+            onClick={async () => {
+              try {
+                const h = await api.git.revParse(currentRepo.path, 'HEAD');
+                useSelectionStore.getState().selectCommit(h.trim());
+                window.location.hash = '#/history';
+              } catch (e) {
+                toast.error('Failed to get HEAD', String(e));
+              }
+            }}
+          >
+            <GitCommit size={9} />
+            <span>HEAD</span>
+          </button>
+        )}
         {/* Global selections chips — show what's currently selected across the app */}
         {selectedCommitHash && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1" title={`Commit selected: ${selectedCommitHash}`}>
+          <span className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1" title={`Selected commit (from any tool): ${selectedCommitHash}`}>
             <GitCommit size={9} />{selectedCommitHash.substring(0, 7)}
+            <button onClick={() => useSelectionStore.getState().selectCommit(null)} title="Clear selection">
+              <X size={8} />
+            </button>
           </span>
         )}
         {selectedBranch && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-added/40 bg-status-added/10 text-status-added flex items-center gap-1" title={`Branch selected: ${selectedBranch}`}>
+          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-added/40 bg-status-added/10 text-status-added flex items-center gap-1" title={`Selected branch: ${selectedBranch}`}>
             <GitBranch size={9} />{selectedBranch}
+            <button onClick={() => useSelectionStore.getState().selectBranch(null)} title="Clear branch selection">
+              <X size={8} />
+            </button>
           </span>
         )}
         {globalPathFilter && (
@@ -318,23 +347,86 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo }: 
           <SettingsIcon size={15} />
         </button>
         {showCustomize && (
-          <div className="absolute top-full right-2 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-56">
+          <div className="absolute top-full right-2 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-72">
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
-              Toolbar customization
+              Toolbar editor — drag to reorder, click eye to hide
             </div>
-            <div className="py-1">
-              {(Object.keys(DEFAULT_TOOLBAR_GROUPS) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>).map(key => (
-                <label key={key} className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs">
-                  <input type="checkbox" checked={groups[key]}
-                    onChange={(e) => setGroup(key, e.target.checked)} />
-                  <span className="capitalize">{key}</span>
-                </label>
-              ))}
+            <div className="py-1 max-h-72 overflow-y-auto">
+              {/* Visible groups — drag-and-drop reorder */}
+              <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Visible</div>
+              {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>)
+                .filter(key => groups[key])
+                .map((key, idx) => (
+                  <div
+                    key={key}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/toolbar-group', key);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const draggedKey = e.dataTransfer.getData('text/toolbar-group') as keyof typeof DEFAULT_TOOLBAR_GROUPS;
+                      if (!draggedKey || draggedKey === key) return;
+                      // Reorder groups: swap positions
+                      const groupKeys = Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>;
+                      const draggedIdx = groupKeys.indexOf(draggedKey);
+                      const targetIdx = groupKeys.indexOf(key);
+                      if (draggedIdx === -1 || targetIdx === -1) return;
+                      // Build new ordered groups object
+                      const newOrdered: Record<string, boolean> = {};
+                      const reordered = [...groupKeys];
+                      reordered.splice(draggedIdx, 1);
+                      reordered.splice(targetIdx, 0, draggedKey);
+                      for (const k of reordered) newOrdered[k] = groups[k as keyof typeof DEFAULT_TOOLBAR_GROUPS];
+                      setGroups(newOrdered as typeof DEFAULT_TOOLBAR_GROUPS);
+                      saveToolbarGroups(newOrdered as typeof DEFAULT_TOOLBAR_GROUPS);
+                    }}
+                    className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-move text-xs"
+                    title="Drag to reorder"
+                  >
+                    <span className="text-text-tertiary">⋮⋮</span>
+                    <span className="capitalize flex-1">{key}</span>
+                    <button
+                      className="text-text-tertiary hover:text-status-deleted"
+                      onClick={(e) => { e.stopPropagation(); setGroup(key, false); }}
+                      title="Hide this group"
+                    >
+                      <EyeOff size={11} />
+                    </button>
+                  </div>
+                ))}
+              {/* Hidden groups */}
+              {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>)
+                .filter(key => !groups[key]).length > 0 && (
+                <>
+                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary border-t border-border-subtle">Hidden</div>
+                  {(Object.keys(groups) as Array<keyof typeof DEFAULT_TOOLBAR_GROUPS>)
+                    .filter(key => !groups[key])
+                    .map(key => (
+                      <div key={key} className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover text-xs opacity-60">
+                        <span className="text-text-tertiary">⋯</span>
+                        <span className="capitalize flex-1">{key}</span>
+                        <button
+                          className="text-text-tertiary hover:text-status-added"
+                          onClick={() => setGroup(key, true)}
+                          title="Show this group"
+                        >
+                          <Plus size={11} />
+                        </button>
+                      </div>
+                    ))}
+                </>
+              )}
             </div>
             <div className="px-3 py-1 border-t border-border-subtle flex justify-between">
               <button className="text-2xs text-accent"
                 onClick={() => { setGroups(DEFAULT_TOOLBAR_GROUPS); saveToolbarGroups(DEFAULT_TOOLBAR_GROUPS); }}>
-                Reset
+                Reset to default
               </button>
               <button className="text-2xs btn btn-primary !py-0.5 !px-2"
                 onClick={() => setShowCustomize(false)}>

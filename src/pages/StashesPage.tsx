@@ -5,6 +5,7 @@ import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type StashEntry } from '../lib/api';
 import { formatDate, shortHash } from '../lib/utils';
+import { CommitHashLink } from '../components/StatusBar';
 
 export function StashesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
@@ -121,7 +122,7 @@ export function StashesPage() {
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-text-primary truncate">{s.message}</div>
                 <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
-                  <code className="font-mono">{shortHash(s.hash)}</code>
+                  <CommitHashLink hash={s.hash} />
                   <span>· {formatDate(s.date)}</span>
                 </div>
               </div>

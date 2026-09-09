@@ -4,6 +4,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { CommitHashLink } from '../components/StatusBar';
 import { api, type DiffResult, type FileStatus, type LogEntry } from '../lib/api';
 import { DiffViewer } from '../components/DiffViewer';
 import { ResizableSplitter, useResizableWidth, useResizableHeight } from '../components/ResizableSplitter';
@@ -553,7 +554,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                     <div
                       key={entry.hash}
                       className="group flex items-center gap-2 px-2 py-1 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
-                      onClick={() => { window.location.hash = '#/history'; }}
+                      onClick={() => {
+                        // Click on a commit in journal → jump to History with this commit selected
+                        useSelectionStore.getState().selectCommit(entry.hash);
+                        window.location.hash = '#/history';
+                      }}
+                      title="Click to view this commit in History"
                     >
                       {/* Author badge */}
                       <span
@@ -570,6 +576,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                       </span>
                       {/* Message */}
                       <span className="flex-1 truncate text-text-primary">{entry.subject}</span>
+                      {/* Hash — clickable */}
+                      <CommitHashLink hash={entry.hash} />
                       {/* Date */}
                       <span className="text-text-tertiary flex-shrink-0">{formatTime(entry.author.date)}</span>
                     </div>

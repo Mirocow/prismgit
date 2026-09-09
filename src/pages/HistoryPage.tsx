@@ -59,6 +59,17 @@ export function HistoryPage() {
   const selectTag = useSelectionStore((s) => s.selectTag);
   const globalPathFilter = useSelectionStore((s) => s.pathFilter);
   const setGlobalPathFilter = useSelectionStore((s) => s.setPathFilter);
+  // Global selected branch — when user clicks a branch in Branches page (with Ctrl),
+  // it's stored here; we apply it as a filter on next load.
+  const globalSelectedBranch = useSelectionStore((s) => s.selectedBranch);
+  // Sync local branchFilter with global selectedBranch (when user picks a branch elsewhere)
+  useEffect(() => {
+    if (globalSelectedBranch && branchFilter !== globalSelectedBranch) {
+      setBranchFilter(globalSelectedBranch);
+      // Clear multi-select when single branch is chosen
+      setSelectedBranches(new Set());
+    }
+  }, [globalSelectedBranch, branchFilter]);
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
@@ -95,6 +106,26 @@ export function HistoryPage() {
   }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // Auto-scroll to selected commit when global selection changes from another tool
+  // (e.g. user clicked a tag in Tags page → navigates to History → we should scroll to that commit)
+  const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
+  useEffect(() => {
+    if (!selectedCommitHash || entries.length === 0) return;
+    const idx = entries.findIndex(e => e.hash === selectedCommitHash);
+    if (idx >= 0 && idx !== selectedIdx) {
+      setSelectedIdx(idx);
+      // Scroll into view
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          const rowTop = idx * ROW_HEIGHT;
+          const viewport = scrollRef.current;
+          // Center the row in the viewport
+          viewport.scrollTop = Math.max(0, rowTop - viewport.clientHeight / 2 + ROW_HEIGHT / 2);
+        }
+      });
+    }
+  }, [selectedCommitHash, entries, selectedIdx]);
 
   const filtered = useMemo(() => {
     let result = entries;
@@ -547,7 +578,7 @@ export function HistoryPage() {
                 <svg
                   width={graphWidth}
                   height={graphRows.length * ROW_HEIGHT + wtOffset}
-                  style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', zIndex: 1 }}
+                  style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', zIndex: 5 }}
                 >
                   {graphRows.map((row, idx) => {
                     const rowY = idx * ROW_HEIGHT + wtOffset;
@@ -637,7 +668,7 @@ export function HistoryPage() {
                 <div
                   className={cn('flex items-center gap-2 px-2 border-b border-border-subtle cursor-pointer relative',
                     selectedIdx === -1 ? 'bg-bg-selected' : 'hover:bg-bg-hover')}
-                  style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 2 }}
+                  style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 4 }}
                   onClick={() => { setSelectedIdx(-1); window.location.hash = '#/changes'; }}
                 >
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--status-deleted)' }} />
@@ -658,7 +689,7 @@ export function HistoryPage() {
                     key={entry.hash}
                     className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
                       isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover')}
-                    style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 2 }}
+                    style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 4 }}
                     onClick={() => { setSelectedIdx(idx); selectCommit(entry.hash); }}
                     onContextMenu={(e) => showCommitContextMenu(e, entry, idx)}
                   >
