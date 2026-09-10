@@ -1,34 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, Plus, Pin, PinOff, X, Sun, Moon, Star, ChevronDown } from './icons';
-import { NAV_ITEMS, NAV_SHORTCUTS, type NavItem } from './navItems';
+import { NAV_ITEMS, NAV_SHORTCUTS, NAV_DESCRIPTIONS, type NavItem } from './navItems';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useGitStore } from '../stores/gitStore';
 import { ResizableSplitter, useResizableWidth } from './ResizableSplitter';
 import { cn } from '../lib/utils';
-
-// Tooltips explaining what each tool does — shown on hover
-const NAV_TOOLTIPS: Record<string, string> = {
-  '/changes': 'Working tree changes (staged + unstaged files). Stage, unstage, commit. Right-click file → View file history',
-  '/history': 'Commit graph — multi-branch selection, filters by author/date/path. Click commit → selected everywhere. Right-click → Create Tag/Branch here',
-  '/annotate': 'Per-line author annotation for the selected file (who wrote each line)',
-  '/investigate': 'Search commits by message, author, hash, or content (-G pattern)',
-  '/blame': 'Git blame for a specific file — line-by-line attribution with hash links',
-  '/journal': 'Recent activity log (last N commits across all branches)',
-  '/gitflow': 'Git-Flow operations: feature/release/hotfix start/finish',
-  '/bisect': 'Binary search for the commit that introduced a bug (git bisect with good/bad/skip)',
-  '/pulls': 'Pull requests from GitHub/GitLab (forge integration)',
-  '/reviews': 'Code review queue (distributed reviews)',
-  '/branches': 'Branch management — checkout, merge, rebase, rename, delete. Ctrl+click to select for History filter',
-  '/tags': 'Tag management — click any tag to jump to its commit in History',
-  '/remotes': 'Remote management — add/remove/rename remotes, edit URLs, fetch all, preview remote refs (ls-remote)',
-  '/worktrees': 'Worktrees — multiple working directories for the same repo',
-  '/reflog': 'Reference log — every HEAD movement, click hash to jump back',
-  '/stashes': 'Saved stashes — click hash to view stash commit',
-  '/submodules': 'Submodule management — init, update, sync',
-  '/lfs': 'Git LFS — large file storage status and operations',
-};
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -186,7 +164,7 @@ export function Sidebar() {
                         : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary border-l-2 border-transparent'
                     )}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate(item.path); }}
-                    title={NAV_TOOLTIPS[item.path] || item.label}
+                    title={NAV_DESCRIPTIONS[item.path] || item.label}
                     aria-current={isActive ? 'page' : undefined}
                     aria-label={item.label}
                   >

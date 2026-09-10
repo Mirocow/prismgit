@@ -19,6 +19,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
 import { CommandLogPanel } from './components/CommandLogPanel';
 import { DragDropHandler } from './components/DragDropHandler';
+import { HelpBanner } from './components/HelpBanner';
 import { NAV_SHORTCUTS } from './components/navItems';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
@@ -402,16 +403,21 @@ export default function App() {
         {/* Sidebar always visible — navigation must be accessible */}
         <Sidebar />
         <main className="flex-1 overflow-hidden flex flex-col">
+          <HelpBanner />
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/" element={<Navigate to={defaultRoute} replace />} />
               <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/diff" element={<DiffPage />} />
-              <Route path="/annotate" element={<AnnotatePage />} />
-              <Route path="/investigate" element={<InvestigatePage />} />
+              {/* Annotate removed — merged into History via file filter */}
+              <Route path="/annotate" element={<Navigate to="/history" replace />} />
+              {/* Investigate renamed to Search */}
+              <Route path="/investigate" element={<Navigate to="/search" replace />} />
+              <Route path="/search" element={<InvestigatePage />} />
               <Route path="/blame" element={<BlamePage />} />
-              <Route path="/journal" element={<JournalPage />} />
+              {/* Journal removed — merged into Reflog */}
+              <Route path="/journal" element={<Navigate to="/reflog" replace />} />
               <Route path="/gitflow" element={<GitFlowPage />} />
               <Route path="/pulls" element={<PullRequestsPage />} />
               <Route path="/reviews" element={<ReviewsPage />} />
