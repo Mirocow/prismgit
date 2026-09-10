@@ -131,7 +131,31 @@ export async function status(repoPath: string): Promise<StatusResult> {
 export async function add(repoPath: string, files: string[]): Promise<void> {
   const git = getGit(repoPath);
   if (files.length === 0) return;
-  await git.add(files);
+  // Remove stale .git/index.lock if it exists — a previous git operation
+  // (e.g. filter-branch crash) may have left it behind, making all
+  // subsequent git commands fail with "Unable to create index.lock".
+  const lockPath = path.join(repoPath, '.git', 'index.lock');
+  try {
+    if (fs.existsSync(lockPath)) {
+      // Check if the lock is stale (no running git process holding it).
+      // On most OSes, a stale lock from a crashed process can be safely removed.
+      fs.unlinkSync(lockPath);
+    }
+  } catch {
+    // If we can't remove it (permission, or another process is actively
+    // using it), the git command below will fail with a clear error.
+  }
+  try {
+    await git.raw(['add', '--', ...files]);
+  } catch (e) {
+    // If the file is gitignored, git add refuses to stage it.
+    // Retry with -f (force) to allow staging ignored files.
+    if (String(e).includes('ignored by one of your .gitignore files')) {
+      await git.raw(['add', '-f', '--', ...files]);
+    } else {
+      throw e;
+    }
+  }
 }
 
 export async function addAll(repoPath: string): Promise<void> {
@@ -2508,22 +2532,59 @@ export async function editCommitMessage(
   hash: string,
   message: string
 ): Promise<void> {
-  // Use git filter-branch to rewrite commit message
-  // Simpler approach: use git commit --amend for HEAD only
-  if (hash === 'HEAD' || hash === (await revParse(repoPath, 'HEAD'))) {
-    const git = getGit(repoPath);
-    // NOTE: git.commit(array) is interpreted by simple-git as MULTIPLE -m
-    // flags, which silently breaks the amend. Use raw args instead.
+  const git = getGit(repoPath);
+  const headHash = (await git.raw(['rev-parse', 'HEAD'])).trim();
+
+  if (hash === 'HEAD' || hash === headHash) {
+    // Amending HEAD is safe and simple — no rebase needed.
     await git.raw(['commit', '--amend', '-m', message]);
   } else {
-    // For non-HEAD commits, use filter-branch
-    const git = getGit(repoPath);
-    const escaped = message.replace(/'/g, "'\\''");
-    await git.raw([
-      'filter-branch', '-f', '--msg-filter',
-      `if [ "$GIT_COMMIT" = "${hash}" ]; then echo '${escaped}'; else cat; fi`,
-      `${hash}^..HEAD`,
-    ]);
+    // For non-HEAD commits, use interactive rebase with a custom sequence
+    // editor. This replaces the fragile git filter-branch approach which:
+    //   1. Prints a scary deprecation warning
+    //   2. Refuses to run when there are unstaged changes
+    //   3. Can leave .git/index.lock behind on failure
+    //
+    // Strategy: write a rebase-todo file where the target commit is marked
+    // as 'reword', all others as 'pick'. Then use GIT_SEQUENCE_EDITOR to
+    // substitute the todo, and GIT_EDITOR to write the new message.
+    const fs = await import('fs');
+    const path = await import('path');
+    const os = await import('os');
+
+    // Get the list of commits from hash^..HEAD
+    const revList = await git.raw(['rev-list', '--reverse', `${hash}^..HEAD`]);
+    const commits = revList.trim().split('\n').filter(Boolean);
+    if (commits.length === 0) return;
+
+    // Build the todo file: 'reword' for target, 'pick' for all others
+    const todoLines = commits.map(oid => {
+      if (oid === hash) return `reword ${oid}`;
+      return `pick ${oid}`;
+    });
+    const todoContent = todoLines.join('\n') + '\n';
+    const todoPath = path.join(os.tmpdir(), `prismgit-reword-todo-${Date.now()}.txt`);
+    fs.writeFileSync(todoPath, todoContent, 'utf8');
+
+    // Write the new commit message to a file — GIT_EDITOR will copy it
+    const msgPath = path.join(os.tmpdir(), `prismgit-reword-msg-${Date.now()}.txt`);
+    fs.writeFileSync(msgPath, message, 'utf8');
+
+    // The sequence editor replaces the auto-generated todo with our version
+    const seqEditorScript = `cp ${todoPath} "$1"`;
+    // The commit message editor replaces the commit message with our version
+    const msgEditorScript = `cp ${msgPath} "$1"`;
+
+    try {
+      await git.raw([
+        '-c', `sequence.editor=${seqEditorScript}`,
+        '-c', `core.editor=${msgEditorScript}`,
+        'rebase', '-i', `${hash}^`,
+      ]);
+    } finally {
+      try { fs.unlinkSync(todoPath); } catch { /* ignore */ }
+      try { fs.unlinkSync(msgPath); } catch { /* ignore */ }
+    }
   }
 }
 
