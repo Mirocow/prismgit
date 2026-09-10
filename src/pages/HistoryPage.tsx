@@ -1076,6 +1076,17 @@ export function HistoryPage() {
               ♺ {recyclableCount} recyclable
             </a>
           )}
+          {/* Stashes count badge — shows how many stashes exist. Clicking jumps
+              to the Stashes page where they can be applied / popped / dropped. */}
+          {stashes.length > 0 && (
+            <a
+              href="#/stashes"
+              className="text-2xs px-1.5 py-0.5 rounded border border-status-renamed/40 bg-status-renamed/10 text-status-renamed font-medium flex items-center gap-0.5 hover:bg-status-renamed/20 transition-colors"
+              title={`${stashes.length} stash${stashes.length === 1 ? '' : 'es'} saved. Click to manage them.`}
+            >
+              📦 {stashes.length} stash{stashes.length === 1 ? '' : 'es'}
+            </a>
+          )}
           {(authorFilter || dateFrom || dateTo || pathFilter || useRegex) && (
             <span className="text-2xs text-accent flex items-center gap-1" title="Active filters">
               <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />filtered
@@ -1619,6 +1630,20 @@ export function HistoryPage() {
                         title="Recyclable — this commit is unreachable from any branch/tag and will be garbage-collected after 90 days. Click to recover it."
                       >
                         ♺ recyclable
+                      </a>
+                    )}
+
+                    {/* Stash badge — this commit is a stash (refs/stash).
+                        Clicking jumps to the Stashes page where it can be
+                        applied / popped / dropped. */}
+                    {stashHashes.has(entry.hash) && (
+                      <a
+                        href="#/stashes"
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex-shrink-0 text-2xs px-1.5 py-0.5 rounded border border-status-renamed/40 bg-status-renamed/10 text-status-renamed font-medium flex items-center gap-0.5 hover:bg-status-renamed/20 transition-colors"
+                        title="Stash — this commit is a saved stash (refs/stash). Click to manage it in the Stashes page."
+                      >
+                        📦 stash
                       </a>
                     )}
 

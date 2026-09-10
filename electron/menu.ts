@@ -207,6 +207,7 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
         { type: 'separator' },
         { label: 'Abort (merge/rebase/cherry-pick/revert)', click: () => send('menu:abortSequence') },
         { label: 'Continue (resolve conflicts first)', click: () => send('menu:continueSequence') },
+        { label: 'Skip current commit (cherry-pick/revert/rebase)', click: () => send('menu:skipSequence') },
       ],
     },
     {

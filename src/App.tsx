@@ -9,6 +9,7 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { RebasePanel } from './components/RebasePanel';
 import { FindObjectDialog } from './components/FindObjectDialog';
 import { SequencerPanel } from './components/SequencerPanel';
+import { MergeInProgressPanel } from './components/MergeInProgressPanel';
 import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
 import { CommandLogPanel } from './components/CommandLogPanel';
@@ -670,6 +671,21 @@ export default function App() {
         useGitStore.getState().refreshStatus(repo.path);
       } catch (e) { toast.error('Continue failed', String(e)); }
     };
+    // Skip the current commit in a cherry-pick / revert / rebase sequence.
+    // Used when a commit produces an empty result (changes already applied).
+    const handleSkipSequence = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const st = useGitStore.getState().status;
+      try {
+        if (st?.isRebasing) await api.git.rebase(repo.path, 'HEAD', { skip: true });
+        else if (st?.isCherryPicking) await api.git.cherryPickSkip(repo.path);
+        else if (st?.isReverting) await api.git.revertSkip(repo.path);
+        else { toast.info('Nothing to skip (merge has no skip)'); return; }
+        toast.info('Commit skipped — sequence continues with the next one');
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Skip failed', String(e)); }
+    };
 
     const handleWindowStyle = (style: unknown) => {
       if (style === 'standard' || style === 'log' || style === 'working-tree') {
@@ -727,6 +743,7 @@ export default function App() {
       window.smartgit.events.on('menu:bisectLog', () => bisect('log')),
       window.smartgit.events.on('menu:abortSequence', handleAbortSequence),
       window.smartgit.events.on('menu:continueSequence', handleContinueSequence),
+      window.smartgit.events.on('menu:skipSequence', handleSkipSequence),
       // Local menu
       window.smartgit.events.on('menu:stage', handleStage),
       window.smartgit.events.on('menu:unstage', handleUnstage),
@@ -1017,6 +1034,14 @@ export default function App() {
   useEffect(() => {
     setDismissSequencer(false);
   }, [currentRepo?.path, status?.isCherryPicking, status?.isReverting]);
+  // Merge in progress: auto-mount a MergeInProgressPanel (the full MergePanel
+  // is a START dialog and requires a targetBranch). This surfaces
+  // Continue/Abort + conflicted-file list for merges started from terminal.
+  const [dismissMerge, setDismissMerge] = useState(false);
+  const showMergePanel = currentRepo && status?.isMerging && !dismissMerge;
+  useEffect(() => {
+    setDismissMerge(false);
+  }, [currentRepo?.path, status?.isMerging]);
 
   const handleFind = useCallback(() => setShowFind(true), []);
 
@@ -1219,6 +1244,12 @@ export default function App() {
           kind={sequencerKind}
           repoPath={currentRepo.path}
           onClose={() => setDismissSequencer(true)}
+        />
+      )}
+      {showMergePanel && (
+        <MergeInProgressPanel
+          repoPath={currentRepo.path}
+          onClose={() => setDismissMerge(true)}
         />
       )}
     </div>

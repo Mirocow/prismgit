@@ -423,6 +423,7 @@ export interface GitApi {
   revert: (repoPath: string, hashes: string[], noCommit?: boolean) => Promise<{ conflicts: string[] }>;
   revertAbort: (repoPath: string) => Promise<void>;
   revertContinue: (repoPath: string) => Promise<void>;
+  revertSkip: (repoPath: string) => Promise<void>;
 
   rebase: (repoPath: string, onto: string, options?: { interactive?: boolean; autosquash?: boolean; abort?: boolean; continue?: boolean; skip?: boolean }) => Promise<void>;
 

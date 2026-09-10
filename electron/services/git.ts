@@ -2587,6 +2587,15 @@ export async function revertContinue(repoPath: string): Promise<void> {
   await git.raw(['revert', '--continue', '--no-edit']);
 }
 
+/**
+ * Skip the current commit in a revert sequence.
+ * Same use case as cherryPickSkip — when a revert produces an empty commit.
+ */
+export async function revertSkip(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['revert', '--skip']);
+}
+
 export async function rebase(
   repoPath: string,
   onto: string,

@@ -873,6 +873,10 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   const groups = useToolbarStore((s) => s.groups);
 
   const disabled = !currentRepo;
+  // In-progress sequencer states block Pull/Push/Discard — they would conflict
+  // with the in-progress merge/rebase/cherry-pick/revert. Fetch/Fetch All are
+  // still allowed (read-only on the working tree). Bisect does NOT block.
+  const isInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
 
   const handlePush = async () => {
     if (!currentRepo) return;
@@ -976,8 +980,8 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           case 'sync':
             return (
               <div key={key} className="flex items-center">
-                <PullDropdown disabled={disabled} />
-                <PushDropdown disabled={disabled} />
+                <PullDropdown disabled={disabled || isInProgress} />
+                <PushDropdown disabled={disabled || isInProgress} />
                 <Divider />
               </div>
             );
@@ -1012,7 +1016,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                     ).then(() => toast.success('Changes discarded'))
                      .catch((e) => toast.error('Discard failed', String(e)));
                   });
-                }} disabled={disabled} title="Discard all changes" />
+                }} disabled={disabled || isInProgress} title={isInProgress ? 'Blocked — finish the in-progress operation first' : 'Discard all changes'} />
                 <Divider />
               </div>
             );

@@ -3,7 +3,7 @@ import type { AppSettings } from '../../electron/types/settings-api';
 import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
 import { LazyFileList } from '../components/LazyFileList';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
@@ -1383,6 +1383,31 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           onAbort={handleCpAbort}
         />
       )}
+      {/* Generic in-progress banner for the OTHER sequencer states (merge /
+          rebase / revert / bisect). Cherry-pick is handled by the specialized
+          CherryPickStateBanner above. */}
+      {(() => {
+        const m = status?.isMerging, r = status?.isRebasing, c = status?.isCherryPicking, v = status?.isReverting, b = status?.isBisecting;
+        // Skip if cherry-pick (handled above) or nothing in progress.
+        if (c || (!m && !r && !v && !b)) return null;
+        let label = '';
+        let hint = '';
+        if (m) { label = 'merging'; hint = 'Resolve conflicts, then use Continue (or Abort to discard the merge).'; }
+        else if (r) { label = 'rebasing'; hint = 'Resolve conflicts, then use Continue / Skip / Abort in the rebase banner.'; }
+        else if (v) { label = 'reverting'; hint = 'Resolve conflicts, then use Continue / Skip / Abort in the revert banner.'; }
+        else if (b) { label = 'bisecting'; hint = 'Mark commits Good / Bad on the Bisect page to narrow down the regression.'; }
+        return (
+          <div className="px-3 py-1.5 border-b border-status-warning/40 bg-status-warning/10 flex items-center gap-2">
+            <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+            <span className="text-2xs text-status-warning font-medium">
+              The working tree is in {label} state.
+            </span>
+            <span className="text-2xs text-text-tertiary">
+              {hint} Other branch operations (Pull, Push, Checkout, Discard) are blocked until you finish.
+            </span>
+          </div>
+        );
+      })()}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Directory tree panel (SmartGit-style) — selects the folder scope */}

@@ -84,8 +84,15 @@ export function RecyclablePage() {
     } catch (e) {
       const msg = String(e);
       // Detect common recoverable states
-      if (/nothing to commit|already applied/i.test(msg)) {
-        toast.info('Commit appears already applied', `Skipping ${shortHash(hash)}`);
+      if (/nothing to commit|already applied|previous cherry-pick is now empty/i.test(msg)) {
+        // The cherry-pick is now empty (the changes are already applied).
+        // The repository is in CHERRY_PICK_HEAD state — offer Skip.
+        toast.warning(
+          `Cherry-pick of ${shortHash(hash)} is empty`,
+          'The changes are already applied. The repository is now in cherry-picking state — use Skip in the banner to drop this commit, or Abort to cancel.',
+        );
+        // Refresh status so the global SequencerPanel banner appears.
+        await refreshStatus(repo.path);
       } else if (/dirty index|uncommitted changes/i.test(msg)) {
         toast.error('Cherry-pick blocked', 'Commit or stash your current changes first.');
       } else {

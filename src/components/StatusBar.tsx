@@ -139,6 +139,30 @@ export function StatusBar({
             <CommitHashLink hash={headHash} />
           </span>
         )}
+        {/* In-progress operation indicator — bright warning so the user
+            knows the working tree is in a special state and destructive
+            operations are blocked. Clicking it jumps to Changes where the
+            SequencerPanel / MergePanel / RebasePanel banners live. */}
+        {(() => {
+          const m = status?.isMerging, r = status?.isRebasing, c = status?.isCherryPicking, v = status?.isReverting, b = status?.isBisecting;
+          if (!m && !r && !c && !v && !b) return null;
+          let label = '';
+          if (m) label = 'Merging';
+          else if (r) label = 'Rebasing';
+          else if (c) label = 'Cherry-picking';
+          else if (v) label = 'Reverting';
+          else if (b) label = 'Bisecting';
+          return (
+            <a
+              href="#/changes"
+              className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-status-warning/15 border border-status-warning/50 text-status-warning font-medium hover:bg-status-warning/25 transition-colors"
+              title={`Working tree is in ${label.toLowerCase()} state. Click to open Changes and Continue / Skip / Abort.`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-status-warning inline-block animate-pulse" />
+              {label} in progress
+            </a>
+          );
+        })()}
         {/* Selected commit (if different from HEAD) */}
         {selectedCommitHash && selectedCommitHash !== headHash && (
           <span className="flex items-center gap-1.5" title="Globally selected commit (from any tool)">

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   GitBranch, Plus, RefreshCw, Trash, GitMerge, Check, ArrowUp, ArrowDown,
   ExternalLink, Upload, ChevronDown, ChevronRight, X, Pencil, CloudDownload,
-  Settings as Cog, Loader, Tag as TagIcon, Package, Download,
+  Settings as Cog, Loader, Tag as TagIcon, Package, Download, AlertCircle,
 } from '../components/icons';
 import { MergePanel } from '../components/MergePanel';
 import { useRepositoryStore } from '../stores/repositoryStore';
@@ -27,6 +27,10 @@ import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function BranchesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { refreshStatus, status } = useGitStore();
+  // In-progress operations (merge/rebase/cherry-pick/revert) block checkout,
+  // push, pull — these would lose work or conflict with the sequencer state.
+  // Fetch / Fetch All are still allowed (read-only on the working tree).
+  const isInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
   const toast = useToastStore();
 
   // SmartGit: while a cherry-pick is in progress the branch is "detached from
@@ -802,14 +806,14 @@ export function BranchesPage() {
     if (b.remote) {
       // === REMOTE BRANCH CONTEXT MENU (matches Fork: Check Out / Merge / Rebase /
       //     Push (disabled) / Push To / Log / Reset / Reset Advanced / Delete / Copy) ===
-      items.push({ label: 'Check Out...', accelerator: 'CmdOrCtrl+G', clickId: 'checkout-remote' });
+      items.push({ label: 'Check Out...', accelerator: 'CmdOrCtrl+G', clickId: 'checkout-remote', enabled: !isInProgress });
       items.push({ type: 'separator' });
       items.push({ label: 'Merge...', clickId: 'merge' });
       items.push({ label: 'Rebase...', accelerator: 'CmdOrCtrl+D', clickId: 'rebase' });
       items.push({ type: 'separator' });
       // Push is meaningless for a remote-only branch — shown disabled like Fork does.
       items.push({ label: 'Push', accelerator: 'CmdOrCtrl+Up', enabled: false, clickId: '_noop' });
-      items.push({ label: 'Push To...', accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to-remote' });
+      items.push({ label: 'Push To...', accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to-remote', enabled: !isInProgress });
       items.push({ type: 'separator' });
       items.push({ label: 'Log', accelerator: 'CmdOrCtrl+L', clickId: 'log' });
       items.push({ type: 'separator' });
@@ -825,7 +829,7 @@ export function BranchesPage() {
 
       // Group 1: Checkout / Merge / Rebase
       if (!b.current) {
-        items.push({ label: 'Check Out...', accelerator: 'CmdOrCtrl+G', clickId: 'checkout' });
+        items.push({ label: 'Check Out...', accelerator: 'CmdOrCtrl+G', clickId: 'checkout', enabled: !isInProgress });
         items.push({ type: 'separator' });
         items.push({ label: 'Merge...', clickId: 'merge' });
         items.push({ label: 'Rebase...', accelerator: 'CmdOrCtrl+D', clickId: 'rebase' });
@@ -834,8 +838,8 @@ export function BranchesPage() {
       }
 
       // Group 2: Push
-      items.push({ label: 'Push', accelerator: 'CmdOrCtrl+Up', clickId: 'push' });
-      items.push({ label: 'Push To...', accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to' });
+      items.push({ label: 'Push', accelerator: 'CmdOrCtrl+Up', clickId: 'push', enabled: !isInProgress });
+      items.push({ label: 'Push To...', accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to', enabled: !isInProgress });
       // SmartGit Manual: Push to Gerrit — refs/for/<branch>
       items.push({ label: 'Push to Gerrit...', clickId: 'push-gerrit' });
       items.push({ type: 'separator' });
@@ -1139,8 +1143,18 @@ export function BranchesPage() {
                 ⚠ cherry-picking
               </span>
             )}
+            {/* "gone" — upstream branch was deleted on the remote. Pull would
+                fail; Push is the recovery. Surface this so the user understands
+                why Pull is unavailable on this branch. */}
+            {b.gone && (
+              <span className="text-2xs px-1 py-0.5 rounded bg-status-deleted/15 text-status-deleted font-medium"
+                title="The upstream branch was deleted on the remote. Pull is unavailable — Push to recreate it, or set a new tracked branch.">
+                gone
+              </span>
+            )}
             {b.ahead !== undefined && b.ahead > 0 && (
-              <span className="text-2xs px-1 py-0.5 rounded bg-status-added/15 text-status-added flex items-center gap-0.5 font-medium">
+              <span className="text-2xs px-1 py-0.5 rounded bg-status-added/15 text-status-added flex items-center gap-0.5 font-medium"
+                title={b.current ? `${b.ahead} commit(s) ahead of upstream — Pull would attempt to merge or fail. Push to publish them.` : `${b.ahead} ahead of upstream`}>
                 <ArrowUp size={8} />{b.ahead}
               </span>
             )}
@@ -1168,7 +1182,8 @@ export function BranchesPage() {
               {!b.current && (
                 <button
                   className="icon-btn !w-5 !h-5 !text-accent hover:!bg-accent-muted"
-                  title="Check out this branch  (or double-click the row)"
+                  title={isInProgress ? 'Checkout blocked — finish the in-progress operation first' : 'Check out this branch  (or double-click the row)'}
+                  disabled={isInProgress}
                   onClick={(e) => { e.stopPropagation(); handleCheckout(b); }}
                 >
                   <Check size={11} />
@@ -1181,7 +1196,9 @@ export function BranchesPage() {
                 </button>
               )}
               {!b.current && (
-                <button className="icon-btn !w-5 !h-5" title="Push"
+                <button className="icon-btn !w-5 !h-5"
+                  title={isInProgress ? 'Push blocked — finish the in-progress operation first' : 'Push'}
+                  disabled={isInProgress}
                   onClick={(e) => { e.stopPropagation(); handlePushBranch(b); }}>
                   <Upload size={11} />
                 </button>
@@ -1202,9 +1219,11 @@ export function BranchesPage() {
             <>
               <button
                 className="icon-btn !w-5 !h-5 !text-accent hover:!bg-accent-muted"
-                title="Check out as new local branch  (or double-click the row)"
+                title={isInProgress ? 'Checkout blocked — finish the in-progress operation first' : 'Check out as new local branch  (or double-click the row)'}
+                disabled={isInProgress}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (isInProgress) return;
                   const localName = b.name.replace(/^[^/]+\//, '');
                   confirmDialog({
                     title: `Checkout remote branch '${b.name}'`,
@@ -1535,6 +1554,35 @@ export function BranchesPage() {
           </button>
         </div>
       </div>
+
+      {/* In-progress warning banner — explains why checkout / push are blocked
+          and points to the floating SequencerPanel/MergePanel/RebasePanel at
+          the bottom of the screen for Continue / Skip / Abort actions. */}
+      {isInProgress && (
+        <div className="px-3 py-1.5 border-b border-status-warning/40 bg-status-warning/10 flex items-center gap-2">
+          <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+          <span className="text-2xs text-status-warning font-medium">
+            Working tree is in {status?.isMerging ? 'merging' : status?.isRebasing ? 'rebasing' : status?.isCherryPicking ? 'cherry-picking' : 'reverting'} state.
+          </span>
+          <span className="text-2xs text-text-tertiary">
+            Checkout, Push, Pull, and Discard are blocked. Use the banner below to Continue, Skip, or Abort. Fetch / Fetch All are still allowed.
+          </span>
+        </div>
+      )}
+      {/* Detached HEAD warning — HEAD points at a commit, not a branch.
+          Commits made here are not on any branch and will become Recyclable
+          when HEAD moves. Surface this prominently. */}
+      {status?.detached && !isInProgress && (
+        <div className="px-3 py-1.5 border-b border-status-warning/40 bg-status-warning/10 flex items-center gap-2">
+          <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+          <span className="text-2xs text-status-warning font-medium">
+            HEAD is detached.
+          </span>
+          <span className="text-2xs text-text-tertiary">
+            You are not on a branch — new commits won't belong to any branch and will become Recyclable when you switch. Checkout a branch to re-attach.
+          </span>
+        </div>
+      )}
 
       {/* Branch list */}
       <div className="flex-1 overflow-y-auto">

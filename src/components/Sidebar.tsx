@@ -358,12 +358,25 @@ export function Sidebar() {
     });
   }, [showContextMenu, groups, repos, dropRepoIntoGroup, checkRemotes, openRepository]);
 
+  // In-progress sequencer state for the CURRENT repo only — shown as a small
+  // warning dot on the active repo row. Per-repo status for inactive repos
+  // would require additional backend plumbing (RemoteCheckSummary doesn't
+  // carry isMerging etc.) — left for a follow-up.
+  const status = useGitStore((s) => s.status);
+  const currentInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
+  const currentBisecting = !!status?.isBisecting;
+  const currentDetached = !!status?.detached;
+
   // ============= Tree rendering =============
 
   const renderRepoRow = (node: RepoItemNode) => {
     const repo = node.repo;
     const meta = metadata[repo.path];
     const isActive = currentRepo?.path === repo.path;
+    // In-progress / detached indicators only apply to the active repo.
+    const showInProgressBadge = isActive && currentInProgress;
+    const showBisectBadge = isActive && currentBisecting;
+    const showDetachedBadge = isActive && currentDetached;
     return (
       <div
         key={repo.path}
@@ -389,6 +402,31 @@ export function Sidebar() {
       >
         {isActive ? <FolderGitOpen size={13} className="text-accent flex-shrink-0" /> : <FolderGit size={13} className="text-text-tertiary flex-shrink-0" />}
         <span className={cn('flex-1 truncate', isActive && 'text-accent font-medium')}>{repo.name}</span>
+        {/* In-progress state badge — only on the active repo, only when one
+            of the sequencer flags is true. Clicking opens Changes where the
+            SequencerPanel / MergePanel / RebasePanel banners live. */}
+        {showInProgressBadge && (
+          <a
+            href="#/changes"
+            onClick={(e) => e.stopPropagation()}
+            className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning inline-block animate-pulse"
+            title={`Working tree is in ${status?.isMerging ? 'merging' : status?.isRebasing ? 'rebasing' : status?.isCherryPicking ? 'cherry-picking' : 'reverting'} state. Click to open Changes.`}
+          />
+        )}
+        {showBisectBadge && !showInProgressBadge && (
+          <span
+            className="flex-shrink-0 text-2xs text-status-info font-semibold"
+            title="Bisect in progress — see the Bisect page"
+          >
+            bisect
+          </span>
+        )}
+        {showDetachedBadge && !showInProgressBadge && (
+          <span
+            className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning inline-block"
+            title="HEAD is detached — commits won't belong to any branch"
+          />
+        )}
         <RemoteBadges check={remoteChecks[repo.path]} />
         {meta?.favorite && (
           <Star size={10} className="text-status-modified fill-current flex-shrink-0" />

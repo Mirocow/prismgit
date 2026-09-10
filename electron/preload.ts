@@ -142,6 +142,7 @@ const api = {
       ipcRenderer.invoke('git:revert', repoPath, hashes, noCommit),
     revertAbort: (repoPath: string) => ipcRenderer.invoke('git:revertAbort', repoPath),
     revertContinue: (repoPath: string) => ipcRenderer.invoke('git:revertContinue', repoPath),
+    revertSkip: (repoPath: string) => ipcRenderer.invoke('git:revertSkip', repoPath),
     rebase: (repoPath: string, onto: string, options?: { interactive?: boolean; autosquash?: boolean; abort?: boolean; continue?: boolean; skip?: boolean }) =>
       ipcRenderer.invoke('git:rebase', repoPath, onto, options),
     bisectStart: (repoPath: string) => ipcRenderer.invoke('git:bisectStart', repoPath),
