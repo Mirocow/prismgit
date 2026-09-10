@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { X, Search, Loader } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type BranchInfo } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
@@ -48,11 +49,15 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
         ]);
         setBranches(bs);
         setCurrent(cur);
-        // Sensible default: for checkout pick another branch, for merge/rebase pick main/master
+        // Sensible default: the branch GLOBALLY selected in another tool
+        // (Branches/History/Toolbar chip) wins over the old name heuristic —
+        // that's the whole point of the cross-tool selection.
+        const globalSel = useSelectionStore.getState().selectedBranch;
         const preferred =
-          action === 'checkout'
+          (globalSel && bs.some((b) => b.name === globalSel && !b.current) ? globalSel : undefined)
+          ?? (action === 'checkout'
             ? bs.find((b) => !b.current && !b.remote)?.name
-            : bs.find((b) => /^(main|master|develop)$/.test(b.name) && !b.current)?.name;
+            : bs.find((b) => /^(main|master|develop)$/.test(b.name) && !b.current)?.name);
         if (preferred) setSelected(preferred);
       } catch (e) {
         toast.error('Failed to load branches', String(e));
@@ -158,7 +163,13 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
           {filtered.map((b) => (
             <button
               key={b.name}
-              onClick={() => { setSelected(b.name); setQuery(b.name); }}
+              onClick={() => {
+                setSelected(b.name);
+                setQuery(b.name);
+                // Cross-tool: picking a branch here also becomes the global
+                // selection so Branches/History/Toolbar stay in sync.
+                if (!b.remote) useSelectionStore.getState().selectBranch(b.name);
+              }}
               className={cn(
                 'w-full text-left px-3 py-1.5 rounded text-xs flex items-center gap-2 hover:bg-surface-hover',
                 selected === b.name && 'bg-accent/15 text-accent'

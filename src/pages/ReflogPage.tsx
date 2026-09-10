@@ -15,6 +15,7 @@ export function ReflogPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const showContextMenu = useContextMenu();
+  const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const [entries, setEntries] = useState<ReflogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [ref, setRef] = useState('HEAD');
@@ -120,7 +121,11 @@ export function ReflogPage() {
           entries.map((entry) => (
             <div
               key={entry.index}
-              className="group flex items-start gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover"
+              className={cn(
+                'group flex items-start gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer',
+                selectedCommitHash === entry.hash && 'bg-bg-selected'
+              )}
+              onClick={() => useSelectionStore.getState().selectCommit(entry.hash)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 showContextMenu([

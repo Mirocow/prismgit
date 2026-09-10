@@ -70,6 +70,12 @@ export function BranchesPage() {
   const [moreBusy, setMoreBusy] = useState(false);
   const [propertiesRemote, setPropertiesRemote] = useState<RemoteProperties | null>(null);
   const [propertiesLoading, setPropertiesLoading] = useState(false);
+  // Reverse sync (read side): highlight whatever is GLOBALLY selected in any
+  // other tool — a branch picked in History/Toolbar, a tag from Tags page, a
+  // stash from Stashes page. BranchesPage used to be write-only.
+  const globalSelectedBranch = useSelectionStore((s) => s.selectedBranch);
+  const globalSelectedTag = useSelectionStore((s) => s.selectedTag);
+  const globalSelectedStashIndex = useSelectionStore((s) => s.selectedStashIndex);
   useEscapeKey(!!showAddTag, () => setShowAddTag(false));
   useEscapeKey(!!showStashDialog, () => setShowStashDialog(false));
   useEscapeKey(!!resetTarget, () => setResetTarget(null));
@@ -933,6 +939,7 @@ export function BranchesPage() {
         className={cn(
           'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
           b.current && 'bg-bg-active font-medium',
+          globalSelectedBranch === b.name && !b.current && 'bg-bg-selected',
           draggedBranch === b.name && 'opacity-50'
         )}
         draggable={!b.remote}
@@ -1123,7 +1130,7 @@ export function BranchesPage() {
       { label: 'Add Tag...', accelerator: 'Shift+F7', clickId: 'add-tag' },
     ], (action) => {
       if (action === 'add-tag') {
-        setAddTagDefaultRef('HEAD');
+        setAddTagDefaultRef(useSelectionStore.getState().selectedCommitHash || 'HEAD');
         setShowAddTag(true);
       }
     });
@@ -1148,7 +1155,7 @@ export function BranchesPage() {
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
       e.preventDefault();
       if (e.shiftKey) {
-        setAddTagDefaultRef('HEAD');
+        setAddTagDefaultRef(useSelectionStore.getState().selectedCommitHash || 'HEAD');
         setShowAddTag(true);
       } else {
         setShowNewDialog(true);
@@ -1259,7 +1266,10 @@ export function BranchesPage() {
   const renderTagRow = (tag: TagInfo) => (
     <div
       key={tag.name}
-      className="group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover"
+      className={cn(
+        'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
+        globalSelectedTag === tag.name && 'bg-bg-selected'
+      )}
       onClick={(e) => {
         // Click: select the tag globally and show the tagged commit in History
         useSelectionStore.getState().selectTag(tag.name);
@@ -1294,7 +1304,10 @@ export function BranchesPage() {
     return (
       <div
         key={`stash-${s.index}`}
-        className="group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover"
+        className={cn(
+          'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
+          globalSelectedStashIndex === s.index && 'bg-bg-selected'
+        )}
         onClick={(e) => { handleStashShowInLog(s); e.stopPropagation(); }}
         onContextMenu={(e) => showStashContextMenu(e, s)}
         title="Click: show content in Log · Right-click: stash menu"

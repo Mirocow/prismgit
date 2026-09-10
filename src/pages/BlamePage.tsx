@@ -11,7 +11,13 @@ export function BlamePage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const [filePath, setFilePath] = useState('');
-  const [ref, setRef] = useState('HEAD');
+  // Blame the ref selected elsewhere in the app (tag/branch from Toolbar or
+  // Tags/Branches) when there is one — otherwise plain HEAD.
+  const [ref, setRef] = useState(
+    useSelectionStore.getState().selectedTag
+    ?? useSelectionStore.getState().selectedBranch
+    ?? 'HEAD'
+  );
   const [blame, setBlame] = useState<BlameResult | null>(null);
   const [loading, setLoading] = useState(false);
   // Read global file selection — when user clicks "Blame this file" from Changes/History,

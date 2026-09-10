@@ -698,10 +698,16 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
       const prefix = `${selectedRemote}/`;
       const rem = brs.filter(b => b.remote && b.name.startsWith(prefix));
       setRemoteBranches(rem);
-      // Default: upstream-tracking remote branch of the CURRENT branch, then
-      // <remote>/<current>, then the remote's first branch.
+      // Default: remote branch matching the GLOBALLY selected branch (from
+      // Branches/History — the pull target follows the app-wide selection),
+      // then upstream-tracking of the CURRENT branch, then the first branch.
       setSelectedBranch(prev => {
         if (prev && rem.some(b => b.name === prev)) return prev;
+        const globallySelected = useSelectionStore.getState().selectedBranch;
+        const gMatch = globallySelected
+          ? rem.find(r => r.name === `${prefix}${globallySelected}`)
+          : undefined;
+        if (gMatch) return gMatch.name;
         const cur = brs.find(b => b.current);
         const match = cur ? rem.find(r => r.name === `${prefix}${cur.name}`) : undefined;
         return match?.name || rem[0]?.name || '';

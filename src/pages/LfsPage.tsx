@@ -208,7 +208,12 @@ export function LfsPage() {
                 <div className="px-3 py-3 text-xs text-text-tertiary">No active locks</div>
               ) : (
                 locks.map((l, i) => (
-                  <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle hover:bg-bg-hover">
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
+                    title="Select this file — visible in Changes/History/Blame"
+                    onClick={() => useSelectionStore.getState().selectFile(l.path)}
+                  >
                     <Lock size={12} className="text-status-modified shrink-0" />
                     <code className="mono flex-1 truncate" title={l.path}>{l.path}</code>
                     <span className="text-2xs text-text-tertiary">{l.owner?.name || 'unknown'}</span>
@@ -252,7 +257,12 @@ export function LfsPage() {
                 files.map((f, i) => {
                   const locked = locks.some(l => l.path === f.path);
                   return (
-                    <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle hover:bg-bg-hover group">
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle hover:bg-bg-hover group cursor-pointer"
+                      title="Select this file — visible in Changes/History/Blame"
+                      onClick={() => useSelectionStore.getState().selectFile(f.path)}
+                    >
                       <Package size={12} className="text-text-tertiary" />
                       <code className="mono flex-1 truncate">{f.path}</code>
                       <span className="text-2xs text-text-tertiary">{f.status}</span>

@@ -3,6 +3,7 @@ import { GitBranch, Loader, Check, X, SkipForward, RotateCcw, FileText, AlertTri
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
 
@@ -18,13 +19,15 @@ export function BisectPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();
+  const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const [bisect, setBisect] = useState<BisectState>({ state: 'none' });
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
-  // Start form
+  // Start form — prefill the BAD ref from the commit selected in History or
+  // another tool (global selection drives every input across the app).
   const [goodRef, setGoodRef] = useState('');
-  const [badRef, setBadRef] = useState('HEAD');
+  const [badRef, setBadRef] = useState(selectedCommitHash ?? 'HEAD');
 
   // Log dialog
   const [showLog, setShowLog] = useState(false);
@@ -37,6 +40,12 @@ export function BisectPage() {
     try {
       const result = await api.git.bisectStatus(repo.path);
       setBisect(result);
+      // Feed the current bisect checkout into the global selection so the
+      // commit is visible in the Toolbar chip, History, Diff, Notes, etc.
+      if (result.state === 'bisecting' && result.rev) {
+        const sel = useSelectionStore.getState().selectedCommitHash;
+        if (sel !== result.rev) useSelectionStore.getState().selectCommit(result.rev);
+      }
     } catch {
       setBisect({ state: 'none' });
     }
@@ -211,7 +220,16 @@ export function BisectPage() {
                 <div className="text-xs text-text-secondary flex items-center gap-2">
                   Current checkout:
                   {bisect.rev ? (
-                    <code className="font-mono text-accent">{shortHash(bisect.rev)}</code>
+                    <code
+                      className="font-mono text-accent cursor-pointer hover:underline"
+                      title="Select this commit (visible in all tools) — click to view in History"
+                      onClick={() => {
+                        useSelectionStore.getState().selectCommit(bisect.rev!);
+                        window.location.hash = '#/history';
+                      }}
+                    >
+                      {shortHash(bisect.rev)}
+                    </code>
                   ) : (
                     <span className="text-text-tertiary">—</span>
                   )}

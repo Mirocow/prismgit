@@ -3,6 +3,7 @@ import { Package, RefreshCw, GitBranch, CheckCircle, AlertCircle, Loader, Plus }
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type SubmoduleInfo } from '../lib/api';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -189,7 +190,15 @@ export function SubmodulesPage() {
                     </span>
                   )}
                 </div>
-                <div className="text-xs text-text-tertiary mt-0.5 font-mono truncate">
+                <div
+                  className="text-xs text-text-tertiary mt-0.5 font-mono truncate cursor-pointer hover:text-accent"
+                  title="Select this submodule path — view its file history in History/Blame"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    useSelectionStore.getState().selectFile(s.path);
+                    useSelectionStore.getState().setPathFilter(s.path);
+                  }}
+                >
                   {s.path}
                 </div>
                 <div className="text-xs text-text-secondary mt-0.5 truncate">
@@ -198,7 +207,17 @@ export function SubmodulesPage() {
                 {s.branch && (
                   <div className="flex items-center gap-1 text-xs text-text-tertiary mt-1">
                     <GitBranch size={10} />
-                    {s.branch}
+                    <span
+                      className="cursor-pointer hover:text-accent hover:underline"
+                      title="Select this branch — click to view in History"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        useSelectionStore.getState().selectBranch(s.branch!);
+                        window.location.hash = '#/history';
+                      }}
+                    >
+                      {s.branch}
+                    </span>
                   </div>
                 )}
               </div>

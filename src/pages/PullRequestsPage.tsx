@@ -23,9 +23,11 @@ export function PullRequestsPage() {
   useEscapeKey(showCreate, () => setShowCreate(false));
   const [repoInfo, setRepoInfo] = useState<{ owner?: string; repo?: string; provider?: string }>({});
 
-  // Create PR form
+  // Create PR form — head/base prefill from the app-wide branch selection
+  // (Branches/History/Toolbar): the PR grows out of the branch you picked.
+  const globalSelBranch = useSelectionStore((s) => s.selectedBranch);
   const [prTitle, setPrTitle] = useState('');
-  const [prHead, setPrHead] = useState('');
+  const [prHead, setPrHead] = useState(globalSelBranch ?? '');
   const [prBase, setPrBase] = useState('');
   const [prBody, setPrBody] = useState('');
   const [creating, setCreating] = useState(false);
@@ -219,7 +221,16 @@ export function PullRequestsPage() {
           <button className="icon-btn" title="Refresh" onClick={loadPRs}>
             <RefreshCw size={13} />
           </button>
-          <button className="btn btn-primary text-xs" onClick={() => setShowCreate(true)}>
+          <button
+            className="btn btn-primary text-xs"
+            title="Create Pull Request — head/base default to the globally selected branch"
+            onClick={() => {
+              // Re-read at open time so the latest cross-tool selection applies
+              const sel = useSelectionStore.getState().selectedBranch;
+              if (sel) setPrHead(sel);
+              setShowCreate(true);
+            }}
+          >
             <Plus size={12} />
             New PR
           </button>

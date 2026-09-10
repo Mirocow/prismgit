@@ -1012,6 +1012,16 @@ export default function App() {
   }, [currentRepo?.path]);
 
   const showRebasePanel = currentRepo && status?.isRebasing && !dismissRebase;
+  // Cherry-pick / revert sequences used to have NO visible continuation UI
+  // (the SequencerPanel existed but was never rendered) — mount it the same
+  // way RebasePanel is mounted, driven by git status flags.
+  const sequencerKind: 'cherry-pick' | 'revert' | null =
+    status?.isCherryPicking ? 'cherry-pick' : status?.isReverting ? 'revert' : null;
+  const [dismissSequencer, setDismissSequencer] = useState(false);
+  const showSequencerPanel = currentRepo && sequencerKind && !dismissSequencer;
+  useEffect(() => {
+    setDismissSequencer(false);
+  }, [currentRepo?.path, status?.isCherryPicking, status?.isReverting]);
 
   const handleFind = useCallback(() => setShowFind(true), []);
 
@@ -1191,6 +1201,13 @@ export default function App() {
       />
       {showRebasePanel && (
         <RebasePanel onClose={() => setDismissRebase(true)} />
+      )}
+      {showSequencerPanel && sequencerKind && (
+        <SequencerPanel
+          kind={sequencerKind}
+          repoPath={currentRepo.path}
+          onClose={() => setDismissSequencer(true)}
+        />
       )}
     </div>
   );

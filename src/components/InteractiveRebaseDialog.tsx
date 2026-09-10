@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, RefreshCw, AlertCircle, Loader, ChevronUp, ChevronDown, GitCommit, CornerDownRight, GitMerge, Scissors, Layers } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type LogEntry } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -46,6 +47,13 @@ export function InteractiveRebaseDialog({
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();
+  // SmartGit linkage: without an explicit prop, the rebase target defaults to
+  // the globally selected branch, then the current HEAD — the dialog used to
+  // be unusable (always warning "Target branch is required") when opened from
+  // the Commands menu.
+  const globalSelectedBranch = useSelectionStore((s) => s.selectedBranch);
+  const headBranch = useGitStore((s) => s.status?.current ?? null);
+  const effectiveOntoBranch = ontoBranch || globalSelectedBranch || headBranch || '';
   const [todos, setTodos] = useState<RebaseTodoItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -227,7 +235,7 @@ export function InteractiveRebaseDialog({
   // Generate a git rebase todo script and execute via filter-branch
   // (Real interactive rebase requires an editor; we use a simpler approach)
   const handleExecute = async () => {
-    if (!ontoBranch) {
+    if (!effectiveOntoBranch) {
       toast.warning('Target branch is required');
       return;
     }
@@ -252,7 +260,7 @@ export function InteractiveRebaseDialog({
       // This is a simplified version - real interactive rebase requires more complex handling
       await api.git.raw(repo.path, [
         '-c', 'sequence.editor=cp ' + todoPath,
-        'rebase', '-i', ontoBranch,
+        'rebase', '-i', effectiveOntoBranch,
       ]);
 
       toast.success('Interactive rebase completed');
@@ -291,7 +299,16 @@ export function InteractiveRebaseDialog({
 
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border-default bg-bg-tertiary text-xs">
           <span className="text-text-tertiary">Rebasing onto:</span>
-          <code className="mono text-accent">{ontoBranch || 'HEAD~' + numCommits}</code>
+          <code
+            className="mono text-accent cursor-pointer hover:underline"
+            title="Select this branch (visible in all tools) — click to view in History"
+            onClick={effectiveOntoBranch ? () => {
+              useSelectionStore.getState().selectBranch(effectiveOntoBranch);
+              window.location.hash = '#/history';
+            } : undefined}
+          >
+            {effectiveOntoBranch || 'HEAD~' + numCommits}
+          </code>
           <span className="text-text-tertiary ml-auto">{todos.length} commits</span>
         </div>
 
@@ -365,8 +382,17 @@ export function InteractiveRebaseDialog({
                   ))}
                 </select>
 
-                {/* Hash */}
-                <code className="text-xs mono text-text-tertiary flex-shrink-0 mt-0.5 w-16">
+                {/* Hash — click selects the commit globally (Toolbar chip,
+                    History, Diff, Notes all follow) */}
+                <code
+                  className="text-xs mono text-text-tertiary hover:text-accent cursor-pointer flex-shrink-0 mt-0.5 w-16"
+                  title="Select this commit — click to view in History"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    useSelectionStore.getState().selectCommit(item.hash);
+                    window.location.hash = '#/history';
+                  }}
+                >
                   {item.hashAbbrev}
                 </code>
 

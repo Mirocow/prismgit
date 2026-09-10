@@ -72,6 +72,9 @@ export function InvestigatePage() {
     setFilePath(path);
     setHistQuery(path);
     setTab('history');
+    // Cross-tool: the picked file becomes the global selection (Toolbar chip,
+    // Changes, Blame, LFS all follow).
+    useSelectionStore.getState().selectFile(path);
   }, []);
   const openInChanges = useCallback((path: string) => {
     useSelectionStore.getState().selectFile(path);
@@ -98,6 +101,21 @@ export function InvestigatePage() {
     const sel = useSelectionStore.getState().selectedFilePath;
     if (sel) { setFilePath(sel); setHistQuery(sel); }
   }, []);
+
+  // Repo switch: stale results from the previous repository must not survive.
+  // The tracked-files effect above reloads on repo.path; here we clear every
+  // tab-local search result.
+  useEffect(() => {
+    setEntries([]);
+    setSelected(null);
+    setSearched(false);
+    setGrepMatches([]);
+    setGrepSearched(false);
+    setGrepError('');
+    setRevResult(null);
+    setRevError(null);
+    setRevInput('HEAD');
+  }, [repo.path]);
 
   const handleInvestigate = useCallback(async () => {
     if (!filePath.trim()) {
@@ -409,7 +427,7 @@ export function InvestigatePage() {
                     <div
                       key={f}
                       className="px-2 py-1 text-xs font-mono hover:bg-bg-hover cursor-pointer truncate"
-                      onClick={() => { setFilePath(f); setHistQuery(f); }}
+                      onClick={() => { setFilePath(f); setHistQuery(f); useSelectionStore.getState().selectFile(f); }}
                     >
                       {f}
                     </div>
@@ -462,7 +480,12 @@ export function InvestigatePage() {
                       'group flex items-start gap-3 px-3 py-2 cursor-pointer border-b border-border-subtle',
                       selected?.hash === entry.hash ? 'bg-bg-selected' : 'hover:bg-bg-hover'
                     )}
-                    onClick={() => setSelected(entry)}
+                    onClick={() => {
+                      setSelected(entry);
+                      // Cross-tool: also the GLOBAL commit selection so the
+                      // commit shows up in Toolbar/History/Diff/Notes.
+                      useSelectionStore.getState().selectCommit(entry.hash);
+                    }}
                   >
                     <GitCommit size={14} className="text-text-tertiary mt-0.5 flex-shrink-0" />
                     <div className="flex-1 min-w-0">

@@ -15,6 +15,7 @@ export function JournalPage() {
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();
   const showContextMenu = useContextMenu();
+  const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const [entries, setEntries] = useState<ReflogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'commit' | 'checkout' | 'merge' | 'rebase' | 'reset' | 'other'>('all');
@@ -140,7 +141,11 @@ export function JournalPage() {
           filtered.map((entry, idx) => (
             <div
               key={entry.index}
-              className="group flex items-start gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover"
+              className={cn(
+                'group flex items-start gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer',
+                selectedCommitHash === entry.hash && 'bg-bg-selected'
+              )}
+              onClick={() => useSelectionStore.getState().selectCommit(entry.hash)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 showContextMenu([

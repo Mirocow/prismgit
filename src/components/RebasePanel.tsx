@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, RefreshCw, AlertCircle, Check, SkipForward, RotateCcw, Loader } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
@@ -19,7 +20,10 @@ export function RebasePanel({ onClose }: { onClose: () => void }) {
   const toast = useToastStore();
   const [state, setState] = useState<RebaseState>({ inProgress: false, conflictedFiles: [] });
   const [loading, setLoading] = useState(false);
-  const [targetBranch, setTargetBranch] = useState('');
+  // SmartGit linkage: the rebase target defaults to the branch selected in
+  // Branches/History/Toolbar instead of an empty input.
+  const globalSelectedBranch = useSelectionStore((s) => s.selectedBranch);
+  const [targetBranch, setTargetBranch] = useState(globalSelectedBranch ?? '');
   const [showStart, setShowStart] = useState(false);
 
   const loadState = useCallback(async () => {
@@ -139,7 +143,15 @@ export function RebasePanel({ onClose }: { onClose: () => void }) {
                   {state.conflictedFiles.map((f) => (
                     <div
                       key={f}
-                      className="flex items-center gap-2 text-xs px-2 py-1 bg-bg-tertiary rounded"
+                      className="flex items-center gap-2 text-xs px-2 py-1 bg-bg-tertiary rounded cursor-pointer hover:bg-bg-hover"
+                      title="Select this file — opens it in Changes / Conflict Solver"
+                      onClick={() => {
+                        // Cross-tool: the conflicted file becomes the global
+                        // file selection (Changes highlights it, global menus
+                        // act on it), then jump to the Changes tool.
+                        useSelectionStore.getState().selectFile(f);
+                        window.location.hash = '#/changes';
+                      }}
                     >
                       <span className="text-status-conflict">●</span>
                       <code className="mono flex-1 truncate">{f}</code>

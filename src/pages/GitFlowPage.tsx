@@ -65,7 +65,17 @@ export function GitFlowPage() {
         </div>
         {branch.lastCommit && (
           <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
-            <code className="font-mono">{shortHash(branch.lastCommit.hash)}</code>
+            <code
+              className="font-mono cursor-pointer hover:text-accent hover:underline"
+              title="Select this commit — click to view in History"
+              onClick={(e) => {
+                e.stopPropagation();
+                useSelectionStore.getState().selectCommit(branch.lastCommit!.hash);
+                window.location.hash = '#/history';
+              }}
+            >
+              {shortHash(branch.lastCommit.hash)}
+            </code>
             <span className="truncate">{branch.lastCommit.message}</span>
             <span>· {formatDate(branch.lastCommit.date)}</span>
           </div>
@@ -102,9 +112,23 @@ export function GitFlowPage() {
           <span className="text-sm font-medium">Git-Flow</span>
           {config && (
             <span className="text-2xs text-text-tertiary">
-              main: <code className="mono">{config.masterBranch}</code>
+              main: <code
+                      className="mono cursor-pointer hover:text-accent hover:underline"
+                      title="Select this branch — click to view in History"
+                      onClick={() => {
+                        useSelectionStore.getState().selectBranch(config.masterBranch);
+                        window.location.hash = '#/history';
+                      }}
+                    >{config.masterBranch}</code>
               {' · '}
-              develop: <code className="mono">{config.developBranch}</code>
+              develop: <code
+                      className="mono cursor-pointer hover:text-accent hover:underline"
+                      title="Select this branch — click to view in History"
+                      onClick={() => {
+                        useSelectionStore.getState().selectBranch(config.developBranch);
+                        window.location.hash = '#/history';
+                      }}
+                    >{config.developBranch}</code>
             </span>
           )}
         </div>

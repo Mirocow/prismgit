@@ -44,7 +44,7 @@ export interface GlobalSelectionState {
   selectedBranches: Set<string>;
   /** Optional path filter — used by History to show "history for this file". */
   pathFilter: string | null;
-  /** Optional author filter (used by History, Changes). */
+  /** Optional author filter — used by History (commit list author search). */
   authorFilter: string | null;
   /** View mode for file lists: 'tree' | 'flat'. */
   fileViewMode: 'tree' | 'flat';

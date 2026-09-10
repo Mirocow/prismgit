@@ -311,12 +311,31 @@ export function SettingsPage() {
             </label>
             <div className="border-t border-border-subtle pt-4 mt-4">
               <div className="text-2xs uppercase text-text-tertiary mb-3 font-bold tracking-wider">Repository list</div>
+              <label
+                className="flex items-center justify-between cursor-pointer mb-4"
+                data-testid="auto-refresh-setting"
+              >
+                <div>
+                  <div className="text-sm font-medium">Auto refresh</div>
+                  <div className="text-xs text-text-tertiary">
+                    Master switch for automatic repository refreshing. When off,
+                    no periodic remote checks happen — the ↓/↑ badges in the
+                    repository list stay frozen until you press "Check now".
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.autoRefresh ?? true}
+                  onChange={(e) => setSetting('autoRefresh', e.target.checked)}
+                />
+              </label>
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-medium">Remote check interval</div>
                   <div className="text-xs text-text-tertiary">
                     How often the sidebar fetches all remotes of every listed
                     repository and shows ↓ incoming / ↑ outgoing badges.
+                    Only applies while Auto refresh is on.
                     Minimum 30&nbsp;s; set 0 to disable the periodic check
                     (the "Check now" button still works).
                   </div>

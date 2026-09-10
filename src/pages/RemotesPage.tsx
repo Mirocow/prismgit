@@ -3,6 +3,7 @@ import { CloudDownload, RefreshCw, Plus, Trash, Pencil, ExternalLink, Loader, Gi
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type RemoteInfo } from '../lib/api';
 import { cn, copyToClipboard } from '../lib/utils';
 import { useContextMenu } from '../lib/useContextMenu';
@@ -347,9 +348,48 @@ export function RemotesPage() {
                   <div className="text-2xs uppercase text-text-tertiary mb-1 pl-8">
                     Remote refs (git ls-remote {r.name})
                   </div>
-                  <pre className="ml-8 text-2xs font-mono bg-bg-tertiary p-2 rounded max-h-60 overflow-auto whitespace-pre text-text-secondary">
-                    {previewLoading === r.name ? 'Loading...' : (preview[r.name] || 'No refs')}
-                  </pre>
+                  <div className="ml-8 text-2xs font-mono bg-bg-tertiary p-2 rounded max-h-60 overflow-auto">
+                    {previewLoading === r.name ? (
+                      'Loading...'
+                    ) : preview[r.name] ? (
+                      preview[r.name]
+                        .split('\n')
+                        .filter((l) => l.trim())
+                        .map((line, i) => {
+                          const tabIndex = line.indexOf('\t');
+                          const hash = tabIndex >= 0 ? line.slice(0, tabIndex) : line;
+                          const refName = tabIndex >= 0 ? line.slice(tabIndex + 1).trim() : '';
+                          // Cross-tool: refs found on the remote become global
+                          // selections — Branches/Tags/History all follow.
+                          const branchMatch = /^refs\/(heads|remotes)\/(.+)$/.exec(refName);
+                          const tagMatch = /^refs\/tags\/(.+?)(\^\{\})?$/.exec(refName);
+                          const isTagObject = refName.endsWith('^{}');
+                          const onClick = isTagObject
+                            ? undefined
+                            : branchMatch
+                            ? () => useSelectionStore.getState().selectBranch(branchMatch[2])
+                            : tagMatch
+                            ? () => useSelectionStore.getState().selectTag(tagMatch[1])
+                            : undefined;
+                          return (
+                            <div
+                              key={`${refName}-${i}`}
+                              className={cn(
+                                'whitespace-pre flex gap-2',
+                                onClick && 'cursor-pointer hover:text-accent hover:underline'
+                              )}
+                              onClick={onClick}
+                              title={onClick ? 'Select this ref (visible in all tools)' : undefined}
+                            >
+                              <span className="text-text-tertiary">{hash.slice(0, 9)}</span>
+                              <span className="flex-1">{refName || line}</span>
+                            </div>
+                          );
+                        })
+                    ) : (
+                      'No refs'
+                    )}
+                  </div>
                 </div>
               )}
             </div>

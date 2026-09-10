@@ -128,6 +128,13 @@ export interface AppSettings {
   gitlabProjectId?: number;
   // === Repository list: periodic remote check ===
   /**
+   * Master "Auto refresh" switch (SmartGit-style). When disabled, the app
+   * stops ALL automatic remote polling for the repository list — no periodic
+   * fetch of every listed repository, no ↓/↑ badge updates. Manual "Check
+   * now" in the sidebar still works. Default: true.
+   */
+  autoRefresh?: boolean;
+  /**
    * How often (in seconds) to poll every repository in the list: fetch all
    * remotes and compute incoming/outgoing counters. Default 120, min 30.
    * 0 disables the periodic check (manual "Check now" still works).

@@ -67,6 +67,8 @@ export function TagsPage() {
   // Globally selected tag — written on click, highlighted in the list, shown
   // as a chip in the Toolbar so other tools see the same tag selection.
   const selectedTag = useSelectionStore((s) => s.selectedTag);
+  // New Tag targets the commit selected in History/another tool when present.
+  const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
 
   const handleRename = async (tag: TagInfo) => {
     const newName = renameValue.trim();
@@ -126,7 +128,7 @@ export function TagsPage() {
       setShowDialog(false);
       setName('');
       setMessage('');
-      setRef('HEAD');
+      setRef(selectedCommitHash || 'HEAD');
       setAnnotated(true);
       await load();
     } catch (e) {
@@ -171,7 +173,12 @@ export function TagsPage() {
           </button>
           <button
             className="btn btn-primary text-xs"
-            onClick={() => setShowDialog(true)}
+            onClick={() => {
+              // Cross-tool: default the new tag's ref to the commit selected
+              // in History (or any other tool) instead of blind HEAD.
+              setRef(selectedCommitHash || 'HEAD');
+              setShowDialog(true);
+            }}
           >
             <Plus size={12} />
             New Tag

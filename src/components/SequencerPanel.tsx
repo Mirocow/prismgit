@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, Check, X, Loader, RotateCcw } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
@@ -84,9 +85,22 @@ export function SequencerPanel({ kind, repoPath, onClose }: SequencerPanelProps)
             {label} in progress — {conflicted.length > 0 ? `${conflicted.length} conflicted file${conflicted.length > 1 ? 's' : ''}` : 'waiting to continue'}
           </div>
           {conflicted.length > 0 && (
-            <div className="text-2xs text-text-tertiary truncate mt-0.5">
-              Resolve conflicts (stage the files), then Continue: {conflicted.slice(0, 5).join(', ')}
-              {conflicted.length > 5 && ` +${conflicted.length - 5} more`}
+            <div className="text-2xs text-text-tertiary mt-0.5 flex flex-wrap gap-1">
+              {conflicted.map((f) => (
+                <span
+                  key={f}
+                  className="mono px-1.5 py-0.5 bg-bg-tertiary rounded cursor-pointer hover:text-accent"
+                  title="Select this file — opens it in Changes / Conflict Solver"
+                  onClick={() => {
+                    // Cross-tool: conflicted file becomes the global selection
+                    // and opens in Changes where it can be resolved.
+                    useSelectionStore.getState().selectFile(f);
+                    window.location.hash = '#/changes';
+                  }}
+                >
+                  {f}
+                </span>
+              ))}
             </div>
           )}
         </div>

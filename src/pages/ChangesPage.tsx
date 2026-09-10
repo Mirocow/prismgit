@@ -158,6 +158,18 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   // selectedFilePath, so History/Blame/Diff and the global menu actions
   // (Stage/Unstage/Discard/Ignore/Index Editor) all operate on the SAME file.
   const selectFileGlobal = useSelectionStore((s) => s.selectFile);
+  // Reverse sync: when ANOTHER tool selects a file globally (Annotate, LFS,
+  // Investigate, Diff, History, deep link), Changes highlights it and loads
+  // its diff. Equal values (own write-through) are ignored — no loop.
+  const globalSelectedFilePath = useSelectionStore((s) => s.selectedFilePath);
+  const selectedFileRef = useRef(selectedFile);
+  selectedFileRef.current = selectedFile;
+  useEffect(() => {
+    if (!globalSelectedFilePath) return;
+    if (globalSelectedFilePath === selectedFileRef.current) return;
+    setSelectedFile(globalSelectedFilePath);
+    setSelectedFiles(new Set([globalSelectedFilePath]));
+  }, [globalSelectedFilePath]);
 
   const handleFileClick = (e: React.MouseEvent, filePath: string) => {
     if (e.ctrlKey || e.metaKey) {

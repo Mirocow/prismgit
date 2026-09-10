@@ -191,7 +191,16 @@ export function WorktreesPage() {
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">{mainWorktree.path}</div>
                     <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
-                      <code className="font-mono">{shortHash(mainWorktree.head)}</code>
+                      <code
+                        className="font-mono cursor-pointer hover:text-accent hover:underline"
+                        title="Select this commit — click to view in History"
+                        onClick={() => {
+                          useSelectionStore.getState().selectCommit(mainWorktree.head);
+                          window.location.hash = '#/history';
+                        }}
+                      >
+                        {shortHash(mainWorktree.head)}
+                      </code>
                       {mainWorktree.branch && (
                         <span className="flex items-center gap-1">
                           <GitBranch size={10} />
@@ -238,7 +247,16 @@ export function WorktreesPage() {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate">{wt.path}</div>
                       <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5 flex-wrap">
-                        <code className="font-mono">{shortHash(wt.head)}</code>
+                        <code
+                          className="font-mono cursor-pointer hover:text-accent hover:underline"
+                          title="Select this commit — click to view in History"
+                          onClick={() => {
+                            useSelectionStore.getState().selectCommit(wt.head);
+                            window.location.hash = '#/history';
+                          }}
+                        >
+                          {shortHash(wt.head)}
+                        </code>
                         {wt.branch && (
                           <span className="flex items-center gap-1">
                             <GitBranch size={10} />

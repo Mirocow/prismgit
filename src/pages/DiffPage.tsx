@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, FileText, GitBranch, GitCommit, ChevronDown, Search } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
@@ -229,6 +229,9 @@ export function DiffPage() {
   const loadFileDiff = async (file: string) => {
     if (!repo) return;
     setSelectedFileInList(file);
+    // Cross-tool write-back: the file shown in Diff is the app-wide selection,
+    // so Blame/Changes/History follow the file the user is looking at.
+    useSelectionStore.getState().selectFile(file);
     setLoading(true);
     try {
       let result: DiffResult;
@@ -253,6 +256,25 @@ export function DiffPage() {
   useEffect(() => {
     setSelectedFileInList(null);
   }, [baseRef, compareMode, compareRef]);
+
+  // Repo switch: stale local state from the previous repository must not
+  // survive — refs from repo A are meaningless (and resolve empty) in repo B.
+  // IMPORTANT: skip the initial mount — prefill-from-global effects above run
+  // on mount (deep links, History → Diff hand-off) and must not be wiped.
+  const prevDiffRepoPathRef = useRef(repo.path);
+  useEffect(() => {
+    if (prevDiffRepoPathRef.current === repo.path) return;
+    prevDiffRepoPathRef.current = repo.path;
+    setFilePath('.');
+    setBaseRef('HEAD');
+    setCompareMode('working');
+    setCompareRef('');
+    setStashHash(null);
+    setDiff(null);
+    setChangedFiles([]);
+    setSelectedFileInList(null);
+    setFileListFilter('');
+  }, [repo.path]);
 
   if (!repo) {
     return <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">No repository open</div>;
