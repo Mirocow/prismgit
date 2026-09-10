@@ -155,12 +155,19 @@ export async function commit(
   noVerify = false
 ): Promise<string> {
   const git = getGit(repoPath);
-  const args: string[] = ['-m', message];
+  // Build the raw git commit command — simple-git's .commit() method
+  // treats its first array argument as files, not as -m flags, which
+  // causes the commit message to be lost (bug: commit uses the wrong
+  // message or falls back to a default). Using git.raw() gives us full
+  // control over the arguments.
+  const args: string[] = ['commit', '-m', message];
   if (amend) args.push('--amend', '--no-edit');
   if (signoff) args.push('--signoff');
   if (noVerify) args.push('--no-verify');
-  const result = await git.commit(args);
-  return result.commit;
+  const output = await git.raw(args);
+  // Extract commit hash from output: "[main abc1234] message"
+  const match = output.match(/\[([a-z0-9_-]+)\s+([a-f0-9]{7,40})\]/);
+  return match ? match[2] : '';
 }
 
 /**

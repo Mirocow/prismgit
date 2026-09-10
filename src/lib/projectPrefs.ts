@@ -55,6 +55,10 @@ export interface ProjectPrefs {
   // --- Sidebar favorites ---
   /** Navigation paths the user pinned to the Favorites section (e.g. ['/changes', '/history']). */
   favoriteTools?: string[];
+
+  // --- Commit message history ---
+  /** Recent commit messages entered by the user, most-recent-first. */
+  commitMessageHistory?: string[];
 }
 
 export function loadProjectPrefs(repoPath: string): ProjectPrefs {

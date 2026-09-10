@@ -602,6 +602,15 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       }
       const hash = await commit(repo.path, finalMsg, amend);
       toast.success('Commit created', `Hash: ${hash.substring(0, 7)}`);
+      // Save commit message to per-project history for reuse
+      const prefs = loadProjectPrefs(repo.path);
+      const history = prefs.commitMessageHistory || [];
+      // Deduplicate: remove the same message if it already exists
+      const filtered = history.filter(m => m !== finalMsg);
+      // Add to front, cap at 50 entries
+      const newHistory = [finalMsg, ...filtered].slice(0, 50);
+      saveProjectPrefs(repo.path, { commitMessageHistory: newHistory });
+      setCommitMsgHistory(newHistory);
       setCommitMsg('');
       setAmend(false);
       setCommitAll(false);
@@ -613,6 +622,17 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
 
   // AI Commit Messages helper — builds an LLMProvider from settings
   const [aiGenerating, setAiGenerating] = useState(false);
+  // Commit message history dropdown
+  const [showMsgHistory, setShowMsgHistory] = useState(false);
+  const [commitMsgHistory, setCommitMsgHistory] = useState<string[]>([]);
+
+  // Load commit message history when repo changes
+  useEffect(() => {
+    if (repo) {
+      const prefs = loadProjectPrefs(repo.path);
+      setCommitMsgHistory(prefs.commitMessageHistory || []);
+    }
+  }, [repo?.path]);
 
   const handleAIGenerate = async () => {
     if (!settings?.aiCommitMessagesEnabled) {
@@ -1592,6 +1612,35 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                 <Sparkles size={10} className={aiGenerating ? 'animate-pulse' : ''} />
                 AI
               </button>
+              {/* Commit message history dropdown */}
+              <div className="relative">
+                <button
+                  className={cn('text-2xs px-1.5 py-0.5 rounded flex items-center gap-1',
+                    commitMsgHistory.length > 0 ? 'text-text-secondary hover:bg-bg-hover' : 'text-text-tertiary opacity-50 cursor-not-allowed')}
+                  onClick={() => commitMsgHistory.length > 0 && setShowMsgHistory(!showMsgHistory)}
+                  disabled={commitMsgHistory.length === 0}
+                  title="Recent commit messages"
+                >
+                  History
+                </button>
+                {showMsgHistory && commitMsgHistory.length > 0 && (
+                  <div className="absolute bottom-full left-0 mb-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-64 max-h-48 overflow-y-auto">
+                    {commitMsgHistory.map((msg, i) => (
+                      <button
+                        key={i}
+                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover truncate border-b border-border-subtle last:border-b-0"
+                        title={msg}
+                        onClick={() => {
+                          setCommitMsg(msg);
+                          setShowMsgHistory(false);
+                        }}
+                      >
+                        {msg.split('\n')[0]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex-1" />
               <button
                 className="btn btn-secondary text-xs"
