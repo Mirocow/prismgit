@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { CloudDownload, RefreshCw, Plus, Trash, Pencil, ExternalLink, Loader, GitBranch, ChevronDown, ChevronRight, Check } from '../components/icons';
+import { CloudDownload, RefreshCw, Plus, Trash, Pencil, ExternalLink, Loader, GitBranch, ChevronDown, ChevronRight, Check, Eye, EyeOff } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -9,6 +9,7 @@ import { cn } from '../lib/utils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { RenameDialog } from '../components/RemoteDialogs';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
+import { getRemoteAuth, setRemoteAuth, hasRemoteAuth } from '../lib/remoteAuth';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function RemotesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
@@ -30,6 +31,11 @@ export function RemotesPage() {
   const [editFetchUrl, setEditFetchUrl] = useState('');
   const [editPushUrl, setEditPushUrl] = useState('');
   const [editBackground, setEditBackground] = useState(false);
+  // Per-remote authorization — the SAME stored credential as Repository
+  // Settings → Remotes; used by push/pull/fetch/ls-remote in the main process.
+  const [editUsername, setEditUsername] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [showEditPassword, setShowEditPassword] = useState(false);
 
   // Rename remote dialog (SmartGit-style modal instead of native prompt)
   const [renameOld, setRenameOld] = useState<string | null>(null);
@@ -116,11 +122,12 @@ export function RemotesPage() {
         await api.git.setRemoteUrl(repo.path, editRemote.name, editPushUrl, true);
       }
       setBackgroundFetchForRepo(repo.path, editRemote.name, editBackground);
-      toast.success(`URLs updated for '${editRemote.name}'`);
+      setRemoteAuth(repo.path, editRemote.name, { username: editUsername, password: editPassword });
+      toast.success(`Remote '${editRemote.name}' updated`);
       setEditRemote(null);
       await load();
     } catch (e) {
-      toast.error('Update URL failed', String(e));
+      toast.error('Update remote failed', String(e));
     } finally {
       setBusy(null);
     }
@@ -226,6 +233,12 @@ export function RemotesPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-text-primary">{r.name}</span>
                     {r.name === 'origin' && <span className="badge badge-renamed">DEFAULT</span>}
+                    {hasRemoteAuth(repo.path, r.name) && (
+                      <span className="badge badge-added" title="Authorization configured — used for push/pull/fetch">AUTH</span>
+ )}
+                    {isBackgroundFetchEnabled(repo.path, r.name) && (
+                      <span className="badge" title="Refresh automatically (background poll)">AUTO</span>
+ )}
                   </div>
                   <div className="text-xs text-text-tertiary mt-0.5 font-mono truncate" title={r.refs.fetch}>
                     {r.refs.fetch}
@@ -268,7 +281,16 @@ export function RemotesPage() {
                       <button
                         className="icon-btn !w-6 !h-6"
                         title="Edit URLs"
-                        onClick={() => { setEditRemote(r); setEditFetchUrl(r.refs.fetch); setEditPushUrl(r.refs.push); setEditBackground(isBackgroundFetchEnabled(repo.path, r.name)); }}
+                        onClick={() => {
+                          setEditRemote(r);
+                          setEditFetchUrl(r.refs.fetch);
+                          setEditPushUrl(r.refs.push);
+                          setEditBackground(isBackgroundFetchEnabled(repo.path, r.name));
+                          const cred = getRemoteAuth(repo.path, r.name);
+                          setEditUsername(cred.username ?? '');
+                          setEditPassword(cred.password ?? '');
+                          setShowEditPassword(false);
+                        }}
                       >
                         <ExternalLink size={12} />
                       </button>
@@ -359,7 +381,7 @@ export function RemotesPage() {
           onClick={() => setEditRemote(null)}
         >
           <div className="panel w-[480px] p-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-medium mb-4">Edit URLs — {editRemote.name}</h3>
+            <h3 className="text-base font-medium mb-4">Edit Remote — {editRemote.name}</h3>
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-text-tertiary block mb-1">Fetch URL</label>
@@ -383,6 +405,42 @@ export function RemotesPage() {
               </div>
               <div className="text-2xs text-text-tertiary">
                 A separate push URL is useful for push-over-SSH setups where fetch goes through a mirror/CDN.
+              </div>
+              <div className="border-t border-border-subtle pt-3">
+                <label className="text-xs text-text-tertiary block mb-1.5">
+                  Authorization (HTTP/HTTPS) — same setting as Repository Settings → Remotes
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    className="w-full text-sm"
+                    placeholder="Username"
+                    autoComplete="off"
+                    value={editUsername}
+                    onChange={(e) => setEditUsername(e.target.value)}
+                  />
+                  <div className="relative">
+                    <input
+                      type={showEditPassword ? 'text' : 'password'}
+                      className="w-full text-sm pr-8"
+                      placeholder="Password / token"
+                      autoComplete="new-password"
+                      value={editPassword}
+                      onChange={(e) => setEditPassword(e.target.value)}
+                    />
+                    <button
+                      className="absolute right-1 top-1/2 -translate-y-1/2 icon-btn !w-6 !h-6"
+                      title={showEditPassword ? 'Hide password' : 'Show password'}
+                      onClick={() => setShowEditPassword((v) => !v)}
+                      tabIndex={-1}
+                    >
+                      {showEditPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                    </button>
+                  </div>
+                </div>
+                <div className="text-2xs text-text-tertiary mt-1">
+                  Applied to push, pull, fetch and ls-remote for this remote. Leave empty for SSH or public servers.
+                </div>
               </div>
               <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
                 <input

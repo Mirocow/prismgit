@@ -1,6 +1,8 @@
 import simpleGit, { type SimpleGit } from 'simple-git';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getSetting } from './storage.js';
+import type { RemoteCredential } from '../types/settings-api.js';
 import type {
   StatusResult,
   LogEntry,
@@ -187,7 +189,18 @@ export async function push(
       }
     }
   }
-  const args: string[] = ['push'];
+  const args: string[] = [
+    ...(await remoteNetworkArgs(repoPath, remote, true)),
+    // Hardening for servers/proxies that reject chunked uploads or HTTP/2
+    // pushes with "RPC failed; HTTP 400 curl 22 / unexpected disconnect":
+    //  - http.version=HTTP/1.1 — curl's HTTP/2 upload trips many proxies
+    //  - http.postBuffer — buffer the whole pack instead of chunked
+    //    transfer-encoding (both are per-command -c flags; nothing is
+    //    persisted into the repository config)
+    '-c', 'http.version=HTTP/1.1',
+    '-c', 'http.postBuffer=524288000',
+    'push',
+  ];
   if (setUp) args.push('-u');
   if (force) args.push('--force-with-lease');
   if (tags) args.push('--tags');
@@ -197,7 +210,111 @@ export async function push(
     // points at, which is wrong when the user selected a non-current branch).
     args.push(refspec);
   }
-  await git.raw(args);
+  try {
+    await git.raw(args);
+  } catch (e) {
+    throw describeNetworkError(e, 'push');
+  }
+}
+
+/**
+ * Per-remote credentials from app settings (Repository Settings → Remotes,
+ * shared with the Remotes tool). Empty when the user has not configured any.
+ */
+function getStoredCredential(repoPath: string, remoteName: string): RemoteCredential | undefined {
+  try {
+    const map = getSetting('remoteAuth') as
+      | Record<string, Record<string, RemoteCredential>>
+      | undefined;
+    const cred = map?.[repoPath]?.[remoteName];
+    if (cred && (cred.username?.trim() || cred.password?.trim())) return cred;
+  } catch {
+    /* settings store unavailable (unit tests) — no credentials */
+  }
+  return undefined;
+}
+
+/**
+ * Build `-c http.extraHeader=Authorization: Basic ...` args for an HTTP(S)
+ * remote with stored credentials. Credentials are injected per command only —
+ * never persisted into .git/config or the remote URL, never echoed in errors.
+ * Returns [] for SSH/local URLs or when no credentials are configured.
+ */
+export function buildHttpAuthArgs(
+  remoteUrl: string | undefined,
+  cred: RemoteCredential | undefined
+): string[] {
+  if (!remoteUrl || !cred) return [];
+  // Only http(s) supports the extraHeader mechanism.
+  if (!/^https?:\/\//i.test(remoteUrl.trim())) return [];
+  const user = cred.username?.trim() ?? '';
+  const pass = cred.password ?? '';
+  if (!user && !pass) return [];
+  // Don't double-authorize: URLs that already embed credentials (http://u:p@host/)
+  // would send two conflicting Authorization sources.
+  if (/^https?:\/\/[^/@]+@/i.test(remoteUrl.trim())) return [];
+  const b64 = Buffer.from(`${user}:${pass}`, 'utf8').toString('base64');
+  return ['-c', `http.extraHeader=Authorization: Basic ${b64}`];
+}
+
+/**
+ * Resolve the stored URL of a remote. Push commands should authenticate
+ * against the push URL when a dedicated one is configured, fetch/pull/ls
+ * against the fetch URL.
+ */
+async function remoteUrlOf(repoPath: string, remoteName: string, pushUrl = false): Promise<string | undefined> {
+  try {
+    const remotes = (await getGit(repoPath).getRemotes(true)) as Array<{
+      name: string;
+      refs: { fetch: string; push?: string };
+    }>;
+    const refs = remotes.find((r) => r.name === remoteName)?.refs;
+    if (!refs) return undefined;
+    return (pushUrl ? refs.push || refs.fetch : refs.fetch) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `-c` args (auth) that must precede a network git subcommand for `remote`.
+ * Async because the remote URL has to be read from the repo config.
+ */
+async function remoteNetworkArgs(repoPath: string, remoteName: string, pushUrl = false): Promise<string[]> {
+  try {
+    const url = await remoteUrlOf(repoPath, remoteName, pushUrl);
+    return buildHttpAuthArgs(url, getStoredCredential(repoPath, remoteName));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Translate raw git network errors into actionable messages. The technical
+ * detail is kept after the hint; the Authorization header value can never
+ * appear in git output (it is an http.extraHeader, not a URL rewrite).
+ */
+function describeNetworkError(e: unknown, op: 'push' | 'pull' | 'fetch'): Error {
+  const raw = e instanceof Error ? e.message : String(e);
+  let hint = '';
+  if (/could not read Username|Authentication failed|401|403|authorization/i.test(raw)) {
+    hint =
+      `Authentication failed — set Username + Password/token for this remote in ` +
+      `Repository Settings → Remotes (or the Remotes tool → Edit URLs). `;
+  } else if (/HTTP 400/.test(raw)) {
+    hint =
+      'The server rejected the request (HTTP 400) — usually a proxy or server ' +
+      'limit. Push was already retried over HTTP/1.1 with a large buffer; ' +
+      'check the server log if it persists. ';
+  } else if (/413/.test(raw)) {
+    hint = 'The server refused the payload as too large (HTTP 413). ';
+  } else if (/host key verification|permission denied \(publickey\)/i.test(raw)) {
+    hint = 'SSH authentication failed — add your key to ssh-agent for this host. ';
+  }
+  if (!hint) return e instanceof Error ? e : new Error(raw);
+  const err = new Error(hint + raw.trim());
+  (err as { originalStack?: string }).originalStack = e instanceof Error ? e.stack : undefined;
+  return err;
 }
 
 export async function pull(
@@ -208,12 +325,16 @@ export async function pull(
   noFF = false
 ): Promise<void> {
   const git = getGit(repoPath);
-  const args: string[] = ['pull'];
+  const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'pull'];
   if (rebase) args.push('--rebase');
   if (noFF) args.push('--no-ff');
   args.push(remote);
   if (branch) args.push(branch);
-  await git.raw(args);
+  try {
+    await git.raw(args);
+  } catch (e) {
+    throw describeNetworkError(e, 'pull');
+  }
 }
 
 export async function fetch(
@@ -223,18 +344,50 @@ export async function fetch(
   tags = false
 ): Promise<void> {
   const git = getGit(repoPath);
-  const args: string[] = ['fetch'];
+  const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'fetch'];
   if (prune) args.push('--prune');
   if (tags) args.push('--tags');
   args.push(remote);
-  await git.raw(args);
+  try {
+    await git.raw(args);
+  } catch (e) {
+    throw describeNetworkError(e, 'fetch');
+  }
 }
 
 export async function fetchAll(repoPath: string, prune = false): Promise<void> {
   const git = getGit(repoPath);
-  const args: string[] = ['fetch', '--all', '--tags'];
-  if (prune) args.push('--prune');
-  await git.raw(args);
+  // Fast path: no per-remote credentials configured → single `fetch --all`.
+  // With credentials we must fetch per remote (each remote may have its own
+  // Authorization header — a single `--all` run can only send one).
+  const remotes = ((await git.getRemotes(true)) as Array<{ name: string }>).map((r) => r.name);
+  const hasCreds = remotes.some((r) => !!getStoredCredential(repoPath, r));
+  if (!hasCreds) {
+    const args: string[] = ['fetch', '--all', '--tags'];
+    if (prune) args.push('--prune');
+    try {
+      await git.raw(args);
+    } catch (e) {
+      throw describeNetworkError(e, 'fetch');
+    }
+    return;
+  }
+  const failures: string[] = [];
+  for (const r of remotes) {
+    try {
+      const args: string[] = [...(await remoteNetworkArgs(repoPath, r)), 'fetch', '--tags'];
+      if (prune) args.push('--prune');
+      args.push(r);
+      await git.raw(args);
+    } catch (e) {
+      failures.push(`${r}: ${describeNetworkError(e, 'fetch').message}`);
+    }
+  }
+  if (failures.length === remotes.length && failures.length > 0) {
+    throw new Error(`Fetch failed for all remotes — ${failures.join('; ')}`);
+  }
+  // Partial failures are intentionally non-fatal (same semantics as --all,
+  // which reports per-remote errors but still updates the others).
 }
 
 export async function log(
@@ -492,7 +645,7 @@ export async function deleteBranch(
 ): Promise<void> {
   const git = getGit(repoPath);
   if (remote) {
-    await git.raw(['push', 'origin', '--delete', name]);
+    await git.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', name]);
   } else {
     await git.deleteLocalBranch(name, force);
   }
@@ -631,10 +784,27 @@ async function countRevList(git: SimpleGit, args: string[]): Promise<number> {
 }
 
 /**
+ * Remotes of `repoPath` whose "Perform background Poll or Fetch" checkbox is
+ * enabled (Repository Settings → Remotes, or the Remotes/Branches tools).
+ * The renderer writes this map into the shared settings store; read it here
+ * so periodic refresh touches exactly the remotes the user opted in.
+ */
+function getBackgroundFetchRemotes(repoPath: string): string[] {
+  try {
+    const map = getSetting('backgroundFetchRemotes') as Record<string, string[]> | undefined;
+    const names = map?.[repoPath];
+    return Array.isArray(names) ? names.filter((n) => typeof n === 'string' && n) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Periodic remote check for the repository list (SmartGit-style background
- * poll): `git fetch --all` (network, guarded by a timeout — never prompts),
- * then cheap local computations of incoming/outgoing commit counters and the
- * working-tree change count. NEVER throws — all failures land in `error`.
+ * poll): fetches ONLY the remotes opted in via "Perform background Poll or
+ * Fetch" (network, guarded by a timeout — never prompts), then cheap local
+ * computations of incoming/outgoing commit counters and the working-tree
+ * change count. NEVER throws — all failures land in `error`.
  */
 export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSummary> {
   const summary = emptyRemoteCheckSummary(repoPath);
@@ -653,30 +823,47 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
     return summary; // not a repo or unreadable — nothing else to report
   }
 
-  // 2. Fetch all remotes (network). GIT_TERMINAL_PROMPT=0 so a credential
-  //    prompt can never hang the background poll; timeout as a safety net.
+  // 2. Network fetch. Refresh ONLY the remotes whose "Perform background
+  //    Poll or Fetch" checkbox is enabled in the repository settings — never
+  //    every remote of every repository. With no checked remotes there is no
+  //    network activity at all (counters reflect the last fetch).
+  //    GIT_TERMINAL_PROMPT=0 so a credential prompt can never hang the
+  //    background poll; per-remote timeout as a safety net.
   //    NOTE: only the override variable goes into .env() — spreading the full
   //    process.env here would trip simple-git's "unsafe operations" guard
   //    whenever the user's environment contains EDITOR/PAGER etc.
   if (summary.hasRemote) {
-    try {
+    const checked = getBackgroundFetchRemotes(repoPath).filter((n) => summary.remotes.includes(n));
+    if (checked.length > 0) {
       const fetchGit = simpleGit({ baseDir: repoPath, binary: 'git' })
         .env({ GIT_TERMINAL_PROMPT: '0' });
-      await Promise.race([
-        fetchGit.raw(['fetch', '--all', '--prune', '--quiet']),
-        new Promise<never>((_, reject) => {
-          const timer = setTimeout(
-            () => reject(new Error(`fetch timed out after ${REMOTE_FETCH_TIMEOUT_MS / 1000}s`)),
-            REMOTE_FETCH_TIMEOUT_MS
-          );
-          // Don't keep the process alive just for this timer.
-          (timer as { unref?: () => void }).unref?.();
-        }),
-      ]);
-      summary.fetched = true;
-    } catch (e) {
-      // Counters below still reflect the LAST successful fetch — worth showing.
-      summary.error = e instanceof Error ? e.message : String(e);
+      const perRemote = async (name: string): Promise<void> => {
+        const authArgs = await remoteNetworkArgs(repoPath, name);
+        await Promise.race([
+          fetchGit.raw([...authArgs, 'fetch', '--prune', '--quiet', name]),
+          new Promise<never>((_, reject) => {
+            const timer = setTimeout(
+              () => reject(new Error(`fetch timed out after ${REMOTE_FETCH_TIMEOUT_MS / 1000}s`)),
+              REMOTE_FETCH_TIMEOUT_MS
+            );
+            // Don't keep the process alive just for this timer.
+            (timer as { unref?: () => void }).unref?.();
+          }),
+        ]);
+      };
+      const results = await Promise.allSettled(checked.map(perRemote));
+      const errors = results
+        .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+        .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
+      if (errors.length === 0) {
+        summary.fetched = true;
+      } else if (errors.length === checked.length) {
+        summary.error = errors.join('; ');
+      } else {
+        // At least one remote refreshed the refs; surface partial failures.
+        summary.fetched = true;
+        summary.error = errors.join('; ');
+      }
     }
   }
 
@@ -1430,7 +1617,10 @@ export async function renameStash(repoPath: string, index: number, newMessage: s
  */
 export async function fetchDeepen(repoPath: string, remote = 'origin', commits = 100): Promise<void> {
   const git = getGit(repoPath);
-  await git.raw(['fetch', remote, '--deepen', String(Math.max(1, commits))]);
+  await git.raw([
+    ...(await remoteNetworkArgs(repoPath, remote)),
+    'fetch', remote, '--deepen', String(Math.max(1, commits)),
+  ]);
   invalidateCache(repoPath);
 }
 
@@ -1440,10 +1630,11 @@ export async function fetchDeepen(repoPath: string, remote = 'origin', commits =
  */
 export async function setFetchDepth(repoPath: string, remote = 'origin', depth: number): Promise<void> {
   const git = getGit(repoPath);
+  const authArgs = await remoteNetworkArgs(repoPath, remote);
   if (depth > 0) {
-    await git.raw(['fetch', remote, '--depth', String(depth)]);
+    await git.raw([...authArgs, 'fetch', remote, '--depth', String(depth)]);
   } else {
-    await git.raw(['fetch', '--unshallow', remote]);
+    await git.raw([...authArgs, 'fetch', '--unshallow', remote]);
   }
   invalidateCache(repoPath);
 }
@@ -1597,7 +1788,7 @@ export async function createTag(
 export async function deleteTag(repoPath: string, name: string, remote = false): Promise<void> {
   const git = getGit(repoPath);
   if (remote) {
-    await git.raw(['push', 'origin', '--delete', name]);
+    await git.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', name]);
   } else {
     await git.tag(['-d', name]);
   }
@@ -1605,7 +1796,12 @@ export async function deleteTag(repoPath: string, name: string, remote = false):
 
 export async function pushTag(repoPath: string, name: string, remote = 'origin'): Promise<void> {
   const git = getGit(repoPath);
-  await git.raw(['push', remote, name]);
+  await git.raw([
+    ...(await remoteNetworkArgs(repoPath, remote, true)),
+    '-c', 'http.version=HTTP/1.1',
+    '-c', 'http.postBuffer=524288000',
+    'push', remote, name,
+  ]);
 }
 
 export async function submodules(repoPath: string): Promise<SubmoduleInfo[]> {
@@ -2926,7 +3122,14 @@ export async function updateServerInfo(repoPath: string): Promise<string> {
  */
 export async function listRemote(repoPath: string, remote: string = 'origin'): Promise<string> {
   const git = getGit(repoPath);
-  return await git.listRemote([remote]);
+  try {
+    // Per-remote auth (http.extraHeader) — private servers reject anonymous
+    // ls-remote, and the Remotes tool preview must use the same stored
+    // credentials as push/pull/fetch.
+    return await git.raw([...(await remoteNetworkArgs(repoPath, remote)), 'ls-remote', remote]);
+  } catch (e) {
+    throw describeNetworkError(e, 'fetch');
+  }
 }
 
 /**
@@ -3751,7 +3954,7 @@ export async function pushToGerrit(
     }
   }
   const ref = options?.draft ? `refs/drafts/${targetBranch}` : `refs/for/${targetBranch}`;
-  const args = ['push', remote, ref];
+  const args = [...(await remoteNetworkArgs(repoPath, remote, true)), 'push', remote, ref];
   if (options?.topic) args.push(`topic=${options.topic}`);
   if (options?.reviewers && options.reviewers.length) {
     for (const r of options.reviewers) args.push(`r=${r}`);
@@ -4283,15 +4486,18 @@ export async function batchOperation(
   for (const repo of repos) {
     try {
       const git = getGit(repo);
+      const r = options.remote || 'origin';
+      const isPush = operation === 'push';
+      const netArgs = await remoteNetworkArgs(repo, r, isPush);
       switch (operation) {
         case 'fetch':
-          await git.raw(['fetch', options.remote || 'origin', '--prune']);
+          await git.raw([...netArgs, 'fetch', r, '--prune']);
           break;
         case 'pull':
-          await git.raw(['pull', options.remote || 'origin', options.branch || '']);
+          await git.raw([...netArgs, 'pull', r, options.branch || '']);
           break;
         case 'push':
-          await git.raw(['push', options.remote || 'origin', ...(options.force ? ['--force-with-lease'] : [])]);
+          await git.raw([...netArgs, '-c', 'http.version=HTTP/1.1', 'push', r, ...(options.force ? ['--force-with-lease'] : [])]);
           break;
         case 'status':
           await git.status();

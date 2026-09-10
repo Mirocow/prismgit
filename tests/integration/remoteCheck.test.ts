@@ -6,13 +6,20 @@
  *     produce genuine incoming/outgoing situations;
  *   - a repo without remotes;
  *   - a non-repo directory (must not throw).
+ *
+ * Contract since Task 27: the network fetch runs ONLY for remotes whose
+ * "Perform background Poll or Fetch" checkbox is enabled (shared app
+ * settings, key backgroundFetchRemotes). Without the checkbox the check is
+ * network-free: fetched=false and counters reflect the last fetch.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as gitService from '../../electron/services/git';
+
+let gitService: typeof import('../../electron/services/git');
+let storage: typeof import('../../electron/services/storage');
 
 let root = '';
 
@@ -42,7 +49,14 @@ describe('git service — remote check (fetch + incoming/outgoing)', () => {
   let noRemote = '';
   let notARepo = '';
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    // Isolate the app-settings store so the checkbox writes never touch the
+    // developer's real settings file. Must happen BEFORE the first import of
+    // electron/services/* (which instantiates the store at module load).
+    process.env.PRISMGIT_USER_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'prismgit-remote-check-store-'));
+    gitService = await import('../../electron/services/git');
+    storage = await import('../../electron/services/storage');
+
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'prismgit-remote-check-'));
     origin = path.join(root, 'origin.git');
     work1 = path.join(root, 'work1');
@@ -95,11 +109,23 @@ describe('git service — remote check (fetch + incoming/outgoing)', () => {
     expect(summary.branch).toBeNull();
   });
 
-  it('detects incoming commits after a fetch (work2 pushed, work1 behind)', async () => {
+  it('skips the network fetch when no remote opted in (no checkbox)', async () => {
+    // No backgroundFetchRemotes entry → no fetch — the summary must report
+    // fetched=false and work2's pushed commit is NOT seen yet.
+    const summary = await gitService.pollRemoteSummary(work1);
+    expect(summary.hasRemote).toBe(true);
+    expect(summary.remotes).toEqual(['origin']);
+    expect(summary.fetched).toBe(false);
+    expect(summary.incoming).toBe(0); // the commit is on the server, unseen
+  });
+
+  it('fetches ONLY opted-in remotes and detects incoming commits', async () => {
+    // The checkbox (Repository Settings → Remotes / Remotes tool) opts in.
+    storage.setSetting('backgroundFetchRemotes', { [work1]: ['origin'] });
     const before = await gitService.pollRemoteSummary(work1);
     expect(before.hasRemote).toBe(true);
     expect(before.remotes).toEqual(['origin']);
-    expect(before.fetched).toBe(true); // local file remote — fetch must succeed
+    expect(before.fetched).toBe(true); // checkbox on → fetch ran
     // work2 pushed 'from work2'; work1 fetched inside pollRemoteSummary
     expect(before.incoming).toBe(1);
     expect(before.outgoing).toBe(0);

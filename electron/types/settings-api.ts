@@ -133,6 +133,22 @@ export interface AppSettings {
    * 0 disables the periodic check (manual "Check now" still works).
    */
   repoRemoteCheckIntervalSec?: number;
+  // === Per-remote authorization (Repository Settings → Remotes) ===
+  /**
+   * HTTP(S) credentials used for push/pull/fetch per remote.
+   * Key 1 = absolute repo path, key 2 = remote name.
+   * Stored in the app settings file (userData) — same store for the
+   * Repository Settings dialog and the Remotes tool. Never written to
+   * .git/config or the remote URL; applied per-command via http.extraHeader.
+   */
+  remoteAuth?: Record<string, Record<string, RemoteCredential>>;
+}
+
+/** Credentials for one remote of one repository (HTTP(S) basic auth). */
+export interface RemoteCredential {
+  username?: string;
+  /** Password or personal access token. */
+  password?: string;
 }
 
 export interface SettingsApi {
