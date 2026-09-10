@@ -77,28 +77,27 @@ describe('buildAboutHtml', () => {
   });
 
   it('renders runtime versions and system rows', () => {
+    // The About page intentionally shows a compact system table (Chromium,
+    // Node.js, V8, OS and Platform rows were dropped from the layout).
+    expect(html).toContain('<td class="k">Version</td><td class="v">2.0.0</td>');
     expect(html).toContain('32.3.3');
-    expect(html).toContain('128.0.6613.186');
-    expect(html).toContain('20.18.1');
-    expect(html).toContain('Darwin 23.6.0');
-    expect(html).toContain('arm64');
     expect(html).toContain('en-US');
+    expect(html).toContain('First launch');
+    expect(html).toContain(ABOUT_LICENSE);
   });
 
-  it('renders all feature chips and links', () => {
+  it('renders all feature chips', () => {
     for (const f of ABOUT_FEATURES) {
       expect(html).toContain(`>${f}</span>`);
     }
-    expect(html).toContain(ABOUT_REPOSITORY_URL);
-    expect(html).toContain('git-scm.com/docs');
   });
 
-  it('embeds the copy-summary payload and routes links through window.open', () => {
-    expect(html).toContain('navigator.clipboard');
-    expect(html).toContain('Copy System Info');
-    expect(html).toContain('copyText(');
-    expect(html).toContain('window.open(');
-    expect(html).toContain('Project Repository');
+  it('closes via the Close button (window.close) — no copy/links UI anymore', () => {
+    expect(html).toContain('id="close-btn"');
+    expect(html).toContain("window.close()");
+    expect(html).not.toContain('Copy System Info');
+    expect(html).not.toContain('navigator.clipboard');
+    expect(html).not.toContain('Project Repository');
   });
 
   it('escapes untrusted-looking values (no raw HTML injection)', () => {
