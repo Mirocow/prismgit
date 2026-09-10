@@ -415,17 +415,22 @@ describe('worktrees (move / prune)', () => {
     await gitService.worktreeAdd(repo, wt1, 'wt-branch');
 
     let list = await gitService.worktrees(repo);
-    expect(list.some(w => w.path === wt1 && w.branch === 'wt-branch')).toBe(true);
+    // On macOS, git may resolve /tmp → /private/tmp — compare realpaths
+    const hasWt1 = list.some(w => fs.realpathSync(w.path) === fs.realpathSync(wt1) && w.branch === 'wt-branch');
+    expect(hasWt1).toBe(true);
 
     await gitService.worktreeMove(repo, wt1, wt2);
     list = await gitService.worktrees(repo);
-    expect(list.some(w => w.path === wt2)).toBe(true);
-    expect(list.some(w => w.path === wt1)).toBe(false);
+    const hasWt2 = list.some(w => { try { return fs.realpathSync(w.path) === fs.realpathSync(wt2); } catch { return false; } });
+    const hasOldWt1 = list.some(w => { try { return fs.realpathSync(w.path) === fs.realpathSync(wt1); } catch { return false; } });
+    expect(hasWt2).toBe(true);
+    expect(hasOldWt1).toBe(false);
     expect(fs.existsSync(path.join(wt2, 'a.txt'))).toBe(true); // contents follow the move
 
     await gitService.worktreeRemove(repo, wt2);
     list = await gitService.worktrees(repo);
-    expect(list.some(w => w.path === wt2)).toBe(false);
+    const stillHasWt2 = list.some(w => { try { return fs.realpathSync(w.path) === fs.realpathSync(wt2); } catch { return false; } });
+    expect(stillHasWt2).toBe(false);
 
     await expect(gitService.worktreePrune(repo)).resolves.toBeUndefined();
   });
@@ -614,7 +619,9 @@ describe('fs & object introspection (trackedFiles / listDirectories / countObjec
     expect(short.trim()).toMatch(/^[0-9a-f]{7,}$/);
     expect((await gitService.revParseArgs(repo, ['--abbrev-ref', 'HEAD'])).trim()).toBe('main');
     expect((await gitService.revParseArgs(repo, ['--is-bare-repository'])).trim()).toBe('false');
-    expect((await gitService.revParseArgs(repo, ['--show-toplevel'])).trim()).toBe(path.resolve(repo));
+    // On macOS, /tmp is a symlink to /private/tmp — resolve both sides
+    const toplevel = (await gitService.revParseArgs(repo, ['--show-toplevel'])).trim();
+    expect(fs.realpathSync(toplevel)).toBe(fs.realpathSync(path.resolve(repo)));
   });
 });
 

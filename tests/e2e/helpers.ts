@@ -21,8 +21,14 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 
-/** Path to the fixture repo created by tests/fixtures/setup-test-repo.sh */
-export const FIXTURE_REPO = '/home/z/my-project/repos/test-repo';
+/** Path to the fixture repo created by tests/fixtures/setup-test-repo.sh
+ * Uses PRISMGIT_TEST_REPOS env var if set, otherwise falls back to a
+ * cross-platform temp directory (previously hardcoded /home/z/my-project/repos
+ * which only works on the Linux dev container).
+ */
+export const FIXTURE_REPO = process.env.PRISMGIT_TEST_REPOS
+  ? path.join(process.env.PRISMGIT_TEST_REPOS, 'test-repo')
+  : path.join(os.tmpdir(), 'prismgit-test-repo');
 
 /** Per-test userData dir — fresh app state (no leftover repos/settings) */
 export function makeUserDataDir(prefix = 'prismgit-e2e-'): string {

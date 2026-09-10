@@ -48,6 +48,16 @@ vi.mock('../../src/lib/api', () => ({
   },
 }));
 
+// Mock i18n — SettingsPage imports useI18n
+vi.mock('../../src/lib/i18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => key,
+    locale: 'en',
+    setLocale: vi.fn(),
+  }),
+  LOCALES: [{ id: 'en', label: 'English', flag: '🇬🇧' }],
+}));
+
 function renderPage() {
   return render(
     <MemoryRouter>

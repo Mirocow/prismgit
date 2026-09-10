@@ -5,7 +5,7 @@ import * as os from 'os';
 import { execSync } from 'child_process';
 import * as gitService from '../../electron/services/git';
 
-const TEST_REPO_DIR = '/home/z/my-project/repos/test-repo';
+const TEST_REPO_DIR = path.join(os.tmpdir(), 'prismgit-repos', 'test-repo');
 
 function shell(cmd: string, cwd = TEST_REPO_DIR) {
   return execSync(cmd, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();

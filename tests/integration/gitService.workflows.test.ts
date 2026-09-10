@@ -502,7 +502,7 @@ describe('worktrees', () => {
     await gitService.worktreeAdd(REPO, wtPath, 'wf-worktree');
     let list = await gitService.worktrees(REPO);
     expect(list.length).toBe(2);
-    const wt = list.find((w) => w.path === wtPath);
+    const wt = list.find((w) => fs.realpathSync(w.path) === fs.realpathSync(wtPath));
     expect(wt).toBeDefined();
     expect(wt!.branch).toBe('wf-worktree');
 

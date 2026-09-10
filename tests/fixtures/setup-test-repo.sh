@@ -16,7 +16,12 @@
 #   - tags: v1 (lightweight), v1.0.0 (lightweight), v1.0.1 (annotated)
 #   - tracked files: src/index.js (contains 'function'), src/version.js, .gitignore, README.md
 set -e
-BASE=/home/z/my-project/repos
+# Use PRISMGIT_TEST_REPOS env var or fall back to a cross-platform temp dir.
+# Previously hardcoded /home/z/my-project/repos which only works on the
+# Linux dev container — macOS doesn't have /home/z.
+# Default: $TMPDIR/repos (macOS) or /tmp/repos (Linux)
+BASE="${PRISMGIT_TEST_REPOS:-${TMPDIR:-/tmp}/prismgit-repos}"
+mkdir -p "$BASE"
 REPO="$BASE/test-repo"
 
 rm -rf "$REPO"

@@ -1,3 +1,4 @@
+import * as os from "os";
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -22,7 +23,7 @@ import * as gitService from '../../electron/services/git';
  * buggy comparison against working tree) gives unrelated results.
  */
 describe('Stash → Diff bug fix — git-level verification', () => {
-  const TEST_REPO_DIR = '/home/z/my-project/repos/test-repo';
+  const TEST_REPO_DIR = path.join(os.tmpdir(), 'prismgit-repos', 'test-repo');
   const STASH_FILE = path.join(TEST_REPO_DIR, 'src/stash-diff-test.txt');
   const MARKER_FILE = path.join(TEST_REPO_DIR, 'src/stash-marker.txt');
 

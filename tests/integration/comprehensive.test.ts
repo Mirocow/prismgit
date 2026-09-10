@@ -1,3 +1,5 @@
+import * as os from "os";
+import * as path from "path";
 /**
  * Comprehensive test — ALL 103 checks from the test plan.
  *
@@ -15,14 +17,14 @@ import * as gitService from '../../electron/services/git';
 
 // We test against the test-repo (small, controlled) for mutations
 // and ollama-code for performance checks
-const TEST_REPO = '/home/z/my-project/repos/test-repo';
+const TEST_REPO = path.join(os.tmpdir(), 'prismgit-repos', 'test-repo');
 const OLLAMA_REPO = '/home/z/my-project/repos/ollama-code';
 // Optional large-repo fixture: ollama-dependent tests are skipped when absent.
 const OLLAMA_REPO_EXISTS = require('fs').existsSync(`${OLLAMA_REPO}/.git`);
 const { execSync } = require('child_process');
 const shell = (cmd: string, cwd = TEST_REPO) => execSync(cmd, { cwd, encoding: 'utf-8' }).trim();
 const fs = require('fs');
-const path = require('path');
+// path and os are already imported as ESM at the top of the file
 
 // Ensure test repo exists and is clean
 beforeAll(() => {
