@@ -8,20 +8,33 @@
 #   make dev           — start dev server with HMR
 #   make build         — production build (renderer + main)
 #   make package       — package for current OS
+#   make package-mac-arm  — package macOS ARM (Apple Silicon)
+#   make package-mac-x64  — package macOS Intel (x64)
 #   make package-all   — build all platforms via Docker
 #   make docker-linux  — build Linux in Docker
 #   make docker-win    — build Windows in Docker
 #   make docker-mac    — build macOS in Docker
+#   make docker-mac-arm — build macOS ARM64 in Docker
 #   make clean         — remove build artifacts
 #   make typecheck     — run TypeScript type check
+#   make test          — run all tests
+#   make test-e2e      — run E2E tests (Playwright)
 #   make help          — show this help
 #
 # =============================================================================
 
 # Project paths
 PROJECT_DIR  := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-APP_NAME     := smartgit-electron
+APP_NAME     := PrismGit
+APP_NAME_LC  := prismgit
 APP_VERSION  := $(shell node -p "require('./package.json').version" 2>/dev/null || echo "1.0.0")
+
+# Detect platform
+UNAME_S := $(shell uname -s 2>/dev/null || echo "")
+UNAME_M := $(shell uname -m 2>/dev/null || echo "")
+IS_MAC   := $(filter Darwin,$(UNAME_S))
+IS_LINUX := $(filter Linux,$(UNAME_S))
+IS_WIN   := $(filter MINGW% MSYS% CYGWIN%,$(UNAME_S))
 
 # Tools
 NPM          := npm
@@ -37,6 +50,7 @@ COLOR_GREEN  := \033[32m
 COLOR_YELLOW := \033[33m
 COLOR_BLUE   := \033[34m
 COLOR_CYAN   := \033[36m
+COLOR_RED    := \033[31m
 
 # Default target
 .DEFAULT_GOAL := help
@@ -48,16 +62,18 @@ COLOR_CYAN   := \033[36m
 .PHONY: help
 help: ## Show this help message
 	@echo ""
-	@echo "$(COLOR_BOLD)PrismGit — Makefile$(COLOR_RESET)"
+	@echo "$(COLOR_BOLD)PrismGit v$(APP_VERSION) — Makefile$(COLOR_RESET)"
 	@echo ""
 	@echo "$(COLOR_CYAN)Development:$(COLOR_RESET)"
-	@grep -E '^[a-zA-Z_-]+:.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(COLOR_GREEN)%-20s$(COLOR_RESET) %s\n", $$1, $$2}' | sort
+	@grep -E '^[a-zA-Z_-]+:.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(COLOR_GREEN)%-22s$(COLOR_RESET) %s\n", $$1, $$2}' | sort
 	@echo ""
-	@echo "$(COLOR_CYAN)Examples:$(COLOR_RESET)"
+	@echo "$(COLOR_CYAN)Quick start:$(COLOR_RESET)"
 	@echo "  make install && make dev          # first-time setup + run"
+	@echo "  make package-mac-arm               # build macOS ARM (Apple Silicon)"
 	@echo "  make docker-all                    # build all platforms via Docker"
-	@echo "  make docker-linux                  # build Linux only"
 	@echo "  make release-check                 # verify release artifacts"
+	@echo ""
+	@echo "$(COLOR_CYAN)Platform:$(COLOR_RESET) $(UNAME_S) $(UNAME_M)"
 	@echo ""
 
 # =============================================================================
@@ -120,23 +136,41 @@ package: build ## Package for current OS
 	@echo "$(COLOR_YELLOW)→ Packaging for current OS...$(COLOR_RESET)"
 	$(NPX) electron-builder
 	@echo "$(COLOR_GREEN)✓ Package complete → release/$(COLOR_RESET)"
+	@ls -lh release/*.* 2>/dev/null || true
 
 .PHONY: package-linux
 package-linux: build ## Package for Linux (AppImage, deb, rpm)
 	@echo "$(COLOR_YELLOW)→ Packaging for Linux...$(COLOR_RESET)"
-	$(NPX) electron-builder --linux
+	$(NPM) run package:linux
+	@echo "$(COLOR_GREEN)✓ Linux package complete$(COLOR_RESET)"
 	@ls -lh release/*.* 2>/dev/null || true
 
 .PHONY: package-win
-package-win: build ## Package for Windows (NSIS, MSI)
+package-win: build ## Package for Windows (NSIS)
 	@echo "$(COLOR_YELLOW)→ Packaging for Windows...$(COLOR_RESET)"
-	$(NPX) electron-builder --win
+	$(NPM) run package:win
+	@echo "$(COLOR_GREEN)✓ Windows package complete$(COLOR_RESET)"
 	@ls -lh release/*.* 2>/dev/null || true
 
 .PHONY: package-mac
-package-mac: build ## Package for macOS (dmg, zip)
-	@echo "$(COLOR_YELLOW)→ Packaging for macOS...$(COLOR_RESET)"
-	$(NPX) electron-builder --mac
+package-mac: build ## Package for macOS (dmg, universal x64+arm64)
+	@echo "$(COLOR_YELLOW)→ Packaging for macOS (universal)...$(COLOR_RESET)"
+	$(NPM) run package:mac
+	@echo "$(COLOR_GREEN)✓ macOS package complete$(COLOR_RESET)"
+	@ls -lh release/*.* 2>/dev/null || true
+
+.PHONY: package-mac-arm
+package-mac-arm: build ## Package for macOS ARM (Apple Silicon only)
+	@echo "$(COLOR_YELLOW)→ Packaging for macOS ARM64 (Apple Silicon)...$(COLOR_RESET)"
+	$(NPM) run package:mac-arm
+	@echo "$(COLOR_GREEN)✓ macOS ARM package complete$(COLOR_RESET)"
+	@ls -lh release/*.* 2>/dev/null || true
+
+.PHONY: package-mac-x64
+package-mac-x64: build ## Package for macOS Intel (x64 only)
+	@echo "$(COLOR_YELLOW)→ Packaging for macOS x64 (Intel)...$(COLOR_RESET)"
+	$(NPM) run package:mac-x64
+	@echo "$(COLOR_GREEN)✓ macOS x64 package complete$(COLOR_RESET)"
 	@ls -lh release/*.* 2>/dev/null || true
 
 # =============================================================================
@@ -146,25 +180,26 @@ package-mac: build ## Package for macOS (dmg, zip)
 .PHONY: docker-build
 docker-build: ## Build Docker image for Linux (default)
 	@echo "$(COLOR_BOLD)$(COLOR_BLUE)→ Building Linux Docker image...$(COLOR_RESET)"
-	$(DOCKER) build -t $(APP_NAME):linux -f Dockerfile.linux .
+	$(DOCKER) build -t $(APP_NAME_LC):linux -f Dockerfile.linux .
 
 .PHONY: docker-build-win
 docker-build-win: ## Build Docker image for Windows (with Wine)
 	@echo "$(COLOR_BOLD)$(COLOR_BLUE)→ Building Windows Docker image...$(COLOR_RESET)"
-	$(DOCKER) build -t $(APP_NAME):win -f Dockerfile.win .
+	$(DOCKER) build -t $(APP_NAME_LC):win -f Dockerfile.win .
 
 .PHONY: docker-build-mac
 docker-build-mac: ## Build Docker image for macOS
 	@echo "$(COLOR_BOLD)$(COLOR_BLUE)→ Building macOS Docker image...$(COLOR_RESET)"
-	$(DOCKER) build -t $(APP_NAME):mac -f Dockerfile.mac --build-arg ARCH=x64 .
+	$(DOCKER) build -t $(APP_NAME_LC):mac -f Dockerfile.mac --build-arg ARCH=x64 .
 
 .PHONY: docker-build-mac-arm64
 docker-build-mac-arm64: ## Build Docker image for macOS ARM64
 	@echo "$(COLOR_BOLD)$(COLOR_BLUE)→ Building macOS ARM64 Docker image...$(COLOR_RESET)"
-	$(DOCKER) build -t $(APP_NAME):mac-arm64 -f Dockerfile.mac --build-arg ARCH=arm64 .
+	$(DOCKER) build -t $(APP_NAME_LC):mac-arm64 -f Dockerfile.mac --build-arg ARCH=arm64 .
 
 .PHONY: docker-all
 docker-all: docker-linux docker-win docker-mac docker-mac-arm64 ## Build all platforms via Docker
+	@echo "$(COLOR_GREEN)✓ All Docker builds complete$(COLOR_RESET)"
 
 .PHONY: docker-linux
 docker-linux: ## Build Linux in Docker
@@ -264,6 +299,27 @@ test-components: ## Run only component tests
 	$(NPX) vitest run tests/components
 	@echo "$(COLOR_GREEN)✓ Component tests complete$(COLOR_RESET)"
 
+.PHONY: test-e2e
+test-e2e: ## Run E2E tests (Playwright, requires built app)
+	@echo "$(COLOR_YELLOW)→ Running E2E tests...$(COLOR_RESET)"
+	$(NPM) run test:e2e
+	@echo "$(COLOR_GREEN)✓ E2E tests complete$(COLOR_RESET)"
+
+.PHONY: test-e2e-headed
+test-e2e-headed: ## Run E2E tests in headed mode (Linux: uses xvfb)
+	@echo "$(COLOR_YELLOW)→ Running E2E tests (headed)...$(COLOR_RESET)"
+	$(NPM) run test:e2e:headed
+	@echo "$(COLOR_GREEN)✓ E2E tests complete$(COLOR_RESET)"
+
+.PHONY: test-verify
+test-verify: ## Full verification pipeline (typecheck + test + build + e2e)
+	@echo "$(COLOR_BOLD)$(COLOR_CYAN)→ Full verification pipeline...$(COLOR_RESET)"
+	$(NPX) tsc --noEmit
+	$(NPX) vitest run
+	$(NPM) run build
+	$(NPM) run test:e2e
+	@echo "$(COLOR_GREEN)✓ Full verification passed$(COLOR_RESET)"
+
 # =============================================================================
 # Clean
 # =============================================================================
@@ -279,13 +335,18 @@ clean-all: clean ## Remove build artifacts + node_modules + Docker images
 	@echo "$(COLOR_YELLOW)→ Removing node_modules...$(COLOR_RESET)"
 	rm -rf node_modules package-lock.json
 	@echo "$(COLOR_YELLOW)→ Removing Docker images...$(COLOR_RESET)"
-	-$(DOCKER) rmi $(APP_NAME):linux $(APP_NAME):win $(APP_NAME):mac $(APP_NAME):mac-arm64 2>/dev/null || true
+	-$(DOCKER) rmi $(APP_NAME_LC):linux $(APP_NAME_LC):win $(APP_NAME_LC):mac $(APP_NAME_LC):mac-arm64 2>/dev/null || true
 	@echo "$(COLOR_GREEN)✓ All clean$(COLOR_RESET)"
 
 .PHONY: clean-docker
 clean-docker: ## Remove Docker images and build cache
-	-$(DOCKER) rmi $(APP_NAME):linux $(APP_NAME):win $(APP_NAME):mac $(APP_NAME):mac-arm64 2>/dev/null || true
+	-$(DOCKER) rmi $(APP_NAME_LC):linux $(APP_NAME_LC):win $(APP_NAME_LC):mac $(APP_NAME_LC):mac-arm64 2>/dev/null || true
 	-$(DOCKER) builder prune -f 2>/dev/null || true
+
+.PHONY: clean-test
+clean-test: ## Remove test artifacts and coverage
+	rm -rf coverage test-results .nyc_output
+	@echo "$(COLOR_GREEN)✓ Test artifacts cleaned$(COLOR_RESET)"
 
 # =============================================================================
 # Release / Inspect
@@ -301,7 +362,7 @@ version: ## Show current version
 	@echo "$(APP_NAME) v$(APP_VERSION)"
 
 .PHONY: bump-version
-bUMP_VERSION ?= patch
+BUMP_VERSION ?= patch
 bump-version: ## Bump version (BUMP_VERSION=patch|minor|major)
 	@echo "$(COLOR_YELLOW)→ Bumping $(BUMP_VERSION) version...$(COLOR_RESET)"
 	$(NPM) version $(BUMP_VERSION) --no-git-tag-version
@@ -316,6 +377,15 @@ icons-check: ## Verify SVG icons file
 	@echo "$(COLOR_YELLOW)→ Checking icons.tsx...$(COLOR_RESET)"
 	@grep -c "^export const" src/components/icons.tsx | xargs -I{} echo "  {} icons exported"
 	@echo "$(COLOR_GREEN)✓ Icons OK$(COLOR_RESET)"
+
+.PHONY: i18n-check
+i18n-check: ## Check i18n translation completeness
+	@echo "$(COLOR_YELLOW)→ Checking i18n translations...$(COLOR_RESET)"
+	@for lang in en ru zh de; do \
+	        count=$$(grep -c "':" src/i18n/locales/$$lang.ts 2>/dev/null || echo 0); \
+	        echo "  $$lang: $$count keys"; \
+	done
+	@echo "$(COLOR_GREEN)✓ i18n check complete$(COLOR_RESET)"
 
 .PHONY: tree
 tree: ## Show project structure (top-level)
@@ -338,7 +408,7 @@ stats: ## Show bundle size statistics
 	fi
 
 # =============================================================================
-# Phony declarations (so targets don't conflict with files)
+# Phony declarations
 # =============================================================================
 
 .PHONY: all
