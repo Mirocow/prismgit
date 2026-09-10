@@ -138,7 +138,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   pathFilter: null,
   authorFilter: null,
   fileViewMode: 'flat',
-  separateStagedView: true,
+  separateStagedView: false,
   groupByState: false,
   commitViewMode: 'tree',
   compressFilePaths: true,
@@ -150,7 +150,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   fileScopeDir: null,
   fileSort: { key: 'name', dir: 1 },
   fileFilterRegex: false,
-  dirTreeVisible: true,
+  dirTreeVisible: false,
   colWidths: { state: 70, dir: 120 },
   diffRequest: null,
 
@@ -206,7 +206,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
     fileStatusFilterSet: new Set(prefs.fileStatusFilterSet ?? ['modified', 'added', 'deleted', 'staged']),
     fileSort: prefs.fileSort ?? { key: 'name', dir: 1 },
     fileFilterRegex: prefs.fileFilterRegex ?? false,
-    dirTreeVisible: prefs.dirTreeVisible ?? true,
+    dirTreeVisible: prefs.dirTreeVisible ?? false,
     colWidths: prefs.colWidths ?? { state: 70, dir: 120 },
   }),
   clearAll: () => set({

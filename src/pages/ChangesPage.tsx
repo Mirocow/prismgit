@@ -212,7 +212,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [journalLoading, setJournalLoading] = useState(false);
   // Journal panel collapsed state — when true, only the header bar is shown
   const [journalCollapsed, setJournalCollapsed] = useState(false);
-  const [showSplitView, setShowSplitView] = useState(true);
+  const [showSplitView, setShowSplitView] = useState(false);
   const { width: leftWidth, setWidth: setLeftWidth, handleResize: handleLeftResize } = useResizableWidth(500, 250, 800);
   const { width: treeWidth, setWidth: setTreeWidth, handleResize: handleTreeResize } = useResizableWidth(210, 140, 380);
   const { height: journalHeight, setHeight: setJournalHeight, handleResize: handleJournalResize } = useResizableHeight(180, 60, 400);
@@ -981,6 +981,13 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               setSelectedFiles(new Set([file.path]));
               setSelectedFile(file.path);
               selectFileGlobal(file.path);
+            },
+            onOpenDiff: () => {
+              // Navigate to the Diff tool with this file pre-selected.
+              // Compare working tree vs HEAD for this file.
+              setSelectedFile(file.path);
+              selectFileGlobal(file.path);
+              window.location.hash = '#/diff';
             },
             onSelectDirectory: handleSelectDir,
             onFocusCommit: focusCommitBox,

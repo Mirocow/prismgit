@@ -106,7 +106,7 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
   if (ctx.mode === 'changes' && ctx.onShowChanges) {
     items.push({ label: 'Show Changes', clickId: 'show-changes' });
   }
-  if (ctx.mode === 'history' && ctx.onOpenDiff) {
+  if ((ctx.mode === 'history' || ctx.mode === 'changes') && ctx.onOpenDiff) {
     items.push({ label: 'Open in Diff tool', clickId: 'open-diff' });
   }
   items.push({ label: 'File History (Log)', clickId: 'file-history' });
