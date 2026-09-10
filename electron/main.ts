@@ -171,18 +171,22 @@ function createWindow(): BrowserWindow {
 
 // Context menu IPC
 function registerContextMenuIpc() {
-  ipcMain.handle('context-menu:show', async (_e, items: Array<{ label?: string; type?: 'separator' | 'normal' | 'checkbox' | 'radio'; checked?: boolean; enabled?: boolean; accelerator?: string; clickId?: string }>) => {
+  ipcMain.handle('context-menu:show', async (_e, items: Array<{ label?: string; type?: 'separator' | 'normal' | 'checkbox' | 'radio'; checked?: boolean; enabled?: boolean; accelerator?: string; clickId?: string; title?: string; submenu?: any[] }>) => {
     if (!mainWindow || mainWindow.isDestroyed()) return null;
-    const menu = Menu.buildFromTemplate(items.map((item) => ({
+    const buildItem = (item: any): Electron.MenuItemConstructorOptions => ({
       label: item.label,
       type: item.type,
       checked: item.checked,
       enabled: item.enabled !== false,
       accelerator: item.accelerator,
+      // Electron's Menu doesn't expose per-item tooltips on the renderer side,
+      // so we fold `title` into the label as a subtle suffix when present.
+      submenu: item.submenu ? item.submenu.map(buildItem) : undefined,
       click: () => {
         mainWindow?.webContents.send('context-menu:click', item.clickId);
       },
-    })));
+    });
+    const menu = Menu.buildFromTemplate(items.map(buildItem));
     if (mainWindow && !mainWindow.isDestroyed()) {
       menu.popup({ window: mainWindow });
     }

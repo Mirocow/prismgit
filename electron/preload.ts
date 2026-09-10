@@ -442,7 +442,7 @@ const api = {
 
   // Context menu
   contextMenu: {
-    show: (items: Array<{ label?: string; type?: 'separator' | 'normal' | 'checkbox' | 'radio'; checked?: boolean; enabled?: boolean; accelerator?: string; clickId?: string }>) =>
+    show: (items: Array<{ label?: string; type?: 'separator' | 'normal' | 'checkbox' | 'radio'; checked?: boolean; enabled?: boolean; accelerator?: string; clickId?: string; title?: string; submenu?: any[] }>) =>
       ipcRenderer.invoke('context-menu:show', items),
     onClick: (cb: (clickId: string) => void) => {
       const listener = (_: unknown, clickId: string) => cb(clickId);

@@ -933,6 +933,34 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     );
   };
 
+  // ===== Stash All + Abort (SmartGit escape hatch) =====
+  // When conflicts are overwhelming, stash everything (incl. untracked)
+  // then abort the in-progress operation. The stash is recoverable via
+  // the Stashes page. This is the "start fresh" option SmartGit offers.
+  const handleStashAll = async () => {
+    if (!(await confirmDialog({
+      title: 'Stash all and abort?',
+      message: 'This will stash ALL local changes (including untracked files) and abort the current operation.\n\nThe stash is saved with a descriptive message and is recoverable via the Stashes page.',
+      confirmLabel: 'Stash All & Abort',
+      danger: true,
+    }))) return;
+    try {
+      const stateLabel = status?.isMerging ? 'merge' : status?.isRebasing ? 'rebase' : status?.isCherryPicking ? 'cherry-pick' : status?.isReverting ? 'revert' : 'operation';
+      await api.git.stashPush(repo.path, `auto-stash before abort (${stateLabel})`, true, false);
+      toast.success('All changes stashed', 'Now aborting the operation…');
+      // Abort the in-progress operation based on the active state
+      if (status?.isMerging) await api.git.abortMerge(repo.path);
+      else if (status?.isRebasing) await api.git.rebase(repo.path, '', { abort: true });
+      else if (status?.isCherryPicking) await api.git.cherryPickAbort(repo.path);
+      else if (status?.isReverting) await api.git.revertAbort(repo.path);
+      else if (status?.isBisecting) await api.git.bisectReset(repo.path);
+      toast.success('Operation aborted', 'Stash is available on the Stashes page.');
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error('Stash & abort failed', String(e));
+    }
+  };
+
   // File filter helper: substring, or regular expression when .* mode is on.
   // Invalid regexes never hide files.
   const matchesFileFilter = (path: string): boolean => {
@@ -1532,6 +1560,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             merge: { onAbort: handleMergeAbort },
             rebase: { onContinue: handleRbContinue, onSkip: handleRbSkip, onAbort: handleRbAbort },
             bisect: { onGood: handleBsGood, onBad: handleBsBad, onSkip: handleBsSkip, onReset: handleBsReset },
+            onStashAll: handleStashAll,
           }}
         />
       )}
@@ -1613,9 +1642,18 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             </div>
 
             {/* Conflicts — SmartGit/GitKraken-style inline resolution actions:
-                Take ours / Take theirs / Take both / Mark resolved + Open solver. */}
+                Take ours / Take theirs / Take both / Mark resolved + Open solver.
+                When all conflicts are resolved, a "commit now" prompt appears. */}
             {status?.conflicted && status.conflicted.length > 0 && (
               <div className="border-b border-status-conflict/30 bg-status-conflict/5">
+                {/* Conflict header with count + "all resolved → commit" hint */}
+                <div className="flex items-center gap-2 px-2 py-1 text-2xs font-bold uppercase text-status-conflict bg-status-conflict/10 border-b border-status-conflict/20">
+                  <AlertCircle size={10} />
+                  Conflicts ({status.conflicted.length})
+                  <span className="normal-case font-normal text-text-tertiary ml-2">
+                    Resolve each file, then {status.isMerging ? 'Commit' : status.isRebasing ? 'Continue the rebase' : status.isCherryPicking ? 'Continue the cherry-pick' : 'Commit'} to finish the {status.isMerging ? 'merge' : status.isRebasing ? 'rebase' : status.isCherryPicking ? 'cherry-pick' : status.isReverting ? 'revert' : 'operation'}.
+                  </span>
+                </div>
                 {status.conflicted.map((filePath) => (
                   <div
                     key={filePath}

@@ -8,6 +8,10 @@ export interface ContextMenuItem {
   enabled?: boolean;
   accelerator?: string;
   clickId?: string;
+  /** Tooltip shown on hover (Electron only). */
+  title?: string;
+  /** Nested submenu (SmartGit-style Resolve → Take Ours / Take Theirs / ...). */
+  submenu?: ContextMenuItem[];
 }
 
 // Global singleton: only ONE listener for 'context-menu:click' across the

@@ -1,7 +1,7 @@
 import type { StatusResult } from '../lib/api';
 import { getRepoInProgressState } from '../lib/repoState';
 import { shortHash } from '../lib/utils';
-import { AlertTriangle, Check, X, SkipForward, Undo } from './icons';
+import { AlertTriangle, Check, X, SkipForward, Undo, Package } from './icons';
 
 /**
  * Per-state resolution actions. Every group is optional so callers can wire
@@ -20,6 +20,13 @@ export interface RepoStateHandlers {
   merge?: { onAbort: () => void };
   rebase?: { onContinue: () => void; onSkip: () => void; onAbort: () => void };
   bisect?: { onGood: () => void; onBad: () => void; onSkip: () => void; onReset: () => void };
+  /**
+   * Stash ALL local changes (including untracked) and abort the in-progress
+   * operation. SmartGit pattern: when conflicts are overwhelming, stash
+   * everything away and start fresh. The stash is recoverable later.
+   * Runs: git stash push -u -m "auto-stash before abort" → then abort.
+   */
+  onStashAll?: () => void;
 }
 
 export interface RepoStateBannerProps {
@@ -123,6 +130,19 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
         <div className="text-2xs text-text-tertiary mt-0.5">{FOOTERS[state.key]}</div>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
+        {/* Stash all local changes — SmartGit escape hatch when conflicts are
+            overwhelming. Stashes everything (incl. untracked) then aborts
+            the in-progress operation. The stash is recoverable via Stashes page. */}
+        {handlers.onStashAll && (
+          <button
+            className="btn btn-secondary text-2xs !py-0.5 !px-2"
+            onClick={handlers.onStashAll}
+            disabled={busy}
+            title="Stash ALL local changes (including untracked) and abort the current operation. The stash is recoverable via the Stashes page."
+          >
+            <Package size={9} /> Stash All
+          </button>
+        )}
         {/* cherry-picking: Continue / Commit Empty / Skip / Abort */}
         {state.key === 'cherry-picking' && cp && (
           <>
