@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, FileText, GitBranch, GitCommit, ChevronDown, Search } from '../components/icons';
+import { RefreshCw, FileText, GitBranch, GitCommit, ChevronDown, Search, AlertCircle } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type DiffResult, type LogEntry, type BranchInfo, type CommitFile } from '../lib/api';
 import { DiffViewer } from '../components/DiffViewer';
+import { ConflictMergeView } from '../components/ConflictMergeView';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { cn, shortHash } from '../lib/utils';
 import { useLazyList } from '../lib/useLazyList';
@@ -36,14 +38,13 @@ import { useI18n } from '../lib/i18n';
 export function DiffPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
+  const status = useGitStore((s) => s.status);
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
   const { t } = useI18n();
   const globalFilePath = useSelectionStore((s) => s.selectedFilePath);
   const globalCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const globalBranch = useSelectionStore((s) => s.selectedBranch);
-  // A tag selected in Tags/Branches is also a valid base ref — keep Diff in sync
   const globalTag = useSelectionStore((s) => s.selectedTag);
-  // One-shot diff request — when set, override local state and clear it.
-  // Used by Stashes (and any future caller) to programmatically configure Diff.
   const diffRequest = useSelectionStore((s) => s.diffRequest);
   const clearDiffRequest = useSelectionStore((s) => s.setDiffRequest);
 
@@ -51,17 +52,24 @@ export function DiffPage() {
   const [baseRef, setBaseRef] = useState('HEAD');
   const [compareMode, setCompareMode] = useState<'working' | 'staged' | 'ref'>('working');
   const [compareRef, setCompareRef] = useState('');
-  // Stash viewer mode (set via diffRequest from Stashes page): file list and
-  // file diffs are read through the stash's PARENT structure, because untracked
-  // files live in the stash's third parent, NOT in the stash tree itself.
   const [stashHash, setStashHash] = useState<string | null>(null);
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [selectedFileInList, setSelectedFileInList] = useState<string | null>(null);
+
+  // Conflict detection — when a sequencer state is active AND the selected
+  // file is conflicted, show the 3-way ConflictMergeView instead of the
+  // normal 2-way DiffViewer. This embeds conflict resolution INTO the Diff
+  // tool (SmartGit pattern) rather than a separate modal popup.
+  const conflicted = status?.conflicted ?? [];
+  const inProgress = !!(status?.isMerging || status?.isCherryPicking || status?.isReverting || status?.isRebasing);
+  const activeFile = selectedFileInList || filePath;
+  const isConflictFile = conflicted.includes(activeFile) && activeFile !== '.';
+  const showMergeView = inProgress && isConflictFile;
   const [recentCommits, setRecentCommits] = useState<LogEntry[]>([]);
   // File list for multi-file diff (when filePath === '.')
   const [changedFiles, setChangedFiles] = useState<CommitFile[]>([]);
-  const [selectedFileInList, setSelectedFileInList] = useState<string | null>(null);
   // Filter box above the file list — with 200+ changed files, scrolling to
   // find one path is not something a human should do.
   const [fileListFilter, setFileListFilter] = useState('');
@@ -499,16 +507,48 @@ export function DiffPage() {
           </>
         )}
 
-        {/* Diff viewer — scrollable */}
-        <div className="flex-1 overflow-auto">
-          {diff ? (
-            <DiffViewer diff={diff} filePath={selectedFileInList || filePath} />
+        {/* Diff viewer OR 3-way ConflictMergeView — when a conflicted file is
+            selected during a merge/rebase/cherry-pick/revert, the Diff tool
+            switches to a 3-way merge view (Base | Ours | Theirs) instead of
+            the normal 2-way diff. This is the SmartGit pattern: conflict
+            resolution happens IN the Diff tool, not in a separate modal. */}
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {showMergeView ? (
+            <ConflictMergeView
+              filePath={activeFile}
+              onResolved={async (resolvedFile) => {
+                await refreshStatus(repo.path);
+                // Auto-advance to next conflicted file
+                const st = await api.git.status(repo.path);
+                const next = st.conflicted.find((f: string) => f !== resolvedFile);
+                if (next) {
+                  setSelectedFileInList(next);
+                  setFilePath(next);
+                } else {
+                  toast.success('All conflicts resolved', 'You can now Continue/Commit to finish.');
+                }
+              }}
+            />
+          ) : diff ? (
+            <div className="flex-1 overflow-auto">
+              <DiffViewer diff={diff} filePath={activeFile} />
+            </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm p-8">
               {loading ? t('common.loading') : t('diff.selectRefs')}
             </div>
           )}
         </div>
+
+        {/* Conflict badge in the header — visible when there are conflicted files */}
+        {conflicted.length > 0 && (
+          <div className="px-3 py-1 border-b border-status-conflict/30 bg-status-conflict/10 text-2xs text-status-conflict flex items-center gap-2 flex-shrink-0">
+            <AlertCircle size={11} className="flex-shrink-0" />
+            <span className="font-medium">{conflicted.length} conflict{conflicted.length === 1 ? '' : 's'}</span>
+            {showMergeView && <span className="text-text-tertiary">— 3-way merge view active for {activeFile}</span>}
+            {!showMergeView && <span className="text-text-tertiary">— select a conflicted file to resolve it here</span>}
+          </div>
+        )}
       </div>
     </div>
   );

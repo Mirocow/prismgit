@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { AlertCircle, Check, ChevronDown, ChevronRight, Filter, Loader, Package, X } from './icons';
+import { AlertCircle, Check, ChevronDown, ChevronRight, Filter, Loader, Package, X, ExternalLink, GitMerge } from './icons';
 import { confirmDialog } from './ConfirmDialog';
 import { cn } from '../lib/utils';
 
@@ -11,10 +11,17 @@ interface ConflictListProps {
   finishLabel: string;
   /** Per-file inline resolution — Take ours / Take theirs / Take both / Mark resolved. */
   onResolveAction?: (file: string, mode: 'ours' | 'theirs' | 'both' | 'resolved') => void;
-  /** Open the 3-way ConflictSolver for a single file. */
+  /** Open the in-app 3-way ConflictSolver for a single file. */
   onOpenSolver?: (file: string) => void;
   /** Mass actions — resolve ALL conflicted files at once (used by toolbar buttons). */
   onResolveAll?: (mode: 'ours' | 'theirs') => void;
+  /** Open the file in an external diff tool (git difftool -- <file>).
+   *  Wired to the repo's configured diff.tool — typically VS Code or Beyond Compare. */
+  onOpenDiffTool?: (file: string) => void;
+  /** Open the file in VS Code's built-in 3-way merge editor (code --merge). */
+  onOpenVsCodeMerge?: (file: string) => void;
+  /** Open the file in VS Code's diff view (ours vs theirs). */
+  onOpenVsCodeDiff?: (file: string) => void;
 }
 
 /**
@@ -40,6 +47,9 @@ export function ConflictList({
   onResolveAction,
   onOpenSolver,
   onResolveAll,
+  onOpenDiffTool,
+  onOpenVsCodeMerge,
+  onOpenVsCodeDiff,
 }: ConflictListProps) {
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState(conflicts.length > 20);
@@ -128,6 +138,26 @@ export function ConflictList({
                 </button>
               </>
             )}
+            {/* External tools — VS Code 3-way merge + git difftool.
+                SmartGit exposes these as one-click actions in the conflict toolbar. */}
+            {onOpenVsCodeMerge && (
+              <button
+                className="text-2xs px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors flex items-center gap-0.5"
+                onClick={() => onOpenVsCodeMerge(conflicts[0])}
+                title="Open the first conflicted file in VS Code's 3-way merge editor (code --merge). Resolve per-file from there."
+              >
+                <ExternalLink size={9} /> VS Code Merge
+              </button>
+            )}
+            {onOpenDiffTool && (
+              <button
+                className="text-2xs px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors flex items-center gap-0.5"
+                onClick={() => onOpenDiffTool(conflicts[0])}
+                title="Open the first conflicted file in git difftool (uses your configured diff.tool)"
+              >
+                <GitMerge size={9} /> Diff Tool
+              </button>
+            )}
             {busy && <Loader size={11} className="animate-spin text-status-conflict" />}
           </div>
         )}
@@ -210,10 +240,16 @@ function ConflictRow({
   filePath,
   onResolveAction,
   onOpenSolver,
+  onOpenDiffTool,
+  onOpenVsCodeMerge,
+  onOpenVsCodeDiff,
 }: {
   filePath: string;
   onResolveAction?: (file: string, mode: 'ours' | 'theirs' | 'both' | 'resolved') => void;
   onOpenSolver?: (file: string) => void;
+  onOpenDiffTool?: (file: string) => void;
+  onOpenVsCodeMerge?: (file: string) => void;
+  onOpenVsCodeDiff?: (file: string) => void;
 }) {
   return (
     <div
@@ -256,10 +292,39 @@ function ConflictRow({
             </button>
           </>
         )}
+        {/* External tools — VS Code merge + VS Code diff + git difftool.
+            Shown on hover so the row stays compact when there are dozens of files. */}
+        {onOpenVsCodeMerge && (
+          <button
+            className="text-2xs px-1 py-0.5 rounded border border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors"
+            title="Open in VS Code 3-way merge editor (code --merge)"
+            onClick={(e) => { e.stopPropagation(); onOpenVsCodeMerge(filePath); }}
+          >
+            <ExternalLink size={9} />
+          </button>
+        )}
+        {onOpenVsCodeDiff && (
+          <button
+            className="text-2xs px-1 py-0.5 rounded border border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors"
+            title="Open VS Code diff view (ours vs theirs)"
+            onClick={(e) => { e.stopPropagation(); onOpenVsCodeDiff(filePath); }}
+          >
+            <GitMerge size={9} />
+          </button>
+        )}
+        {onOpenDiffTool && (
+          <button
+            className="text-2xs px-1 py-0.5 rounded border border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors"
+            title="Open in git difftool (configured diff.tool)"
+            onClick={(e) => { e.stopPropagation(); onOpenDiffTool(filePath); }}
+          >
+            Diff
+          </button>
+        )}
         <button
           className="btn btn-primary text-2xs !py-0.5 !px-2"
           onClick={(e) => { e.stopPropagation(); onOpenSolver?.(filePath); }}
-          title="Open 3-way Conflict Solver"
+          title="Open in-app 3-way Conflict Solver"
         >
           Solver
         </button>
