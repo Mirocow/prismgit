@@ -92,16 +92,19 @@ export function useResizableWidth(initialWidth: number, min: number = 200, max: 
 /**
  * Hook for managing resizable panel height.
  *
- * CONVENTION (edge follows mouse):
+ * CONVENTION (edge follows mouse — drag toward a panel shrinks it, drag away grows it):
  *   - Resized panel is ABOVE the splitter → <ResizableSplitter onResize={handleResize} />
  *   - Resized panel is BELOW the splitter → <ResizableSplitter onResize={(d) => handleResize(-d)} />
+ *
+ * Same sign convention as useResizableWidth: handleResize(delta) does height += delta,
+ * so "panel above/left of splitter → +d, panel below/right of splitter → -d".
  */
 export function useResizableHeight(initialHeight: number, min: number = 100, max: number = 600) {
   const [height, setHeight] = useState(initialHeight);
 
   const handleResize = useCallback((delta: number) => {
     setHeight(prev => {
-      const next = prev - delta; // negative because dragging down = smaller height for top panel
+      const next = prev + delta;
       return Math.max(min, Math.min(max, next));
     });
   }, [min, max]);
