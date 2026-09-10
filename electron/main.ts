@@ -9,6 +9,7 @@ import { registerSettingsIpc } from './ipc/settings.js';
 import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
 import { SimpleStore } from './services/simpleStore.js';
 import { buildAppMenu } from './menu.js';
+import { resolveResourceIcon } from './appIcons.js';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
@@ -80,6 +81,7 @@ function createWindow(): BrowserWindow {
     backgroundColor: '#f8f9fa',
     frame: false,
     title: 'PrismGit',
+    icon: resolveResourceIcon('icon-512.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

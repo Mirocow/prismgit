@@ -1,5 +1,6 @@
 import { Menu, type BrowserWindow, shell, app, dialog } from 'electron';
 import * as path from 'path';
+import { openAboutWindow } from './about.js';
 
 export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
   const isMac = process.platform === 'darwin';
@@ -19,7 +20,10 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
       ? [{
           label: app.name,
           submenu: [
-            { role: 'about' as const },
+            {
+              label: 'About PrismGit',
+              click: () => openAboutWindow(),
+            },
             { type: 'separator' as const },
             { role: 'services' as const },
             { type: 'separator' as const },
@@ -340,17 +344,10 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
         },
         { type: 'separator' },
         {
-          label: 'About',
+          id: 'help-about',
+          label: 'About PrismGit',
           click: () => {
-            const win = getMainWindow();
-            if (!win) return;
-            dialog.showMessageBox(win, {
-              type: 'info',
-              title: 'About PrismGit',
-              message: 'PrismGit',
-              detail: `Version: ${app.getVersion()}\nElectron-based Git client\n\nPlatform: ${process.platform}\nArchitecture: ${process.arch}`,
-              buttons: ['OK'],
-            });
+            openAboutWindow();
           },
         },
       ],

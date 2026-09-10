@@ -1,5 +1,6 @@
 {
   "name": "PrismGit",
+  "productName": "PrismGit",
   "version": "2.0.0",
   "description": "A modern Git client built on Electron + React + TypeScript — visual history, smart merges, and a clean Ayu palette.",
   "author": "PrismGit Team",
@@ -24,6 +25,7 @@
     "test:verify": "npm run typecheck && npm run test && npm run build && npm run test:e2e",
     "verify": "npm run typecheck && npm run test && npm run build",
     "hooks:install": "bash scripts/install-hooks.sh",
+    "icons": "python3 scripts/make-icons.py",
     "test:simple-git": "node --test tests/simple-git-suite.mjs"
   },
   "dependencies": {
@@ -63,12 +65,23 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "build/icon-512.png",
+        "to": "icon-512.png"
+      },
+      {
+        "from": "build/logo-256.png",
+        "to": "logo-256.png"
+      }
+    ],
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
       "target": [
         {
           "target": "dmg",
@@ -80,6 +93,7 @@
       ]
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -91,6 +105,7 @@
     },
     "linux": {
       "category": "Development",
+      "icon": "build/icons",
       "target": [
         {
           "target": "AppImage",

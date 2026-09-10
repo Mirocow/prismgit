@@ -10,6 +10,11 @@ export default defineConfig({
       main: {
         entry: 'electron/main.ts',
         vite: {
+          // __BUILD_DATE__ is baked into the main-process bundle and shown
+          // in the About window ("Build date" row).
+          define: {
+            __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
+          },
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
