@@ -69,3 +69,54 @@ test.describe('About window', () => {
     }
   });
 });
+
+test.describe('About window — keep-alive reopen performance', () => {
+  test('closing hides the window and reopening reuses it instantly (main-process truth)', async () => {
+    const ctx = await launchApp();
+    try {
+      // Open About (first time — window is created)
+      const aboutPromise = ctx.app.waitForEvent('window', { timeout: 10000 });
+      await ctx.app.evaluate(({ Menu }) => {
+        Menu.getApplicationMenu()?.getMenuItemById('help-about')?.click?.();
+      });
+      const about = await aboutPromise;
+      await about.waitForLoadState('domcontentloaded');
+
+      const aboutId = await ctx.app.evaluate(({ BrowserWindow }) =>
+        Math.max(...BrowserWindow.getAllWindows().map((w) => w.id))
+      );
+
+      // Close it — keep-alive must HIDE (not destroy) the window
+      await ctx.app.evaluate(({ BrowserWindow }, id) => {
+        BrowserWindow.getAllWindows().find((w) => w.id === id)?.close();
+      }, aboutId);
+      const hiddenButAlive = await ctx.app.evaluate(({ BrowserWindow }, id) => {
+        const w = BrowserWindow.getAllWindows().find((x) => x.id === id);
+        return !!w && !w.isVisible();
+      }, aboutId);
+      expect(hiddenButAlive).toBe(true);
+
+      // Reopen — the SAME window must become visible again (no recreation)
+      await ctx.app.evaluate(({ Menu }) => {
+        Menu.getApplicationMenu()?.getMenuItemById('help-about')?.click?.();
+      });
+      // Poll main-process isVisible — cheap and tooling-overhead-free.
+      let visibleAgain = false;
+      for (let i = 0; i < 1000 && !visibleAgain; i++) {
+        visibleAgain = await ctx.app.evaluate(({ BrowserWindow }, id) => {
+          const w = BrowserWindow.getAllWindows().find((x) => x.id === id);
+          return w ? w.isVisible() : false;
+        }, aboutId);
+      }
+      expect(visibleAgain).toBe(true);
+
+      // Exactly one About window still exists — no duplicates spawned
+      const aboutCount = await ctx.app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows().filter((w) => w.getTitle() === 'About PrismGit').length
+      );
+      expect(aboutCount).toBe(1);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
