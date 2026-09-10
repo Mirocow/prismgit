@@ -14,6 +14,9 @@ export type ResetMode = 'soft' | 'mixed' | 'hard' | 'keep';
  *                            additionally lets you edit the target ref.
  *  - SetTrackedDialog      — pick the upstream for a local branch from the
  *                            list of remote branches (with filter).
+ *  - PushToDialog          — "Push To...": choose the remote repository AND
+ *                            the remote-side target branch (refspec
+ *                            `local:target`), plus -u / --force-with-lease.
  *  - AddTagDialog          — create a lightweight or annotated tag on a ref.
  *  - PullOptionsDialog     — pull a remote: merge or rebase, optional --no-ff.
  *  - SetDepthDialog        — set shallow fetch depth (0 = unshallow).
@@ -224,6 +227,158 @@ export function SetTrackedDialog({
       {current && (
         <div className="text-2xs text-text-tertiary mt-2">Current upstream: <code>{current}</code></div>
       )}
+    </DialogShell>
+  );
+}
+
+const BRANCH_NAME_INVALID = /[~^:?*[\]\\@\s]|\.\.|^-$|^--/;
+
+/**
+ * "Push To..." — pick the remote repository AND the remote-side branch name.
+ *
+ * SmartGit semantics: the user right-clicks a LOCAL branch, chooses Push To...
+ * and gets to decide WHERE (remote) and UNDER WHICH NAME (target branch) the
+ * branch lands. Pushing `feature` to `main`-named target, publishing a local
+ * branch to a second remote, or renaming on the remote side are all the same
+ * refspec: `git push [-u] [--force-with-lease] <remote> <local>:<target>`.
+ */
+export function PushToDialog({
+  branchName,
+  remotes,
+  defaultRemote,
+  remoteBranches = [],
+  hasUpstream = false,
+  busy,
+  onSubmit,
+  onClose,
+}: {
+  /** The local (source) branch being pushed. */
+  branchName: string;
+  /** Configured remote names (e.g. ["origin", "upstream"]). */
+  remotes: string[];
+  /** Preselected remote (the branch's tracking remote, or the repo default). */
+  defaultRemote?: string;
+  /** Remote-tracking branch names ("origin/main") — target-name suggestions. */
+  remoteBranches?: string[];
+  /** Whether the branch already has an upstream (→ -u unchecked by default). */
+  hasUpstream?: boolean;
+  busy?: boolean;
+  onSubmit: (opts: { remote: string; targetBranch: string; setUpstream: boolean; force: boolean }) => void;
+  onClose: () => void;
+}) {
+  const [remote, setRemote] = useState(defaultRemote || remotes[0] || 'origin');
+  const [target, setTarget] = useState(branchName);
+  const [setUpstream, setSetUpstream] = useState(!hasUpstream);
+  const [force, setForce] = useState(false);
+  useEscapeKey(true, onClose);
+
+  const trimmed = target.trim();
+  const targetError = !trimmed
+    ? 'Target branch is required'
+    : BRANCH_NAME_INVALID.test(trimmed)
+      ? 'Branch name contains invalid characters'
+      : null;
+
+  // Suggest existing branches that live on the SELECTED remote
+  // ("origin/main" → "main") so the user can pick instead of typing.
+  const suggestions = useMemo(
+    () => remoteBranches
+      .filter((b) => b.startsWith(`${remote}/`))
+      .map((b) => b.slice(remote.length + 1)),
+    [remoteBranches, remote]
+  );
+
+  const canSubmit = !targetError && !!remote.trim() && !busy;
+  const refspec = trimmed === branchName ? branchName : `${branchName}:${trimmed}`;
+  const renamed = trimmed !== branchName && !targetError;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    onSubmit({ remote: remote.trim(), targetBranch: trimmed, setUpstream, force });
+  };
+
+  return (
+    <DialogShell
+      title="Push To..."
+      subtitle={`Push local branch '${branchName}' to a remote repository.\nYou choose WHERE (remote) and under which name (target branch).`}
+      onClose={onClose}
+      width={480}
+      buttons={
+        <>
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={!canSubmit} onClick={submit}>
+            {busy ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}
+            Push
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div>
+          <label htmlFor="push-to-remote" className="text-xs text-text-tertiary block mb-1">Remote repository</label>
+          {remotes.length > 0 ? (
+            <select
+              id="push-to-remote"
+              className="w-full text-sm font-mono"
+              value={remote}
+              onChange={(e) => setRemote(e.target.value)}
+            >
+              {remotes.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          ) : (
+            // No remotes configured — let the user type a name anyway
+            <input
+              id="push-to-remote"
+              type="text"
+              className="w-full text-sm font-mono"
+              value={remote}
+              autoFocus
+              onChange={(e) => setRemote(e.target.value)}
+              placeholder="origin"
+            />
+          )}
+        </div>
+        <div>
+          <label htmlFor="push-to-target" className="text-xs text-text-tertiary block mb-1">Target branch</label>
+          <input
+            id="push-to-target"
+            type="text"
+            className="w-full text-sm font-mono"
+            value={target}
+            list="push-to-target-suggestions"
+            autoFocus={remotes.length > 0}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setTarget(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+          />
+          <datalist id="push-to-target-suggestions">
+            {suggestions.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+          {targetError && <div className="text-2xs text-status-deleted mt-1">{targetError}</div>}
+          {renamed && (
+            <div className="text-2xs text-text-tertiary mt-1">
+              Remote ref will be <code>{remote}/{trimmed}</code> — the local branch keeps its name.
+            </div>
+          )}
+        </div>
+        <div className="space-y-1 pt-1">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={setUpstream} onChange={(e) => setSetUpstream(e.target.checked)} />
+            Set upstream tracking (-u)
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+            Force push (--force-with-lease)
+          </label>
+        </div>
+        <div data-testid="push-to-cmd" className="text-2xs text-text-tertiary font-mono bg-bg-hover/60 rounded px-2 py-1.5 break-all">
+          git push {setUpstream ? '-u ' : ''}{force ? '--force-with-lease ' : ''}{remote} {refspec}
+        </div>
+      </div>
     </DialogShell>
   );
 }

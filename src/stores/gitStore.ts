@@ -14,7 +14,7 @@ interface GitState {
   stageFiles: (repoPath: string, files: string[]) => Promise<void>;
   stageAll: (repoPath: string) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean) => Promise<string>;
-  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean) => Promise<PushResult>;
+  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, targetBranch?: string) => Promise<PushResult>;
   pull: (repoPath: string, remote?: string, branch?: string) => Promise<void>;
   fetch: (repoPath: string, remote?: string, prune?: boolean) => Promise<void>;
 }
@@ -68,7 +68,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  push: async (repoPath, remote, branch, setUpstream) => {
+  push: async (repoPath, remote, branch, setUpstream, force, targetBranch) => {
     const log = useOperationLogStore.getState();
     // Never hardcode 'origin' — resolve it (origin → first remote). Fails with
     // a clear message when the repo has no remotes at all.
@@ -76,10 +76,11 @@ export const useGitStore = create<GitState>((set, get) => ({
     if (!resolved) {
       throw new Error('No remotes configured — add one on the Remotes page');
     }
-    const cmd = `git push ${resolved} ${branch || ''} ${setUpstream ? '-u' : ''}`.trim();
+    const refspec = targetBranch && targetBranch !== branch ? `${branch}:${targetBranch}` : (branch || '');
+    const cmd = `git push ${resolved} ${refspec} ${setUpstream ? '-u' : ''}${force ? ' --force-with-lease' : ''}`.trim();
     const opId = log.startOp('Push', repoPath, cmd);
     try {
-      const result = await api.git.push(repoPath, resolved, branch, setUpstream);
+      const result = await api.git.push(repoPath, resolved, branch, setUpstream, force, false, targetBranch);
       await get().refreshStatus(repoPath);
       // Refresh repository metadata (lastCommit, branchCount, etc.) in the sidebar
       api.settings.refreshRepoStats(repoPath).then(() => {

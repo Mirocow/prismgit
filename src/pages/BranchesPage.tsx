@@ -18,7 +18,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { RenameDialog, RemoteConfigDialog } from '../components/RemoteDialogs';
 import {
   ResetDialog, SetTrackedDialog, AddTagDialog, PullOptionsDialog,
-  SetDepthDialog, FetchMoreDialog, RemotePropertiesDialog, type ResetMode,
+  SetDepthDialog, FetchMoreDialog, RemotePropertiesDialog, PushToDialog, type ResetMode,
 } from '../components/BranchDialogs';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
 import { describePushResult } from '../lib/pushResult';
@@ -63,6 +63,9 @@ export function BranchesPage() {
   const [resetBusy, setResetBusy] = useState(false);
   const [setTrackedTarget, setSetTrackedTarget] = useState<{ branch: string; current?: string } | null>(null);
   const [setTrackedBusy, setSetTrackedBusy] = useState(false);
+  // Push To... (choose remote + target branch) — local AND remote-branch menus
+  const [pushToTarget, setPushToTarget] = useState<{ branch: string; defaultRemote: string; hasUpstream: boolean } | null>(null);
+  const [pushToBusy, setPushToBusy] = useState(false);
   const [pullRemote, setPullRemote] = useState<string | null>(null);
   const [pullBusy, setPullBusy] = useState(false);
   const [depthRemote, setDepthRemote] = useState<string | null>(null);
@@ -81,6 +84,7 @@ export function BranchesPage() {
   useEscapeKey(!!showStashDialog, () => setShowStashDialog(false));
   useEscapeKey(!!resetTarget, () => setResetTarget(null));
   useEscapeKey(!!setTrackedTarget, () => setSetTrackedTarget(null));
+  useEscapeKey(!!pushToTarget, () => setPushToTarget(null));
   useEscapeKey(!!pullRemote, () => setPullRemote(null));
   useEscapeKey(!!depthRemote, () => setDepthRemote(null));
   useEscapeKey(!!moreRemote, () => setMoreRemote(null));
@@ -306,6 +310,32 @@ export function BranchesPage() {
       toast.error('Reset failed', String(e));
     } finally {
       setResetBusy(false);
+    }
+  };
+
+  // ===== Push To... executor (choose remote + target branch) =====
+  const executePushTo = async (opts: { remote: string; targetBranch: string; setUpstream: boolean; force: boolean }) => {
+    if (!pushToTarget) return;
+    setPushToBusy(true);
+    const src = pushToTarget.branch;
+    const refspec = opts.targetBranch === src ? src : `${src}:${opts.targetBranch}`;
+    try {
+      const res = await useOperationLogStore.getState().logOperation(
+        `Push ${src} → ${opts.remote}/${opts.targetBranch}`, repo.path,
+        `git push ${opts.setUpstream ? '-u ' : ''}${opts.force ? '--force-with-lease ' : ''}${opts.remote} ${refspec}`,
+        () => api.git.push(repo.path, opts.remote, src, opts.setUpstream, opts.force, false, opts.targetBranch)
+      );
+      const t = describePushResult(res, opts.remote, opts.targetBranch);
+      if (t.kind === 'error') toast.error(t.title, t.detail);
+      else if (t.kind === 'info') toast.info(t.title, t.detail);
+      else toast.success(t.title, t.detail);
+      setPushToTarget(null);
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error('Push failed', String(e));
+    } finally {
+      setPushToBusy(false);
     }
   };
 
@@ -805,27 +835,11 @@ export function BranchesPage() {
         // === Push ===
         else if (action === 'push') handlePushBranch(b);
 
-        // === Push To... (choose remote) ===
+        // === Push To... (choose remote + target branch) ===
         else if (action === 'push-to') {
-          const remoteName = b.tracking ? b.tracking.split('/')[0] : 'origin';
-          const branchName = b.name;
-          if (!(await confirmDialog({
-            title: `Push '${branchName}' to '${remoteName}'`,
-            message: `This runs: git push ${remoteName} ${branchName}${!b.tracking ? ' (sets upstream with -u)' : ''}`,
-            confirmLabel: 'Push',
-          }))) return;
-          useOperationLogStore.getState().logOperation(
-            `Push ${branchName} to ${remoteName}`, repo.path,
-            `git push ${remoteName} ${branchName}`,
-            () => api.git.push(repo.path, remoteName, branchName, !b.tracking)
-          ).then((res) => {
-            const t = describePushResult(res, remoteName, branchName);
-            if (t.kind === 'error') toast.error(t.title, t.detail);
-            else if (t.kind === 'info') toast.info(t.title, t.detail);
-            else toast.success(t.title, t.detail);
-            refreshStatus(repo.path);
-          })
-           .catch((e) => toast.error('Push failed', String(e)));
+          const remoteName = b.tracking ? b.tracking.split('/')[0]
+            : (await resolveDefaultRemote(repo.path)) || 'origin';
+          setPushToTarget({ branch: b.name, defaultRemote: remoteName, hasUpstream: !!b.tracking });
         }
 
         // === Push to Gerrit (refs/for/<branch>) === SmartGit Manual
@@ -899,22 +913,19 @@ export function BranchesPage() {
         // === Delete remote ===
         else if (action === 'delete-remote') handleDeleteRemote(b);
 
-        // === Push To... for a REMOTE branch: push current HEAD to that remote ===
+        // === Push To... for a REMOTE branch: push the CURRENT branch to that
+        // remote — with full remote + target-branch choice (same dialog) ===
         else if (action === 'push-to-remote') {
-          const remoteName = b.name.split('/')[0];
-          if (!(await confirmDialog({
-            title: `Push current branch to '${remoteName}'`,
-            message: `This runs: git push ${remoteName} HEAD (with -u when the current branch has no upstream).`,
-            confirmLabel: 'Push',
-          }))) return;
-          const current = await api.git.currentBranch(repo.path);
-          const setUpstream = !branches.some((x) => x.current && x.tracking);
-          useOperationLogStore.getState().logOperation(
-            `Push ${current || 'HEAD'} to ${remoteName}`, repo.path,
-            `git push ${remoteName} HEAD`,
-            () => api.git.push(repo.path, remoteName, undefined, setUpstream)
-          ).then(() => { toast.success(`Pushed to ${remoteName}`); refreshStatus(repo.path); })
-           .catch((e) => toast.error('Push failed', String(e)));
+          const current = branches.find((x) => x.current)?.name || (await api.git.currentBranch(repo.path));
+          if (!current || current === 'HEAD') {
+            toast.warning('Push To needs a current branch (detached HEAD?)');
+            return;
+          }
+          setPushToTarget({
+            branch: current,
+            defaultRemote: b.name.split('/')[0],
+            hasUpstream: branches.some((x) => x.current && x.tracking),
+          });
         }
 
         // === Create local from remote ===
@@ -1101,21 +1112,17 @@ export function BranchesPage() {
       { label: 'Manage all remotes (Remotes page)', clickId: 'manage' },
     ], (action) => {
       if (action === 'remote-push-to') {
-        // Push the CURRENT branch HEAD to this remote (Fork behavior).
-        confirmDialog({
-          title: `Push current branch to '${remoteName}'`,
-          message: `This runs: git push ${remoteName} HEAD`,
-          confirmLabel: 'Push',
-        }).then(async (ok) => {
-          if (!ok) return;
-          try {
-            await useOperationLogStore.getState().logOperation(
-              `Push current branch to ${remoteName}`, repo.path, `git push ${remoteName} HEAD`,
-              () => api.git.push(repo.path, remoteName, undefined, false)
-            );
-            toast.success(`Pushed current branch to ${remoteName}`);
-            refreshStatus(repo.path);
-          } catch (err) { toast.error('Push failed', String(err)); }
+        // Push the CURRENT branch to this remote (Fork behavior) — via the
+        // Push To dialog so the remote + target branch stay user-selectable.
+        const current = branches.find((x) => x.current)?.name;
+        if (!current) {
+          toast.warning('Push To needs a current branch (detached HEAD?)');
+          return;
+        }
+        setPushToTarget({
+          branch: current,
+          defaultRemote: remoteName,
+          hasUpstream: branches.some((x) => x.current && x.tracking),
         });
       }
       else if (action === 'remote-pull') setPullRemote(remoteName);
@@ -1477,6 +1484,20 @@ export function BranchesPage() {
           busy={setTrackedBusy}
           onSubmit={executeSetTracking}
           onClose={() => setSetTrackedTarget(null)}
+        />
+      )}
+
+      {/* Push To... dialog (choose remote repository + target branch) */}
+      {pushToTarget && (
+        <PushToDialog
+          branchName={pushToTarget.branch}
+          remotes={Object.keys(remotesMap)}
+          defaultRemote={pushToTarget.defaultRemote}
+          remoteBranches={branches.filter((b) => b.remote).map((b) => b.name)}
+          hasUpstream={pushToTarget.hasUpstream}
+          busy={pushToBusy}
+          onSubmit={executePushTo}
+          onClose={() => setPushToTarget(null)}
         />
       )}
 

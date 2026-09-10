@@ -361,7 +361,9 @@ export async function push(
   branch?: string,
   setUpstream = false,
   force = false,
-  tags = false
+  tags = false,
+  /** Remote-side branch name (Push To... dialog): refspec becomes `branch:target`. */
+  targetBranch?: string
 ): Promise<PushResult> {
   const git = getGit(repoPath);
   // No branch given: resolve the CURRENT branch and auto-publish it.
@@ -383,6 +385,9 @@ export async function push(
       }
     }
   }
+  // Explicit remote-side target ("Push To..." lets the user publish a local
+  // branch under a DIFFERENT name on the remote): refspec `src:target`.
+  const target = targetBranch?.trim() || undefined;
   const args: string[] = [
     ...(await remoteNetworkArgs(repoPath, remote, true)),
     // Hardening for servers/proxies that reject chunked uploads or HTTP/2
@@ -401,8 +406,9 @@ export async function push(
   args.push(remote);
   if (refspec) {
     // Plain refspec `branch` (NOT `HEAD:branch` — that pushes whatever HEAD
-    // points at, which is wrong when the user selected a non-current branch).
-    args.push(refspec);
+    // points at, which is wrong when the user selected a non-current branch),
+    // or `branch:target` when the user chose a different remote-side name.
+    args.push(target && target !== refspec ? `${refspec}:${target}` : refspec);
   }
 
   // Capture BOTH streams: git prints ref status on stderr and exits 0 even
@@ -432,11 +438,13 @@ export async function push(
   // weirdness, and wrong-branch pushes (e.g. `Main` vs `main`).
   let verification: PushVerification | undefined;
   if (refspec && /^[A-Za-z0-9._\-/]+$/.test(refspec) && !refspec.includes(':')) {
+    // With a different remote-side name, the remote branch to verify is the TARGET.
+    const verifyRef = target && target !== refspec ? target : refspec;
     try {
       const localHash = (await git.raw(['rev-parse', refspec])).trim();
-      const remoteHash = await lsRemoteBranch(repoPath, remote, refspec);
+      const remoteHash = await lsRemoteBranch(repoPath, remote, verifyRef);
       verification = {
-        branch: refspec,
+        branch: verifyRef,
         localHash,
         remoteHash,
         ok: remoteHash === localHash,

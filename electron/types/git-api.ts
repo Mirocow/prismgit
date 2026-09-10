@@ -303,7 +303,7 @@ export interface GitApi {
   addAll: (repoPath: string) => Promise<void>;
   restore: (repoPath: string, files: string[], staged?: boolean) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean, signoff?: boolean, noVerify?: boolean) => Promise<string>;
-  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean) => Promise<PushResult>;
+  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string) => Promise<PushResult>;
   pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) => Promise<void>;
   fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) => Promise<void>;
   fetchAll: (repoPath: string, prune?: boolean) => Promise<void>;

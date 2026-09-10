@@ -17,8 +17,8 @@ export function registerGitIpc(): void {
   );
 
   // Network
-  ipcMain.handle('git:push', (_e, p: string, r?: string, b?: string, u?: boolean, f?: boolean, t?: boolean) =>
-    gitService.push(p, r, b, u, f, t)
+  ipcMain.handle('git:push', (_e, p: string, r?: string, b?: string, u?: boolean, f?: boolean, t?: boolean, tb?: string) =>
+    gitService.push(p, r, b, u, f, t, tb)
   );
   ipcMain.handle('git:pull', (_e, p: string, r?: string, b?: string, rb?: boolean, nff?: boolean) =>
     gitService.pull(p, r, b, rb, nff)

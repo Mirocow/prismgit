@@ -1138,3 +1138,46 @@ describe('LFS without git-lfs binary (graceful degradation)', () => {
   });
 });
 
+// =====================================================================
+// Push To... — refspec `local:target` (push a branch under a DIFFERENT
+// remote-side name; backs the Branches "Push To..." dialog)
+// =====================================================================
+describe('push with targetBranch (Push To... refspec `local:target`)', () => {
+  it('publishes a local branch under a different remote-side name and verifies the TARGET', async () => {
+    const src = await mkRepo('pushto-src');
+    const bare = bareRemote('pushto-origin.git');
+    await gitService.addRemote(src, 'origin', bare);
+    await gitService.raw(src, ['checkout', '-b', 'feature/auth']);
+
+    write(src, 'f.txt', 'feature work\n');
+    await gitService.addAll(src);
+    await gitService.commit(src, 'feature work');
+
+    // Push local `feature/auth` to remote `main` (with upstream tracking)
+    const res = await gitService.push(src, 'origin', 'feature/auth', true, false, false, 'main');
+    expect(res.updated).toBe(true);
+    // Post-push verification must check the TARGET branch, not the source name
+    expect(res.verification?.branch).toBe('main');
+    expect(res.verification?.ok).toBe(true);
+
+    // The remote really has refs/heads/main at the local feature/auth commit
+    const localHash = (await gitService.raw(src, ['rev-parse', 'feature/auth'])).trim();
+    const ls = await gitService.raw(src, ['ls-remote', 'origin', 'refs/heads/main']);
+    expect(ls.split(/\s+/)[0]).toBe(localHash);
+  });
+
+  it('keeps the plain single-ref refspec when the target equals the source', async () => {
+    const src = await mkRepo('pushto-same');
+    const bare = bareRemote('pushto-same-origin.git');
+    await gitService.addRemote(src, 'origin', bare);
+    await gitService.raw(src, ['checkout', '-b', 'feature']);
+
+    const res = await gitService.push(src, 'origin', 'feature', true, false, false, 'feature');
+    expect(res.updated).toBe(true);
+    expect(res.verification?.branch).toBe('feature');
+    expect(res.verification?.ok).toBe(true);
+    expect(res.branch).toBe('feature');
+  });
+});
+
+
