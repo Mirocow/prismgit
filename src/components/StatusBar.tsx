@@ -9,6 +9,7 @@ import { memo, useEffect, useState, useCallback } from 'react';
 import { ArrowUp, ArrowDown, Loader, ChevronUp, ChevronDown } from './icons';
 import { useContextMenu } from '../lib/useContextMenu';
 import { buildHashMenu, runHashMenuAction } from '../lib/commitMenu';
+import { describePushResult } from '../lib/pushResult';
 
 /**
  * Clickable commit hash — clicking jumps to History and focuses that commit.
@@ -189,7 +190,12 @@ export function StatusBar({
             onClick={() => {
               if (!currentRepo) return;
               useGitStore.getState().push(currentRepo.path)
-                .then(() => toast.success('Pushed successfully'))
+                .then((res) => {
+                  const t = describePushResult(res);
+                  if (t.kind === 'error') toast.error(t.title, t.detail);
+                  else if (t.kind === 'info') toast.info(t.title, t.detail);
+                  else toast.success(t.title, t.detail);
+                })
                 .catch((e) => toast.error('Push failed', String(e)));
             }}
             title={`${status.ahead} commit(s) ahead — click to push`}

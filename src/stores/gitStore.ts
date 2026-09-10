@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, type StatusResult } from '../lib/api';
+import { api, type StatusResult, type PushResult } from '../lib/api';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { useOperationLogStore } from './operationLogStore';
 
@@ -13,7 +13,7 @@ interface GitState {
   stageFiles: (repoPath: string, files: string[]) => Promise<void>;
   stageAll: (repoPath: string) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean) => Promise<string>;
-  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean) => Promise<void>;
+  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean) => Promise<PushResult>;
   pull: (repoPath: string, remote?: string, branch?: string) => Promise<void>;
   fetch: (repoPath: string, remote?: string, prune?: boolean) => Promise<void>;
 }
@@ -78,9 +78,10 @@ export const useGitStore = create<GitState>((set, get) => ({
     const cmd = `git push ${resolved} ${branch || ''} ${setUpstream ? '-u' : ''}`.trim();
     const opId = log.startOp('Push', repoPath, cmd);
     try {
-      await api.git.push(repoPath, resolved, branch, setUpstream);
+      const result = await api.git.push(repoPath, resolved, branch, setUpstream);
       await get().refreshStatus(repoPath);
-      log.finishOp(opId, 'Pushed successfully');
+      log.finishOp(opId, result?.summary ?? 'Pushed successfully');
+      return result;
     } catch (e) {
       log.failOp(opId, String(e));
       throw e;

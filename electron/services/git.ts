@@ -1,8 +1,10 @@
 import simpleGit, { type SimpleGit } from 'simple-git';
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import { getSetting } from './storage.js';
 import type { RemoteCredential } from '../types/settings-api.js';
+import type { PushRefStatus, PushResult, PushVerification } from '../types/git-api.js';
 import type {
   StatusResult,
   LogEntry,
@@ -161,6 +163,83 @@ export async function commit(
   return result.commit;
 }
 
+/**
+ * Parse `git push` output (stderr + stdout combined) into structured ref
+ * statuses. git writes the per-ref status lines to stderr:
+ *   To https://host/repo.git
+ *      27aa286..b7d1f2f  main -> main
+ *    * [new branch]      Main -> Main
+ *    + 27aa286...b7d1f2f main -> main (forced update)
+ *    ! [remote rejected] main -> main (protected branch hook declined)
+ *    ! [rejected]        main -> main (non-fast-forward)
+ *    - [deleted]         tmp -> tmp
+ *    = [up to date]      main -> main
+ *    Everything up-to-date
+ */
+export function parsePushOutput(output: string): { refs: PushRefStatus[]; upToDate: boolean } {
+  const refs: PushRefStatus[] = [];
+  let upToDate = /everything up-to-date/i.test(output);
+  for (const line of output.split(/\r?\n/)) {
+    const arrow = line.match(/(\S+)\s*->\s*(\S+)/);
+    if (!arrow) continue;
+    const localRef = arrow[1];
+    const remoteRef = arrow[2];
+    if (localRef === remoteRef && localRef === '') continue;
+    const reason = (line.match(/\(([^)]+)\)\s*$/) || [])[1];
+    const status: PushRefStatus = { remoteRef, localRef };
+    if (/^\s*!/.test(line)) status.rejected = true;
+    if (/\[remote rejected\]/i.test(line)) status.rejected = true;
+    if (/\[new branch\]/i.test(line)) status.created = true;
+    if (/\[deleted\]/i.test(line)) status.deleted = true;
+    if (/\(forced update\)/i.test(line)) status.forced = true;
+    if (/\[up to date\]/i.test(line)) status.upToDate = true;
+    const range = line.match(/([0-9a-f]{7,40})(\.\.\.|\.\.)?([0-9a-f]{0,40})?/i);
+    if (range && !status.upToDate) {
+      status.oldHash = range[1];
+      if (range[3]) status.newHash = range[3];
+    }
+    if (reason) status.reason = reason;
+    refs.push(status);
+    // A per-ref `[up to date]` line only means that ref; the blanket
+    // "Everything up-to-date" stays true only when no ref line contradicts it.
+    if (!status.upToDate && !status.rejected && !status.deleted) upToDate = false;
+  }
+  return { refs, upToDate: upToDate || refs.every((r) => r.upToDate) && refs.length > 0 };
+}
+
+/** Spawn a git command and capture both streams (unlike simple-git's raw()). */
+function spawnGitCapture(
+  repoPath: string,
+  args: string[]
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd: repoPath, windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+  });
+}
+
+/** Read what the remote's branch points at right now (with push credentials). */
+async function lsRemoteBranch(
+  repoPath: string,
+  remote: string,
+  branch: string
+): Promise<string | null> {
+  const auth = await remoteNetworkArgs(repoPath, remote, true);
+  const { code, stdout } = await spawnGitCapture(repoPath, [
+    ...auth, 'ls-remote', remote, `refs/heads/${branch}`,
+  ]);
+  if (code !== 0) return null;
+  const line = stdout.split(/\r?\n/).find((l) => l.trim().length > 0);
+  if (!line) return null;
+  const hash = line.split(/\t|\s+/)[0];
+  return /^[0-9a-f]{40}$/i.test(hash) ? hash : null;
+}
+
 export async function push(
   repoPath: string,
   remote = 'origin',
@@ -168,7 +247,7 @@ export async function push(
   setUpstream = false,
   force = false,
   tags = false
-): Promise<void> {
+): Promise<PushResult> {
   const git = getGit(repoPath);
   // No branch given: resolve the CURRENT branch and auto-publish it.
   // `git push <remote>` alone fails with "no upstream configured" for a fresh
@@ -210,11 +289,65 @@ export async function push(
     // points at, which is wrong when the user selected a non-current branch).
     args.push(refspec);
   }
-  try {
-    await git.raw(args);
-  } catch (e) {
+
+  // Capture BOTH streams: git prints ref status on stderr and exits 0 even
+  // when nothing was pushed ("Everything up-to-date").
+  const run = await spawnGitCapture(repoPath, args).catch((e) => {
     throw describeNetworkError(e, 'push');
+  });
+  if (run.code !== 0) {
+    const err = new Error(run.stderr.trim() || run.stdout.trim() || 'git push failed');
+    throw describeNetworkError(err, 'push');
   }
+
+  const { refs, upToDate } = parsePushOutput(`${run.stderr}\n${run.stdout}`);
+  const rejected = refs.filter((r) => r.rejected);
+  // Exit 0 but a rejected ref line → server refused part of the push
+  // (can happen with --tags or multiple refspecs): treat as failure.
+  if (rejected.length > 0) {
+    const detail = rejected
+      .map((r) => `${r.remoteRef}: ${r.reason ?? 'rejected by remote'}`)
+      .join('; ');
+    const err = new Error(`The remote refused the push — ${detail}\n${run.stderr.trim()}`);
+    throw describeNetworkError(err, 'push');
+  }
+
+  // Honest post-push verification: the remote branch must now point at the
+  // same commit the local one does. Catches silent hook rewrites, proxy
+  // weirdness, and wrong-branch pushes (e.g. `Main` vs `main`).
+  let verification: PushVerification | undefined;
+  if (refspec && /^[A-Za-z0-9._\-/]+$/.test(refspec) && !refspec.includes(':')) {
+    try {
+      const localHash = (await git.raw(['rev-parse', refspec])).trim();
+      const remoteHash = await lsRemoteBranch(repoPath, remote, refspec);
+      verification = {
+        branch: refspec,
+        localHash,
+        remoteHash,
+        ok: remoteHash === localHash,
+      };
+    } catch {
+      /* verification is best-effort — never mask a successful push */
+    }
+  }
+
+  const updated = refs.some((r) => !r.upToDate && !r.rejected && !r.deleted);
+  const head = refs.find((r) => !r.upToDate && !r.rejected && !r.deleted);
+  let summary: string;
+  if (upToDate && !updated) summary = 'Everything up-to-date — nothing to push';
+  else if (head?.created) summary = `Published '${head.remoteRef}' → ${remote}`;
+  else if (head) summary = `Pushed '${head.localRef ?? head.remoteRef}' → ${remote}/${head.remoteRef}`;
+  else summary = 'Push completed';
+
+  return {
+    upToDate: upToDate && !updated,
+    updated,
+    refs,
+    verification,
+    remote,
+    branch: refspec ?? undefined,
+    summary,
+  };
 }
 
 /**
@@ -297,7 +430,16 @@ async function remoteNetworkArgs(repoPath: string, remoteName: string, pushUrl =
 function describeNetworkError(e: unknown, op: 'push' | 'pull' | 'fetch'): Error {
   const raw = e instanceof Error ? e.message : String(e);
   let hint = '';
-  if (/could not read Username|Authentication failed|401|403|authorization/i.test(raw)) {
+  if (/remote rejected|protected branch|GH006|hook declined|pre-receive/i.test(raw)) {
+    hint =
+      'The server REFUSED the branch update — the branch is protected ' +
+      '(e.g. GitHub "Protect this branch" / required PR reviews) or you lack ' +
+      'write permission. The remote branch was NOT changed. ';
+  } else if (/non-fast-forward|fetch first|behind its remote/i.test(raw)) {
+    hint =
+      'The remote branch has commits you do not have locally — pull first ' +
+      '(Pull button, or Pull --rebase), then push again. ';
+  } else if (/could not read Username|Authentication failed|401|403|authorization/i.test(raw)) {
     hint =
       `Authentication failed — set Username + Password/token for this remote in ` +
       `Repository Settings → Remotes (or the Remotes tool → Edit URLs). `;

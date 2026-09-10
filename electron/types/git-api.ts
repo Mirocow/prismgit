@@ -244,13 +244,66 @@ export interface GitConfigEntry {
   source?: string;
 }
 
+/** Status of one ref update as reported by `git push` output. */
+export interface PushRefStatus {
+  /** remote branch name, e.g. `main` */
+  remoteRef: string;
+  /** local side of the refspec, e.g. `main` (may differ — case, or Main vs main) */
+  localRef?: string;
+  /** new branch was created on the remote */
+  created?: boolean;
+  deleted?: boolean;
+  forced?: boolean;
+  /** server refused this ref (protected branch, permissions, ...) */
+  rejected?: boolean;
+  /** reason given by the server, e.g. `protected branch hook declined` */
+  reason?: string;
+  oldHash?: string;
+  newHash?: string;
+  /** `= [up to date]` for this ref */
+  upToDate?: boolean;
+}
+
+/** Post-push verification: does the remote branch now point at the local commit? */
+export interface PushVerification {
+  branch: string;
+  localHash: string;
+  /** hash the remote branch points at after the push, null when missing */
+  remoteHash: string | null;
+  /** localHash === remoteHash */
+  ok: boolean;
+}
+
+/**
+ * Honest result of a push. `git push` exits 0 in cases where the user's
+ * intent was NOT fulfilled ("Everything up-to-date", pushing `Main` when the
+ * remote branch is `main` — a new branch appears). The UI must not report
+ * "Pushed successfully" without checking this result.
+ */
+export interface PushResult {
+  /** git said "Everything up-to-date" — nothing was sent */
+  upToDate: boolean;
+  /** at least one ref was updated (or created) on the remote */
+  updated: boolean;
+  /** per-ref details as reported by git */
+  refs: PushRefStatus[];
+  /** post-push ls-remote verification of the pushed branch */
+  verification?: PushVerification;
+  /** remote that received (or would have received) the push */
+  remote: string;
+  /** branch refspec that was pushed (resolved current branch when omitted) */
+  branch?: string;
+  /** short human-readable summary for the operation log */
+  summary: string;
+}
+
 export interface GitApi {
   status: (repoPath: string) => Promise<StatusResult>;
   add: (repoPath: string, files: string[]) => Promise<void>;
   addAll: (repoPath: string) => Promise<void>;
   restore: (repoPath: string, files: string[], staged?: boolean) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean, signoff?: boolean, noVerify?: boolean) => Promise<string>;
-  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean) => Promise<void>;
+  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean) => Promise<PushResult>;
   pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) => Promise<void>;
   fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) => Promise<void>;
   fetchAll: (repoPath: string, prune?: boolean) => Promise<void>;

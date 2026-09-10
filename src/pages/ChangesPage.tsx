@@ -13,6 +13,7 @@ import { buildFileMenu, runFileAction, getIndexFlagsAsync, type IndexFlags } fro
 import { RefBadges } from '../lib/refBadge';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { cn, getStatusColor } from '../lib/utils';
+import { describePushResult } from '../lib/pushResult';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
@@ -691,8 +692,11 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const handleCommitAndPush = async () => {
     await handleCommit();
     try {
-      await push(repo.path);
-      toast.success('Pushed successfully');
+      const res = await push(repo.path);
+      const t = describePushResult(res);
+      if (t.kind === 'error') toast.error(t.title, t.detail);
+      else if (t.kind === 'info') toast.info(t.title, t.detail);
+      else toast.success(t.title, t.detail);
     } catch (e) {
       toast.error('Push failed', String(e));
     }

@@ -28,6 +28,7 @@ import type {
   UnreachableCommit,
   BugtraqConfig,
   RemoteCheckSummary,
+  PushResult,
 } from '../../electron/types/git-api';
 import type {
   GithubUser,
@@ -67,6 +68,7 @@ export type {
   UnreachableCommit,
   BugtraqConfig,
   RemoteCheckSummary,
+  PushResult,
   GithubUser,
   GithubRepository,
   GithubPullRequest,

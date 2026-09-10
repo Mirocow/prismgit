@@ -9,6 +9,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
+import { describePushResult } from '../lib/pushResult';
 import { confirmDialog } from './ConfirmDialog';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Package, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Tag as TagIcon, Trash, X } from './icons';
 
@@ -108,7 +109,13 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
 
   const handlePush = async () => {
     if (!currentRepo) return;
-    try { await push(currentRepo.path); toast.success('Pushed successfully'); }
+    try {
+      const res = await push(currentRepo.path);
+      const t = describePushResult(res);
+      if (t.kind === 'error') toast.error(t.title, t.detail);
+      else if (t.kind === 'info') toast.info(t.title, t.detail);
+      else toast.success(t.title, t.detail);
+    }
     catch (e) { toast.error('Push failed', String(e)); }
   };
   const handlePull = async () => {
@@ -524,15 +531,19 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
     }
     const cmd = `git push ${selectedRemote} ${b || ''} ${setUpstream ? '-u' : ''} ${force ? '--force-with-lease' : ''} ${pushTags ? '--tags' : ''}`.trim();
     try {
-      await useOperationLogStore.getState().logOperation(
+      const res = await useOperationLogStore.getState().logOperation(
         `Push ${b || 'current'} → ${selectedRemote}${force ? ' (force)' : ''}${pushTags ? ' +tags' : ''}`,
         currentRepo.path, cmd,
         async () => {
-          await api.git.push(currentRepo.path, selectedRemote, b || undefined, setUpstream, force, pushTags);
+          const r = await api.git.push(currentRepo.path, selectedRemote, b || undefined, setUpstream, force, pushTags);
           await refreshStatus(currentRepo.path);
+          return r;
         }
       );
-      toast.success(`Pushed ${b || 'current'} → ${selectedRemote}${force ? ' (force)' : ''}${pushTags ? ' + tags' : ''}`);
+      const t = describePushResult(res, selectedRemote, b || undefined);
+      if (t.kind === 'error') toast.error(t.title, t.detail);
+      else if (t.kind === 'info') toast.info(t.title, t.detail);
+      else toast.success(t.title, t.detail);
     } catch (e) {
       toast.error('Push failed', String(e));
     }

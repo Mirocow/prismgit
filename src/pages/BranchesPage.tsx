@@ -21,6 +21,7 @@ import {
   SetDepthDialog, FetchMoreDialog, RemotePropertiesDialog, type ResetMode,
 } from '../components/BranchDialogs';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
+import { describePushResult } from '../lib/pushResult';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function BranchesPage() {
@@ -270,8 +271,11 @@ export function BranchesPage() {
       const remote = (branch.tracking ? branch.tracking.split('/')[0] : '')
         || (await resolveDefaultRemote(repo.path))
         || 'origin';
-      await api.git.push(repo.path, remote, branch.name, !branch.tracking);
-      toast.success(`Pushed '${branch.name}' → ${remote}`);
+      const res = await api.git.push(repo.path, remote, branch.name, !branch.tracking);
+      const t = describePushResult(res, remote, branch.name);
+      if (t.kind === 'error') toast.error(t.title, t.detail);
+      else if (t.kind === 'info') toast.info(t.title, t.detail);
+      else toast.success(t.title, t.detail);
       await load();
       await refreshStatus(repo.path);
     } catch (e) { toast.error('Push failed', String(e)); }
@@ -814,7 +818,13 @@ export function BranchesPage() {
             `Push ${branchName} to ${remoteName}`, repo.path,
             `git push ${remoteName} ${branchName}`,
             () => api.git.push(repo.path, remoteName, branchName, !b.tracking)
-          ).then(() => { toast.success(`Pushed ${branchName} to ${remoteName}`); refreshStatus(repo.path); })
+          ).then((res) => {
+            const t = describePushResult(res, remoteName, branchName);
+            if (t.kind === 'error') toast.error(t.title, t.detail);
+            else if (t.kind === 'info') toast.info(t.title, t.detail);
+            else toast.success(t.title, t.detail);
+            refreshStatus(repo.path);
+          })
            .catch((e) => toast.error('Push failed', String(e)));
         }
 
