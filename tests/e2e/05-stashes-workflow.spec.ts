@@ -79,7 +79,7 @@ test.describe('Stashes workflow', () => {
       // Verify via git CLI that the stash was created (more reliable than
       // waiting for the UI to refresh the list)
       const { execSync } = require('node:child_process');
-      const stashList = execSync('git -C /home/z/my-project/repos/test-repo stash list', { encoding: 'utf8' });
+      const stashList = execSync(`git -C ${FIXTURE_REPO} stash list`, { encoding: 'utf8' });
       console.log('Stash list after click:', stashList);
 
       await screenshot(ctx.page, 'stashes-after-create');
@@ -94,14 +94,14 @@ test.describe('Stashes workflow', () => {
       // Cleanup: drop the stash we created
       try {
         const { execSync } = require('node:child_process');
-        const list = execSync('git -C /home/z/my-project/repos/test-repo stash list', { encoding: 'utf8' });
+        const list = execSync(`git -C ${FIXTURE_REPO} stash list`, { encoding: 'utf8' });
         const stashLine = list.split('\n').find(l => l.includes('E2E test stash'));
         if (stashLine) {
           const stashRef = stashLine.split(':')[0];
-          execSync(`git -C /home/z/my-project/repos/test-repo stash drop ${stashRef}`, { stdio: 'ignore' });
+          execSync(`git -C ${FIXTURE_REPO} stash drop ${stashRef}`, { stdio: 'ignore' });
         }
         // Restore README
-        execSync('git -C /home/z/my-project/repos/test-repo checkout -- README.md', { stdio: 'ignore' });
+        execSync(`git -C ${FIXTURE_REPO} checkout -- README.md`, { stdio: 'ignore' });
       } catch { /* ignore */ }
       await ctx.close();
     }
@@ -117,7 +117,7 @@ test.describe('Stashes workflow', () => {
       await ctx.page.waitForTimeout(500);
 
       const { execSync } = require('node:child_process');
-      execSync('git -C /home/z/my-project/repos/test-repo stash push -m "E2E stash diff test" 2>/dev/null', { stdio: 'ignore' });
+      execSync(`git -C ${FIXTURE_REPO} stash push -m "E2E stash diff test" 2>/dev/null`, { stdio: 'ignore' });
       // Restore file content
       fs.writeFileSync(file, original);
 
@@ -156,11 +156,11 @@ test.describe('Stashes workflow', () => {
       // Cleanup
       try {
         const { execSync } = require('node:child_process');
-        const list = execSync('git -C /home/z/my-project/repos/test-repo stash list', { encoding: 'utf8' });
+        const list = execSync(`git -C ${FIXTURE_REPO} stash list`, { encoding: 'utf8' });
         const stashLine = list.split('\n').find(l => l.includes('E2E stash diff test'));
         if (stashLine) {
           const stashRef = stashLine.split(':')[0];
-          execSync(`git -C /home/z/my-project/repos/test-repo stash drop ${stashRef}`, { stdio: 'ignore' });
+          execSync(`git -C ${FIXTURE_REPO} stash drop ${stashRef}`, { stdio: 'ignore' });
         }
       } catch { /* ignore */ }
       await ctx.close();

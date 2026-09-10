@@ -72,7 +72,7 @@ test.describe('Tags workflow', () => {
     } finally {
       // Cleanup
       try {
-        execSync('git -C /home/z/my-project/repos/test-repo tag -d e2e-test-tag 2>/dev/null', { stdio: 'ignore' });
+        execSync(`git -C ${FIXTURE_REPO} tag -d e2e-test-tag 2>/dev/null`, { stdio: 'ignore' });
       } catch { /* ignore */ }
       await ctx.close();
     }

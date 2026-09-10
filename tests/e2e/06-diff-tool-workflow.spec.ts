@@ -74,7 +74,7 @@ test.describe('Diff tool workflow', () => {
       // Cleanup
       try {
         const { execSync } = require('node:child_process');
-        execSync('git -C /home/z/my-project/repos/test-repo checkout -- src/version.js', { stdio: 'ignore' });
+        execSync(`git -C ${FIXTURE_REPO} checkout -- src/version.js`, { stdio: 'ignore' });
       } catch { /* ignore */ }
       await ctx.close();
     }

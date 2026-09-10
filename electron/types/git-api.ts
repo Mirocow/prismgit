@@ -33,6 +33,8 @@ export interface StatusResult {
   isCherryPicking: boolean;
   isReverting: boolean;
   isBisecting: boolean;
+  /** Present ONLY while a cherry-pick is in progress (SmartGit: "cherry-picking-state"). */
+  cherryPick?: { commit: string; subject: string; /** pick has nothing to commit — needs Skip or Commit Empty */ empty: boolean };
   detached: boolean;
 }
 
@@ -411,9 +413,12 @@ export interface GitApi {
   reflog: (repoPath: string, ref?: string, maxCount?: number) => Promise<ReflogEntry[]>;
   reflogDelete: (repoPath: string, index: number, ref?: string) => Promise<void>;
 
-  cherryPick: (repoPath: string, hashes: string[], noCommit?: boolean) => Promise<{ conflicts: string[] }>;
+  cherryPick: (repoPath: string, hashes: string[], noCommit?: boolean) => Promise<{ conflicts: string[]; empty?: boolean; error?: string }>;
   cherryPickAbort: (repoPath: string) => Promise<void>;
-  cherryPickContinue: (repoPath: string) => Promise<void>;
+  /** Continue after conflict resolution; returns {empty:true} when the pick has nothing to commit (use allowEmpty to commit it anyway). */
+  cherryPickContinue: (repoPath: string, allowEmpty?: boolean) => Promise<{ empty?: boolean }>;
+  /** Skip the current pick (git cherry-pick --skip) — drops an empty step. */
+  cherryPickSkip: (repoPath: string) => Promise<void>;
 
   revert: (repoPath: string, hashes: string[], noCommit?: boolean) => Promise<{ conflicts: string[] }>;
   revertAbort: (repoPath: string) => Promise<void>;

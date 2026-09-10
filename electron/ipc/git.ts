@@ -157,7 +157,8 @@ export function registerGitIpc(): void {
   // Cherry Pick (SmartGit 20+)
   ipcMain.handle('git:cherryPick', (_e, p: string, h: string[], nc?: boolean) => gitService.cherryPick(p, h, nc));
   ipcMain.handle('git:cherryPickAbort', (_e, p: string) => gitService.cherryPickAbort(p));
-  ipcMain.handle('git:cherryPickContinue', (_e, p: string) => gitService.cherryPickContinue(p));
+  ipcMain.handle('git:cherryPickContinue', (_e, p: string, allowEmpty?: boolean) => gitService.cherryPickContinue(p, allowEmpty));
+  ipcMain.handle('git:cherryPickSkip', (_e, p: string) => gitService.cherryPickSkip(p));
 
   // Revert (SmartGit 20+)
   ipcMain.handle('git:revert', (_e, p: string, h: string[], nc?: boolean) => gitService.revert(p, h, nc));

@@ -95,7 +95,7 @@ test.describe('Changes workflow', () => {
       // Reset any staged changes
       try {
         const { execSync } = require('node:child_process');
-        execSync('git -C /home/z/my-project/repos/test-repo reset HEAD -- . 2>/dev/null', { stdio: 'ignore' });
+        execSync(`git -C ${FIXTURE_REPO} reset HEAD -- . 2>/dev/null`, { stdio: 'ignore' });
       } catch { /* ignore */ }
       await ctx.close();
     }
@@ -143,8 +143,8 @@ test.describe('Changes workflow', () => {
       // Cleanup: revert the commit so other tests are not affected
       try {
         const { execSync } = require('node:child_process');
-        execSync('git -C /home/z/my-project/repos/test-repo reset --hard HEAD~1 2>/dev/null', { stdio: 'ignore' });
-        execSync('rm -f /home/z/my-project/repos/test-repo/e2e-commit-test.txt', { stdio: 'ignore' });
+        execSync(`git -C ${FIXTURE_REPO} reset --hard HEAD~1 2>/dev/null`, { stdio: 'ignore' });
+        execSync(`rm -f ${FIXTURE_REPO}/e2e-commit-test.txt`, { stdio: 'ignore' });
       } catch { /* ignore */ }
       await ctx.close();
     }

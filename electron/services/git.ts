@@ -148,8 +148,27 @@ function invalidateCache(repoPath?: string) {
 }
 
 // State detection helpers
-async function detectRepoState(repoPath: string) {
-  const gitDir = path.join(repoPath, '.git');
+// Resolved git dirs are cached per repoPath: `rev-parse --absolute-git-dir` is
+// stable for the lifetime of a session, and it keeps state detection working
+// for linked worktrees and submodule repos where '.git' is a FILE, not a
+// directory (the naive path.join(repoPath, '.git') check misses those states).
+const gitDirCache = new Map<string, string>();
+async function resolveGitDir(repoPath: string, git: SimpleGit): Promise<string> {
+  const cached = gitDirCache.get(repoPath);
+  if (cached) return cached;
+  let dir = path.join(repoPath, '.git');
+  try {
+    const out = (await git.raw(['rev-parse', '--absolute-git-dir'])).trim();
+    if (out) dir = out;
+  } catch {
+    /* fall back to the conventional .git path */
+  }
+  gitDirCache.set(repoPath, dir);
+  return dir;
+}
+
+async function detectRepoState(repoPath: string, git?: SimpleGit) {
+  const gitDir = await resolveGitDir(repoPath, git ?? getGit(repoPath));
   const isMerging = fs.existsSync(path.join(gitDir, 'MERGE_HEAD'));
   let isRebasing = false;
   const rebaseApplyDir = path.join(gitDir, 'rebase-apply');
@@ -181,7 +200,29 @@ export async function isRepo(targetPath: string): Promise<boolean> {
 export async function status(repoPath: string): Promise<StatusResult> {
   const git = getGit(repoPath);
   const s = await git.status();
-  const state = await detectRepoState(repoPath);
+  const state = await detectRepoState(repoPath, git);
+  // Cherry-pick details — which commit is being picked and whether the pick has
+  // become EMPTY (its changes are already applied to HEAD, so there is nothing
+  // to commit). SmartGit surfaces this as "The working tree is in
+  // cherry-picking-state." and only allows Abort / Continue until it resolves.
+  let cherryPick: StatusResult['cherryPick'];
+  if (state.isCherryPicking) {
+    // Untracked ('?') entries don't block an empty pick — only tracked changes
+    // (staged or unstaged) and unresolved conflicts do.
+    const hasRealChanges = s.files.some((f) => f.index !== '?' && f.working_dir !== '?');
+    const empty = s.conflicted.length === 0 && !hasRealChanges;
+    let commit = '';
+    let subject = '';
+    try {
+      const out = await git.raw(['log', '-1', '--format=%H%x1f%s', 'CHERRY_PICK_HEAD']);
+      const [h, sub] = out.trim().split('\x1f');
+      commit = h || '';
+      subject = sub || '';
+    } catch {
+      /* CHERRY_PICK_HEAD may point to a pruned object mid-cleanup */
+    }
+    cherryPick = { commit, subject, empty };
+  }
   return {
     not_added: s.not_added,
     conflicted: s.conflicted,
@@ -208,6 +249,7 @@ export async function status(repoPath: string): Promise<StatusResult> {
     isCherryPicking: state.isCherryPicking,
     isReverting: state.isReverting,
     isBisecting: state.isBisecting,
+    cherryPick,
     detached: !s.current && s.files.length === 0 && !s.tracking,
   };
 }
@@ -2427,22 +2469,51 @@ export async function reflogDelete(
   await git.raw(['reflog', 'delete', `HEAD@{${index}}`, ref]);
 }
 
+export interface CherryPickResult {
+  conflicts: string[];
+  /** The pick produced no changes (already applied) — repo left in cherry-pick state with nothing to commit. */
+  empty?: boolean;
+  /** Non-empty when cherry-pick failed for a reason OTHER than conflicts/empty (e.g. dirty worktree). */
+  error?: string;
+}
+
 export async function cherryPick(
   repoPath: string,
   hashes: string[],
   noCommit = false
-): Promise<{ conflicts: string[] }> {
+): Promise<CherryPickResult> {
   const git = getGit(repoPath);
   const args = ['cherry-pick'];
   if (noCommit) args.push('-n');
   args.push(...hashes);
+  let errText = '';
   try {
     await git.raw(args);
-  } catch {
-    // simple-git may throw on conflicts, fall through to status check
+  } catch (e) {
+    // simple-git throws on conflicts AND on the "previous cherry-pick is now
+    // empty" exit — both leave the repo in a recoverable sequencer state, so
+    // fall through to the status check instead of failing the whole operation.
+    // Prefer stderr: e.message may omit the actual git diagnostics.
+    errText = e instanceof Error
+      ? (((e as { stderr?: string }).stderr || e.message) as string)
+      : String(e);
   }
   const statusRes = await status(repoPath);
-  return { conflicts: statusRes.conflicted };
+  if (statusRes.conflicted.length > 0) {
+    return { conflicts: statusRes.conflicted };
+  }
+  if (statusRes.isCherryPicking) {
+    // State remains but nothing is conflicted → the pick is empty ("The
+    // previous cherry-pick is now empty, possibly due to conflict
+    // resolution"). The user must Skip or Commit Empty to resolve it.
+    return { conflicts: [], empty: true, error: errText || undefined };
+  }
+  if (errText) {
+    // Hard failure with no sequencer state (e.g. "your local changes would be
+    // overwritten", "bad revision") — surface it to the UI instead of lying.
+    return { conflicts: [], error: errText };
+  }
+  return { conflicts: [] };
 }
 
 export async function cherryPickAbort(repoPath: string): Promise<void> {
@@ -2450,9 +2521,42 @@ export async function cherryPickAbort(repoPath: string): Promise<void> {
   await git.raw(['cherry-pick', '--abort']);
 }
 
-export async function cherryPickContinue(repoPath: string): Promise<void> {
+/**
+ * Skip the current pick (`git cherry-pick --skip`) — drops the empty/conflicted
+ * step and continues with the next one in multi-pick sequences.
+ */
+export async function cherryPickSkip(repoPath: string): Promise<void> {
   const git = getGit(repoPath);
-  await git.raw(['cherry-pick', '--continue', '--no-edit']);
+  await git.raw(['cherry-pick', '--skip']);
+}
+
+/**
+ * Continue a cherry-pick after conflict resolution (`git cherry-pick --continue`).
+ * When the pick has become EMPTY, --continue refuses — the caller can pass
+ * allowEmpty to finalize it with `git commit --allow-empty` (git's own
+ * suggested remedy) or use cherryPickSkip instead.
+ */
+export async function cherryPickContinue(
+  repoPath: string,
+  allowEmpty = false
+): Promise<{ empty?: boolean }> {
+  const git = getGit(repoPath);
+  try {
+    await git.raw(['cherry-pick', '--continue', '--no-edit']);
+    return {};
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/now empty|nothing to commit/i.test(msg)) {
+      if (allowEmpty) {
+        // git docs: "If you wish to commit it anyway, use: git commit --allow-empty".
+        // A plain commit during a pick consumes MERGE_MSG and clears CHERRY_PICK_HEAD.
+        await git.raw(['commit', '--allow-empty', '--no-edit']);
+        return {};
+      }
+      return { empty: true };
+    }
+    throw e;
+  }
 }
 
 export async function revert(

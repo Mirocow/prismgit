@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, Chevrons
 import { LazyFileList } from '../components/LazyFileList';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
+import { CherryPickStateBanner } from '../components/CherryPickStateBanner';
 import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, type LLMProvider } from '../lib/aiCommitMessages';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
@@ -569,6 +570,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       toast.warning('Commit message is required');
       return;
     }
+    // SmartGit: while the working tree is in cherry-picking-state only
+    // Abort/Continue are allowed — a plain commit would consume the pick.
+    if (status?.isCherryPicking) {
+      toast.warning('Cherry-pick in progress', 'Finish it first: Continue, Skip or Abort in the banner above');
+      return;
+    }
     try {
       // SmartGit Manual: AI Commit Messages — @ai placeholder → replace with AI-generated
       let finalMsg = commitMsg.trim();
@@ -719,6 +726,75 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     } catch (e) {
       toast.error('Push failed', String(e));
     }
+  };
+
+  // ===== Cherry-pick state (SmartGit: "The working tree is in cherry-picking-state.") =====
+  // While CHERRY_PICK_HEAD exists only Abort / Continue / Skip / Commit Empty
+  // are allowed — every other HEAD-moving operation would discard the pick.
+  const [cpBusy, setCpBusy] = useState(false);
+  const runCherryPickOp = async (title: string, cmd: string, fn: () => Promise<void>, okMsg: string) => {
+    setCpBusy(true);
+    try {
+      await useOperationLogStore.getState().logOperation(title, repo.path, cmd, fn);
+      toast.success(okMsg);
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error(`${title} failed`, String(e));
+    } finally {
+      setCpBusy(false);
+    }
+  };
+  const handleCpContinue = () => {
+    if (!status?.isCherryPicking) return;
+    void (async () => {
+      setCpBusy(true);
+      try {
+        const res = await useOperationLogStore.getState().logOperation(
+          'Cherry-pick Continue', repo.path, 'git cherry-pick --continue',
+          () => api.git.cherryPickContinue(repo.path)
+        );
+        if (res?.empty) {
+          toast.warning('The previous cherry-pick is now empty', 'Use Skip (drop it) or Commit Empty (commit it anyway)');
+        } else {
+          toast.success('Cherry-pick finished — commit created');
+        }
+        await refreshStatus(repo.path);
+      } catch (e) {
+        toast.error('Cherry-pick Continue failed', String(e));
+      } finally {
+        setCpBusy(false);
+      }
+    })();
+  };
+  const handleCpCommitEmpty = () => {
+    if (!status?.isCherryPicking) return;
+    void runCherryPickOp(
+      'Cherry-pick Commit Empty', 'git commit --allow-empty',
+      () => api.git.cherryPickContinue(repo.path, true).then(() => undefined),
+      'Empty commit created — cherry-pick finished'
+    );
+  };
+  const handleCpSkip = () => {
+    if (!status?.isCherryPicking) return;
+    void runCherryPickOp(
+      'Cherry-pick Skip', 'git cherry-pick --skip',
+      () => api.git.cherryPickSkip(repo.path),
+      'Cherry-pick skipped'
+    );
+  };
+  const handleCpAbort = async () => {
+    if (!status?.isCherryPicking) return;
+    if (!(await confirmDialog({
+      title: 'Abort cherry-pick',
+      message: 'Cancel the cherry-pick and restore the branch to its previous state?\n\nPicked changes will be discarded.',
+      confirmLabel: 'Abort',
+      danger: true,
+    }))) return;
+    void runCherryPickOp(
+      'Cherry-pick Abort', 'git cherry-pick --abort',
+      () => api.git.cherryPickAbort(repo.path),
+      'Cherry-pick aborted'
+    );
   };
 
   // File filter helper: substring, or regular expression when .* mode is on.
@@ -1294,6 +1370,20 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         </div>
       </div>
 
+      {/* SmartGit: "The working tree is in cherry-picking-state." — only Abort/Continue/Skip allowed */}
+      {status?.isCherryPicking && status.cherryPick && (
+        <CherryPickStateBanner
+          commit={status.cherryPick.commit}
+          subject={status.cherryPick.subject}
+          empty={status.cherryPick.empty}
+          busy={cpBusy}
+          onContinue={handleCpContinue}
+          onSkip={handleCpSkip}
+          onCommitEmpty={handleCpCommitEmpty}
+          onAbort={handleCpAbort}
+        />
+      )}
+
       <div className="flex flex-1 overflow-hidden">
         {/* Directory tree panel (SmartGit-style) — selects the folder scope */}
         {dirTreeVisible && (
@@ -1640,8 +1730,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               <button
                 className="btn btn-secondary text-xs"
                 onClick={handleCommitAndPush}
-                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0)}
-                title="Commit then push"
+                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || !!status?.isCherryPicking}
+                title={status?.isCherryPicking ? 'Cherry-pick in progress — finish it first (Continue/Skip/Abort)' : 'Commit then push'}
               >
                 <GitPullRequest size={11} />
                 Commit & Push
@@ -1649,8 +1739,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               <button
                 className="btn btn-primary text-xs"
                 onClick={handleCommit}
-                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0)}
-                title="Ctrl+Enter"
+                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || !!status?.isCherryPicking}
+                title={status?.isCherryPicking ? 'Cherry-pick in progress — finish it first (Continue/Skip/Abort)' : 'Ctrl+Enter'}
               >
                 <GitCommit size={11} />
                 Commit

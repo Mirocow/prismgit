@@ -26,8 +26,22 @@ import { resolveDefaultRemote } from '../lib/remotes';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function BranchesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const { refreshStatus } = useGitStore();
+  const { refreshStatus, status } = useGitStore();
   const toast = useToastStore();
+
+  // SmartGit: while a cherry-pick is in progress the branch is "detached from
+  // its remote" — the picked commit exists only locally. Pull and Checkout
+  // (and other HEAD-movers) would DISCARD the pick, so they are blocked until
+  // the user finishes it on the Changes page (Continue / Skip / Abort).
+  const cherryPicking = !!status?.isCherryPicking;
+  const blockedByCherryPick = (): boolean => {
+    if (!cherryPicking) return false;
+    toast.error(
+      'Cherry-pick in progress',
+      'Finish it first on the Changes page (Continue or Abort) — this operation would lead to loss of the picked commit'
+    );
+    return true;
+  };
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -114,6 +128,7 @@ export function BranchesPage() {
 
   const handleCheckout = async (branch: BranchInfo) => {
     if (branch.current) return;
+    if (blockedByCherryPick()) return;
     try {
       await useOperationLogStore.getState().logOperation(
         'Check Out Branch', repo.path, `git checkout ${branch.name}`,
@@ -265,6 +280,7 @@ export function BranchesPage() {
   };
 
   const handleMerge = async (branch: string) => {
+    if (blockedByCherryPick()) return;
     setMergeTarget(branch);
   };
 
@@ -296,6 +312,7 @@ export function BranchesPage() {
   // ===== Reset dialog executor (Reset... / Reset Advanced... for local AND remote branches) =====
   const executeReset = async (mode: ResetMode, ref: string) => {
     if (!resetTarget) return;
+    if (blockedByCherryPick()) return;
     setResetBusy(true);
     try {
       await useOperationLogStore.getState().logOperation(
@@ -435,6 +452,9 @@ export function BranchesPage() {
   // ===== Remote operations: Pull / Fetch More / Set Depth / Properties / Copy URL =====
   const executePull = async (opts: { rebase: boolean; noFF: boolean }) => {
     if (!pullRemote) return;
+    // Pull during cherry-pick would merge over an unfinished pick — the picked
+    // commit is not committed yet and would be lost.
+    if (blockedByCherryPick()) return;
     setPullBusy(true);
     try {
       await useOperationLogStore.getState().logOperation(
@@ -1009,6 +1029,18 @@ export function BranchesPage() {
           <div className="flex items-center gap-2">
             <span className="truncate font-medium text-text-primary">{b.name}</span>
             {b.tracking && <span className="text-2xs text-text-tertiary">→ {b.tracking}</span>}
+            {/* SmartGit: show cherry-picking state explicitly on the branch —
+                the pick is not committed yet, so the branch is effectively
+                detached from its remote until the pick is finished. */}
+            {b.current && cherryPicking && (
+              <span
+                data-testid="cherry-pick-badge"
+                className="text-2xs px-1 py-0.5 rounded bg-status-conflict/15 text-status-conflict border border-status-conflict/40 flex items-center gap-0.5 font-medium flex-shrink-0"
+                title={`Cherry-picking ${status?.cherryPick?.commit ? shortHash(status.cherryPick.commit) : ''} — not yet committed, detached from remote. Pull and Checkout would lead to loss of commits. Finish the pick on the Changes page (Continue/Skip/Abort).`}
+              >
+                ⚠ cherry-picking
+              </span>
+            )}
             {b.ahead !== undefined && b.ahead > 0 && (
               <span className="text-2xs px-1 py-0.5 rounded bg-status-added/15 text-status-added flex items-center gap-0.5 font-medium">
                 <ArrowUp size={8} />{b.ahead}
@@ -1377,6 +1409,19 @@ export function BranchesPage() {
 
       {/* Branch list */}
       <div className="flex-1 overflow-y-auto">
+        {/* SmartGit: explicit repo-level cherry-picking warning — Pull/Checkout blocked */}
+        {cherryPicking && (
+          <div
+            data-testid="cherry-pick-warning"
+            className="flex items-center gap-2 px-3 py-1.5 border-b border-status-conflict/40 bg-status-conflict/10 text-2xs text-status-conflict"
+          >
+            <span className="font-medium">Cherry-pick in progress</span>
+            <span className="text-text-secondary">
+              {status?.cherryPick?.commit && <>— picking <code className="font-mono">{shortHash(status.cherryPick.commit)}</code>{status.cherryPick.subject ? ` “${status.cherryPick.subject}”` : null}. </>}
+              The current branch is detached from its remote until the pick is finished: Pull and Checkout would lead to loss of commits. Finish it on the Changes page — Continue, Skip or Abort.
+            </span>
+          </div>
+        )}
         {loading ? (
           <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
         ) : filtered.length === 0 && filteredTags.length === 0 && filteredStashes.length === 0 ? (

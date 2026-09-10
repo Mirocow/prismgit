@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RotateCcw, RefreshCw, Trash, Copy, AlertCircle } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type RecyclableCommit } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
@@ -21,6 +22,7 @@ import { confirmDialog } from '../components/ConfirmDialog';
 export function RecyclablePage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
   const selectCommit = useSelectionStore((s) => s.selectCommit);
   const [commits, setCommits] = useState<RecyclableCommit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -46,10 +48,22 @@ export function RecyclablePage() {
     try {
       const result = await api.git.cherryPick(repo.path, [hash]);
       if (result.conflicts.length > 0) {
-        toast.warning(`Cherry-pick conflicts in ${result.conflicts.length} files`);
+        toast.warning(`Cherry-pick conflicts in ${result.conflicts.length} files`, 'Resolve them on the Changes page, then press Continue');
+      } else if (result.empty) {
+        // "The previous cherry-pick is now empty" — the commit's changes are
+        // already applied to HEAD. The repo stays in cherry-picking-state and
+        // MUST be resolved on the Changes page (Skip / Commit Empty / Abort).
+        toast.warning(
+          'The cherry-pick is empty — these changes are already applied',
+          'Resolve it on the Changes page: Skip (drop) or Commit Empty'
+        );
+      } else if (result.error) {
+        toast.error('Cherry-pick failed', result.error);
       } else {
         toast.success(`Cherry-picked ${shortHash(hash)}`);
       }
+      await refreshStatus(repo.path);
+      await load();
     } catch (e) {
       toast.error('Cherry-pick failed', String(e));
     }

@@ -22,13 +22,16 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 
 /** Path to the fixture repo created by tests/fixtures/setup-test-repo.sh
- * Uses PRISMGIT_TEST_REPOS env var if set, otherwise falls back to a
- * cross-platform temp directory (previously hardcoded /home/z/my-project/repos
- * which only works on the Linux dev container).
+ * MUST stay in sync with the script: it uses
+ * `${PRISMGIT_TEST_REPOS:-${TMPDIR:-/tmp}/prismgit-repos}` as the base dir.
+ * (A previous version pointed at os.tmpdir()/prismgit-test-repo — a DIFFERENT
+ * path than the script creates, so seeded settings referenced a repo that
+ * did not exist and the app stayed on the WelcomeScreen: 02-branches failed.)
  */
-export const FIXTURE_REPO = process.env.PRISMGIT_TEST_REPOS
-  ? path.join(process.env.PRISMGIT_TEST_REPOS, 'test-repo')
-  : path.join(os.tmpdir(), 'prismgit-test-repo');
+export const FIXTURE_REPO = path.join(
+  process.env.PRISMGIT_TEST_REPOS || path.join(os.tmpdir(), 'prismgit-repos'),
+  'test-repo'
+);
 
 /** Per-test userData dir — fresh app state (no leftover repos/settings) */
 export function makeUserDataDir(prefix = 'prismgit-e2e-'): string {

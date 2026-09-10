@@ -135,7 +135,9 @@ const api = {
     cherryPick: (repoPath: string, hashes: string[], noCommit?: boolean) =>
       ipcRenderer.invoke('git:cherryPick', repoPath, hashes, noCommit),
     cherryPickAbort: (repoPath: string) => ipcRenderer.invoke('git:cherryPickAbort', repoPath),
-    cherryPickContinue: (repoPath: string) => ipcRenderer.invoke('git:cherryPickContinue', repoPath),
+    cherryPickContinue: (repoPath: string, allowEmpty?: boolean) =>
+      ipcRenderer.invoke('git:cherryPickContinue', repoPath, allowEmpty),
+    cherryPickSkip: (repoPath: string) => ipcRenderer.invoke('git:cherryPickSkip', repoPath),
     revert: (repoPath: string, hashes: string[], noCommit?: boolean) =>
       ipcRenderer.invoke('git:revert', repoPath, hashes, noCommit),
     revertAbort: (repoPath: string) => ipcRenderer.invoke('git:revertAbort', repoPath),
