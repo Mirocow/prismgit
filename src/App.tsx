@@ -122,6 +122,17 @@ export default function App() {
     loadAuth();
   }, [loadRepos, loadMetadata, loadSettings, loadAuth]);
 
+  // Initialize the IPC listener for operation-log events from main process.
+  // This captures ALL git operations (checkout, merge, cherry-pick, revert,
+  // rebase, stash, tag, clone, etc.) — not just the ones manually logged in
+  // the UI layer — and feeds them into the Operations tab.
+  useEffect(() => {
+    import('./stores/operationLogStore').then(({ initOperationLogIpcListener }) => {
+      const cleanup = initOperationLogIpcListener();
+      return cleanup;
+    }).catch(() => { /* ignore — test env without electron */ });
+  }, []);
+
   // Listen for repo-closed events to clear global selections and free memory
   useEffect(() => {
     const handler = () => {

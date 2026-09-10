@@ -151,3 +151,64 @@ export const useOperationLogStore = create<OperationLogState>((set, get) => ({
     }
   },
 }));
+
+/**
+ * IPC bridge: listen for operation-log events from the main process.
+ *
+ * The main process (electron/services/git.ts) wraps mutating git operations
+ * (checkout, merge, cherry-pick, revert, rebase, stash, tag, clone, etc.)
+ * with withOperationLog(), which broadcasts start/finish/error events to
+ * all renderer windows. This listener feeds those events into the store
+ * so the Operations tab shows ALL user-initiated git commands — not just
+ * the ones manually instrumented in the UI layer.
+ *
+ * Called once from App.tsx on mount.
+ */
+export function initOperationLogIpcListener(): () => void {
+  // Guard: window.smartgit may not exist in test environments
+  if (typeof window === 'undefined' || !(window as any).smartgit) {
+    return () => {}; // no-op cleanup
+  }
+  const { ipcRenderer } = require('electron') as typeof import('electron');
+
+  const startListener = (_: unknown, entry: { id: string; timestamp: number; action: string; command?: string; repoPath: string; status: 'running' }) => {
+    const store = useOperationLogStore.getState();
+    const op: OperationLog = {
+      id: entry.id,
+      timestamp: entry.timestamp,
+      action: entry.action,
+      command: entry.command,
+      repoPath: entry.repoPath,
+      status: 'running',
+    };
+    useOperationLogStore.setState((state) => ({
+      ops: pruneOldOps([op, ...state.ops.filter(o => o.id !== entry.id)]),
+      runningIds: new Set([...state.runningIds, entry.id]),
+    }));
+  };
+
+  const finishListener = (_: unknown, entry: { id: string; status: 'success' | 'error'; result?: string; error?: string }) => {
+    const startTime = useOperationLogStore.getState().ops.find((o) => o.id === entry.id)?.timestamp;
+    const duration = startTime ? Date.now() - startTime : undefined;
+    useOperationLogStore.setState((state) => ({
+      ops: state.ops.map((o) =>
+        o.id === entry.id
+          ? { ...o, status: entry.status, duration, result: entry.result, error: entry.error }
+          : o
+      ),
+      runningIds: (() => {
+        const next = new Set(state.runningIds);
+        next.delete(entry.id);
+        return next;
+      })(),
+    }));
+  };
+
+  ipcRenderer.on('operation-log:start', startListener);
+  ipcRenderer.on('operation-log:finish', finishListener);
+
+  return () => {
+    ipcRenderer.removeListener('operation-log:start', startListener);
+    ipcRenderer.removeListener('operation-log:finish', finishListener);
+  };
+}

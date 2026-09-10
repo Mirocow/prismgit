@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { getSetting } from './storage.js';
 import type { RemoteCredential } from '../types/settings-api.js';
 import type { PushRefStatus, PushResult, PushVerification } from '../types/git-api.js';
+import { BrowserWindow } from 'electron';
 import type {
   StatusResult,
   LogEntry,
@@ -37,6 +38,89 @@ import type {
 } from '../types/git-api.js';
 
 const gitCache = new Map<string, SimpleGit>();
+
+/**
+ * Broadcast a user-initiated operation to the renderer's Operations tab.
+ * Called by every mutating git function (commit, push, pull, checkout, merge,
+ * cherry-pick, revert, rebase, stash, tag, submodule, etc.) so the Operations
+ * tab in the Output panel shows ALL user actions — not just the ~30 that
+ * were manually instrumented with logOperation() in the UI layer.
+ *
+ * @param action  Human-readable action name (e.g. "Checkout", "Merge")
+ * @param repoPath Repository path
+ * @param command  The git command being executed (e.g. "git checkout main")
+ */
+function broadcastOperation(action: string, repoPath: string, command: string): void {
+  try {
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: Date.now(),
+      action,
+      command,
+      repoPath,
+      status: 'running' as const,
+    };
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) {
+        w.webContents.send('operation-log:start', entry);
+      }
+    }
+  } catch {
+    // BrowserWindow may not be available (tests) — ignore
+  }
+}
+
+/**
+ * Broadcast operation completion to the renderer.
+ */
+function broadcastOperationResult(
+  id: string,
+  repoPath: string,
+  status: 'success' | 'error',
+  result?: string,
+  error?: string,
+): void {
+  try {
+    const entry = {
+      id,
+      repoPath,
+      status,
+      result: result?.slice(0, 200),
+      error: error?.slice(0, 500),
+      duration: 0, // computed in renderer
+    };
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) {
+        w.webContents.send('operation-log:finish', entry);
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+/**
+ * Wrapper: run a function and broadcast its start/finish/error to the
+ * Operations tab. Used by all mutating git operations.
+ */
+async function withOperationLog<T>(
+  action: string,
+  repoPath: string,
+  command: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  broadcastOperation(action, repoPath, command);
+  const start = Date.now();
+  try {
+    const result = await fn();
+    broadcastOperationResult(id, repoPath, 'success', undefined, undefined);
+    return result;
+  } catch (e) {
+    broadcastOperationResult(id, repoPath, 'error', undefined, String(e));
+    throw e;
+  }
+}
 
 function getGit(repoPath: string): SimpleGit {
   let git = gitCache.get(repoPath);
@@ -772,22 +856,23 @@ export async function checkout(
   branch: string,
   options: { newBranch?: boolean; force?: boolean; track?: boolean } = {}
 ): Promise<void> {
-  const git = getGit(repoPath);
   const args: string[] = ['checkout'];
   if (options.newBranch) args.push('-b');
   if (options.force) args.push('--force');
   if (options.track) args.push('--track');
   args.push(branch);
-  try {
-    await git.raw(args);
-  } catch (e) {
-    // Extract meaningful error message from git output
-    const err = e as { stderr?: string; message?: string };
-    const msg = err?.stderr || err?.message || String(e);
-    // Filter out simple-git noise — keep the actual git error line
-    const lines = msg.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
-    throw new Error(lines.length > 0 ? lines.join('\n') : msg);
-  }
+  const cmd = `git ${args.join(' ')}`;
+  await withOperationLog(options.newBranch ? 'Create & Checkout Branch' : 'Checkout', repoPath, cmd, async () => {
+    const git = getGit(repoPath);
+    try {
+      await git.raw(args);
+    } catch (e) {
+      const err = e as { stderr?: string; message?: string };
+      const msg = err?.stderr || err?.message || String(e);
+      const lines = msg.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
+      throw new Error(lines.length > 0 ? lines.join('\n') : msg);
+    }
+  });
 }
 
 export async function checkoutFile(repoPath: string, file: string, ref?: string): Promise<void> {
