@@ -66,5 +66,6 @@
   "launch.configurations": [],
   "files.associations": {
     "*.css": "tailwindcss"
-  }
+  },
+  "folder-color.pathColors": []
 }

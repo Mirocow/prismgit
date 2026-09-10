@@ -8,16 +8,16 @@
  */
 
 import { app, BrowserWindow, shell } from 'electron';
-import * as os from 'os';
 import * as fs from 'fs';
-import { SimpleStore } from './services/simpleStore.js';
-import { resolveResourceIcon } from './appIcons.js';
+import * as os from 'os';
 import {
-  buildAboutHtml,
-  ABOUT_REPOSITORY_URL,
   ABOUT_LICENSE,
+  ABOUT_REPOSITORY_URL,
+  buildAboutHtml,
   type AboutInfo,
 } from './aboutInfo.js';
+import { resolveResourceIcon } from './appIcons.js';
+import { SimpleStore } from './services/simpleStore.js';
 // Baked into the main bundle at build time. app.getName()/getVersion() are
 // unreliable: when Electron is launched against a bare main.js (e2e, some
 // dev flows) it cannot find package.json and reports "Electron" / the
@@ -95,7 +95,7 @@ export function openAboutWindow(): BrowserWindow {
 
   const win = new BrowserWindow({
     width: 540,
-    height: 820,
+    height: 620,
     minWidth: 460,
     minHeight: 640,
     title: 'About PrismGit',

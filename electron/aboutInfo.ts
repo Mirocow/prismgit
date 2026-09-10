@@ -114,11 +114,11 @@ export function buildAboutHtml(info: AboutInfo, deps: AboutHtmlDeps): string {
     ['Version', esc(info.version)],
     ['Build date', esc(formatBuildDate(info.buildDate))],
     ['Electron', esc(info.electron)],
-    ['Chromium', esc(info.chrome)],
-    ['Node.js', esc(info.node)],
-    ['V8', esc(info.v8)],
-    ['OS', esc(`${info.osType} ${info.osRelease}`)],
-    ['Platform', esc(`${info.platform} · ${info.arch}`)],
+    //['Chromium', esc(info.chrome)],
+    //['Node.js', esc(info.node)],
+    //['V8', esc(info.v8)],
+    //['OS', esc(`${info.osType} ${info.osRelease}`)],
+    //['Platform', esc(`${info.platform} · ${info.arch}`)],
     ['Locale', esc(info.locale)],
     ['First launch', esc(formatBuildDate(info.firstLaunch))],
     ['License', esc(info.license)],
@@ -224,56 +224,13 @@ export function buildAboutHtml(info: AboutInfo, deps: AboutHtmlDeps): string {
     <h2>System Information</h2>
     <table>${infoRows}</table>
 
-    <h2>Links</h2>
-    <div class="links">
-      <button class="link" data-url="${esc(info.repositoryUrl)}">Project Repository
-        <span class="url">${esc(info.repositoryUrl)}</span></button>
-      <button class="link" data-url="https://git-scm.com/docs">Git Documentation
-        <span class="url">git-scm.com/docs</span></button>
-      <button class="link" data-url="https://docs.syntevo.com/SmartGit/Latest/Manual/">SmartGit Manual (feature reference)
-        <span class="url">docs.syntevo.com</span></button>
-    </div>
-
     <div class="actions">
-      <button class="btn primary" id="copy-btn">Copy System Info</button>
       <button class="btn" id="close-btn">Close</button>
     </div>
-    <div class="copied" id="copied">Copied to clipboard ✓</div>
 
     <footer>${esc(info.name)} — ${esc(info.license)} License · Built with Electron, React &amp; TypeScript</footer>
   </div>
-
   <script>
-    // No preload bridge: copy uses the Clipboard API (with a deprecated-API
-    // fallback), links open via window.open — routed to the system browser
-    // by the window's setWindowOpenHandler.
-    function fallbackCopy(t) {
-      var ta = document.createElement('textarea');
-      ta.value = t;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch (e) { /* noop */ }
-      document.body.removeChild(ta);
-    }
-    function copyText(t) {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(t).catch(function () { fallbackCopy(t); });
-      } else {
-        fallbackCopy(t);
-      }
-    }
-    function openUrl(u) { window.open(u, '_blank'); }
-    document.querySelectorAll('.link').forEach(function (el) {
-      el.addEventListener('click', function () { openUrl(el.getAttribute('data-url')); });
-    });
-    document.getElementById('copy-btn').addEventListener('click', function () {
-      copyText(${summaryJson});
-      var chip = document.getElementById('copied');
-      chip.classList.add('show');
-      setTimeout(function () { chip.classList.remove('show'); }, 1600);
-    });
     document.getElementById('close-btn').addEventListener('click', function () { window.close(); });
   </script>
 </body>
