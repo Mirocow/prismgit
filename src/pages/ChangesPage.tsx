@@ -610,7 +610,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     return false;
   };
 
-  const stagedFiles: FileStatus[] = sortFiles((status?.files || []).filter((f) => {
+  // Memoize file lists to avoid re-sorting on every render (e.g. when
+  // hovering over rows causes a re-render but status hasn't changed).
+  const stagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) return false;
     const idx = staged.index as string;
@@ -628,9 +630,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       if (fileStatusFilter === 'deleted') return code === 'D';
       if (fileStatusFilter === 'untracked') return code === '?';
       return true;
-    }));
+    })), [status, sortFiles, fileStatusFilter, fileStatusFilterSet]);
 
-  const unstagedFiles: FileStatus[] = sortFiles((status?.files || []).filter((f) => {
+  const unstagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) {
       const wd = f.working_dir as string;
@@ -653,9 +655,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       if (fileStatusFilter === 'deleted') return code === 'D';
       if (fileStatusFilter === 'untracked') return code === '?';
       return true;
-    }));
+    })), [status, sortFiles, fileStatusFilter, fileStatusFilterSet]);
 
-  const untrackedFiles: FileStatus[] = sortFiles((status?.files || []).filter((f) => {
+  const untrackedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
     const idx = f.index as string;
     const wd = f.working_dir as string;
     return idx === '?' && wd === '?';
@@ -666,7 +668,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     .filter(() => {
       if (fileStatusFilter === 'all' || fileStatusFilter === 'untracked') return true;
       return false;
-    }));
+    })), [status, sortFiles, fileFilter, fileStatusFilter, fileStatusFilterSet, fileScopeDir]);
 
   const totalChanged = (status?.files.length ?? 0);
 
