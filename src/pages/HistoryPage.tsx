@@ -141,7 +141,7 @@ export function HistoryPage() {
   const recyclableCount = recyclable.length;
   const stashHashes = useMemo(() => new Set(stashes.map(s => s.hash)), [stashes]);
   const [showStashes, setShowStashes] = useState(true);
-  const [showRecyclable, setShowRecyclable] = useState(false);
+  const [showRecyclable, setShowRecyclable] = useState(true);
   const [cpBusyHash, setCpBusyHash] = useState<string | null>(null);
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
   const showContextMenu = useContextMenu();
@@ -318,12 +318,59 @@ export function HistoryPage() {
 
   // Search pool: loaded entries + (optionally) the commit resolved by hash prefix lookup.
   // The hit is prepended so it stays visible even when it's outside the loaded log window.
+  //
+  // SmartGit Log: Stashes and Recyclable Commits are INJECTED into the graph
+  // itself — not as separate groups below it. They become standalone graph
+  // nodes (empty parents → orphan dots) interleaved with regular commits by
+  // date. Badges (📦 stash / ♻ recyclable) distinguish them; hover actions
+  // (apply / cherry-pick / drop) are available directly on the row.
   const searchPool = useMemo(() => {
-    if (hashHit && !entries.some(e => e.hash === hashHit.hash)) {
-      return [hashHit, ...entries];
+    const extras: LogEntry[] = [];
+    // Stashes → synthetic LogEntry (parents:[] = orphan node in the graph)
+    if (showStashes) {
+      for (const s of stashes) {
+        if (entries.some(e => e.hash === s.hash)) continue; // already in log
+        const ts = s.date ? new Date(s.date).getTime() : Date.now();
+        extras.push({
+          hash: s.hash,
+          hashAbbrev: s.hashAbbrev,
+          parents: [],
+          parentsAbbrev: [],
+          author: { name: '(stash)', email: '', date: s.date || '', timestamp: ts },
+          committer: { name: '(stash)', email: '', date: s.date || '', timestamp: ts },
+          subject: s.subject || s.message,
+          body: s.message,
+          refs: [],
+          message: s.message,
+        });
+      }
     }
-    return entries;
-  }, [entries, hashHit]);
+    // Recyclable commits → synthetic LogEntry (parents:[] = orphan node)
+    if (showRecyclable) {
+      for (const c of recyclable) {
+        if (entries.some(e => e.hash === c.hash)) continue; // already in log
+        extras.push({
+          hash: c.hash,
+          hashAbbrev: c.hashAbbrev,
+          parents: [],
+          parentsAbbrev: [],
+          author: { name: '(recyclable)', email: '', date: c.date, timestamp: c.timestamp },
+          committer: { name: '(recyclable)', email: '', date: c.date, timestamp: c.timestamp },
+          subject: c.subject,
+          body: '',
+          refs: [],
+          message: c.subject,
+        });
+      }
+    }
+    const pool = extras.length > 0
+      ? [...extras, ...entries].sort((a, b) => b.author.timestamp - a.author.timestamp)
+      : entries;
+    if (hashHit && !pool.some(e => e.hash === hashHit.hash)) {
+      return [hashHit, ...pool];
+    }
+    return pool;
+  }, [entries, hashHit, stashes, recyclable, showStashes, showRecyclable]);
 
   const filtered = useMemo(() => {
     let result = searchPool;
@@ -1206,12 +1253,13 @@ export function HistoryPage() {
                 </button>
               );
             })()}
-            {/* SmartGit Log groups — Stashes and Recyclable Commits */}
+            {/* SmartGit Log: Stashes and Recyclable Commits toggle their
+                visibility IN the graph (orphan nodes interleaved by date). */}
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1',
                 showStashes ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
               onClick={() => setShowStashes(!showStashes)}
-              title="Toggle the Stashes group (SmartGit Log)"
+              title="Show stashes (📦) as graph nodes — interleaved with commits by date. Hover for Apply/Pop/Drop."
             >
               <Package size={9} /> Stashes{stashes.length > 0 ? ` (${stashes.length})` : ''}
             </button>
@@ -1219,7 +1267,7 @@ export function HistoryPage() {
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1',
                 showRecyclable ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
               onClick={() => setShowRecyclable(!showRecyclable)}
-              title="Toggle the Recyclable Commits group (unreachable reflog commits)"
+              title="Show recyclable commits (♻) as graph nodes — unreachable from any ref, eligible for GC. Hover for Cherry-pick/Create branch."
             >
               <RotateCcw size={9} /> Recyclable{recyclable.length > 0 ? ` (${recyclable.length})` : ''}
             </button>
@@ -1369,86 +1417,11 @@ export function HistoryPage() {
         </div>
       )}
 
-      {/* SmartGit Log groups — Stashes + Recyclable Commits.
-          Rendered OUTSIDE the virtualized graph list (its scrollTop-based
-          windowing has no knowledge of these rows). */}
-      {(showStashes && stashes.length > 0) || (showRecyclable && recyclable.length > 0) ? (
-        <div className="border-b border-border-default bg-bg-secondary flex-shrink-0">
-          {showStashes && stashes.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 px-3 py-1 text-2xs font-bold uppercase text-text-secondary bg-bg-tertiary border-b border-border-subtle">
-                <Package size={10} /> Stashes ({stashes.length})
-              </div>
-              <div className="max-h-40 overflow-y-auto">
-                {stashes.map((s) => (
-                  <div
-                    key={`hs-${s.index}`}
-                    className="group flex items-center gap-2 px-3 py-1 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
-                    onClick={() => handleShowCommit(s.hash)}
-                    title="Click: highlight in graph · Apply/Pop/Drop on the right"
-                  >
-                    <Package size={11} className="text-text-tertiary flex-shrink-0" />
-                    <span className="text-text-secondary font-mono text-2xs flex-shrink-0">stash@{'{'}{s.index}{'}'}</span>
-                    <span className="flex-1 truncate text-text-primary">{s.message}</span>
-                    <span className="text-2xs text-text-tertiary flex-shrink-0">{s.date ? formatDate(s.date) : ''}</span>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
-                      <button className="icon-btn !w-5 !h-5" title="Apply (keep stash)" onClick={(e) => { e.stopPropagation(); handleStashApply(s); }}>
-                        <Check size={11} />
-                      </button>
-                      <button className="icon-btn !w-5 !h-5" title="Pop (apply + drop)" onClick={(e) => { e.stopPropagation(); handleStashPop(s); }}>
-                        <CornerDownRight size={11} />
-                      </button>
-                      <button className="icon-btn !w-5 !h-5 hover:!text-status-deleted" title="Drop" onClick={(e) => { e.stopPropagation(); handleStashDrop(s); }}>
-                        <Trash size={11} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {showRecyclable && recyclable.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 px-3 py-1 text-2xs font-bold uppercase text-text-secondary bg-bg-tertiary border-b border-border-subtle">
-                <RotateCcw size={10} /> Recyclable Commits ({recyclable.length})
-                <span className="normal-case font-normal text-text-tertiary">— unreachable, eligible for GC</span>
-              </div>
-              <div className="max-h-40 overflow-y-auto">
-                {recyclable.map((c) => (
-                  <div
-                    key={`hr-${c.hash}`}
-                    className="group flex items-center gap-2 px-3 py-1 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
-                    onClick={() => handleShowCommit(c.hash)}
-                    title="Click: highlight in graph · Cherry-pick / recover on the right"
-                  >
-                    <RotateCcw size={11} className="text-status-modified flex-shrink-0" />
-                    <CommitHashLink hash={c.hash} short className="font-mono text-accent shrink-0" />
-                    <span className="flex-1 truncate text-text-primary">{c.subject}</span>
-                    <span className="text-2xs text-text-tertiary font-mono shrink-0" title={c.source}>{c.source}</span>
-                    <span className="text-2xs text-text-tertiary shrink-0">{formatDate(c.date)}</span>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
-                      <button
-                        className="icon-btn !w-5 !h-5"
-                        title="Cherry-pick onto the current branch"
-                        onClick={(e) => { e.stopPropagation(); void handleCherryPick(c); }}
-                        disabled={cpBusyHash === c.hash}
-                      >
-                        <CornerDownRight size={11} />
-                      </button>
-                      <button className="icon-btn !w-5 !h-5" title="Create branch at this commit (recover)" onClick={(e) => { e.stopPropagation(); void handleRecyclableBranch(c); }}>
-                        <GitBranch size={11} />
-                      </button>
-                      <button className="icon-btn !w-5 !h-5" title="Copy hash" onClick={(e) => { e.stopPropagation(); copyToClipboard(c.hash); toast.success('Copied'); }}>
-                        <Copy size={10} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      ) : null}
+      {/* Stashes and Recyclable Commits are now INJECTED INTO the graph itself
+          (see searchPool useMemo above). They appear as orphan graph nodes
+          interleaved with regular commits by date, with badges (📦 stash /
+          ♻ recyclable) and hover actions (Apply/Pop/Drop, Cherry-pick/Create
+          branch) directly on the row. No separate groups below the graph. */}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Graph + Commit list */}
@@ -1587,7 +1560,7 @@ export function HistoryPage() {
                 return (
                   <div
                     key={entry.hash}
-                    className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
+                    className={cn('group flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
                       isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
                       // Incoming (remote-only) commits get a subtle tinted background
                       incomingHashes.has(entry.hash) && !isSelected && 'bg-blue-50/30 dark:bg-blue-950/10',
@@ -1634,18 +1607,61 @@ export function HistoryPage() {
                     )}
 
                     {/* Stash badge — this commit is a stash (refs/stash).
-                        Clicking jumps to the Stashes page where it can be
-                        applied / popped / dropped. */}
+                        Hover actions (Apply/Pop/Drop) are available directly
+                        on the row — no need to visit the Stashes page. */}
                     {stashHashes.has(entry.hash) && (
-                      <a
-                        href="#/stashes"
-                        onClick={(e) => e.stopPropagation()}
-                        className="flex-shrink-0 text-2xs px-1.5 py-0.5 rounded border border-status-renamed/40 bg-status-renamed/10 text-status-renamed font-medium flex items-center gap-0.5 hover:bg-status-renamed/20 transition-colors"
-                        title="Stash — this commit is a saved stash (refs/stash). Click to manage it in the Stashes page."
+                      <span
+                        className="flex-shrink-0 text-2xs px-1.5 py-0.5 rounded border border-status-renamed/40 bg-status-renamed/10 text-status-renamed font-medium flex items-center gap-0.5"
+                        title="Stash — this commit is a saved stash (refs/stash). Use hover actions to Apply / Pop / Drop."
                       >
                         📦 stash
-                      </a>
+                      </span>
                     )}
+
+                    {/* Hover actions for stash rows — Apply / Pop / Drop directly
+                        in the graph (no separate page needed). */}
+                    {stashHashes.has(entry.hash) && (() => {
+                      const s = stashes.find(x => x.hash === entry.hash);
+                      if (!s) return null;
+                      return (
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                          <button className="icon-btn !w-5 !h-5 !text-status-added hover:!bg-status-added/15" title="Apply (keep stash)" onClick={(e) => { e.stopPropagation(); handleStashApply(s); }}>
+                            <Check size={11} />
+                          </button>
+                          <button className="icon-btn !w-5 !h-5" title="Pop (apply + drop)" onClick={(e) => { e.stopPropagation(); handleStashPop(s); }}>
+                            <CornerDownRight size={11} />
+                          </button>
+                          <button className="icon-btn !w-5 !h-5 hover:!text-status-deleted" title="Drop" onClick={(e) => { e.stopPropagation(); handleStashDrop(s); }}>
+                            <Trash size={11} />
+                          </button>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Hover actions for recyclable rows — Cherry-pick / Create
+                        branch / Copy hash directly in the graph. */}
+                    {recyclableHashes.has(entry.hash) && (() => {
+                      const c = recyclable.find(x => x.hash === entry.hash);
+                      if (!c) return null;
+                      return (
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                          <button
+                            className="icon-btn !w-5 !h-5 !text-status-added hover:!bg-status-added/15"
+                            title="Cherry-pick onto current branch"
+                            onClick={(e) => { e.stopPropagation(); void handleCherryPick(c); }}
+                            disabled={cpBusyHash === c.hash}
+                          >
+                            <CornerDownRight size={11} />
+                          </button>
+                          <button className="icon-btn !w-5 !h-5 !text-accent hover:!bg-accent-muted" title="Create branch at this commit (recover)" onClick={(e) => { e.stopPropagation(); void handleRecyclableBranch(c); }}>
+                            <GitBranch size={11} />
+                          </button>
+                          <button className="icon-btn !w-5 !h-5" title="Copy hash" onClick={(e) => { e.stopPropagation(); copyToClipboard(c.hash); toast.success('Copied'); }}>
+                            <Copy size={10} />
+                          </button>
+                        </div>
+                      );
+                    })()}
 
                     {/* GitHub Actions CI badge (SmartGit "My History" CI integrations) */}
                     {ciStatus[entry.hash]?.conclusion && (
