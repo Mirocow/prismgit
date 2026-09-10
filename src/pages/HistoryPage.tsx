@@ -688,7 +688,6 @@ export function HistoryPage() {
         case 'show-commit-diff': handleShowCommitDiff(entry); break;
         case 'split-off': handleOpenSplitOff(entry); break;
         case 'split-commit': handleStartSplitCommit(entry); break;
-        case 'add-note': handleAddNote(entry); break;
         case 'show-note': handleShowNote(entry); break;
         case 'remove-note': handleRemoveNote(entry); break;
       }

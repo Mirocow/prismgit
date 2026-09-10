@@ -21,10 +21,8 @@ function writeFile(p: string, content: string): void {
 
 describe('git service — integration with real git repo', () => {
   beforeAll(() => {
-    // Ensure test repo exists; if not, set it up
-    if (!fs.existsSync(path.join(TEST_REPO_DIR, '.git'))) {
-      execSync('bash /home/z/my-project/scripts/setup-test-repo.sh', { encoding: 'utf-8' });
-    }
+    // ALWAYS recreate: e2e suites share this fixture and may leave it dirty.
+    execSync('bash tests/fixtures/setup-test-repo.sh', { encoding: 'utf-8', cwd: process.cwd() });
   });
 
   describe('isRepo', () => {

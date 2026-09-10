@@ -890,32 +890,54 @@ export default function App() {
     return () => { cleanupOpen(); cleanupLog(); cleanupBlame(); cleanupInvestigate(); };
   }, [navigate, toast]);
 
-  // File watcher: start/stop when repo changes + auto-refresh on changes
-  // Use a ref to track in-flight refresh and debounce to avoid loops.
-  // The debounce is 2s (not 1s) to reduce git status spawn frequency —
-  // each status call spawns a git process which uses ~20-50MB of RAM.
-  // At 1s debounce, saving files rapidly can spawn 5+ status processes
-  // in quick succession. At 2s, they coalesce into 1.
-  const refreshInFlight = useRef(false);
+  // File watcher: start/stop when repo changes + auto-refresh on changes.
+  // Debounce strategy: leading-rate-limited + TRAILING guaranteed.
+  // Each watcher event schedules a refresh at most MIN_REFRESH_INTERVAL after
+  // the previous one; if events arrive faster, they coalesce into one trailing
+  // refresh — a change is never dropped (the old code silently discarded
+  // events inside the 2s window, so edits could stay invisible indefinitely).
+  const refreshInFlight = useRef<Promise<unknown> | null>(null);
   const lastRefreshTime = useRef(0);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!currentRepo) return;
-    api.watcher.start(currentRepo.path);
-    const cleanup = api.watcher.onChanged((data) => {
-      // Skip if a refresh is already in-flight
-      if (refreshInFlight.current) return;
-      // Debounce: at least 2 seconds between watcher-triggered refreshes
-      const now = Date.now();
-      if (now - lastRefreshTime.current < 2000) return;
-      lastRefreshTime.current = now;
-      refreshInFlight.current = true;
-      refreshStatus(currentRepo.path).finally(() => {
-        refreshInFlight.current = false;
+    const repoPath = currentRepo.path;
+    api.watcher.start(repoPath);
+
+    const doRefresh = () => {
+      lastRefreshTime.current = Date.now();
+      const p = refreshStatus(repoPath).catch(() => { /* status errors shown elsewhere */ });
+      // Chain so a trailing refresh can wait for the in-flight one to settle
+      refreshInFlight.current = p.finally(() => {
+        if (refreshInFlight.current === p) refreshInFlight.current = null;
       });
-    });
+    };
+
+    const scheduleRefresh = () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+      const elapsed = Date.now() - lastRefreshTime.current;
+      const delay = Math.max(0, 2000 - elapsed);
+      refreshTimer.current = setTimeout(() => {
+        refreshTimer.current = null;
+        if (refreshInFlight.current) {
+          // A refresh started before the latest change — wait for it, then refresh again
+          void Promise.resolve(refreshInFlight.current).then(() => {
+            if (!refreshTimer.current) doRefresh();
+          });
+        } else {
+          doRefresh();
+        }
+      }, delay);
+    };
+
+    const cleanup = api.watcher.onChanged(() => scheduleRefresh());
     return () => {
-      api.watcher.stop(currentRepo.path);
+      if (refreshTimer.current) {
+        clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
+      api.watcher.stop(repoPath);
       cleanup();
     };
   }, [currentRepo, refreshStatus]);

@@ -17,6 +17,8 @@ import * as gitService from '../../electron/services/git';
 // and ollama-code for performance checks
 const TEST_REPO = '/home/z/my-project/repos/test-repo';
 const OLLAMA_REPO = '/home/z/my-project/repos/ollama-code';
+// Optional large-repo fixture: ollama-dependent tests are skipped when absent.
+const OLLAMA_REPO_EXISTS = require('fs').existsSync(`${OLLAMA_REPO}/.git`);
 const { execSync } = require('child_process');
 const shell = (cmd: string, cwd = TEST_REPO) => execSync(cmd, { cwd, encoding: 'utf-8' }).trim();
 const fs = require('fs');
@@ -24,9 +26,9 @@ const path = require('path');
 
 // Ensure test repo exists and is clean
 beforeAll(() => {
-  if (!fs.existsSync(`${TEST_REPO}/.git`)) {
-    execSync('bash /home/z/my-project/scripts/setup-test-repo.sh', { encoding: 'utf-8' });
-  }
+  // ALWAYS recreate: e2e suites share this fixture and may leave it dirty
+  // (extra branches, moved main). The script is deterministic and fast.
+  execSync('bash tests/fixtures/setup-test-repo.sh', { encoding: 'utf-8', cwd: process.cwd() });
   shell('git checkout main 2>/dev/null || true');
   shell('git reset --hard 2>/dev/null || true');
 });
@@ -124,7 +126,7 @@ describe('Блок 1: Changes — рабочее дерево', () => {
 // БЛОК 2: History — граф коммитов (20 checks)
 // ==========================================
 describe('Блок 2: History — граф коммитов', () => {
-  it('3.1 — log returns 500+ commits with --all', async () => {
+  it.skipIf(!OLLAMA_REPO_EXISTS)('3.1 — log returns 500+ commits with --all', async () => {
     const log = await gitService.log(OLLAMA_REPO, { maxCount: 500, all: true });
     expect(log.length).toBeGreaterThan(100);
     expect(log[0].hash).toMatch(/^[0-9a-f]{40}$/);
@@ -511,7 +513,7 @@ describe('Блок 7: Tags', () => {
     expect(tags.find(t => t.name === name)).toBeUndefined();
   });
 
-  it('8.6 — ollama-code: 591 tags load without N+1', async () => {
+  it.skipIf(!OLLAMA_REPO_EXISTS)('8.6 — ollama-code: 591 tags load without N+1', async () => {
     const tags = await gitService.tags(OLLAMA_REPO);
     expect(tags.length).toBeGreaterThan(100);
     // Each tag should have a hash
@@ -713,7 +715,7 @@ describe('Блок 11: Cross-tool связанность', () => {
 // ==========================================
 // БЛОК 12: Производительность (10 checks)
 // ==========================================
-describe('Блок 12: Производительность на ollama-code', () => {
+describe.skipIf(!OLLAMA_REPO_EXISTS)('Блок 12: Производительность на ollama-code', () => {
   it('13.1 — open repo: status < 50ms', async () => {
     const start = Date.now();
     await gitService.status(OLLAMA_REPO);

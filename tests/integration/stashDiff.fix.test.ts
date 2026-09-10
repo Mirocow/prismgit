@@ -34,10 +34,8 @@ describe('Stash → Diff bug fix — git-level verification', () => {
   }
 
   beforeAll(() => {
-    // Ensure test repo exists
-    if (!fs.existsSync(path.join(TEST_REPO_DIR, '.git'))) {
-      execSync('bash /home/z/my-project/scripts/setup-test-repo.sh', { encoding: 'utf-8' });
-    }
+    // ALWAYS recreate: e2e suites share this fixture and may leave it dirty.
+    execSync('bash tests/fixtures/setup-test-repo.sh', { encoding: 'utf-8', cwd: process.cwd() });
 
     // Save state of the marker file (it may exist from earlier stash tests)
     if (fs.existsSync(MARKER_FILE)) {

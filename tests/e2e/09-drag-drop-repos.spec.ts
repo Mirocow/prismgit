@@ -22,12 +22,14 @@ test.describe('Drag-and-drop repositories', () => {
     try {
       // Simulate a drag-enter event with Files type
       await ctx.page.evaluate(() => {
+        const dt = new DataTransfer();
+        // A real File item makes dataTransfer.types contain 'Files'
+        // (setData('Files','') would be lowercased to 'files' by Chromium)
+        dt.items.add(new File([''], 'folder'));
         const event = new DragEvent('dragenter', {
-          dataTransfer: new DataTransfer(),
+          dataTransfer: dt,
           bubbles: true,
         });
-        // Add Files type to make it look like a file drag
-        event.dataTransfer?.setData('Files', '');
         window.dispatchEvent(event);
       });
       await ctx.page.waitForTimeout(300);
@@ -40,11 +42,12 @@ test.describe('Drag-and-drop repositories', () => {
 
       // Simulate drag-leave to dismiss
       await ctx.page.evaluate(() => {
+        const dt = new DataTransfer();
+        dt.items.add(new File([''], 'folder'));
         const event = new DragEvent('dragleave', {
-          dataTransfer: new DataTransfer(),
+          dataTransfer: dt,
           bubbles: true,
         });
-        event.dataTransfer?.setData('Files', '');
         window.dispatchEvent(event);
       });
       await ctx.page.waitForTimeout(300);
@@ -57,9 +60,10 @@ test.describe('Drag-and-drop repositories', () => {
 
   test('drops a valid git repo and adds it to the list', async () => {
     const ctx = await launchApp({ repos: [] }); // Start with no repos
+    let tmpDir = '';
     try {
       // Create a temporary git repo to drop
-      const tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'prismgit-drop-'));
+      tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'prismgit-drop-'));
       const { execSync } = require('node:child_process');
       execSync(`git init -q -b main "${tmpDir}"`, { stdio: 'ignore' });
       execSync(`git -C "${tmpDir}" config user.name "Test"`, { stdio: 'ignore' });
@@ -94,9 +98,14 @@ test.describe('Drag-and-drop repositories', () => {
       expect(bodyText).toContain(repoName);
 
       // Cleanup
-      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
     } finally {
+      // Close the app BEFORE deleting the tmp repo — the file watcher is
+      // watching that directory, and deleting it under a live app makes the
+      // teardown race (watcher fires on a vanished path during quit).
       await ctx.close();
+      if (tmpDir) {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
     }
   });
 });

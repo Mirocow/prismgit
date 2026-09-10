@@ -21,7 +21,15 @@ const DEBOUNCE_MS = 500;
 function notifyRenderer(repoPath: string, eventType: string) {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
-    win.webContents.send('watcher:changed', { repoPath, eventType, timestamp: Date.now() });
+    // Window may already be closed/destroyed (e.g. repo deleted during quit) —
+    // sending to a destroyed webContents throws and can wedge app shutdown.
+    try {
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+        win.webContents.send('watcher:changed', { repoPath, eventType, timestamp: Date.now() });
+      }
+    } catch {
+      // ignore — window disappeared between check and send
+    }
   }
 }
 

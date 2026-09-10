@@ -40,20 +40,25 @@ export function DragDropHandler() {
   const loadRepos = useRepositoryStore((s) => s.loadRepos);
   const toast = useToastStore();
 
+  // A file drag lists the special 'Files' type. Some sources (synthetic events,
+  // platform quirks) expose it lowercased — accept both.
+  const isFileDrag = (e: DragEvent): boolean =>
+    !!e.dataTransfer && Array.from(e.dataTransfer.types).some((t) => t.toLowerCase() === 'files');
+
   // Track drag enter/leave counter to handle nested drag events correctly.
   // The browser fires dragenter for each nested element, so we use a counter
   // to know when the drag truly enters/leaves the window.
   useEffect(() => {
     const handleDragEnter = (e: DragEvent) => {
       // Only handle file drags (not text/HTML drags from within the app)
-      if (!e.dataTransfer || !e.dataTransfer.types.includes('Files')) return;
+      if (!isFileDrag(e)) return;
       e.preventDefault();
       setDragCounter((c) => c + 1);
       setIsDragging(true);
     };
 
     const handleDragLeave = (e: DragEvent) => {
-      if (!e.dataTransfer || !e.dataTransfer.types.includes('Files')) return;
+      if (!isFileDrag(e)) return;
       e.preventDefault();
       setDragCounter((c) => {
         const next = c - 1;
@@ -67,7 +72,7 @@ export function DragDropHandler() {
 
     const handleDragOver = (e: DragEvent) => {
       // Must call preventDefault on dragover to allow drop
-      if (!e.dataTransfer || !e.dataTransfer.types.includes('Files')) return;
+      if (!isFileDrag(e)) return;
       e.preventDefault();
       if (e.dataTransfer) {
         e.dataTransfer.dropEffect = 'copy';

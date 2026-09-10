@@ -62,9 +62,10 @@ test.describe('Branches workflow', () => {
       // The new branch should appear in the list
       await waitForText(ctx.page, 'e2e-test-branch', 5000);
     } finally {
-      // Cleanup
+      // Cleanup: restore the fixture exactly (the app may have checked out the
+      // new branch, which makes a plain `branch -D` fail silently).
       try {
-        execSync('git -C /home/z/my-project/repos/test-repo branch -D e2e-test-branch 2>/dev/null', { stdio: 'ignore' });
+        execSync('bash tests/fixtures/setup-test-repo.sh', { encoding: 'utf8', cwd: process.cwd(), stdio: 'ignore' });
       } catch { /* ignore */ }
       await ctx.close();
     }
@@ -88,9 +89,10 @@ test.describe('Branches workflow', () => {
       const headIndicator = ctx.page.locator('text=develop').first();
       await expect(headIndicator).toBeVisible();
     } finally {
-      // Cleanup: checkout main
+      // Cleanup: restore the fixture exactly (checkout may leave HEAD moved;
+      // a plain `checkout main` cannot undo a moved branch ref).
       try {
-        execSync('git -C /home/z/my-project/repos/test-repo checkout main 2>/dev/null', { stdio: 'ignore' });
+        execSync('bash tests/fixtures/setup-test-repo.sh', { encoding: 'utf8', cwd: process.cwd(), stdio: 'ignore' });
       } catch { /* ignore */ }
       await ctx.close();
     }
