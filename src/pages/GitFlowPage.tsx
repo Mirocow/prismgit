@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { GitBranch, Tag, AlertCircle, Loader, Plus, GitMerge, Check, RefreshCw } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { GitFlowDialog } from '../components/GitFlowDialog';
 import { listFlowBranches, type GitFlowConfig } from '../lib/gitflow';
 import { detectGitFlowConfig } from '../lib/gitflow';
@@ -71,6 +72,17 @@ export function GitFlowPage() {
         )}
       </div>
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+        {/* Cross-tool: this flow branch becomes the global selection and opens in History */}
+        <button
+          className="btn btn-secondary text-2xs"
+          title={`Show log of '${branch.name}'`}
+          onClick={() => {
+            useSelectionStore.getState().selectBranch(branch.name);
+            window.location.hash = '#/history';
+          }}
+        >
+          Log
+        </button>
         <button
           className="btn btn-secondary text-2xs"
           onClick={() => openDialog(flow, 'finish', branch.name.replace(config?.[`${flow}Prefix` as keyof GitFlowConfig] || '', ''))}

@@ -128,8 +128,20 @@ export default function App() {
   //   2. While a repo is open, subscribe to selectionStore and save the
   //      preference keys back (debounced) whenever they change.
   const repoPath = currentRepo?.path ?? null;
+  // Track repo switches: selections (commit/file/branch/tag/stash) belong to a
+  // specific repository — carrying them across repos would make History open a
+  // foreign pathFilter or Notes attach to a foreign commit. View prefs are
+  // per-project (applied right after) and are NOT touched.
+  const lastRepoPathRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!repoPath) return;
+    if (!repoPath) {
+      lastRepoPathRef.current = null;
+      return;
+    }
+    if (lastRepoPathRef.current !== null && lastRepoPathRef.current !== repoPath) {
+      useSelectionStore.getState().clearAll();
+    }
+    lastRepoPathRef.current = repoPath;
     useSelectionStore.getState().applyProjectPrefs(loadProjectPrefs(repoPath));
   }, [repoPath]);
   useEffect(() => {

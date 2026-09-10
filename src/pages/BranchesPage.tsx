@@ -375,6 +375,7 @@ export function BranchesPage() {
     ], (action) => {
       if (action === 'push-tag') handlePushTag(tag);
       else if (action === 'tag-log') {
+        useSelectionStore.getState().selectTag(tag.name);
         useSelectionStore.getState().selectCommit(tag.hash);
         window.location.hash = '#/history';
       } else if (action === 'tag-copy') {
@@ -534,6 +535,8 @@ export function BranchesPage() {
   };
 
   const handleStashShowInLog = (s: StashEntry) => {
+    // Stash selection is global — Branches and Stashes pages stay in sync
+    useSelectionStore.getState().selectStash(s.index, s.hash);
     useSelectionStore.getState().selectCommit(s.hash);
     window.location.hash = '#/history';
   };
@@ -1233,7 +1236,8 @@ export function BranchesPage() {
       key={tag.name}
       className="group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover"
       onClick={(e) => {
-        // Click: show the tagged commit in History
+        // Click: select the tag globally and show the tagged commit in History
+        useSelectionStore.getState().selectTag(tag.name);
         useSelectionStore.getState().selectCommit(tag.hash);
         window.location.hash = '#/history';
         e.stopPropagation();

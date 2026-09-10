@@ -72,7 +72,22 @@ export function HistoryPage() {
   const [editingMessage, setEditingMessage] = useState(false);
   const [editMsgValue, setEditMsgValue] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [authorFilter, setAuthorFilter] = useState('');
+  // Author filter — synced with the global selectionStore so the Toolbar chip
+  // and other tools see the same filter (cleared there → cleared here too).
+  const globalAuthorFilter = useSelectionStore((s) => s.authorFilter);
+  const setGlobalAuthorFilter = useSelectionStore((s) => s.setAuthorFilter);
+  const [authorFilter, setAuthorFilterLocal] = useState(globalAuthorFilter ?? '');
+  const setAuthorFilter = (v: string) => {
+    setAuthorFilterLocal(v);
+    setGlobalAuthorFilter(v || null);
+  };
+  // Two-way: when the author filter is cleared/changed from the Toolbar chip
+  useEffect(() => {
+    const g = globalAuthorFilter ?? '';
+    setAuthorFilterLocal((prev) => (prev === g ? prev : g));
+  }, [globalAuthorFilter]);
+  // "Recent" smart-view preset (last 7 days) — date-based, independent of author filter
+  const [recentActive, setRecentActive] = useState(false);
   // Current user's git config user.name — for "Mine" quick filter
   const [myAuthorName, setMyAuthorName] = useState('');
   useEffect(() => {
@@ -82,8 +97,11 @@ export function HistoryPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [branchFilter, setBranchFilter] = useState<string>('all');
-  // Multi-branch selection: when set, shows union of all selected branches' history
-  const [selectedBranches, setSelectedBranches] = useState<Set<string>>(new Set());
+  // Multi-branch selection — stored GLOBALLY so the Toolbar shows the set and
+  // other tools see the same branch scope (SmartGit: Log reflects ref selection).
+  const selectedBranches = useSelectionStore((s) => s.selectedBranches);
+  const toggleBranch = useSelectionStore((s) => s.toggleBranch);
+  const clearBranches = useSelectionStore((s) => s.clearBranches);
   const [useRegex, setUseRegex] = useState(false);
   const [showBranchPicker, setShowBranchPicker] = useState(false);
   // Hash lookup: when the search query looks like a commit hash prefix and no loaded
@@ -117,14 +135,18 @@ export function HistoryPage() {
   // Global selected branch — when user clicks a branch in Branches page (with Ctrl),
   // it's stored here; we apply it as a filter on next load.
   const globalSelectedBranch = useSelectionStore((s) => s.selectedBranch);
-  // Sync local branchFilter with global selectedBranch (when user picks a branch elsewhere)
+  // Sync local branchFilter with global selectedBranch (two-way):
+  //  - a branch picked in Branches/Toolbar → applied as filter here
+  //  - selection cleared in Toolbar → filter resets to All
   useEffect(() => {
-    if (globalSelectedBranch && branchFilter !== globalSelectedBranch) {
-      setBranchFilter(globalSelectedBranch);
-      // Clear multi-select when single branch is chosen
-      setSelectedBranches(new Set());
+    if (globalSelectedBranch) {
+      if (branchFilter !== globalSelectedBranch) setBranchFilter(globalSelectedBranch);
+    } else if (branchFilter !== 'all' && selectedBranches.size === 0) {
+      // Selection was cleared elsewhere and no multi-select is active
+      setBranchFilter('all');
     }
-  }, [globalSelectedBranch, branchFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalSelectedBranch]);
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
@@ -157,8 +179,20 @@ export function HistoryPage() {
         /* ignore */
       }
       setSelectedIdx(0);
-      // Propagate first commit's selection to global store
-      if (result.length > 0) selectCommit(result[0].hash);
+      // Preserve an existing global selection when it is still visible in the
+      // (re)loaded log — clobbering it with the first commit broke other tools
+      // (e.g. Notes "Add note" silently attached to the wrong commit).
+      // Only fall back to the first commit when nothing is selected or the
+      // selected commit is not part of the current filter result.
+      if (result.length > 0) {
+        const current = useSelectionStore.getState().selectedCommitHash;
+        const idx = current ? result.findIndex((e) => e.hash === current) : -1;
+        if (idx >= 0) {
+          setSelectedIdx(idx);
+        } else {
+          selectCommit(result[0].hash);
+        }
+      }
     } catch (e) { toast.error('Failed to load history', String(e)); }
     finally { setLoading(false); }
   }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit]);
@@ -648,7 +682,6 @@ export function HistoryPage() {
       { label: 'Edit Commit Message...', clickId: 'edit-msg' },
       { label: 'Edit Commit Author...', clickId: 'edit-author' },
       { type: 'separator' },
-      { label: 'Add Note...', clickId: 'add-note' },
       { label: 'Format Patch...', clickId: 'format-patch' },
       { label: 'Open in Browser', clickId: 'browser' },
     ];
@@ -793,11 +826,7 @@ export function HistoryPage() {
               {Array.from(selectedBranches).slice(0, 3).map(b => (
                 <span key={b} className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1">
                   <GitBranch size={8} />{b}
-                  <button onClick={() => {
-                    const next = new Set(selectedBranches);
-                    next.delete(b);
-                    setSelectedBranches(next);
-                  }} title="Remove">
+                  <button onClick={() => toggleBranch(b)} title="Remove">
                     <X size={8} />
                   </button>
                 </span>
@@ -846,16 +875,18 @@ export function HistoryPage() {
             >
               Merges
             </button>
-            {/* Smart Views presets (SmartGit Manual) */}
+            {/* Smart Views presets (SmartGit Manual) — "Recent" is a DATE preset:
+                it must not pollute the author filter (a 'recent' author filter
+                would hide every commit). Active state derives from dateFrom. */}
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
-                authorFilter === 'recent' ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
+                recentActive ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
               onClick={() => {
-                if (authorFilter === 'recent') {
-                  setAuthorFilter('');
+                if (recentActive) {
+                  setRecentActive(false);
                   setDateFrom('');
                 } else {
-                  setAuthorFilter('recent');
+                  setRecentActive(true);
                   // Last 7 days
                   const d = new Date();
                   d.setDate(d.getDate() - 7);
@@ -901,7 +932,7 @@ export function HistoryPage() {
                     type="checkbox"
                     checked={selectedBranches.size === 0 && branchFilter === 'all'}
                     onChange={() => {
-                      setSelectedBranches(new Set());
+                      clearBranches();
                       setBranchFilter('all');
                       setShowBranchPicker(false);
                     }}
@@ -917,12 +948,9 @@ export function HistoryPage() {
                       type="checkbox"
                       checked={selectedBranches.has(b.name)}
                       onChange={() => {
-                        const next = new Set(selectedBranches);
-                        if (next.has(b.name)) next.delete(b.name);
-                        else next.add(b.name);
-                        setSelectedBranches(next);
+                        toggleBranch(b.name);
                         // Reset single-branch filter when using multi-select
-                        if (next.size > 0) setBranchFilter('all');
+                        if (selectedBranches.size > 0 || !selectedBranches.has(b.name)) setBranchFilter('all');
                       }}
                     />
                     <span className={cn('truncate', b.current && 'text-accent font-medium')}>{b.name}</span>
@@ -938,11 +966,8 @@ export function HistoryPage() {
                       type="checkbox"
                       checked={selectedBranches.has(b.name)}
                       onChange={() => {
-                        const next = new Set(selectedBranches);
-                        if (next.has(b.name)) next.delete(b.name);
-                        else next.add(b.name);
-                        setSelectedBranches(next);
-                        if (next.size > 0) setBranchFilter('all');
+                        toggleBranch(b.name);
+                        if (selectedBranches.size > 0 || !selectedBranches.has(b.name)) setBranchFilter('all');
                       }}
                     />
                     <span className="truncate">{b.name}</span>
@@ -951,7 +976,7 @@ export function HistoryPage() {
                 <div className="px-3 py-1 border-t border-border-subtle flex items-center justify-between">
                   <button className="text-2xs text-accent"
                     onClick={() => {
-                      setSelectedBranches(new Set());
+                      clearBranches();
                       setBranchFilter('all');
                     }}>
                     Clear

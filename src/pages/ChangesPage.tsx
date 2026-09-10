@@ -154,6 +154,10 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   // For diff display — when multi-select, show diff of the last-clicked file
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  // Cross-tool selection: every file the user clicks here becomes the global
+  // selectedFilePath, so History/Blame/Diff and the global menu actions
+  // (Stage/Unstage/Discard/Ignore/Index Editor) all operate on the SAME file.
+  const selectFileGlobal = useSelectionStore((s) => s.selectFile);
 
   const handleFileClick = (e: React.MouseEvent, filePath: string) => {
     if (e.ctrlKey || e.metaKey) {
@@ -166,6 +170,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       });
       // Still set the primary selection for diff display
       setSelectedFile(filePath);
+      selectFileGlobal(filePath);
     } else if (e.shiftKey) {
       // Range select — simplified: just add to set
       setSelectedFiles(prev => {
@@ -174,10 +179,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         return next;
       });
       setSelectedFile(filePath);
+      selectFileGlobal(filePath);
     } else {
       // Single click — clear multi-select, select only this file
       setSelectedFiles(new Set([filePath]));
       setSelectedFile(filePath);
+      selectFileGlobal(filePath);
     }
   };
   const [diff, setDiff] = useState<DiffResult | null>(null);
@@ -902,6 +909,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           e.stopPropagation();
           setSelectedFiles(new Set([file.path]));
           setSelectedFile(file.path);
+          selectFileGlobal(file.path);
           const focusCommitBox = () => {
             const box = document.getElementById('commit-message-input') as HTMLTextAreaElement | null;
             box?.focus();
@@ -918,6 +926,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             onShowChanges: () => {
               setSelectedFiles(new Set([file.path]));
               setSelectedFile(file.path);
+              selectFileGlobal(file.path);
             },
             onSelectDirectory: handleSelectDir,
             onFocusCommit: focusCommitBox,

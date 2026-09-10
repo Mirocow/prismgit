@@ -230,6 +230,25 @@ export function SubmodulesPage() {
                     </button>
                     {s.initialized && (
                       <button
+                        className="btn btn-secondary text-xs"
+                        title="Open the submodule as a repository (SmartGit: submodule navigation)"
+                        onClick={async () => {
+                          try {
+                            // Build the absolute submodule path ('/' works on all
+                            // platforms in Node — .gitmodules paths use forward slashes)
+                            const abs = `${repo.path.replace(/[\\/]+$/, '')}/${s.path}`;
+                            await useRepositoryStore.getState().openRepository(abs);
+                            window.location.hash = '#/changes';
+                          } catch (e) {
+                            toast.error('Failed to open submodule', String(e));
+                          }
+                        }}
+                      >
+                        Open
+                      </button>
+                    )}
+                    {s.initialized && (
+                      <button
                         className="btn btn-secondary text-xs hover:!text-status-deleted"
                         onClick={() => handleDeinit(s.name)}
                         title="Remove the submodule working tree (entry stays in .gitmodules)"

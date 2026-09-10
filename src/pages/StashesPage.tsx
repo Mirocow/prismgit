@@ -25,6 +25,9 @@ export function StashesPage() {
   useEscapeKey(showNewDialog, () => setShowNewDialog(false));
   const [stashMessage, setStashMessage] = useState('');
   const [includeUntracked, setIncludeUntracked] = useState(false);
+  // Global stash selection — shared with Branches stash section and the Toolbar
+  // chip: clicking a stash here marks it everywhere (SmartGit behavior).
+  const selectedStashIndex = useSelectionStore((s) => s.selectedStashIndex);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,6 +68,10 @@ export function StashesPage() {
     try {
       await api.git.stashPop(repo.path, stash.index);
       toast.success(`Stash@{${stash.index}} popped`);
+      // The popped stash no longer exists — clear the global selection if it pointed here
+      if (useSelectionStore.getState().selectedStashIndex === stash.index) {
+        useSelectionStore.getState().selectStash(null);
+      }
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
@@ -92,6 +99,9 @@ export function StashesPage() {
     try {
       await api.git.stashDrop(repo.path, stash.index);
       toast.success(`Stash@{${stash.index}} dropped`);
+      if (useSelectionStore.getState().selectedStashIndex === stash.index) {
+        useSelectionStore.getState().selectStash(null);
+      }
       await load();
     } catch (e) {
       toast.error('Stash drop failed', String(e));
@@ -127,6 +137,8 @@ export function StashesPage() {
   // as `baseRef = stash.hash`, then computed diff(baseRef, working tree) — that
   // showed unrelated working-tree changes instead of the stash contents.
   const handleViewStash = (stash: StashEntry) => {
+    // Mark this stash as the globally selected one (Toolbar chip + Branches)
+    useSelectionStore.getState().selectStash(stash.index, stash.hash);
     useSelectionStore.getState().setDiffRequest({
       // stash.hash^ is the commit the stash was created on top of (parent[0]).
       // Stashes are merge commits with 2 parents (or 3 if -u/--include-untracked):
@@ -183,11 +195,14 @@ export function StashesPage() {
           </div>
         ) : (
           stashes.map((s) => (
-            <div key={s.index}>
+            <div key={s.index} className={selectedStashIndex === s.index ? 'bg-accent/10 border-l-2 border-l-accent' : ''}>
               <div
                 className="group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
-                onClick={() => handleViewStash(s)}
-                title="Click to open in Diff tool"
+                onClick={() => {
+                  // Select globally, then open in Diff
+                  handleViewStash(s);
+                }}
+                title="Click to select and open in Diff tool"
                 onContextMenu={(e) => {
                   e.preventDefault();
                   showContextMenu([
@@ -204,7 +219,10 @@ export function StashesPage() {
                   ], (action) => {
                     switch (action) {
                       case 'view': handleViewStash(s); break;
-                      case 'apply': handleApply(s); break;
+                      case 'apply':
+                        useSelectionStore.getState().selectStash(s.index, s.hash);
+                        handleApply(s);
+                        break;
                       case 'pop': handlePop(s); break;
                       case 'branch': handleStashBranch(s); break;
                       case 'drop': handleDrop(s); break;

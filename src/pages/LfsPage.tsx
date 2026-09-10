@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Package, RefreshCw, Download, Upload, Plus, Loader, AlertCircle, Check, Lock, Unlock } from '../components/icons';
+import { Package, RefreshCw, Download, Upload, Plus, Loader, AlertCircle, Check, Lock, Unlock, History } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type LfsLock } from '../lib/api';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -255,6 +256,18 @@ export function LfsPage() {
                       <Package size={12} className="text-text-tertiary" />
                       <code className="mono flex-1 truncate">{f.path}</code>
                       <span className="text-2xs text-text-tertiary">{f.status}</span>
+                      {/* Cross-tool: jump straight to this file's history/blame */}
+                      <button
+                        className="icon-btn !w-5 !h-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="File History (Log)"
+                        onClick={() => {
+                          useSelectionStore.getState().selectFile(f.path);
+                          useSelectionStore.getState().setPathFilter(f.path);
+                          window.location.hash = '#/history';
+                        }}
+                      >
+                        <History size={10} />
+                      </button>
                       {locked ? (
                         <button
                           className="icon-btn !w-5 !h-5 text-status-modified opacity-100"

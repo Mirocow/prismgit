@@ -38,7 +38,12 @@ export function BlamePage() {
     }
     setLoading(true);
     api.git.blame(repo.path, path, ref || undefined)
-      .then(setBlame)
+      .then((result) => {
+        setBlame(result);
+        // The file being blamed becomes the global file selection — other
+        // tools (Changes file list, History file filter, Diff) follow it.
+        if (path.trim()) useSelectionStore.getState().selectFile(path.trim());
+      })
       .catch((e) => { toast.error('Blame failed', String(e)); setBlame(null); })
       .finally(() => setLoading(false));
   };

@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
-import { Search, FileText, Loader, GitCommit, CornerDownRight, ExternalLink, Copy } from '../components/icons';
+import { Search, FileText, Loader, GitCommit, CornerDownRight, ExternalLink, Copy, History } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type LogEntry } from '../lib/api';
 import { cn, formatDate, shortHash } from '../lib/utils';
 
@@ -283,6 +284,29 @@ export function InvestigatePage() {
                       onClick={() => handleOpenInBrowser(selected)}
                     >
                       <ExternalLink size={12} />
+                    </button>
+                    {/* Cross-tool links — the found commit becomes the global
+                        selection and opens in History / Diff like anywhere else */}
+                    <button
+                      className="icon-btn"
+                      title="View in History (Log)"
+                      onClick={() => {
+                        useSelectionStore.getState().selectCommit(selected.hash);
+                        window.location.hash = '#/history';
+                      }}
+                    >
+                      <History size={12} />
+                    </button>
+                    <button
+                      className="icon-btn"
+                      title="Open in Diff tool"
+                      onClick={() => {
+                        useSelectionStore.getState().selectCommit(selected.hash);
+                        useSelectionStore.getState().selectFile('.');
+                        window.location.hash = '#/diff';
+                      }}
+                    >
+                      <FileText size={12} />
                     </button>
                   </div>
                   <div className="space-y-3 text-sm">

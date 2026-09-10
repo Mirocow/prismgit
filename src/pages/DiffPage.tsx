@@ -38,6 +38,8 @@ export function DiffPage() {
   const globalFilePath = useSelectionStore((s) => s.selectedFilePath);
   const globalCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const globalBranch = useSelectionStore((s) => s.selectedBranch);
+  // A tag selected in Tags/Branches is also a valid base ref — keep Diff in sync
+  const globalTag = useSelectionStore((s) => s.selectedTag);
   // One-shot diff request — when set, override local state and clear it.
   // Used by Stashes (and any future caller) to programmatically configure Diff.
   const diffRequest = useSelectionStore((s) => s.diffRequest);
@@ -89,6 +91,9 @@ export function DiffPage() {
   useEffect(() => {
     if (globalBranch) setBaseRef(globalBranch);
   }, [globalBranch]);
+  useEffect(() => {
+    if (globalTag) setBaseRef(globalTag);
+  }, [globalTag]);
 
   // Consume one-shot diffRequest — when Stashes (or any tool) sets it,
   // apply base/compare/filePath to local state, then clear the request.
@@ -310,6 +315,17 @@ export function DiffPage() {
               <option key={c.hash} value={c.hash}>{shortHash(c.hash)} · {c.subject.substring(0, 40)}</option>
             ))}
           </select>
+          {/* Cross-tool link: apply the commit currently selected in History/Tags
+              without hunting for it in the dropdown */}
+          {globalCommitHash && baseRef !== globalCommitHash && (
+            <button
+              className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent whitespace-nowrap"
+              title={`Use the commit selected in History (${shortHash(globalCommitHash)}) as base`}
+              onClick={() => setBaseRef(globalCommitHash)}
+            >
+              → {shortHash(globalCommitHash)}
+            </button>
+          )}
         </div>
 
         {/* Arrow */}

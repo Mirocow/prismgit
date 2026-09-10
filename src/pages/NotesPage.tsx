@@ -17,6 +17,9 @@ export function NotesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const selectCommit = useSelectionStore((s) => s.selectCommit);
+  // The commit a new note will attach to (selected in History/Tags/Branches, else HEAD).
+  // Shown explicitly so the user sees WHERE the note lands — and can jump to it.
+  const targetCommit = useSelectionStore((s) => s.selectedCommitHash);
 
   const [categories, setCategories] = useState<NoteCategory[]>([]);
   const [activeCat, setActiveCat] = useState<string>('commits');
@@ -213,6 +216,27 @@ export function NotesPage() {
 
       {/* Add note bar */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-surface/40">
+        {/* Target commit indicator — mirrors the global commit selection */}
+        <span
+          className="hidden sm:flex items-center gap-1 px-2 py-1 rounded border border-border text-2xs text-text-secondary shrink-0"
+          title={targetCommit ? `New notes attach to ${shortHash(targetCommit)} — the commit selected in History/Tags/Branches` : 'No commit selected — notes will attach to HEAD'}
+        >
+          <GitCommit size={11} className="text-text-tertiary" />
+          {targetCommit ? (
+            <button
+              className="hover:text-accent underline decoration-dotted"
+              onClick={() => {
+                selectCommit(targetCommit);
+                window.location.hash = '#/history';
+              }}
+              title="View this commit in History"
+            >
+              {shortHash(targetCommit)}
+            </button>
+          ) : (
+            <span>HEAD</span>
+          )}
+        </span>
         <textarea
           value={newNote}
           onChange={(e) => setNewNote(e.target.value)}

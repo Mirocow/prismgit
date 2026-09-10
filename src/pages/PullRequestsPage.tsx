@@ -3,6 +3,7 @@ import { GitPullRequest, Plus, RefreshCw, ExternalLink, Loader, X } from '../com
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type GithubPullRequest } from '../lib/api';
 import { cn, formatDate } from '../lib/utils';
 
@@ -202,9 +203,29 @@ export function PullRequestsPage() {
                   <img src={pr.user.avatar_url} alt="" className="w-4 h-4 rounded-full" />
                   <span>{pr.user.login}</span>
                   <span>·</span>
-                  <span className="text-status-renamed">{pr.head.ref}</span>
+                  <button
+                    className="text-status-renamed hover:underline"
+                    title={`Show log of head branch '${pr.head.ref}'`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      useSelectionStore.getState().selectBranch(pr.head.ref);
+                      window.location.hash = '#/history';
+                    }}
+                  >
+                    {pr.head.ref}
+                  </button>
                   <span>→</span>
-                  <span className="text-status-added">{pr.base.ref}</span>
+                  <button
+                    className="text-status-added hover:underline"
+                    title={`Show log of base branch '${pr.base.ref}'`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      useSelectionStore.getState().selectBranch(pr.base.ref);
+                      window.location.hash = '#/history';
+                    }}
+                  >
+                    {pr.base.ref}
+                  </button>
                   <span>·</span>
                   <span>{formatDate(pr.updated_at)}</span>
                 </div>

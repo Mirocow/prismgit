@@ -36,8 +36,10 @@ export interface GlobalSelectionState {
   selectedFilePath: string | null;
   /** Currently selected tag name (across Tags, History). */
   selectedTag: string | null;
-  /** Currently selected stash index (across Stashes). */
+  /** Currently selected stash index (across Stashes, Branches stash section). */
   selectedStashIndex: number | null;
+  /** Commit hash of the selected stash — lets other tools jump to it in History. */
+  selectedStashHash: string | null;
   /** Multi-select branches for History (when user picks multiple in the branch picker). */
   selectedBranches: Set<string>;
   /** Optional path filter — used by History to show "history for this file". */
@@ -91,7 +93,8 @@ export interface GlobalSelectionState {
   selectBranch: (name: string | null) => void;
   selectFile: (path: string | null) => void;
   selectTag: (name: string | null) => void;
-  selectStash: (index: number | null) => void;
+  /** Select a stash by index (pass hash so other tools can navigate to its commit). */
+  selectStash: (index: number | null, hash?: string | null) => void;
   toggleBranch: (name: string) => void;
   clearBranches: () => void;
   setPathFilter: (path: string | null) => void;
@@ -130,6 +133,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   selectedFilePath: null,
   selectedTag: null,
   selectedStashIndex: null,
+  selectedStashHash: null,
   selectedBranches: new Set(),
   pathFilter: null,
   authorFilter: null,
@@ -157,7 +161,11 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   }),
   selectFile: (path) => set({ selectedFilePath: path }),
   selectTag: (name) => set({ selectedTag: name }),
-  selectStash: (index) => set({ selectedStashIndex: index }),
+  selectStash: (index, hash) => set({
+    selectedStashIndex: index,
+    // Keep hash consistent with index: null index → null hash
+    selectedStashHash: index == null ? null : (hash ?? get().selectedStashHash),
+  }),
   toggleBranch: (name) => {
     const next = new Set(get().selectedBranches);
     if (next.has(name)) next.delete(name);
@@ -206,6 +214,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
     selectedFilePath: null,
     selectedTag: null,
     selectedStashIndex: null,
+    selectedStashHash: null,
     selectedBranches: new Set(),
     pathFilter: null,
     authorFilter: null,

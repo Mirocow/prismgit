@@ -241,6 +241,15 @@ export function RemotesPage() {
                     <Loader size={14} className="animate-spin text-accent" />
                   ) : (
                     <>
+                      {/* Cross-tool: open Branches (its remote groups show this remote's branches) */}
+                      <button
+                        className="btn btn-secondary text-xs"
+                        title={`Browse branches of '${r.name}'`}
+                        onClick={() => { window.location.hash = '#/branches'; }}
+                      >
+                        <GitBranch size={11} />
+                        Branches
+                      </button>
                       <button
                         className="btn btn-secondary text-xs"
                         onClick={() => handleFetchOne(r)}

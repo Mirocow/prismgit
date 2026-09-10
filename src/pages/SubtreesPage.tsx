@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { GitMerge, RefreshCw, Plus, Trash, CloudDownload, CloudUpload, SplitSquareHorizontal, Folder } from '../components/icons';
+import { GitMerge, RefreshCw, Plus, Trash, CloudDownload, CloudUpload, SplitSquareHorizontal, Folder, History } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type SubtreeInfo, type RemoteInfo } from '../lib/api';
 import { cn } from '../lib/utils';
 import { confirmDialog } from '../components/ConfirmDialog';
@@ -197,6 +198,19 @@ export function SubtreesPage() {
                   </span>
                   <div className="flex-1" />
                   <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                    {/* Cross-tool: file-history scoped to the subtree folder */}
+                    <button
+                      onClick={() => {
+                        useSelectionStore.getState().selectFile(t.path);
+                        useSelectionStore.getState().setPathFilter(t.path);
+                        window.location.hash = '#/history';
+                      }}
+                      className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-border hover:bg-surface-hover"
+                      title={`Show log of '${t.path}/' in History`}
+                    >
+                      <History size={13} />
+                      Log
+                    </button>
                     <button
                       onClick={() => withBusy(`pull-${t.name}`, () => api.git.subtreePull(repo.path, t.name), `Pulled upstream into ${t.path}`)}
                       disabled={busy !== null}

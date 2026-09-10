@@ -10,7 +10,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useToolbarStore, DEFAULT_TOOLBAR_GROUPS, type ToolbarGroups, type ToolbarGroupKey } from '../stores/toolbarStore';
 import { useToastStore } from '../stores/toastStore';
 import { confirmDialog } from './ConfirmDialog';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Minus, Moon, Package, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Tag as TagIcon, Trash, X } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -83,6 +83,11 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
   const setGlobalPathFilter = useSelectionStore((s) => s.setPathFilter);
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const selectedBranch = useSelectionStore((s) => s.selectedBranch);
+  // Cross-tool selection chips: tag, stash, multi-branch set, author filter
+  const selectedTag = useSelectionStore((s) => s.selectedTag);
+  const selectedStashIndex = useSelectionStore((s) => s.selectedStashIndex);
+  const selectedBranches = useSelectionStore((s) => s.selectedBranches);
+  const authorFilter = useSelectionStore((s) => s.authorFilter);
   // Toolbar customization state — shared store, so edits apply to GitToolbar too
   const groups = useToolbarStore((s) => s.groups);
   const setGroup = useToolbarStore((s) => s.setGroup);
@@ -294,6 +299,41 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
             </button>
           </span>
         )}
+        {selectedBranches.size > 0 && (
+          <span
+            className="text-2xs px-1.5 py-0.5 rounded border border-status-added/40 bg-status-added/10 text-status-added flex items-center gap-1"
+            title={`Selected branches: ${Array.from(selectedBranches).join(', ')}`}
+          >
+            <GitBranch size={9} />{selectedBranches.size} branches
+            <button onClick={() => useSelectionStore.getState().clearBranches()} title="Clear multi-branch selection">
+              <X size={8} />
+            </button>
+          </span>
+        )}
+        {selectedTag && (
+          <span className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1" title={`Selected tag: ${selectedTag}`}>
+            <TagIcon size={9} />{selectedTag}
+            <button onClick={() => useSelectionStore.getState().selectTag(null)} title="Clear tag selection">
+              <X size={8} />
+            </button>
+          </span>
+        )}
+        {selectedStashIndex != null && (
+          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-warning/40 bg-status-warning/10 text-status-warning flex items-center gap-1" title={`Selected stash: stash@{${selectedStashIndex}}} — used by Stashes, Branches and Diff`}>
+            <Package size={9} />stash@{'{'}{selectedStashIndex}{'}'}
+            <button onClick={() => useSelectionStore.getState().selectStash(null)} title="Clear stash selection">
+              <X size={8} />
+            </button>
+          </span>
+        )}
+        {authorFilter && (
+          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-info/40 bg-status-info/10 text-status-info flex items-center gap-1" title={`Author filter — applied in History`}>
+            Author: {authorFilter}
+            <button onClick={() => useSelectionStore.getState().setAuthorFilter(null)} title="Clear author filter">
+              <X size={8} />
+            </button>
+          </span>
+        )}
         {globalPathFilter && (
           <span className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/40 bg-status-modified/10 text-status-modified flex items-center gap-1" title={`File history filter: ${globalPathFilter}`}>
             File: {globalPathFilter}
@@ -445,9 +485,13 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
     if (!open || !currentRepo) return;
     api.git.branches(currentRepo.path).then(brs => {
       setBranches(brs.filter(b => !b.remote));
-      // Default to current branch
-      const cur = brs.find(b => b.current);
-      setSelectedBranch(cur?.name || '');
+      // Default to the globally selected branch (from Branches page) when it
+      // exists locally, otherwise the current branch
+      const globallySelected = useSelectionStore.getState().selectedBranch;
+      const sel = globallySelected && brs.some(b => b.name === globallySelected && !b.remote)
+        ? globallySelected
+        : brs.find(b => b.current)?.name || '';
+      setSelectedBranch(sel);
     }).catch(() => {});
   }, [open, currentRepo]);
 
@@ -567,6 +611,16 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
     api.git.branches(currentRepo.path).then(brs => {
       const remotes = brs.filter(b => b.remote);
       setBranches(remotes);
+      // If a branch is globally selected (Branches page) and has a remote
+      // counterpart like "origin/<name>", preselect it — otherwise origin/<current>
+      const globallySelected = useSelectionStore.getState().selectedBranch;
+      const selectedRemote = globallySelected
+        ? remotes.find(r => r.name === globallySelected || r.name === `origin/${globallySelected}`)
+        : undefined;
+      if (selectedRemote) {
+        setSelectedBranch(selectedRemote.name);
+        return;
+      }
       // Default to origin/<current>
       const cur = brs.find(b => b.current);
       if (cur) {

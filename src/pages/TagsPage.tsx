@@ -64,6 +64,9 @@ export function TagsPage() {
   // SmartGit Manual: Tag-Grouping toggle
   const [groupByPattern, setGroupByPattern] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  // Globally selected tag — written on click, highlighted in the list, shown
+  // as a chip in the Toolbar so other tools see the same tag selection.
+  const selectedTag = useSelectionStore((s) => s.selectedTag);
 
   const handleRename = async (tag: TagInfo) => {
     const newName = renameValue.trim();
@@ -230,6 +233,7 @@ export function TagsPage() {
                           handleRename={handleRename}
                           handleDelete={handleDelete}
                           showContextMenu={showContextMenu}
+                          selected={selectedTag === t.name}
                         />
                       ))}
                     </div>
@@ -256,6 +260,7 @@ export function TagsPage() {
                 handleRename={handleRename}
                 handleDelete={handleDelete}
                 showContextMenu={showContextMenu}
+                selected={selectedTag === t.name}
               />
             ))
             }
@@ -338,6 +343,7 @@ function TagRow({
   handleRename,
   handleDelete,
   showContextMenu,
+  selected,
 }: {
   tag: TagInfo;
   renamingTag: string | null;
@@ -347,15 +353,20 @@ function TagRow({
   handleRename: (tag: TagInfo) => void;
   handleDelete: (tag: TagInfo) => void;
   showContextMenu: ReturnType<typeof useContextMenu>;
+  /** Whether this tag is the globally selected tag (Toolbar chip / other tools see it too). */
+  selected: boolean;
 }) {
   return (
     <div
-      className="group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
+      className={`group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer ${selected ? 'bg-accent/10 border-l-2 border-l-accent' : ''}`}
       onClick={() => {
+        // Cross-tool selection: the tag name AND its commit become global —
+        // Toolbar shows the tag chip, History opens the tagged commit.
+        useSelectionStore.getState().selectTag(t.name);
         useSelectionStore.getState().selectCommit(t.hash);
         window.location.hash = '#/history';
       }}
-      title="Click to view this tag's commit in History"
+      title="Click to select this tag and view its commit in History"
       onContextMenu={(e) => {
         e.preventDefault();
         showContextMenu([
@@ -373,6 +384,7 @@ function TagRow({
             case 'rename': setRenamingTag(t.name); setRenameValue(t.name); break;
             case 'delete': handleDelete(t); break;
             case 'view-commit':
+              useSelectionStore.getState().selectTag(t.name);
               useSelectionStore.getState().selectCommit(t.hash);
               window.location.hash = '#/history';
               break;

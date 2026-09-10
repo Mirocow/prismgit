@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { FolderTree, RefreshCw, Plus, Trash, Folder, GitBranch, AlertCircle, Loader, CheckCircle, CornerDownRight } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type WorktreeInfo } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
 
@@ -200,6 +201,18 @@ export function WorktreesPage() {
                       {mainWorktree.bare && <span className="badge badge-modified">BARE</span>}
                     </div>
                   </div>
+                  {mainWorktree.branch && (
+                    <button
+                      className="btn btn-secondary text-xs"
+                      title={`Show log of '${mainWorktree.branch}'`}
+                      onClick={() => {
+                        useSelectionStore.getState().selectBranch(mainWorktree.branch!);
+                        window.location.hash = '#/history';
+                      }}
+                    >
+                      Log
+                    </button>
+                  )}
                   <button
                     className="btn btn-secondary text-xs"
                     onClick={() => handleOpen(mainWorktree)}
@@ -251,6 +264,18 @@ export function WorktreesPage() {
                         <Loader size={14} className="animate-spin text-accent" />
                       ) : (
                         <>
+                          {wt.branch && (
+                            <button
+                              className="btn btn-secondary text-xs"
+                              title={`Show log of '${wt.branch}'`}
+                              onClick={() => {
+                                useSelectionStore.getState().selectBranch(wt.branch!);
+                                window.location.hash = '#/history';
+                              }}
+                            >
+                              Log
+                            </button>
+                          )}
                           <button
                             className="btn btn-secondary text-xs"
                             onClick={() => handleOpen(wt)}

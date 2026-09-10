@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { GitPullRequest, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
 import { api, type LogEntry } from '../lib/api';
 import {
   loadReviews,
@@ -39,7 +40,10 @@ export function ReviewsPage() {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [commits, setCommits] = useState<LogEntry[]>([]);
-  const [selectedCommit, setSelectedCommit] = useState<string | null>(null);
+  // Selected commit — the GLOBAL selection (shared with History, Tags, Notes…).
+  // Clicking a reviewed commit here highlights it in History too.
+  const selectedCommit = useSelectionStore((s) => s.selectedCommitHash);
+  const selectCommit = useSelectionStore((s) => s.selectCommit);
   const [showAdd, setShowAdd] = useState(false);
   useEscapeKey(showAdd, () => setShowAdd(false));
   const [newComment, setNewComment] = useState<Partial<ReviewComment>>({});
@@ -220,7 +224,7 @@ export function ReviewsPage() {
                     'px-3 py-2 cursor-pointer border-b border-border-subtle hover:bg-bg-hover',
                     selectedCommit && review.commitHash.startsWith(selectedCommit) && 'bg-bg-selected'
                   )}
-                  onClick={() => setSelectedCommit(review.commitHash.substring(0, 7))}
+                  onClick={() => selectCommit(review.commitHash)}
                 >
                   <div className="flex items-center gap-2">
                     <code className="text-2xs mono text-text-tertiary">{shortHash(review.commitHash)}</code>
