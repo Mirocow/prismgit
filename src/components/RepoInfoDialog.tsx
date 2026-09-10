@@ -26,6 +26,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showRepoSettings, setShowRepoSettings] = useState(false);
+  const [settingsRemoteName, setSettingsRemoteName] = useState<string | null>(null);
 
   // === Remotes & Authorization (ALL remotes of this repository) ===
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
@@ -211,14 +212,6 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
           </div>
           <div className="flex items-center gap-1">
             <button
-              className="btn btn-secondary text-xs flex items-center gap-1"
-              title="Repository Settings: User, Fetch & Pull, Push, Signing, Encoding, Tag-Grouping"
-              onClick={() => setShowRepoSettings(true)}
-            >
-              <SettingsIcon size={12} />
-              Repository Settings
-            </button>
-            <button
               className="icon-btn"
               title="Refresh stats from Git"
               onClick={handleRefreshStats}
@@ -350,6 +343,13 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
                           />
                           Refresh automatically
                         </label>
+                        <button
+                          className="icon-btn !w-5 !h-5"
+                          title="Repository Settings: User, Fetch & Pull, Push, Signing, Encoding, Tag-Grouping"
+                          onClick={() => { setSettingsRemoteName(r.name); setShowRepoSettings(true); }}
+                        >
+                          <SettingsIcon size={11} />
+                        </button>
                       </div>
                       <div className="text-2xs font-mono text-text-tertiary truncate" title={r.refs.fetch}>
                         {r.refs.fetch}
@@ -524,7 +524,10 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
 
       {/* Repository Settings dialog (User, Fetch & Pull, Push, Signing, Encoding, Tag-Grouping) */}
       {showRepoSettings && (
-        <RepoSettingsDialog onClose={() => setShowRepoSettings(false)} />
+        <RepoSettingsDialog
+          onClose={() => { setShowRepoSettings(false); setSettingsRemoteName(null); }}
+          remoteName={settingsRemoteName ?? undefined}
+        />
       )}
     </div>
   );

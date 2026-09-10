@@ -14,7 +14,7 @@ import { cn } from '../lib/utils';
 const TABS = ['User', 'Fetch and Pull', 'Push', 'Signing', 'Encoding', 'Tag-Grouping'] as const;
 type Tab = (typeof TABS)[number];
 
-export function RepoSettingsDialog({ onClose }: { onClose: () => void }) {
+export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => void; remoteName?: string }) {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const [tab, setTab] = useState<Tab>('User');
@@ -107,6 +107,9 @@ export function RepoSettingsDialog({ onClose }: { onClose: () => void }) {
         <div className="flex items-center px-4 py-3 border-b border-border">
           <span className="text-sm font-semibold">Repository Settings</span>
           <span className="text-xs text-text-tertiary ml-2 truncate">{repo.name}</span>
+          {remoteName && (
+            <span className="badge badge-renamed ml-2 text-2xs">remote: {remoteName}</span>
+          )}
           <div className="flex-1" />
           {/* Open Project Settings (global application preferences) */}
           <button
