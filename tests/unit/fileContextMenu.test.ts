@@ -182,6 +182,12 @@ describe('runFileAction', () => {
     expect(apiGitMock.stashPush).toHaveBeenCalledTimes(1);
   });
 
+  it('stash-file on an UNTRACKED file passes includeUntracked=true (otherwise git refuses: "No local changes to save")', async () => {
+    promptAnswer = 'WIP: new file';
+    await runFileAction('stash-file', baseCtx({ isUntracked: true }));
+    expect(apiGitMock.stashPush).toHaveBeenCalledWith('/repo', 'WIP: new file', true, false, ['src/app/main.ts']);
+  });
+
   it('move-rename calls moveFile with the prompted target', async () => {
     promptAnswer = 'src/renamed.ts';
     await runFileAction('move-rename', baseCtx());

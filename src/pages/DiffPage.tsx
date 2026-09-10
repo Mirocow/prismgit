@@ -47,6 +47,10 @@ export function DiffPage() {
   const [baseRef, setBaseRef] = useState('HEAD');
   const [compareMode, setCompareMode] = useState<'working' | 'staged' | 'ref'>('working');
   const [compareRef, setCompareRef] = useState('');
+  // Stash viewer mode (set via diffRequest from Stashes page): file list and
+  // file diffs are read through the stash's PARENT structure, because untracked
+  // files live in the stash's third parent, NOT in the stash tree itself.
+  const [stashHash, setStashHash] = useState<string | null>(null);
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [branches, setBranches] = useState<BranchInfo[]>([]);
@@ -94,6 +98,7 @@ export function DiffPage() {
     setBaseRef(diffRequest.baseRef);
     setCompareRef(diffRequest.compareRef);
     setCompareMode('ref');
+    setStashHash(diffRequest.stashHash ?? null);
     if (diffRequest.filePath) {
       setFilePath(diffRequest.filePath);
       // Also sync to global so other consumers see the same path
@@ -114,8 +119,29 @@ export function DiffPage() {
     if (!repo) return;
     setLoading(true);
     try {
-      // If filePath is '.' (all files), first get the list of changed files
-      if ((filePath === '.' || filePath === '') && compareMode === 'working') {
+      // Stash viewer (View Stash from the Stashes page): plain `diff stash^..stash`
+      // renders EMPTY when the stash contains untracked files — they are stored
+      // ONLY in the stash's third parent. api.git.stashFiles/stashFileRawDiff
+      // read both the tracked and the untracked part.
+      if (stashHash && (filePath === '.' || filePath === '')) {
+        const files = await api.git.stashFiles(repo.path, stashHash);
+        setChangedFiles(files);
+        if (!selectedFileInList && files.length > 0) {
+          setSelectedFileInList(files[0].path);
+        }
+        const fileToDiff = selectedFileInList || files[0]?.path;
+        if (fileToDiff) {
+          const rawDiff = await api.git.stashFileRawDiff(repo.path, stashHash, fileToDiff);
+          setDiff(parseRawDiff(rawDiff, fileToDiff));
+        } else {
+          setDiff(null);
+        }
+      } else if (stashHash) {
+        // Single file inside a stash
+        setChangedFiles([]);
+        const rawDiff = await api.git.stashFileRawDiff(repo.path, stashHash, filePath || '.');
+        setDiff(parseRawDiff(rawDiff, filePath));
+      } else if ((filePath === '.' || filePath === '') && compareMode === 'working') {
         // Get changed files between baseRef and working tree
         const rawFiles = await api.git.raw(repo.path, ['diff', '--name-status', '--no-color', baseRef]);
         const files: CommitFile[] = rawFiles.split('\n').filter(Boolean).map(line => {
@@ -184,7 +210,7 @@ export function DiffPage() {
     } finally {
       setLoading(false);
     }
-  }, [repo, filePath, baseRef, compareMode, compareRef, toast, selectedFileInList]);
+  }, [repo, filePath, baseRef, compareMode, compareRef, stashHash, toast, selectedFileInList]);
 
   // Auto-compute when inputs change
   useEffect(() => {
@@ -201,7 +227,10 @@ export function DiffPage() {
     setLoading(true);
     try {
       let result: DiffResult;
-      if (compareMode === 'ref' && compareRef) {
+      if (stashHash) {
+        const rawDiff = await api.git.stashFileRawDiff(repo.path, stashHash, file);
+        result = parseRawDiff(rawDiff, file);
+      } else if (compareMode === 'ref' && compareRef) {
         const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', file]);
         result = parseRawDiff(rawDiff, file);
       } else {
@@ -224,11 +253,13 @@ export function DiffPage() {
     return <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">No repository open</div>;
   }
 
-  const title = compareMode === 'ref' && compareRef
-    ? `${baseRef} → ${compareRef}`
-    : compareMode === 'staged'
-      ? `${baseRef} → Staged`
-      : `${baseRef} → Working Tree`;
+  const title = stashHash
+    ? `Stash ${shortHash(stashHash)} content`
+    : compareMode === 'ref' && compareRef
+      ? `${baseRef} → ${compareRef}`
+      : compareMode === 'staged'
+        ? `${baseRef} → Staged`
+        : `${baseRef} → Working Tree`;
 
   // The file the toolbar actions (Blame) and the header bar refer to.
   const blameTarget = selectedFileInList || filePath;

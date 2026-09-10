@@ -138,6 +138,9 @@ export function StashesPage() {
       baseRef: `${stash.hash}^`,
       compareRef: stash.hash,
       filePath: '.',
+      // Stash anatomy viewer: plain stash^..stash misses untracked files
+      // (they live in the stash's third parent) — see stashFiles.
+      stashHash: stash.hash,
     });
     navigate('/diff');
   };

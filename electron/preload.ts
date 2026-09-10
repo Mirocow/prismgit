@@ -65,6 +65,9 @@ const api = {
       ipcRenderer.invoke('git:stashPush', repoPath, message, includeUntracked, keepIndex, files),
     stashPop: (repoPath: string, index?: number) => ipcRenderer.invoke('git:stashPop', repoPath, index),
     stashApply: (repoPath: string, index?: number) => ipcRenderer.invoke('git:stashApply', repoPath, index),
+    stashFiles: (repoPath: string, hash: string) => ipcRenderer.invoke('git:stashFiles', repoPath, hash),
+    stashFileRawDiff: (repoPath: string, hash: string, file: string) =>
+      ipcRenderer.invoke('git:stashFileRawDiff', repoPath, hash, file),
     stashDrop: (repoPath: string, index?: number) => ipcRenderer.invoke('git:stashDrop', repoPath, index),
     stashBranch: (repoPath: string, branch: string, index?: number) =>
       ipcRenderer.invoke('git:stashBranch', repoPath, branch, index),

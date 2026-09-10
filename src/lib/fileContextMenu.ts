@@ -272,7 +272,9 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       });
       if (msg === null) return true; // cancelled
       try {
-        await api.git.stashPush(ctx.repoPath, msg.trim() || undefined, false, false, [ctx.path]);
+        // Untracked files need --include-untracked, otherwise git refuses:
+        // "No local changes to save" — the stash is silently NOT created.
+        await api.git.stashPush(ctx.repoPath, msg.trim() || undefined, ctx.isUntracked ?? false, false, [ctx.path]);
         t.success(`Stashed ${baseName(ctx.path)}`);
         refresh();
       } catch (e) {

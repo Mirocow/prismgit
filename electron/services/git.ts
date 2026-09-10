@@ -902,6 +902,108 @@ export async function stashList(repoPath: string): Promise<StashEntry[]> {
   }));
 }
 
+/**
+ * Stash commit anatomy (why plain `git diff stash^..stash` is NOT enough):
+ *
+ *   parent[0]  base commit (HEAD at stash time)   → tracked changes
+ *   parent[1]  index state at stash time
+ *   parent[2]  untracked-files commit (OPTIONAL, only with --include-untracked)
+ *
+ * The stash commit's TREE does not contain untracked files — they live ONLY
+ * in parent[2]. So `git diff stash^..stash` renders EMPTY for any stash that
+ * includes untracked files (the "View Stash shows nothing" bug). These
+ * helpers read both parts.
+ */
+async function stashParents(git: SimpleGit, hash: string): Promise<string[]> {
+  const out = await git.raw(['rev-list', '--parents', '-n', '1', hash]);
+  const parts = out.trim().split(/\s+/);
+  return parts.slice(1); // drop the stash commit itself → [base, index?, untracked?]
+}
+
+/** Parse a `--name-status` line into a CommitFile (handles R/C two-path form). */
+function parseNameStatusLine(line: string): CommitFile | null {
+  const parts = line.split('\t');
+  if (parts.length < 2) return null;
+  const statusCode = parts[0];
+  let pathStr = parts[parts.length - 1];
+  let oldPath: string | undefined;
+  if (statusCode.startsWith('R') || statusCode.startsWith('C')) {
+    oldPath = parts[1];
+    pathStr = parts[2];
+  }
+  return { path: pathStr, status: statusCode, oldPath, additions: 0, deletions: 0, binary: false, mode: '' };
+}
+
+/** Best-effort numstat merge into the file list. */
+async function applyNumstat(git: SimpleGit, args: string[], files: CommitFile[]): Promise<void> {
+  let numstat: string;
+  try {
+    numstat = await git.raw(args);
+  } catch {
+    return;
+  }
+  for (const line of numstat.split('\n')) {
+    if (!line.trim()) continue;
+    const cols = line.split('\t');
+    if (cols.length < 3) continue;
+    const pathStr = cols[cols.length - 1];
+    const target = files.find((f) => f.path === pathStr);
+    if (!target) continue;
+    if (cols[0] === '-') target.binary = true;
+    else target.additions = parseInt(cols[0] || '0', 10) || 0;
+    if (cols[1] === '-') target.binary = true;
+    else target.deletions = parseInt(cols[1] || '0', 10) || 0;
+  }
+}
+
+/** All files contained in a stash: tracked changes + untracked files (parent[2]). */
+export async function stashFiles(repoPath: string, hash: string): Promise<CommitFile[]> {
+  const git = getGit(repoPath);
+  const parents = await stashParents(git, hash);
+  const base = parents[0];
+  const result: CommitFile[] = [];
+
+  // Tracked changes: direct two-dot diff base..stash (working-tree part; the
+  // index part is included in the stash tree as well — the union is what the
+  // user expects to see, exactly like `git stash show`).
+  const tracked = await git.raw(['diff', '--name-status', '--no-color', `${base}..${hash}`]);
+  for (const line of tracked.split('\n').filter(Boolean)) {
+    const f = parseNameStatusLine(line);
+    if (f) result.push(f);
+  }
+  await applyNumstat(git, ['diff', '--numstat', '--no-color', `${base}..${hash}`], result);
+
+  // Untracked files: stored ONLY in parent[2] as a root commit holding them.
+  if (parents.length >= 3) {
+    const untracked = await git.raw(['diff-tree', '--root', '--no-color', '--name-status', '-r', parents[2]]);
+    for (const line of untracked.split('\n').filter(Boolean)) {
+      if (!line.includes('\t')) continue; // diff-tree --root echoes the commit id first
+      const f = parseNameStatusLine(line);
+      if (!f) continue;
+      if (f.status === 'A' || f.status === '') f.status = 'A';
+      if (!result.some((r) => r.path === f.path)) result.push(f);
+    }
+    await applyNumstat(git, ['show', '--numstat', '--format=', parents[2]], result);
+  }
+  return result;
+}
+
+/** Raw unified diff of ONE file inside a stash (tracked part or untracked part). */
+export async function stashFileRawDiff(repoPath: string, hash: string, file: string): Promise<string> {
+  const git = getGit(repoPath);
+  const parents = await stashParents(git, hash);
+  const base = parents[0];
+  // 1) tracked: base..stash -- file
+  const tracked = await git.raw(['diff', '--no-color', `${base}..${hash}`, '--', file]);
+  if (tracked.trim()) return tracked;
+  // 2) untracked: only present in the third parent (root commit)
+  if (parents.length >= 3) {
+    const untracked = await git.raw(['show', '--format=', '--no-color', parents[2], '--', file]);
+    if (untracked.trim()) return untracked;
+  }
+  return '';
+}
+
 export async function stashPush(
   repoPath: string,
   message?: string,

@@ -90,6 +90,8 @@ export function registerGitIpc(): void {
   );
   ipcMain.handle('git:stashPop', (_e, p: string, i?: number) => gitService.stashPop(p, i));
   ipcMain.handle('git:stashApply', (_e, p: string, i?: number) => gitService.stashApply(p, i));
+  ipcMain.handle('git:stashFiles', (_e, p: string, h: string) => gitService.stashFiles(p, h));
+  ipcMain.handle('git:stashFileRawDiff', (_e, p: string, h: string, f: string) => gitService.stashFileRawDiff(p, h, f));
   ipcMain.handle('git:stashDrop', (_e, p: string, i?: number) => gitService.stashDrop(p, i));
   ipcMain.handle('git:stashBranch', (_e, p: string, b: string, i?: number) => gitService.stashBranch(p, b, i));
   ipcMain.handle('git:stashRename', (_e, p: string, i: number, m: string) => gitService.renameStash(p, i, m));

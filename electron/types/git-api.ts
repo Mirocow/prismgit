@@ -265,6 +265,10 @@ export interface GitApi {
   stashPush: (repoPath: string, message?: string, includeUntracked?: boolean, keepIndex?: boolean, files?: string[]) => Promise<string>;
   stashPop: (repoPath: string, index?: number) => Promise<void>;
   stashApply: (repoPath: string, index?: number) => Promise<void>;
+  /** All files in a stash: tracked changes + untracked files (stash parent[2]). */
+  stashFiles: (repoPath: string, hash: string) => Promise<CommitFile[]>;
+  /** Raw unified diff of ONE file inside a stash (tracked or untracked part). */
+  stashFileRawDiff: (repoPath: string, hash: string, file: string) => Promise<string>;
   stashDrop: (repoPath: string, index?: number) => Promise<void>;
   stashBranch: (repoPath: string, branch: string, index?: number) => Promise<void>;
   /** Rename a stash entry (rebuild refs/stash with a replacement commit). */

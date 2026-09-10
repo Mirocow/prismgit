@@ -84,7 +84,7 @@ export interface GlobalSelectionState {
    * so we diff the stash against the commit it was based on (parent[0]),
    * NOT against HEAD (which was the original bug — see StashesPage.handleViewStash).
    */
-  diffRequest: { baseRef: string; compareRef: string; filePath?: string } | null;
+  diffRequest: { baseRef: string; compareRef: string; filePath?: string; /** Stash viewer mode — read files via git stash anatomy (see stashFiles). */ stashHash?: string } | null;
 
   // Actions
   selectCommit: (hash: string | null) => void;
@@ -113,7 +113,7 @@ export interface GlobalSelectionState {
   /** Set the width (px) of one of the resizable Changes table columns. */
   setColWidth: (col: 'state' | 'dir', width: number) => void;
   /** Set a one-shot diff request — DiffPage consumes it on first render. */
-  setDiffRequest: (req: { baseRef: string; compareRef: string; filePath?: string } | null) => void;
+  setDiffRequest: (req: { baseRef: string; compareRef: string; filePath?: string; stashHash?: string } | null) => void;
   /**
    * Apply per-project UI preferences (loaded from projectPrefs).
    * Keys absent from the prefs object fall back to defaults, so switching
