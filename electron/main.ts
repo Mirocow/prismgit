@@ -12,14 +12,17 @@ import { buildAppMenu } from './menu.js';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
-// Suppress the EGL/GL driver error on Linux:
+// Suppress the EGL/GL driver error:
 //   ERROR:gl_display.cc(497) EGL Driver message (Error) eglQueryDeviceAttribEXT: Bad attribute.
-// This is a known Chromium/Electron issue with certain GPU drivers. The error
-// is cosmetic (doesn't affect functionality) but clutters stderr. Disabling
-// hardware acceleration eliminates the EGL init path that triggers it.
-if (process.platform === 'linux') {
-  app.disableHardwareAcceleration();
-}
+// This is a known Chromium/Electron issue with certain GPU drivers — observed on
+// Linux (NVIDIA) as well as on macOS (ANGLE/Metal EGL device query). The error
+// is cosmetic (doesn't affect functionality) but clutters stderr on every launch.
+// Disabling hardware acceleration eliminates the EGL init path that triggers it.
+// PrismGit is a plain 2D UI (no WebGL/GPU usage anywhere), so software rendering
+// has no noticeable impact on this app.
+// NOTE: must be applied on ALL platforms (not only Linux) — the macOS ANGLE/EGL
+// path produces the same message; keep this call unconditional.
+app.disableHardwareAcceleration();
 
 // Window state persistence
 interface WindowState {
