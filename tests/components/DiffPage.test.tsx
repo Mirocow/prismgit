@@ -21,6 +21,12 @@ vi.mock('../../src/lib/api', () => ({
       log: (...args: unknown[]) => mockLog(...args),
       diff: (...args: unknown[]) => mockDiff(...args),
     },
+    // DiffPage uses useContextMenu (native menu via IPC) — provide the two
+    // methods it touches: onClick returns a cleanup fn, show resolves.
+    contextMenu: {
+      show: vi.fn().mockResolvedValue(undefined),
+      onClick: vi.fn(() => () => {}),
+    },
   },
 }));
 

@@ -9,6 +9,7 @@ import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
+import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { cn, copyToClipboard, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
@@ -38,14 +39,14 @@ function SortableHeader({
   onSort: (key: FileSortKey) => void;
   width?: number;
   align?: 'right';
-  /** When set, renders a drag handle on the right edge to resize the column. */
+  /** When set, renders a drag handle on the column's left edge to resize it. */
   onResizeStart?: (e: ReactMouseEvent) => void;
 }) {
   const active = sort.key === sortKey;
   return (
     <button
       className={cn(
-        'relative flex items-center gap-0.5 uppercase hover:text-text-primary',
+        'relative group flex items-center gap-0.5 uppercase hover:text-text-primary',
         active && 'text-accent',
         align === 'right' && 'justify-end'
       )}
@@ -60,8 +61,12 @@ function SortableHeader({
         <ChevronDown size={9} className="opacity-40" />
       )}
       {onResizeStart && (
+        // Resize handle sits on the column's LEFT boundary — see startColResize
+        // for why (right-pinned columns grow leftward, so the left edge is the
+        // only boundary that can follow the mouse). The inner grip line makes
+        // the handle discoverable; the 12px hit area stays forgiving.
         <span
-          className="absolute -right-1.5 -top-1 -bottom-1 w-3 z-20 cursor-col-resize hover:bg-accent/30"
+          className="absolute -left-1.5 -top-1 -bottom-1 w-3 z-20 cursor-col-resize flex items-center"
           title="Drag to resize column"
           onMouseDown={(e) => {
             e.preventDefault();
@@ -69,7 +74,9 @@ function SortableHeader({
             onResizeStart(e);
           }}
           onClick={(e) => e.stopPropagation()}
-        />
+        >
+          <span className="w-0.5 h-full my-0.5 ml-1 rounded-full bg-border-strong group-hover:bg-accent transition-colors" style={{ opacity: 0.45 }} />
+        </span>
       )}
     </button>
   );
@@ -152,10 +159,10 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [journal, setJournal] = useState<LogEntry[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
   const [showSplitView, setShowSplitView] = useState(true);
-  const { width: leftWidth, handleResize: handleLeftResize } = useResizableWidth(500, 250, 800);
-  const { width: treeWidth, handleResize: handleTreeResize } = useResizableWidth(210, 140, 380);
-  const { height: journalHeight, handleResize: handleJournalResize } = useResizableHeight(180, 60, 400);
-  const { height: commitHeight, handleResize: handleCommitResize } = useResizableHeight(120, 60, 500);
+  const { width: leftWidth, setWidth: setLeftWidth, handleResize: handleLeftResize } = useResizableWidth(500, 250, 800);
+  const { width: treeWidth, setWidth: setTreeWidth, handleResize: handleTreeResize } = useResizableWidth(210, 140, 380);
+  const { height: journalHeight, setHeight: setJournalHeight, handleResize: handleJournalResize } = useResizableHeight(180, 60, 400);
+  const { height: commitHeight, setHeight: setCommitHeight, handleResize: handleCommitResize } = useResizableHeight(120, 60, 500);
   const [showMarkdownPreview, setShowMarkdownPreview] = useState(false);
   const [dirTree, setDirTree] = useState<DirNode[]>([]);
   const [dirTreeLoading, setDirTreeLoading] = useState(false);
@@ -167,6 +174,31 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   });
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set([ROOT_KEY]));
   const showContextMenu = useContextMenu();
+
+  // Per-project panel sizes (projectPrefs). "Настройки интерфейса должны
+  // запоминаться на проект": apply the saved sizes when the repo opens, and
+  // save them back (debounced) while the user drags the splitters.
+  useEffect(() => {
+    const prefs = loadProjectPrefs(repo.path);
+    const clamp = (v: number | undefined, min: number, max: number, dflt: number) =>
+      v == null || !Number.isFinite(v) ? dflt : Math.max(min, Math.min(max, v));
+    setLeftWidth(clamp(prefs.changesLeftWidth, 250, 800, 500));
+    setTreeWidth(clamp(prefs.changesTreeWidth, 140, 380, 210));
+    setJournalHeight(clamp(prefs.journalHeight, 60, 400, 180));
+    setCommitHeight(clamp(prefs.commitHeight, 60, 500, 120));
+  }, [repo.path, setLeftWidth, setTreeWidth, setJournalHeight, setCommitHeight]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      saveProjectPrefs(repo.path, {
+        changesLeftWidth: leftWidth,
+        changesTreeWidth: treeWidth,
+        journalHeight,
+        commitHeight,
+      });
+    }, 500);
+    return () => clearTimeout(t);
+  }, [repo.path, leftWidth, treeWidth, journalHeight, commitHeight]);
 
   const loadDiff = useCallback(
     async (file: string, staged: boolean) => {
@@ -309,7 +341,16 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     setExpandedDirs(new Set([ROOT_KEY]));
   };
 
-  // Column resize: drag the handle on a column header's right edge.
+  // Column resize: drag the handle on a column header's LEFT edge.
+  //
+  // Why the handle is on the LEFT edge and why the math INVERTS the delta:
+  // the Name column is flex-1 and absorbs all slack, so the State/Dir columns
+  // are pinned against the RIGHT edge of the panel. When a column's width
+  // changes, it grows/shrinks LEFTWARD — its right edge never moves, which
+  // made the old right-edge handle feel broken ("inverted": drag right, the
+  // column's visible boundary moved LEFT). With the handle on the column's
+  // left boundary and width = start - dx, the boundary under the mouse tracks
+  // the cursor 1:1 in both directions — the expected table-resize feel.
   const startColResize = (e: ReactMouseEvent, col: 'state' | 'dir') => {
     e.preventDefault();
     const startX = e.clientX;
@@ -317,7 +358,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     const min = col === 'state' ? 46 : 50;
     const max = col === 'state' ? 220 : 480;
     const onMove = (ev: MouseEvent) => {
-      setColWidth(col, Math.max(min, Math.min(max, startWidth + (ev.clientX - startX))));
+      setColWidth(col, Math.max(min, Math.min(max, startWidth - (ev.clientX - startX))));
     };
     const onUp = () => {
       document.body.style.cursor = '';
@@ -865,8 +906,10 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         </span>
         {/* State text */}
         <span className="text-text-tertiary flex-shrink-0 italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>{stateLabel}</span>
-        {/* Relative directory — shown/hidden based on compressFilePaths */}
-        {!compressFilePaths && relDir && (
+        {/* Relative directory — always reserve the cell when the column is
+            visible, so rows with an empty relDir (repo-root files) stay
+            column-aligned with the header and other rows. */}
+        {!compressFilePaths && (
           <span className="text-text-tertiary flex-shrink-0 truncate whitespace-nowrap" style={{ width: colWidths.dir }} title={relDir}>{relDir}</span>
         )}
         {/* Actions — fixed width so all rows stay column-aligned */}

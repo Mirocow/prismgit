@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, FileText, GitBranch, GitCommit, ChevronDown } from '../components/icons';
+import { RefreshCw, FileText, GitBranch, GitCommit, ChevronDown, Search } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -7,8 +7,10 @@ import { CommitHashLink } from '../components/StatusBar';
 import { api, type DiffResult, type LogEntry, type BranchInfo, type CommitFile } from '../lib/api';
 import { DiffViewer } from '../components/DiffViewer';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
-import { cn, shortHash } from '../lib/utils';
+import { cn, copyToClipboard, shortHash } from '../lib/utils';
 import { useLazyList } from '../lib/useLazyList';
+import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
+import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 
 /**
  * Diff Tool — standalone comparison tool.
@@ -54,7 +56,20 @@ export function DiffPage() {
   // Width of the file-list sidebar — splitter lets the user resize it.
   // Bug fix: previously the file list was a fixed `w-56` with no splitter, so
   // users couldn't widen it for long paths. Now we use useResizableWidth.
-  const { width: fileListWidth, handleResize: handleFileListResize } = useResizableWidth(224, 140, 480);
+  const { width: fileListWidth, setWidth: setFileListWidth, handleResize: handleFileListResize } = useResizableWidth(224, 140, 480);
+  const showContextMenu = useContextMenu();
+
+  // Per-project file-list width (projectPrefs) — apply on repo open, save
+  // back debounced while the user drags the splitter.
+  useEffect(() => {
+    const v = loadProjectPrefs(repo.path).diffFileListWidth;
+    if (v != null && Number.isFinite(v)) setFileListWidth(Math.max(140, Math.min(480, v)));
+  }, [repo.path, setFileListWidth]);
+
+  useEffect(() => {
+    const t = setTimeout(() => saveProjectPrefs(repo.path, { diffFileListWidth: fileListWidth }), 500);
+    return () => clearTimeout(t);
+  }, [repo.path, fileListWidth]);
 
   // Pre-fill from global selections
   useEffect(() => {
@@ -211,6 +226,9 @@ export function DiffPage() {
       ? `${baseRef} → Staged`
       : `${baseRef} → Working Tree`;
 
+  // The file the toolbar actions (Blame) and the header bar refer to.
+  const blameTarget = selectedFileInList || filePath;
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header with comparison controls */}
@@ -301,7 +319,22 @@ export function DiffPage() {
           </select>
         )}
 
-        <button className="icon-btn !w-6 !h-6 ml-auto" title="Refresh" onClick={computeDiff}>
+        {/* Blame the file currently shown in the diff (or the selected one
+            from the file list) — mirrors the "Blame this file..." entry of
+            the file context menu. */}
+        <button
+          className="icon-btn !w-6 !h-6 ml-auto"
+          title="Blame this file — line-by-line authorship"
+          disabled={!blameTarget || blameTarget === '.'}
+          onClick={() => {
+            if (!blameTarget || blameTarget === '.') return;
+            useSelectionStore.getState().selectFile(blameTarget);
+            window.location.hash = '#/blame';
+          }}
+        >
+          <Search size={12} />
+        </button>
+        <button className="icon-btn !w-6 !h-6" title="Refresh" onClick={computeDiff}>
           <RefreshCw size={12} className={loading ? 'spin' : ''} />
         </button>
       </div>
@@ -331,7 +364,37 @@ export function DiffPage() {
                     selectedFileInList === f.path && 'bg-bg-selected'
                   )}
                   onClick={() => loadFileDiff(f.path)}
-                  title={f.path}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // Select + load the file under the cursor first, so the
+                    // diff pane and any action act on exactly this file.
+                    if (selectedFileInList !== f.path) loadFileDiff(f.path);
+                    const items: ContextMenuItem[] = [
+                      { label: 'View file history...', clickId: 'file-history' },
+                      { label: 'Blame this file...', clickId: 'blame' },
+                      { type: 'separator' },
+                      { label: 'Copy path', clickId: 'copy-path' },
+                      { label: 'Copy full path', clickId: 'copy-full-path' },
+                    ];
+                    showContextMenu(items, (action) => {
+                      if (action === 'file-history') {
+                        useSelectionStore.getState().selectFile(f.path);
+                        useSelectionStore.getState().setPathFilter(f.path);
+                        window.location.hash = '#/history';
+                      } else if (action === 'blame') {
+                        useSelectionStore.getState().selectFile(f.path);
+                        window.location.hash = '#/blame';
+                      } else if (action === 'copy-path') {
+                        copyToClipboard(f.path);
+                        toast.success('Path copied');
+                      } else if (action === 'copy-full-path') {
+                        copyToClipboard(`${repo.path}/${f.path}`.replace(/\/+/g, '/'));
+                        toast.success('Full path copied');
+                      }
+                    });
+                  }}
+                  title="Click to load diff · Right-click for more actions"
                 >
                   <span className="font-mono font-bold w-3 text-center flex-shrink-0"
                     style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>

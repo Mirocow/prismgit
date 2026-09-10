@@ -25,6 +25,7 @@
  */
 
 import { create } from 'zustand';
+import type { ProjectPrefs } from '../lib/projectPrefs';
 
 export interface GlobalSelectionState {
   /** Currently selected commit hash (across History, Tags, Reflog, Annotate). */
@@ -107,6 +108,12 @@ export interface GlobalSelectionState {
   setColWidth: (col: 'state' | 'dir', width: number) => void;
   /** Set a one-shot diff request — DiffPage consumes it on first render. */
   setDiffRequest: (req: { baseRef: string; compareRef: string; filePath?: string } | null) => void;
+  /**
+   * Apply per-project UI preferences (loaded from projectPrefs).
+   * Keys absent from the prefs object fall back to defaults, so switching
+   * repositories never leaks the previous repo's view modes or filters.
+   */
+  applyProjectPrefs: (prefs: ProjectPrefs) => void;
   /** Clear all selections (e.g. when switching repos). */
   clearAll: () => void;
 }
@@ -172,6 +179,17 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   toggleDirTreeVisible: () => set({ dirTreeVisible: !get().dirTreeVisible }),
   setColWidth: (col, width) => set((s) => ({ colWidths: { ...s.colWidths, [col]: width } })),
   setDiffRequest: (req) => set({ diffRequest: req }),
+  applyProjectPrefs: (prefs) => set({
+    fileViewMode: prefs.fileViewMode ?? 'flat',
+    commitViewMode: prefs.commitViewMode ?? 'tree',
+    compressFilePaths: prefs.compressFilePaths ?? true,
+    fileStatusFilter: prefs.fileStatusFilter ?? 'all',
+    fileStatusFilterSet: new Set(prefs.fileStatusFilterSet ?? []),
+    fileSort: prefs.fileSort ?? { key: 'name', dir: 1 },
+    fileFilterRegex: prefs.fileFilterRegex ?? false,
+    dirTreeVisible: prefs.dirTreeVisible ?? true,
+    colWidths: prefs.colWidths ?? { state: 70, dir: 120 },
+  }),
   clearAll: () => set({
     selectedCommitHash: null,
     selectedBranch: null,

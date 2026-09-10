@@ -30,6 +30,7 @@ import { useGitStore } from './stores/gitStore';
 import { useSelectionStore } from './stores/selectionStore';
 import { useBackgroundFetch } from './hooks/useBackgroundFetch';
 import { api } from './lib/api';
+import { loadProjectPrefs, saveProjectPrefs } from './lib/projectPrefs';
 
 // Lazy-load pages for smaller initial bundle
 const ChangesPage = lazy(() => import('./pages/ChangesPage').then(m => ({ default: m.ChangesPage })));
@@ -104,6 +105,53 @@ export default function App() {
     window.addEventListener('smartgit:repo-closed', handler);
     return () => window.removeEventListener('smartgit:repo-closed', handler);
   }, []);
+
+  // Per-project UI preferences (the user's request: "настройки интерфейса
+  // должны запоминаться на проект"). Two effects:
+  //   1. When a repo opens, load its saved UI prefs into selectionStore.
+  //   2. While a repo is open, subscribe to selectionStore and save the
+  //      preference keys back (debounced) whenever they change.
+  const repoPath = currentRepo?.path ?? null;
+  useEffect(() => {
+    if (!repoPath) return;
+    useSelectionStore.getState().applyProjectPrefs(loadProjectPrefs(repoPath));
+  }, [repoPath]);
+  useEffect(() => {
+    if (!repoPath) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsub = useSelectionStore.subscribe((state, prev) => {
+      const changed =
+        state.fileViewMode !== prev.fileViewMode ||
+        state.commitViewMode !== prev.commitViewMode ||
+        state.compressFilePaths !== prev.compressFilePaths ||
+        state.fileStatusFilter !== prev.fileStatusFilter ||
+        state.fileStatusFilterSet !== prev.fileStatusFilterSet ||
+        state.fileSort !== prev.fileSort ||
+        state.fileFilterRegex !== prev.fileFilterRegex ||
+        state.dirTreeVisible !== prev.dirTreeVisible ||
+        state.colWidths !== prev.colWidths;
+      if (!changed) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const s = useSelectionStore.getState();
+        saveProjectPrefs(repoPath, {
+          fileViewMode: s.fileViewMode,
+          commitViewMode: s.commitViewMode,
+          compressFilePaths: s.compressFilePaths,
+          fileStatusFilter: s.fileStatusFilter,
+          fileStatusFilterSet: Array.from(s.fileStatusFilterSet),
+          fileSort: s.fileSort,
+          fileFilterRegex: s.fileFilterRegex,
+          dirTreeVisible: s.dirTreeVisible,
+          colWidths: s.colWidths,
+        });
+      }, 400);
+    });
+    return () => {
+      unsub();
+      clearTimeout(timer);
+    };
+  }, [repoPath]);
 
   // Listen for menu events
   useEffect(() => {
