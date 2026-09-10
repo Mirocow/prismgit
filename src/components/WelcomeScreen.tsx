@@ -1,4 +1,5 @@
-import { Folder, Plus, Github, BookOpen, Star, ChevronRight, GitBranch, FileText, History, Download } from './icons';
+import { useMemo, useState } from 'react';
+import { Folder, Plus, Github, BookOpen, Star, ChevronRight, GitBranch, FileText, History, Download, Search, X } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 
 export function WelcomeScreen({
@@ -10,18 +11,34 @@ export function WelcomeScreen({
 }) {
   const openRepo = useRepositoryStore((s) => s.openRepositoryPicker);
   const { repos, metadata, openRepository } = useRepositoryStore();
-  // Show up to 5 recent repos — favorites first, stable order otherwise
+  const [search, setSearch] = useState('');
+  // Show ALL repos (not just 5) — favorites first, then lastOpened desc, stable order otherwise
   const safeRepos = Array.isArray(repos) ? repos : [];
   const safeMeta = metadata || {};
-  const recentRepos = [...safeRepos]
-    .sort((a, b) => {
+  const allSortedRepos = useMemo(() => {
+    return [...safeRepos].sort((a, b) => {
       const ma = safeMeta[a.path];
       const mb = safeMeta[b.path];
+      // Favorites first
       if (ma?.favorite && !mb?.favorite) return -1;
       if (!ma?.favorite && mb?.favorite) return 1;
-      return 0; // stable — keep insertion order
-    })
-    .slice(0, 5);
+      // Then by lastOpened (most recent first)
+      const ta = a.lastOpened || 0;
+      const tb = b.lastOpened || 0;
+      if (ta !== tb) return tb - ta;
+      return 0;
+    });
+  }, [safeRepos, safeMeta]);
+  // Filter by search query (name or path)
+  const filteredRepos = useMemo(() => {
+    if (!search.trim()) return allSortedRepos;
+    const q = search.toLowerCase();
+    return allSortedRepos.filter(r =>
+      r.name.toLowerCase().includes(q) ||
+      r.path.toLowerCase().includes(q) ||
+      (safeMeta[r.path]?.tags || []).some(t => t.toLowerCase().includes(q))
+    );
+  }, [allSortedRepos, search, safeMeta]);
 
   // Quick feature highlights shown beneath the primary actions
   const features = [
@@ -104,50 +121,92 @@ export function WelcomeScreen({
         </div>
       </div>
 
-      {/* Recent repositories — only show if user has any */}
-      {recentRepos.length > 0 && (
+      {/* All repositories with search — only show if user has any */}
+      {allSortedRepos.length > 0 && (
         <div className="max-w-2xl mx-auto px-6 pb-6">
-          <div className="text-2xs uppercase tracking-wider text-text-tertiary font-semibold mb-3 px-1">
-            Recent Repositories
+          <div className="flex items-center justify-between mb-3 px-1">
+            <div className="text-2xs uppercase tracking-wider text-text-tertiary font-semibold">
+              All Repositories
+              <span className="ml-2 text-text-tertiary/70 font-normal normal-case">
+                {filteredRepos.length} of {allSortedRepos.length}
+              </span>
+            </div>
           </div>
-          <div className="bg-bg-secondary border border-border-default rounded-lg overflow-hidden shadow-sm">
-            {recentRepos.map((repo, i) => {
-              const meta = safeMeta[repo.path];
-              return (
-                <button
-                  key={repo.path}
-                  onClick={() => openRepository && openRepository(repo.path)}
-                  className={`w-full group flex items-center gap-3 px-4 py-3 hover:bg-bg-hover transition-colors text-left ${
-                    i > 0 ? 'border-t border-border-subtle' : ''
-                  }`}
-                >
-                  <div className="w-9 h-9 rounded-lg bg-bg-tertiary border border-border-default flex items-center justify-center flex-shrink-0 group-hover:border-accent group-hover:bg-accent-muted transition-colors">
-                    <Folder size={16} className="text-accent" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-text-primary truncate">
-                        {repo.name}
-                      </span>
-                      {meta?.favorite && (
-                        <Star size={11} className="text-status-modified fill-current flex-shrink-0" />
-                      )}
+          {/* Search input */}
+          <div className="relative mb-3">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+            <input
+              type="text"
+              className="w-full text-sm pl-9 pr-8 py-2 bg-bg-secondary border border-border-default rounded-lg focus:outline-none focus:border-accent transition-colors"
+              placeholder="Search repositories by name, path, or tag..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              autoFocus={allSortedRepos.length > 8}
+            />
+            {search && (
+              <button
+                className="absolute right-2 top-1/2 -translate-y-1/2 icon-btn !w-6 !h-6"
+                title="Clear search"
+                onClick={() => setSearch('')}
+              >
+                <X size={11} />
+              </button>
+            )}
+          </div>
+          <div className="bg-bg-secondary border border-border-default rounded-lg overflow-hidden shadow-sm max-h-[60vh] overflow-y-auto">
+            {filteredRepos.length === 0 ? (
+              <div className="px-4 py-8 text-center text-text-tertiary text-sm">
+                <Search size={20} className="mx-auto mb-2 opacity-40" />
+                No repositories match "{search}"
+              </div>
+            ) : (
+              filteredRepos.map((repo, i) => {
+                const meta = safeMeta[repo.path];
+                return (
+                  <button
+                    key={repo.path}
+                    onClick={() => openRepository && openRepository(repo.path)}
+                    className={`w-full group flex items-center gap-3 px-4 py-3 hover:bg-bg-hover transition-colors text-left ${
+                      i > 0 ? 'border-t border-border-subtle' : ''
+                    }`}
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-bg-tertiary border border-border-default flex items-center justify-center flex-shrink-0 group-hover:border-accent group-hover:bg-accent-muted transition-colors">
+                      <Folder size={16} className="text-accent" />
                     </div>
-                    <div className="text-xs text-text-tertiary font-mono truncate">{repo.path}</div>
-                  </div>
-                  {meta?.color && (
-                    <span
-                      className="w-1 self-stretch rounded-full"
-                      style={{ backgroundColor: meta.color }}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-text-primary truncate">
+                          {repo.name}
+                        </span>
+                        {meta?.favorite && (
+                          <Star size={11} className="text-status-modified fill-current flex-shrink-0" />
+                        )}
+                        {meta?.tags && meta.tags.length > 0 && (
+                          <span className="flex gap-1 flex-shrink-0">
+                            {meta.tags.slice(0, 3).map(t => (
+                              <span key={t} className="text-2xs text-text-tertiary px-1.5 py-0.5 rounded-full bg-bg-tertiary">
+                                {t}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-text-tertiary font-mono truncate">{repo.path}</div>
+                    </div>
+                    {meta?.color && (
+                      <span
+                        className="w-1 self-stretch rounded-full"
+                        style={{ backgroundColor: meta.color }}
+                      />
+                    )}
+                    <ChevronRight
+                      size={14}
+                      className="text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
                     />
-                  )}
-                  <ChevronRight
-                    size={14}
-                    className="text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                  />
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
       )}

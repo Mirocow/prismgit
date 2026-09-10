@@ -8,7 +8,7 @@ import { NAV_ITEMS, NAV_SHORTCUTS, NAV_DESCRIPTIONS, type NavItem } from './navI
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useGitStore } from '../stores/gitStore';
-import { ResizableSplitter, useResizableWidth } from './ResizableSplitter';
+import { ResizableSplitter, useResizableWidth, useResizableHeight } from './ResizableSplitter';
 import { cn } from '../lib/utils';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
 import { useContextMenu } from '../lib/useContextMenu';
@@ -85,6 +85,9 @@ export function Sidebar() {
   );
   const [showRepoList, setShowRepoList] = useState(true);
   const { width: sidebarWidth, handleResize: handleSidebarResize } = useResizableWidth(240, 180, 400);
+  // SmartGit-style: vertical splitter between Repositories list and Navigation
+  // panel in the sidebar — user can drag to give more space to either side.
+  const { height: repoListHeight, setHeight: setRepoListHeight, handleResize: handleRepoListResize } = useResizableHeight(280, 120, 700);
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
   // Live change counters for the Changes badge
@@ -444,7 +447,8 @@ export function Sidebar() {
 
         {showRepoList && (
           <div
-            className="max-h-80 overflow-y-auto border-t border-border-subtle"
+            className="overflow-y-auto border-t border-border-subtle"
+            style={{ height: repoListHeight, flexShrink: 0 }}
             data-testid="repo-tree"
             onDragOver={(e) => {
               // Root drop zone: any empty space in the list = move to root level.
@@ -483,6 +487,11 @@ export function Sidebar() {
           </div>
         )}
       </div>
+
+      {/* Vertical splitter — drag up/down to resize repo list vs navigation */}
+      {showRepoList && (
+        <ResizableSplitter direction="vertical" onResize={handleRepoListResize} />
+      )}
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-2 scrollbar-thin" role="navigation" aria-label="Main navigation">
