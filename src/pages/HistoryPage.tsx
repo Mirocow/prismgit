@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DiffViewer } from '../components/DiffViewer';
 import { CommitFileTree } from '../components/CommitFileTree';
+import { DiffViewer } from '../components/DiffViewer';
 import {
   ChevronDown, ChevronRight,
-  Check,
   Copy,
   CornerDownRight,
   ExternalLink, FileText,
@@ -11,38 +10,36 @@ import {
   GitBranch,
   GitMerge,
   GitPullRequest,
-  Package,
   Pencil,
   RefreshCw,
   RotateCcw,
+  StickyNote,
   Tag as TagIcon,
-  Trash,
   Undo,
   X
 } from '../components/icons';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
-import { api, type BranchInfo, type CommitFile, type LogEntry, type StashEntry, type RecyclableCommit } from '../lib/api';
-import { useOperationLogStore } from '../stores/operationLogStore';
+import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
+import { api, type BranchInfo, type CommitFile, type LogEntry, type RecyclableCommit, type StashEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
+import { linkifyCommitMessage } from '../lib/bugtraq';
+import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
-import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
-import { linkifyCommitMessage } from '../lib/bugtraq';
-import { StickyNote } from '../components/icons';
-import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
-import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { RefBadges } from '../lib/refBadge';
+import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { useLazyList } from '../lib/useLazyList';
-import { cn, copyToClipboard, formatDate, shortHash } from '../lib/utils';
+import { cn, copyToClipboard, shortHash } from '../lib/utils';
+import { useAuthStore } from '../stores/authStore';
 import { useGitStore } from '../stores/gitStore';
+import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
-import { useAuthStore } from '../stores/authStore';
 
-import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 const ROW_HEIGHT = 28;
 const LANE_WIDTH = 24;
 const GRAPH_PAD = 8;
@@ -1112,45 +1109,6 @@ export function HistoryPage() {
             >
               Merges
             </button>
-            {/* Smart Views presets (SmartGit Manual) — "Recent" is a DATE preset:
-                it must not pollute the author filter (a 'recent' author filter
-                would hide every commit). Active state derives from dateFrom. */}
-            <button
-              className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
-                recentActive ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
-              onClick={() => {
-                if (recentActive) {
-                  setRecentActive(false);
-                  setDateFrom('');
-                } else {
-                  setRecentActive(true);
-                  // Last 7 days
-                  const d = new Date();
-                  d.setDate(d.getDate() - 7);
-                  setDateFrom(d.toISOString().slice(0, 10));
-                }
-              }}
-              title="Show commits from the last 7 days"
-            >
-              Recent
-            </button>
-            {/* SmartGit Log groups — Stashes and Recyclable Commits */}
-            <button
-              className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1',
-                showStashes ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
-              onClick={() => setShowStashes(!showStashes)}
-              title="Toggle the Stashes group (SmartGit Log)"
-            >
-              <Package size={9} /> Stashes{stashes.length > 0 ? ` (${stashes.length})` : ''}
-            </button>
-            <button
-              className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1',
-                showRecyclable ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
-              onClick={() => setShowRecyclable(!showRecyclable)}
-              title="Toggle the Recyclable Commits group (unreachable reflog commits)"
-            >
-              <RotateCcw size={9} /> Recyclable{recyclable.length > 0 ? ` (${recyclable.length})` : ''}
-            </button>
           </div>
           <button className={cn('icon-btn !w-5 !h-5', showGraph && 'active')}
             title="Toggle graph" onClick={() => setShowGraph(!showGraph)}>
@@ -1275,87 +1233,6 @@ export function HistoryPage() {
           )}
         </div>
       )}
-
-      {/* SmartGit Log groups — Stashes + Recyclable Commits.
-          Rendered OUTSIDE the virtualized graph list (its scrollTop-based
-          windowing has no knowledge of these rows). */}
-      {(showStashes && stashes.length > 0) || (showRecyclable && recyclable.length > 0) ? (
-        <div className="border-b border-border-default bg-bg-secondary flex-shrink-0">
-          {showStashes && stashes.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 px-3 py-1 text-2xs font-bold uppercase text-text-secondary bg-bg-tertiary border-b border-border-subtle">
-                <Package size={10} /> Stashes ({stashes.length})
-              </div>
-              <div className="max-h-40 overflow-y-auto">
-                {stashes.map((s) => (
-                  <div
-                    key={`hs-${s.index}`}
-                    className="group flex items-center gap-2 px-3 py-1 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
-                    onClick={() => handleShowCommit(s.hash)}
-                    title="Click: highlight in graph · Apply/Pop/Drop on the right"
-                  >
-                    <Package size={11} className="text-text-tertiary flex-shrink-0" />
-                    <span className="text-text-secondary font-mono text-2xs flex-shrink-0">stash@{'{'}{s.index}{'}'}</span>
-                    <span className="flex-1 truncate text-text-primary">{s.message}</span>
-                    <span className="text-2xs text-text-tertiary flex-shrink-0">{s.date ? formatDate(s.date) : ''}</span>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
-                      <button className="icon-btn !w-5 !h-5" title="Apply (keep stash)" onClick={(e) => { e.stopPropagation(); handleStashApply(s); }}>
-                        <Check size={11} />
-                      </button>
-                      <button className="icon-btn !w-5 !h-5" title="Pop (apply + drop)" onClick={(e) => { e.stopPropagation(); handleStashPop(s); }}>
-                        <CornerDownRight size={11} />
-                      </button>
-                      <button className="icon-btn !w-5 !h-5 hover:!text-status-deleted" title="Drop" onClick={(e) => { e.stopPropagation(); handleStashDrop(s); }}>
-                        <Trash size={11} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {showRecyclable && recyclable.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 px-3 py-1 text-2xs font-bold uppercase text-text-secondary bg-bg-tertiary border-b border-border-subtle">
-                <RotateCcw size={10} /> Recyclable Commits ({recyclable.length})
-                <span className="normal-case font-normal text-text-tertiary">— unreachable, eligible for GC</span>
-              </div>
-              <div className="max-h-40 overflow-y-auto">
-                {recyclable.map((c) => (
-                  <div
-                    key={`hr-${c.hash}`}
-                    className="group flex items-center gap-2 px-3 py-1 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
-                    onClick={() => handleShowCommit(c.hash)}
-                    title="Click: highlight in graph · Cherry-pick / recover on the right"
-                  >
-                    <RotateCcw size={11} className="text-status-modified flex-shrink-0" />
-                    <CommitHashLink hash={c.hash} short className="font-mono text-accent shrink-0" />
-                    <span className="flex-1 truncate text-text-primary">{c.subject}</span>
-                    <span className="text-2xs text-text-tertiary font-mono shrink-0" title={c.source}>{c.source}</span>
-                    <span className="text-2xs text-text-tertiary shrink-0">{formatDate(c.date)}</span>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
-                      <button
-                        className="icon-btn !w-5 !h-5"
-                        title="Cherry-pick onto the current branch"
-                        onClick={(e) => { e.stopPropagation(); void handleCherryPick(c); }}
-                        disabled={cpBusyHash === c.hash}
-                      >
-                        <CornerDownRight size={11} />
-                      </button>
-                      <button className="icon-btn !w-5 !h-5" title="Create branch at this commit (recover)" onClick={(e) => { e.stopPropagation(); void handleRecyclableBranch(c); }}>
-                        <GitBranch size={11} />
-                      </button>
-                      <button className="icon-btn !w-5 !h-5" title="Copy hash" onClick={(e) => { e.stopPropagation(); copyToClipboard(c.hash); toast.success('Copied'); }}>
-                        <Copy size={10} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      ) : null}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Graph + Commit list */}
