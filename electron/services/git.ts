@@ -274,7 +274,7 @@ export async function commit(
   if (noVerify) args.push('--no-verify');
   const output = await git.raw(args);
   // Extract commit hash from output: "[main abc1234] message"
-  const match = output.match(/\[([a-z0-9_-]+)\s+([a-f0-9]{7,40})\]/);
+  const match = output.match(/\[([a-z0-9_-]+)(?:\s+\(root-commit\))?\s+([a-f0-9]{7,40})\]/);
   return match ? match[2] : '';
 }
 
@@ -1065,7 +1065,12 @@ export async function aheadBehind(
   const git = getGit(repoPath);
   try {
     const out = await git.raw(['rev-list', '--left-right', '--count', `${base}...${compare}`]);
-    // Output: "<behind>\t<ahead>"  (left = base, right = compare)
+    // Output: "<left> <right>" — left = commits only in `base`, right = commits
+    // only in `compare`. Contract (see gitService.real tests): `ahead` counts
+    // commits only in `compare` ("compare is ahead of base"), `behind` counts
+    // commits only in `base`. BranchesPage compare dialog and MergePanel both
+    // rely on this. NOTE: smartPull() parses the same command inline with the
+    // OPPOSITE orientation (HEAD first = left = local ahead) — do not "unify".
     const [behind, ahead] = out.trim().split(/\s+/).map(n => parseInt(n, 10) || 0);
     return { ahead, behind };
   } catch {
@@ -2149,7 +2154,10 @@ export async function submodules(repoPath: string): Promise<SubmoduleInfo[]> {
     }
     try {
       trackedCommit = await git.raw(['submodule', 'status', subPath]);
-      trackedCommit = trackedCommit.trim().split(' ')[1] || '';
+      // Format: "<prefix><hash> <path> (<describe>)" — prefix is ' '/+/-/U.
+      // The old code took token [1] (the PATH) instead of the hash.
+      const statusToken = trackedCommit.trim().split(/\s+/)[0] || '';
+      trackedCommit = statusToken.replace(/^[+\-U]/, '');
     } catch {
       /* ignore */
     }
@@ -2692,36 +2700,51 @@ export async function editCommitMessage(
     const os = await import('os');
 
     // Get the list of commits from hash^..HEAD
-    const revList = await git.raw(['rev-list', '--reverse', `${hash}^..HEAD`]);
-    const commits = revList.trim().split('\n').filter(Boolean);
+    // `${hash}^..HEAD` breaks when hash is the ROOT commit ("invalid upstream").
+    // List commits after hash and prepend hash itself — root-safe.
+    const revList = await git.raw(['rev-list', '--reverse', `${hash}..HEAD`]);
+    const commits = [hash, ...revList.trim().split('\n').filter(Boolean)];
     if (commits.length === 0) return;
 
-    // Build the todo file: 'reword' for target, 'pick' for all others
-    const todoLines = commits.map(oid => {
-      if (oid === hash) return `reword ${oid}`;
-      return `pick ${oid}`;
-    });
-    const todoContent = todoLines.join('\n') + '\n';
-    const todoPath = path.join(os.tmpdir(), `prismgit-reword-todo-${Date.now()}.txt`);
-    fs.writeFileSync(todoPath, todoContent, 'utf8');
-
-    // Write the new commit message to a file — GIT_EDITOR will copy it
+    // Non-HEAD reword via interactive rebase. We deliberately do NOT use the
+    // 'reword' todo action: git 2.4x fails `rebase -i --root` with 'reword'
+    // (the sequence editor gets ENOTDIR on .git/rebase-merge). The pick +
+    // exec-amend pattern (same as squashCommits) is root-safe and keeps the
+    // full multi-line message via -F <file>.
     const msgPath = path.join(os.tmpdir(), `prismgit-reword-msg-${Date.now()}.txt`);
     fs.writeFileSync(msgPath, message, 'utf8');
 
-    // The sequence editor replaces the auto-generated todo with our version
-    const seqEditorScript = `cp ${todoPath} "$1"`;
-    // The commit message editor replaces the commit message with our version
-    const msgEditorScript = `cp ${msgPath} "$1"`;
+    // The sequence editor (core.editor for rebase) replaces the generated todo
+    const editorScript = path.join(repoPath, '.git', 'prismgit-seq-editor.sh');
+    const todoLines = commits.map(oid => `pick ${oid}`);
+    todoLines.splice(commits.indexOf(hash) + 1, 0,
+      `exec git commit --amend --no-verify -F "${msgPath}"`);
+    fs.writeFileSync(
+      editorScript,
+      `#!/bin/sh\ncat > "$1" <<'PRISM_TODO_EOF'\n${todoLines.join('\n')}\nPRISM_TODO_EOF\n`,
+      { mode: 0o755 },
+    );
 
     try {
-      await git.raw([
-        '-c', `sequence.editor=${seqEditorScript}`,
-        '-c', `core.editor=${msgEditorScript}`,
-        'rebase', '-i', `${hash}^`,
-      ]);
+      // simple-git blocks `-c core.editor` on the default instance — the
+      // non-HEAD reword path silently always failed. An unsafe instance is
+      // required for interactive-rebase automation.
+      const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } });
+      // Rewording the ROOT commit: rebase needs --root there (same parent-
+      // counting probe as squashCommits — rev-parse --quiet never throws).
+      let rootCase = false;
+      try {
+        const parentsOut = await git.raw(['rev-list', '--parents', '-n', '1', hash]);
+        rootCase = parentsOut.trim().split(/\s+/).length < 2;
+      } catch {
+        rootCase = false;
+      }
+      const rebaseArgs = ['-c', `core.editor=${editorScript}`, 'rebase', '-i'];
+      if (rootCase) rebaseArgs.push('--root');
+      else rebaseArgs.push(`${hash}^`);
+      await gitUnsafe.raw(rebaseArgs);
     } finally {
-      try { fs.unlinkSync(todoPath); } catch { /* ignore */ }
+      try { fs.unlinkSync(editorScript); } catch { /* ignore */ }
       try { fs.unlinkSync(msgPath); } catch { /* ignore */ }
     }
   }
@@ -4303,11 +4326,19 @@ export async function pushToGerrit(
     }
   }
   const ref = options?.draft ? `refs/drafts/${targetBranch}` : `refs/for/${targetBranch}`;
-  const args = [...(await remoteNetworkArgs(repoPath, remote, true)), 'push', remote, ref];
-  if (options?.topic) args.push(`topic=${options.topic}`);
+  // A bare magic ref ("git push origin refs/for/main") means "push the LOCAL
+  // refs/for/main branch" — which never exists, so the push always failed with
+  // "src refspec refs/for/... does not match any". Gerrit needs HEAD:magic-ref,
+  // and topic/reviewers must ride the refspec as '%'-options (not extra args,
+  // which git parses as additional refspecs).
+  let refspec = `HEAD:${ref}`;
+  const gerritOpts: string[] = [];
+  if (options?.topic) gerritOpts.push(`topic=${options.topic}`);
   if (options?.reviewers && options.reviewers.length) {
-    for (const r of options.reviewers) args.push(`r=${r}`);
+    for (const r of options.reviewers) gerritOpts.push(`r=${r}`);
   }
+  if (gerritOpts.length) refspec += '%' + gerritOpts.join(',');
+  const args = [...(await remoteNetworkArgs(repoPath, remote, true)), 'push', remote, refspec];
   return git.raw(args);
 }
 
@@ -4330,14 +4361,15 @@ export async function clonePartial(
 
 /** Set up PrismGit as credential helper for the cloned repo */
 export async function setupCredentialHelper(repoPath: string): Promise<void> {
-  const git = getGit(repoPath);
+  // simple-git BLOCKS configuring credential.helper on the default instance
+  // ("Configuring credential.helper is not permitted without enabling
+  // allowUnsafeCredentialHelper") — the old code swallowed that error, so this
+  // function silently did nothing. Use an unsafe instance and actually set it.
+  const git = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeCredentialHelper: true } });
   try {
-    await git.raw(['config', '--local', 'credential.helper', '']);
-    // We don't actually have a real credential helper here, so leave it as a config note.
-    // The intent is: future PrismGit installs a credential helper that this enables.
-    await git.addConfig('credential.helper', 'store', false /* local */);
+    await git.addConfig('credential.helper', 'store', false /* replace-all */, 'local');
   } catch {
-    /* ignore */
+    /* ignore — best effort */
   }
 }
 
@@ -4372,9 +4404,21 @@ export async function blameBidirectional(
     /* ignore */
   }
 
-  // For each line in past blame, find future commits (timestamp > blame commit's timestamp) that touched this file
+  // For each line in past blame, find future commits (timestamp > blame commit's timestamp) that touched this file.
+  // blame --porcelain reports author-time as raw UNIX SECONDS ('1704067201');
+  // Date.parse on a plain number string parses it as a YEAR (~5.4e13), so every
+  // comparison failed and futureLines was ALWAYS empty. Handle both forms.
+  const pastTime = (v: string): number => {
+    const trimmed = (v || '').trim();
+    if (trimmed && !/^\d+$/.test(trimmed)) {
+      const t = Date.parse(trimmed);
+      if (!Number.isNaN(t)) return t;
+    }
+    const secs = parseInt(trimmed, 10);
+    return Number.isNaN(secs) ? 0 : secs * 1000;
+  };
   for (const line of past.lines) {
-    const lineCommitTimestamp = Date.parse(line.authorTime);
+    const lineCommitTimestamp = pastTime(line.authorTime);
     const futureCommits = commits
       .filter(c => c.timestamp > lineCommitTimestamp)
       .map(c => ({ hash: c.hash, subject: c.subject, date: c.date }))
@@ -4395,13 +4439,17 @@ export async function pickaxeSearch(
   options?: { regex?: boolean; ignoreCase?: boolean }
 ): Promise<{ hash: string; subject: string; date: string; lineNumbers: number[] }[]> {
   const git = getGit(repoPath);
-  const args = ['log', '-S', search, '--format=%H%x1f%s%x1f%cI', '--follow', '--', file];
+  // Options must come BEFORE the "--" pathspec: pushing -i after "--" made git
+  // read it as a pathspec (always-empty results), and the old regex splice
+  // produced ["-S", "-G", search] (invalid). Build the argv cleanly instead.
+  const args = ['log', '-S', search];
   if (options?.regex) {
-    args.splice(2, 1, '-G', search);
+    args[1] = '-G';
   }
   if (options?.ignoreCase) {
     args.push('-i');
   }
+  args.push('--format=%H%x1f%s%x1f%cI', '--follow', '--', file);
   try {
     const out = await git.raw(args);
     if (!out.trim()) return [];
@@ -4473,23 +4521,64 @@ export async function squashCommits(
   message?: string
 ): Promise<void> {
   const git = getGit(repoPath);
-  // Get list of commits from fromHash..toHash (oldest first)
-  const list = await git.raw(['rev-list', '--reverse', `${fromHash}^..${toHash}`]);
-  const hashes = list.trim().split('\n').filter(Boolean);
-  if (hashes.length < 2) return;
-  // Create a sequence editor that turns all but the first into fixup
-  const editorScript = path.join(repoPath, '.git', 'prismgit-seq-editor.sh');
+  // Commits to squash: everything reachable from toHash but not from fromHash,
+  // plus fromHash itself. `^fromHash` (instead of `fromHash^..toHash`) also
+  // works when fromHash is the ROOT commit.
+  const afterFrom = await git.raw(['rev-list', '--reverse', toHash, `^${fromHash}`]);
+  const squashList = [fromHash, ...afterFrom.split('\n').filter(Boolean)];
+  if (squashList.length < 2) return;
+
+  // The sequence editor REPLACES the whole todo file, so the todo must cover
+  // fromHash..HEAD — otherwise every commit after toHash would be silently
+  // DROPPED from the branch (data loss; the old code listed only from..to).
+  const tailRaw = await git.raw(['rev-list', '--reverse', 'HEAD', `^${fromHash}`]);
+  const allAfter = [fromHash, ...tailRaw.split('\n').filter(Boolean)];
+
+  // Inline "pick <hash> <msg>" messages are ignored by rebase; a custom
+  // message is applied with an exec-amend right after the fixup group.
+  const safeMessage = (message ?? '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/"/g, '\\"')
+    .trim();
+
   const lines: string[] = [];
-  hashes.forEach((h, i) => {
-    if (i === 0) {
-      lines.push(`pick ${h} ${message || 'squashed'}`);
-    } else {
-      lines.push(`fixup ${h}`);
-    }
+  allAfter.forEach((h, i) => {
+    if (i === 0) lines.push(`pick ${h}`);
+    else if (i < squashList.length) lines.push(`fixup ${h}`);
+    else lines.push(`pick ${h}`);
   });
-  fs.writeFileSync(editorScript, `#!/bin/sh\necho '${lines.join('\\n')}' > "$1"\n`, { mode: 0o755 });
+  if (safeMessage) {
+    lines.splice(squashList.length, 0, `exec git commit --amend --no-verify -m "${safeMessage}"`);
+  }
+
+  // Heredoc instead of echo: no shell escape ambiguity for the todo lines.
+  const editorScript = path.join(repoPath, '.git', 'prismgit-seq-editor.sh');
+  fs.writeFileSync(
+    editorScript,
+    `#!/bin/sh\ncat > "$1" <<'PRISM_TODO_EOF'\n${lines.join('\n')}\nPRISM_TODO_EOF\n`,
+    { mode: 0o755 },
+  );
   try {
-    await git.raw(['-c', 'core.editor=' + editorScript, 'rebase', '-i', `${fromHash}^`]);
+    // simple-git blocks `-c core.editor` on the default instance (the same
+    // pitfall splitCommit documents) — an unsafe instance is MANDATORY here,
+    // otherwise the rebase always fails with "Configuring core.editor is not
+    // permitted without enabling allowUnsafeEditor".
+    const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } });
+    // fromHash may be the ROOT commit — rebase needs --root there. NOTE: a
+    // `rev-parse --verify --quiet <hash>^` probe does NOT work: it exits 1
+    // with EMPTY output and simple-git resolves that (no stderr → no throw).
+    // Count parents instead — deterministic for root and normal commits.
+    let rootCase = false;
+    try {
+      const parentsOut = await git.raw(['rev-list', '--parents', '-n', '1', fromHash]);
+      rootCase = parentsOut.trim().split(/\s+/).length < 2;
+    } catch {
+      rootCase = false;
+    }
+    const rebaseArgs = ['-c', `core.editor=${editorScript}`, 'rebase', '-i'];
+    if (rootCase) rebaseArgs.push('--root');
+    else rebaseArgs.push(`${fromHash}^`);
+    await gitUnsafe.raw(rebaseArgs);
   } finally {
     try { fs.unlinkSync(editorScript); } catch { /* ignore */ }
   }
@@ -4501,13 +4590,17 @@ export async function coalesceCommits(
   firstHash: string,
   secondHash: string
 ): Promise<void> {
-  // Find which is older
   const git = getGit(repoPath);
-  const order = await git.raw(['rev-list', '--reverse', '--format=%H', `${firstHash}~1..${secondHash}`]);
-  const hashes = order.trim().split('\n').filter(l => l.startsWith('commit ')).map(l => l.substring(7));
-  if (hashes.length < 2) return;
-  const older = hashes[0];
-  const newer = hashes[hashes.length - 1];
+  // Accept any argument order — determine which commit is the older one.
+  // (`rev-list first~1..second` broke when first was the ROOT commit.)
+  let older = firstHash;
+  let newer = secondHash;
+  try {
+    await git.raw(['merge-base', '--is-ancestor', firstHash, secondHash]);
+  } catch {
+    older = secondHash;
+    newer = firstHash;
+  }
   // Squash with combined message
   const messages: string[] = [];
   for (const h of [older, newer]) {
@@ -4587,14 +4680,18 @@ export async function smartPull(
   } catch {
     /* ignore fetch errors */
   }
-  // Check ahead/behind
+  // Check ahead/behind. `rev-list --left-right --count HEAD...remote` prints
+  // "<left> <right>": left = commits only in HEAD (LOCAL, ahead), right =
+  // commits only on the remote (behind). The old code read them swapped, which
+  // made smartPull REBASE a clean behind-repo (should reset) and — far worse —
+  // RESET --hard a repo that was only AHEAD, silently dropping local commits.
   const remoteRef = `${remote}/${targetBranch}`;
   let ahead = 0, behind = 0;
   try {
     const counts = await git.raw(['rev-list', '--left-right', '--count', `HEAD...${remoteRef}`]);
     const parts = counts.trim().split(/\s+/);
-    behind = parseInt(parts[0] || '0', 10) || 0;
-    ahead = parseInt(parts[1] || '0', 10) || 0;
+    ahead = parseInt(parts[0] || '0', 10) || 0;   // left = HEAD side = local
+    behind = parseInt(parts[1] || '0', 10) || 0;  // right = remote side
   } catch {
     // Remote ref may not exist — fall back to regular pull
     await pull(repoPath, remote, targetBranch, true);
@@ -4783,10 +4880,10 @@ export async function commitSigned(
     args.push('-S');
   }
   if (options.noVerify) args.push('--no-verify');
-  const result = await git.raw(args);
-  // Extract commit hash from output
-  const hashMatch = result.match(/\[([a-f0-9]{7,40})\]/);
-  return hashMatch ? hashMatch[1] : '';
+  await git.raw(args);
+  // Commit output ("[main abc1234] msg") has the branch name inside the
+  // brackets, so a bracket-regex never matches — read HEAD instead.
+  return (await git.revparse(['HEAD'])).trim();
 }
 
 /**
