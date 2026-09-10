@@ -7,8 +7,8 @@ import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToolbarStore, DEFAULT_TOOLBAR_GROUPS, type ToolbarGroups, type ToolbarGroupKey } from '../stores/toolbarStore';
 import { useToastStore } from '../stores/toastStore';
+import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Minus, Moon, Package, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Tag as TagIcon, Trash, X } from './icons';
 
@@ -543,24 +543,26 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
 
   return (
     <div className="relative">
-      <button
-        className="flex items-center gap-1.5 px-3 h-8 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
-        style={{ color: '#86b300' }}
-        onClick={() => doPush()}
-        disabled={disabled || remotes.length === 0}
-        title={remotes.length === 0 ? 'No remotes configured — add one on the Remotes page' : `Push current branch to ${defaultRemote}`}
-      >
-        <ArrowUp size={14} />
-        <span className="hidden md:inline">Push</span>
-      </button>
-      <button
-        className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
-        onClick={() => setOpen(!open)}
-        disabled={disabled}
-        title="Push options — select remote, branch, force push, tags"
-      >
-        <ChevronDown size={12} />
-      </button>
+      <div className="flex items-center">
+        <button
+          className="flex items-center gap-1.5 px-3 h-8 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
+          style={{ color: '#86b300' }}
+          onClick={() => doPush()}
+          disabled={disabled || remotes.length === 0}
+          title={remotes.length === 0 ? 'No remotes configured — add one on the Remotes page' : `Push current branch to ${defaultRemote}`}
+        >
+          <ArrowUp size={14} />
+          <span className="hidden md:inline">Push</span>
+        </button>
+        <button
+          className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
+          onClick={() => setOpen(!open)}
+          disabled={disabled}
+          title="Push options — select remote, branch, force push, tags"
+        >
+          <ChevronDown size={12} />
+        </button>
+      </div>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
