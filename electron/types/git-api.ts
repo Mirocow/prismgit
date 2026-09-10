@@ -35,6 +35,14 @@ export interface StatusResult {
   isBisecting: boolean;
   /** Present ONLY while a cherry-pick is in progress (SmartGit: "cherry-picking-state"). */
   cherryPick?: { commit: string; subject: string; /** pick has nothing to commit — needs Skip or Commit Empty */ empty: boolean };
+  /** Present ONLY while a revert is in progress (REVERT_HEAD). */
+  revert?: { commit: string; subject: string };
+  /** Present ONLY while a merge is in progress (MERGE_HEAD / MERGE_MSG). */
+  merge?: { message: string };
+  /** Present ONLY while a rebase is in progress (rebase-merge / rebase-apply). */
+  rebase?: { step?: number; total?: number };
+  /** Present ONLY while bisecting (HEAD detached at the current candidate). */
+  bisect?: { rev: string };
   detached: boolean;
 }
 

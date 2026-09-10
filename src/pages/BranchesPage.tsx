@@ -22,6 +22,7 @@ import {
 } from '../components/BranchDialogs';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
 import { describePushResult } from '../lib/pushResult';
+import { getRepoInProgressState } from '../lib/repoState';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function BranchesPage() {
@@ -33,25 +34,22 @@ export function BranchesPage() {
   const isInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
   const toast = useToastStore();
 
-  // SmartGit: while a cherry-pick is in progress the branch is "detached from
-  // its remote" — the picked commit exists only locally. Pull and Checkout
-  // (and other HEAD-movers) would DISCARD the pick, so they are blocked until
-  // the user finishes it on the Changes page (Continue / Skip / Abort).
-  const cherryPicking = !!status?.isCherryPicking;
-  // All sequencer states (merge / rebase / cherry-pick / revert) block
-  // branch-switching operations — git would refuse anyway, and switching
-  // mid-sequence would lose the in-progress state. Bisect is allowed (it
-  // doesn't touch the working tree in a way that conflicts).
-  const sequencerInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
-  const blockedByCherryPick = (): boolean => {
-    if (!sequencerInProgress) return false;
-    const state = status?.isMerging ? 'merging' : status?.isRebasing ? 'rebasing' : status?.isCherryPicking ? 'cherry-picking' : 'reverting';
+  // SmartGit: while a sequencer state (cherry-pick / revert / merge / rebase /
+  // bisect) is in progress the branch is effectively "detached from its remote"
+  // — the unfinished operation exists only locally. Pull and Checkout (and
+  // other HEAD-movers) would DISCARD it, so they are blocked until the user
+  // finishes it on the Changes page (Continue / Skip / Abort / Reset).
+  const repoState = getRepoInProgressState(status);
+  const blockedByRepoState = (): boolean => {
+    if (!repoState) return false;
     toast.error(
-      `${state.charAt(0).toUpperCase() + state.slice(1)} in progress`,
-      `Finish it first on the Changes page (Continue / Skip / Abort) — this operation would lead to loss of the in-progress state.`
+      repoState.blockedTitle,
+      repoState.blockedHint
     );
     return true;
   };
+  // Back-compat alias used by the operation guards below.
+  const blockedByCherryPick = blockedByRepoState;
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -1131,16 +1129,16 @@ export function BranchesPage() {
               </span>
             )}
             {b.tracking && <span className="text-2xs text-text-tertiary">→ {b.tracking}</span>}
-            {/* SmartGit: show cherry-picking state explicitly on the branch —
-                the pick is not committed yet, so the branch is effectively
-                detached from its remote until the pick is finished. */}
-            {b.current && cherryPicking && (
+            {/* SmartGit: show the in-progress state explicitly on the branch —
+                the unfinished operation is not committed yet, so the branch is
+                effectively detached from its remote until it is finished. */}
+            {b.current && repoState && (
               <span
-                data-testid="cherry-pick-badge"
+                data-testid="repo-state-badge"
                 className="text-2xs px-1 py-0.5 rounded bg-status-conflict/15 text-status-conflict border border-status-conflict/40 flex items-center gap-0.5 font-medium flex-shrink-0"
-                title={`Cherry-picking ${status?.cherryPick?.commit ? shortHash(status.cherryPick.commit) : ''} — not yet committed, detached from remote. Pull and Checkout would lead to loss of commits. Finish the pick on the Changes page (Continue/Skip/Abort).`}
+                title={`${repoState.bannerText} Not yet committed, detached from remote. Pull and Checkout would lead to loss of commits. Finish it on the Changes page.`}
               >
-                ⚠ cherry-picking
+                ⚠ {repoState.badge}
               </span>
             )}
             {/* "gone" — upstream branch was deleted on the remote. Pull would
@@ -1556,23 +1554,25 @@ export function BranchesPage() {
       </div>
 
       {/* In-progress warning banner — explains why checkout / push are blocked
-          and points to the floating SequencerPanel/MergePanel/RebasePanel at
-          the bottom of the screen for Continue / Skip / Abort actions. */}
-      {isInProgress && (
+          and points to the Changes page banner for Continue / Skip / Abort.
+          Covers ALL five states (incl. bisect) via repoState. */}
+      {repoState && (
         <div className="px-3 py-1.5 border-b border-status-warning/40 bg-status-warning/10 flex items-center gap-2">
           <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
           <span className="text-2xs text-status-warning font-medium">
-            Working tree is in {status?.isMerging ? 'merging' : status?.isRebasing ? 'rebasing' : status?.isCherryPicking ? 'cherry-picking' : 'reverting'} state.
+            {repoState.bannerText}
           </span>
           <span className="text-2xs text-text-tertiary">
-            Checkout, Push, Pull, and Discard are blocked. Use the banner below to Continue, Skip, or Abort. Fetch / Fetch All are still allowed.
+            {repoState.key === 'cherry-picking' && status?.cherryPick?.commit && <>picking {shortHash(status.cherryPick.commit)}{status.cherryPick.subject ? ` “${status.cherryPick.subject}”` : null}. </>}
+            {repoState.key === 'reverting' && status?.revert?.commit && <>reverting {shortHash(status.revert.commit)}{status.revert.subject ? ` “${status.revert.subject}”` : null}. </>}
+            Checkout, Push, Pull and Discard are blocked. Finish it on the Changes page (Continue / Skip / Abort / Reset). Fetch / Fetch All are still allowed.
           </span>
         </div>
       )}
       {/* Detached HEAD warning — HEAD points at a commit, not a branch.
           Commits made here are not on any branch and will become Recyclable
           when HEAD moves. Surface this prominently. */}
-      {status?.detached && !isInProgress && (
+      {status?.detached && !repoState && (
         <div className="px-3 py-1.5 border-b border-status-warning/40 bg-status-warning/10 flex items-center gap-2">
           <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
           <span className="text-2xs text-status-warning font-medium">
@@ -1586,19 +1586,6 @@ export function BranchesPage() {
 
       {/* Branch list */}
       <div className="flex-1 overflow-y-auto">
-        {/* SmartGit: explicit repo-level cherry-picking warning — Pull/Checkout blocked */}
-        {cherryPicking && (
-          <div
-            data-testid="cherry-pick-warning"
-            className="flex items-center gap-2 px-3 py-1.5 border-b border-status-conflict/40 bg-status-conflict/10 text-2xs text-status-conflict"
-          >
-            <span className="font-medium">Cherry-pick in progress</span>
-            <span className="text-text-secondary">
-              {status?.cherryPick?.commit && <>— picking <code className="font-mono">{shortHash(status.cherryPick.commit)}</code>{status.cherryPick.subject ? ` “${status.cherryPick.subject}”` : null}. </>}
-              The current branch is detached from its remote until the pick is finished: Pull and Checkout would lead to loss of commits. Finish it on the Changes page — Continue, Skip or Abort.
-            </span>
-          </div>
-        )}
         {loading ? (
           <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
         ) : filtered.length === 0 && filteredTags.length === 0 && filteredStashes.length === 0 ? (

@@ -201,6 +201,7 @@ export async function status(repoPath: string): Promise<StatusResult> {
   const git = getGit(repoPath);
   const s = await git.status();
   const state = await detectRepoState(repoPath, git);
+  const gitDir = await resolveGitDir(repoPath, git);
   // Cherry-pick details — which commit is being picked and whether the pick has
   // become EMPTY (its changes are already applied to HEAD, so there is nothing
   // to commit). SmartGit surfaces this as "The working tree is in
@@ -222,6 +223,69 @@ export async function status(repoPath: string): Promise<StatusResult> {
       /* CHERRY_PICK_HEAD may point to a pruned object mid-cleanup */
     }
     cherryPick = { commit, subject, empty };
+  }
+  // Revert state details — which commit is being undone (REVERT_HEAD).
+  let revert: StatusResult['revert'];
+  if (state.isReverting) {
+    let commit = '';
+    let subject = '';
+    try {
+      const out = await git.raw(['log', '-1', '--format=%H%x1f%s', 'REVERT_HEAD']);
+      const [h, sub] = out.trim().split('\x1f');
+      commit = h || '';
+      subject = sub || '';
+    } catch {
+      /* REVERT_HEAD may point to a pruned object mid-cleanup */
+    }
+    revert = { commit, subject };
+  }
+  // Merge state details — the subject of the merge (MERGE_MSG first line).
+  let merge: StatusResult['merge'];
+  if (state.isMerging) {
+    let message = '';
+    try {
+      const msgPath = path.join(gitDir, 'MERGE_MSG');
+      if (fs.existsSync(msgPath)) {
+        message = (fs.readFileSync(msgPath, 'utf8').split('\n')[0] || '').trim();
+      }
+    } catch {
+      /* ignore unreadable MERGE_MSG */
+    }
+    merge = { message };
+  }
+  // Rebase state details — progress ("step/total") from the sequencer dirs.
+  let rebase: StatusResult['rebase'];
+  if (state.isRebasing) {
+    let step: number | undefined;
+    let total: number | undefined;
+    try {
+      const readNum = async (file: string): Promise<number | undefined> => {
+        for (const dir of ['rebase-merge', 'rebase-apply']) {
+          const p = path.join(gitDir, dir, file);
+          if (fs.existsSync(p)) {
+            const n = parseInt((await fs.promises.readFile(p, 'utf8')).trim(), 10);
+            if (!Number.isNaN(n)) return n;
+          }
+        }
+        return undefined;
+      };
+      step = await readNum('msgnum');
+      total = await readNum('end');
+    } catch {
+      /* best-effort progress info */
+    }
+    rebase = { step, total };
+  }
+  // Bisect state details — HEAD is detached at the current candidate.
+  let bisect: StatusResult['bisect'];
+  if (state.isBisecting) {
+    let rev = '';
+    try {
+      rev = (await git.raw(['rev-parse', 'HEAD'])).trim();
+    } catch {
+      /* ignore */
+    }
+    bisect = { rev };
   }
   return {
     not_added: s.not_added,
@@ -250,6 +314,10 @@ export async function status(repoPath: string): Promise<StatusResult> {
     isReverting: state.isReverting,
     isBisecting: state.isBisecting,
     cherryPick,
+    revert,
+    merge,
+    rebase,
+    bisect,
     detached: !s.current && s.files.length === 0 && !s.tracking,
   };
 }
@@ -2582,18 +2650,18 @@ export async function revertAbort(repoPath: string): Promise<void> {
   await git.raw(['revert', '--abort']);
 }
 
-export async function revertContinue(repoPath: string): Promise<void> {
-  const git = getGit(repoPath);
-  await git.raw(['revert', '--continue', '--no-edit']);
-}
-
 /**
- * Skip the current commit in a revert sequence.
- * Same use case as cherryPickSkip — when a revert produces an empty commit.
+ * Skip the current revert step (`git revert --skip`) — drops the
+ * empty/conflicted step and continues with the next one in a sequence.
  */
 export async function revertSkip(repoPath: string): Promise<void> {
   const git = getGit(repoPath);
   await git.raw(['revert', '--skip']);
+}
+
+export async function revertContinue(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['revert', '--continue', '--no-edit']);
 }
 
 export async function rebase(

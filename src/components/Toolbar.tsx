@@ -11,6 +11,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
+import { getRepoInProgressState, isRepoBusy } from '../lib/repoState';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
@@ -147,8 +148,9 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
     catch (e) { toast.error('Failed to reveal in file manager', String(e)); }
   };
 
-  const isInProgress = status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting;
-  const isBisecting = status?.isBisecting;
+  // SmartGit: while a sequencer state (merge/rebase/cherry-pick/revert/bisect)
+  // is active, Pull is NOT allowed — only Fetch / Fetch All stay available.
+  // The reaction lives in PullDropdown/GitToolbar below via lib/repoState.
 
   // Compact icon-only button
   const IconButton = ({ icon: Icon, onClick, disabled, title }: {
@@ -589,7 +591,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
  * open), and where a freshly added remote (nothing fetched) left an EMPTY
  * branch dropdown with no way to pull from it at all.
  */
-function PullDropdown({ disabled }: { disabled: boolean }) {
+function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason Pull is blocked (in-progress repo state) — undefined when allowed */ pullBlocked?: string }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -660,6 +662,14 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
 
   const doPull = async () => {
     if (!currentRepo) return;
+    // SmartGit: Pull would merge/rebase over an in-progress state (merge,
+    // rebase, cherry-pick, revert, bisect) and discard it — blocked. Fetch /
+    // Fetch All remain available (they never touch the working tree).
+    if (pullBlocked) {
+      toast.error('Pull is not available now', pullBlocked);
+      setOpen(false);
+      return;
+    }
     if (!selectedBranch) {
       toast.warning(
         'Nothing to pull from',
@@ -711,8 +721,12 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
           className="flex items-center gap-1.5 px-3 h-8 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
           style={{ color: '#399ee6' }}
           onClick={() => doPull()}
-          disabled={disabled}
-          title={pullTarget ? `Pull ${pullTarget} into the current branch` : 'Pull — no remote branches available'}
+          disabled={disabled || !!pullBlocked}
+          title={pullBlocked
+            ? `Pull is blocked — ${pullBlocked}`
+            : pullTarget
+              ? `Pull ${pullTarget} into the current branch`
+              : 'Pull — no remote branches available'}
         >
           <ArrowDown size={14} />
           <span className="hidden md:inline">Pull</span>
@@ -730,6 +744,14 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded-md shadow-lg z-50 min-w-64">
+            {/* SmartGit: during an in-progress state Pull is blocked, but the
+                menu stays reachable — Fetch / Fetch All remain available. */}
+            {pullBlocked && (
+              <div className="px-3 py-2 text-2xs bg-status-conflict/10 text-status-conflict border-b border-status-conflict/30">
+                Pull is blocked while {pullBlocked}
+                <div className="text-text-tertiary mt-0.5">Use Fetch / Fetch All — they never touch the working tree.</div>
+              </div>
+            )}
             {/* Quick actions: Fetch from / Fetch All */}
             <div className="px-3 py-2 border-b border-border-subtle flex gap-2">
               <button
@@ -836,7 +858,8 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
                   <button
                     className="btn btn-primary text-xs flex-1"
                     onClick={() => doPull()}
-                    disabled={!selectedBranch}
+                    disabled={!selectedBranch || !!pullBlocked}
+                    title={pullBlocked ? `Pull is blocked — ${pullBlocked}` : undefined}
                   >
                     <ArrowDown size={12} /> Pull{useRebase ? ' (rebase)' : ''}
                   </button>
@@ -873,10 +896,19 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   const groups = useToolbarStore((s) => s.groups);
 
   const disabled = !currentRepo;
-  // In-progress sequencer states block Pull/Push/Discard — they would conflict
+  // In-progress sequencer states block Push/Discard — they would conflict
   // with the in-progress merge/rebase/cherry-pick/revert. Fetch/Fetch All are
   // still allowed (read-only on the working tree). Bisect does NOT block.
   const isInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
+
+  // SmartGit: while a sequencer state (merge / rebase / cherry-pick / revert /
+  // bisect) is active, Pull is NOT allowed — only Fetch / Fetch All remain
+  // available (they never touch the working tree or HEAD).
+  const repoState = getRepoInProgressState(status);
+  const pullBlocked = repoState
+    ? `${repoState.pullReason} — ${repoState.blockedHint}`
+    : undefined;
+  const isBusy = isRepoBusy(status);
 
   const handlePush = async () => {
     if (!currentRepo) return;
@@ -980,8 +1012,9 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           case 'sync':
             return (
               <div key={key} className="flex items-center">
-                <PullDropdown disabled={disabled || isInProgress} />
+                <PullDropdown disabled={disabled} pullBlocked={pullBlocked} />
                 <PushDropdown disabled={disabled || isInProgress} />
+                {isBusy && <span data-testid="toolbar-state-badge" className="text-2xs text-status-conflict ml-1 flex items-center gap-1" title={repoState?.blockedHint}><AlertCircle size={11} />{repoState?.badge}</span>}
                 <Divider />
               </div>
             );

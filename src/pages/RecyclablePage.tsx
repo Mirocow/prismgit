@@ -8,6 +8,7 @@ import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { CommitHashLink } from '../components/StatusBar';
 import { useSelectionStore } from '../stores/selectionStore';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { blockedOperationToast } from '../lib/repoState';
 
 /**
  * Recyclable Commits — unreachable reflog commits that are eligible for GC.
@@ -57,6 +58,14 @@ export function RecyclablePage() {
   }, [load]);
 
   const handleCherryPick = async (hash: string) => {
+    // SmartGit: while an in-progress state is active no other HEAD-moving
+    // operation may start — it would discard the unfinished one.
+    const status = useGitStore.getState().status;
+    const blocked = blockedOperationToast(status);
+    if (blocked) {
+      toast.error(blocked.title, blocked.hint);
+      return;
+    }
     setBusyHash(hash);
     try {
       const result = await api.git.cherryPick(repo.path, [hash]);

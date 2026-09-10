@@ -7,7 +7,7 @@ import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDow
 import { LazyFileList } from '../components/LazyFileList';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
-import { CherryPickStateBanner } from '../components/CherryPickStateBanner';
+import { RepoStateBanner } from '../components/RepoStateBanner';
 import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, type LLMProvider } from '../lib/aiCommitMessages';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
@@ -15,6 +15,7 @@ import { buildFileMenu, getIndexFlagsAsync, runFileAction, type IndexFlags } fro
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { describePushResult } from '../lib/pushResult';
 import { RefBadges } from '../lib/refBadge';
+import { isCommitBlocked } from '../lib/repoState';
 import { useContextMenu } from '../lib/useContextMenu';
 import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
@@ -570,10 +571,18 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       toast.warning('Commit message is required');
       return;
     }
-    // SmartGit: while the working tree is in cherry-picking-state only
-    // Abort/Continue are allowed — a plain commit would consume the pick.
-    if (status?.isCherryPicking) {
-      toast.warning('Cherry-pick in progress', 'Finish it first: Continue, Skip or Abort in the banner above');
+    // SmartGit: while the working tree is in a sequencer state (cherry-pick /
+    // revert / rebase / bisect) only the state-resolving actions are allowed —
+    // a plain commit would consume the operation. MERGE is the exception: a
+    // plain commit is THE way to complete a (conflicted) merge.
+    if (isCommitBlocked(status)) {
+      toast.warning(
+        status?.isCherryPicking ? 'Cherry-pick in progress'
+          : status?.isReverting ? 'Revert in progress'
+          : status?.isRebasing ? 'Rebase in progress'
+          : 'Bisect in progress',
+        'Finish it first: use the buttons in the banner above'
+      );
       return;
     }
     try {
@@ -794,6 +803,126 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       'Cherry-pick Abort', 'git cherry-pick --abort',
       () => api.git.cherryPickAbort(repo.path),
       'Cherry-pick aborted'
+    );
+  };
+
+  // ===== Revert state (SmartGit: "The working tree is in reverting-state.") =====
+  const handleRvContinue = () => {
+    if (!status?.isReverting) return;
+    void runCherryPickOp(
+      'Revert Continue', 'git revert --continue',
+      () => api.git.revertContinue(repo.path),
+      'Revert finished — commit created'
+    );
+  };
+  const handleRvSkip = () => {
+    if (!status?.isReverting) return;
+    void runCherryPickOp(
+      'Revert Skip', 'git revert --skip',
+      () => api.git.revertSkip(repo.path),
+      'Revert step skipped'
+    );
+  };
+  const handleRvAbort = async () => {
+    if (!status?.isReverting) return;
+    if (!(await confirmDialog({
+      title: 'Abort revert',
+      message: 'Cancel the revert and restore the branch to its previous state?\n\nRevert changes will be discarded.',
+      confirmLabel: 'Abort',
+      danger: true,
+    }))) return;
+    void runCherryPickOp(
+      'Revert Abort', 'git revert --abort',
+      () => api.git.revertAbort(repo.path),
+      'Revert aborted'
+    );
+  };
+
+  // ===== Merge state (SmartGit: "The working tree is in merging-state.") =====
+  // A plain COMMIT completes the merge (allowed); Abort Merge cancels it.
+  const handleMergeAbort = async () => {
+    if (!status?.isMerging) return;
+    if (!(await confirmDialog({
+      title: 'Abort merge',
+      message: 'Cancel the merge and restore the branch to its pre-merge state?\n\nMerged changes will be discarded.',
+      confirmLabel: 'Abort Merge',
+      danger: true,
+    }))) return;
+    void runCherryPickOp(
+      'Merge Abort', 'git merge --abort',
+      () => api.git.abortMerge(repo.path),
+      'Merge aborted'
+    );
+  };
+
+  // ===== Rebase state (SmartGit: "The working tree is in rebasing-state.") =====
+  const handleRbContinue = () => {
+    if (!status?.isRebasing) return;
+    void runCherryPickOp(
+      'Rebase Continue', 'git rebase --continue',
+      () => api.git.rebase(repo.path, '', { continue: true }),
+      'Rebase continued'
+    );
+  };
+  const handleRbSkip = () => {
+    if (!status?.isRebasing) return;
+    void runCherryPickOp(
+      'Rebase Skip', 'git rebase --skip',
+      () => api.git.rebase(repo.path, '', { skip: true }),
+      'Rebase step skipped'
+    );
+  };
+  const handleRbAbort = async () => {
+    if (!status?.isRebasing) return;
+    if (!(await confirmDialog({
+      title: 'Abort rebase',
+      message: 'Cancel the rebase and restore the branch to its original state?\n\nRebased commits will be discarded.',
+      confirmLabel: 'Abort',
+      danger: true,
+    }))) return;
+    void runCherryPickOp(
+      'Rebase Abort', 'git rebase --abort',
+      () => api.git.rebase(repo.path, '', { abort: true }),
+      'Rebase aborted'
+    );
+  };
+
+  // ===== Bisect state (SmartGit: "The working tree is in bisecting-state.") =====
+  const handleBsGood = () => {
+    if (!status?.isBisecting) return;
+    void runCherryPickOp(
+      'Bisect Good', 'git bisect good',
+      () => api.git.bisectGood(repo.path),
+      'Marked good — bisect continues'
+    );
+  };
+  const handleBsBad = () => {
+    if (!status?.isBisecting) return;
+    void runCherryPickOp(
+      'Bisect Bad', 'git bisect bad',
+      () => api.git.bisectBad(repo.path),
+      'Marked bad — bisect continues'
+    );
+  };
+  const handleBsSkip = () => {
+    if (!status?.isBisecting) return;
+    void runCherryPickOp(
+      'Bisect Skip', 'git bisect skip',
+      () => api.git.bisectSkip(repo.path),
+      'Revision skipped — bisect continues'
+    );
+  };
+  const handleBsReset = async () => {
+    if (!status?.isBisecting) return;
+    if (!(await confirmDialog({
+      title: 'Reset bisect',
+      message: 'End the bisect session and return to the original branch?',
+      confirmLabel: 'Reset',
+    }))) return;
+    void runCherryPickOp(
+      'Bisect Reset', 'git bisect reset',
+      () => api.git.bisectReset(repo.path),
+      'Bisect finished — back on the original branch'
     );
   };
 
@@ -1370,44 +1499,29 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         </div>
       </div>
 
-      {/* SmartGit: "The working tree is in cherry-picking-state." — only Abort/Continue/Skip allowed */}
-      {status?.isCherryPicking && status.cherryPick && (
-        <CherryPickStateBanner
-          commit={status.cherryPick.commit}
-          subject={status.cherryPick.subject}
-          empty={status.cherryPick.empty}
+      {/* SmartGit: "The working tree is in cherry-picking/merging/rebasing/reverting/bisecting-state." —
+          only the state-resolving actions are allowed (Pull is blocked, Fetch stays available) */}
+      {status && (status.isCherryPicking || status.isReverting || status.isMerging || status.isRebasing || status.isBisecting) && (
+        <RepoStateBanner
+          status={status}
           busy={cpBusy}
-          onContinue={handleCpContinue}
-          onSkip={handleCpSkip}
-          onCommitEmpty={handleCpCommitEmpty}
-          onAbort={handleCpAbort}
+          handlers={{
+            cherryPick: {
+              onContinue: handleCpContinue,
+              onSkip: handleCpSkip,
+              onCommitEmpty: handleCpCommitEmpty,
+              onAbort: handleCpAbort,
+            },
+            revert: { onContinue: handleRvContinue, onSkip: handleRvSkip, onAbort: handleRvAbort },
+            merge: { onAbort: handleMergeAbort },
+            rebase: { onContinue: handleRbContinue, onSkip: handleRbSkip, onAbort: handleRbAbort },
+            bisect: { onGood: handleBsGood, onBad: handleBsBad, onSkip: handleBsSkip, onReset: handleBsReset },
+          }}
         />
       )}
-      {/* Generic in-progress banner for the OTHER sequencer states (merge /
-          rebase / revert / bisect). Cherry-pick is handled by the specialized
-          CherryPickStateBanner above. */}
-      {(() => {
-        const m = status?.isMerging, r = status?.isRebasing, c = status?.isCherryPicking, v = status?.isReverting, b = status?.isBisecting;
-        // Skip if cherry-pick (handled above) or nothing in progress.
-        if (c || (!m && !r && !v && !b)) return null;
-        let label = '';
-        let hint = '';
-        if (m) { label = 'merging'; hint = 'Resolve conflicts, then use Continue (or Abort to discard the merge).'; }
-        else if (r) { label = 'rebasing'; hint = 'Resolve conflicts, then use Continue / Skip / Abort in the rebase banner.'; }
-        else if (v) { label = 'reverting'; hint = 'Resolve conflicts, then use Continue / Skip / Abort in the revert banner.'; }
-        else if (b) { label = 'bisecting'; hint = 'Mark commits Good / Bad on the Bisect page to narrow down the regression.'; }
-        return (
-          <div className="px-3 py-1.5 border-b border-status-warning/40 bg-status-warning/10 flex items-center gap-2">
-            <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
-            <span className="text-2xs text-status-warning font-medium">
-              The working tree is in {label} state.
-            </span>
-            <span className="text-2xs text-text-tertiary">
-              {hint} Other branch operations (Pull, Push, Checkout, Discard) are blocked until you finish.
-            </span>
-          </div>
-        );
-      })()}
+      {/* (A generic banner for merge / rebase / revert / bisect used to live
+          here — superseded by RepoStateBanner above, which covers ALL five
+          states with per-state resolution buttons.) */}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Directory tree panel (SmartGit-style) — selects the folder scope */}
@@ -1755,8 +1869,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               <button
                 className="btn btn-secondary text-xs"
                 onClick={handleCommitAndPush}
-                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || !!status?.isCherryPicking}
-                title={status?.isCherryPicking ? 'Cherry-pick in progress — finish it first (Continue/Skip/Abort)' : 'Commit then push'}
+                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || isCommitBlocked(status)}
+                title={isCommitBlocked(status) ? 'A git operation is in progress — finish it first (use the banner above)' : 'Commit then push'}
               >
                 <GitPullRequest size={11} />
                 Commit & Push
@@ -1764,8 +1878,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               <button
                 className="btn btn-primary text-xs"
                 onClick={handleCommit}
-                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || !!status?.isCherryPicking}
-                title={status?.isCherryPicking ? 'Cherry-pick in progress — finish it first (Continue/Skip/Abort)' : 'Ctrl+Enter'}
+                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || isCommitBlocked(status)}
+                title={isCommitBlocked(status) ? 'A git operation is in progress — finish it first (use the banner above)' : 'Ctrl+Enter'}
               >
                 <GitCommit size={11} />
                 Commit

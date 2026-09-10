@@ -33,6 +33,7 @@ import { StickyNote } from '../components/icons';
 import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { RefBadges } from '../lib/refBadge';
+import { blockedOperationToast } from '../lib/repoState';
 import { useLazyList } from '../lib/useLazyList';
 import { cn, copyToClipboard, formatDate, shortHash } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
@@ -622,14 +623,13 @@ export function HistoryPage() {
     return () => { cancelled = true; };
   }, [selectedIdx, filtered, repo.path]);
 
-  // SmartGit: while a cherry-pick is in progress no other HEAD-moving
-  // operation may start — it would discard the unfinished pick.
+  // SmartGit: while a sequencer state (cherry-pick / revert / merge / rebase /
+  // bisect) is in progress no other HEAD-moving operation may start — it would
+  // discard the unfinished operation.
   const blockedByCherryPick = (): boolean => {
-    if (!status?.isCherryPicking) return false;
-    toast.error(
-      'Cherry-pick in progress',
-      'Finish it first on the Changes page (Continue, Skip or Abort)'
-    );
+    const blocked = blockedOperationToast(status);
+    if (!blocked) return false;
+    toast.error(blocked.title, blocked.hint);
     return true;
   };
 
