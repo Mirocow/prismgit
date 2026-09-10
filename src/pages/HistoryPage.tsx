@@ -162,10 +162,11 @@ export function HistoryPage() {
   const loadHistory = useCallback(async () => {
     setLoading(true);
     try {
-      // Load 200 commits by default (was 500). 200 covers most active repos
-      // and uses ~60% less memory for the graph + filter computation.
-      // The user can scroll down to trigger lazy loading for more.
-      const logOpts: { maxCount: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = { maxCount: 200 };
+      // Load commits — use a higher limit when --all is set so incoming
+      // (remote-only) commits are more likely to be included in the visible
+      // window. Without this, a busy local history can push remote-only
+      // commits past the 200-commit cutoff, making them invisible.
+      const logOpts: { maxCount: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = { maxCount: (branchFilter === 'all' || !branchFilter) ? 500 : 200 };
       // Multi-branch selection takes precedence over single branch filter
       if (selectedBranches.size > 0) {
         logOpts.branches = Array.from(selectedBranches);
@@ -185,23 +186,23 @@ export function HistoryPage() {
       // Compute incoming commits: reachable from remote-tracking refs
       // (refs/remotes/*) but NOT from any local branch (refs/heads/*).
       // These are "not yet pulled" commits — drawn dashed/hollow in graph.
+      //
+      // Key: use --branches (local only) NOT --all (which includes remotes).
+      // Include merge commits — they're part of the history and should be
+      // visible as incoming too. No --max-count limit so we catch everything.
       try {
+        // Commits reachable from LOCAL branches only (refs/heads/*)
+        const localList = await api.git.raw(repo.path, ['rev-list', '--branches']);
         const localOids = new Set<string>();
-        const remoteOids = new Set<string>();
-        // Get all local branch OIDs
-        const localList = await api.git.raw(repo.path, ['rev-list', '--all', '--no-merges', '--max-count=500']);
         for (const line of localList.trim().split('\n')) {
           if (line.trim()) localOids.add(line.trim());
         }
-        // Get OIDs reachable only from remote-tracking branches
-        const remoteOnly = await api.git.raw(repo.path, ['rev-list', '--remotes', '--no-merges', '--max-count=500', '--not', '--branches']);
-        for (const line of remoteOnly.trim().split('\n')) {
-          if (line.trim()) remoteOids.add(line.trim());
-        }
-        // Incoming = in remoteOids but NOT in localOids
+        // Commits reachable from remote-tracking branches but NOT from local branches
+        // = commits that exist on the remote but haven't been pulled yet
+        const remoteOnly = await api.git.raw(repo.path, ['rev-list', '--remotes', '--not', '--branches']);
         const incoming = new Set<string>();
-        for (const oid of remoteOids) {
-          if (!localOids.has(oid)) incoming.add(oid);
+        for (const line of remoteOnly.trim().split('\n')) {
+          if (line.trim()) incoming.add(line.trim());
         }
         setIncomingHashes(incoming);
       } catch {
@@ -917,6 +918,17 @@ export function HistoryPage() {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold">Graph</span>
           <span className="text-2xs text-text-tertiary">{filtered.length} commits</span>
+          {/* Incoming count badge — shows how many remote-only commits are visible */}
+          {(() => {
+            const visibleIncoming = filtered.filter(e => incomingHashes.has(e.hash)).length;
+            if (visibleIncoming === 0) return null;
+            return (
+              <span className="text-2xs px-1.5 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium flex items-center gap-0.5"
+                title={`${visibleIncoming} incoming commit(s) — exist on remote but not yet pulled`}>
+                ↓ {visibleIncoming} incoming
+              </span>
+            );
+          })()}
           {(authorFilter || dateFrom || dateTo || pathFilter || useRegex) && (
             <span className="text-2xs text-accent flex items-center gap-1" title="Active filters">
               <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />filtered
@@ -1261,7 +1273,9 @@ export function HistoryPage() {
                   <div
                     key={entry.hash}
                     className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
-                      isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover')}
+                      isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
+                      // Incoming (remote-only) commits get a subtle tinted background
+                      incomingHashes.has(entry.hash) && !isSelected && 'bg-blue-50/30 dark:bg-blue-950/10')}
                     style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 4 }}
                     onClick={() => { setSelectedIdx(realIdx); selectCommit(entry.hash); }}
                     onContextMenu={(e) => showCommitContextMenu(e, entry, realIdx)}
@@ -1273,11 +1287,18 @@ export function HistoryPage() {
                         from BOTH short and --decorate=full shapes (see refBadge). */}
                     <RefBadges refs={entry.refs} max={3} hash={entry.hash} onChanged={loadHistory} />
 
-                    {/* Incoming badge — commit exists only on remote, not yet pulled */}
+                    {/* Incoming badge — commit exists only on remote, not yet pulled.
+                        In VS Code style: a dashed "↓ incoming" label with the remote
+                        branch name. */}
                     {incomingHashes.has(entry.hash) && (
-                      <span className="flex-shrink-0 text-2xs px-1 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium"
-                        title="Incoming — this commit exists on a remote but has not been pulled into a local branch yet">
+                      <span className="flex-shrink-0 text-2xs px-1.5 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium flex items-center gap-0.5"
+                        title="Incoming — this commit exists on a remote but has not been pulled into a local branch yet. Use Pull to bring it into your local branch.">
                         ↓
+                        {entry.refs.some(r => r.includes('refs/remotes/') || r.includes('/')) && (
+                          <span className="opacity-75">
+                            {entry.refs.find(r => r.includes('refs/remotes/'))?.replace('refs/remotes/', '') || entry.refs.find(r => r.includes('/'))}
+                          </span>
+                        )}
                       </span>
                     )}
 
