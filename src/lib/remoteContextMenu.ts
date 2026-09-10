@@ -46,6 +46,7 @@ export function buildRemoteContextMenu(
       checked: state.backgroundFetch,
       clickId: 'toggle-background',
     },
+    { label: 'Repository Settings...', clickId: 'repo-settings' },
     { type: 'separator' },
     { label: `Remove remote '${remote.name}'...`, clickId: 'remove' },
   ];

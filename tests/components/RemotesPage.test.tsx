@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { RemotesPage } from '../../src/pages/RemotesPage';
+import { api } from '../../src/lib/api';
 
 // Mock the git API: two remotes — one with identical fetch/push URLs,
 // one with a separate push URL (extra "Copy push URL" menu item).
@@ -72,12 +73,32 @@ describe('RemotesPage — right-click context menu on a remote row', () => {
       "Rename 'origin'...",
       '---',
       'Perform background Poll or Fetch',
+      'Repository Settings...',
       '---',
       "Remove remote 'origin'...",
     ]);
     // Checkbox item for the background poll toggle
     const checkbox = items.find((i) => i.clickId === 'toggle-background');
     expect(checkbox).toMatchObject({ type: 'checkbox', checked: false });
+  });
+
+  it('opening Repository Settings dispatches the same global event as the sidebar menu', async () => {
+    const listener = vi.fn();
+    window.addEventListener('prismgit:repo-settings', listener);
+    render(<RemotesPage />);
+    await waitFor(() => expect(screen.getByText('origin')).toBeInTheDocument());
+
+    fireEvent.contextMenu(screen.getByText('origin'));
+    await waitFor(() => expect(mockShow).toHaveBeenCalledTimes(1));
+
+    // Simulate the user picking "Repository Settings..." in the native menu:
+    // useContextMenu routes the clickId back through api.contextMenu.onClick.
+    const onClickMock = api.contextMenu.onClick as ReturnType<typeof vi.fn>;
+    const registered = onClickMock.mock.calls.at(-1)?.[0] as (id: string) => void;
+    registered('repo-settings');
+
+    await waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+    window.removeEventListener('prismgit:repo-settings', listener);
   });
 
   it('adds "Copy push URL" for a remote with a separate push URL', async () => {

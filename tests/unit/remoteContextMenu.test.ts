@@ -23,9 +23,17 @@ describe('buildRemoteContextMenu', () => {
       "Rename 'origin'...",
       '---',
       'Perform background Poll or Fetch',
+      'Repository Settings...',
       '---',
       "Remove remote 'origin'...",
     ]);
+  });
+
+  it('opens Repository Settings via the same event as the sidebar menu', () => {
+    const items = buildRemoteContextMenu(baseRemote, baseState);
+    expect(items.find((i) => i.clickId === 'repo-settings')).toMatchObject({
+      label: 'Repository Settings...',
+    });
   });
 
   it('does not include Copy push URL when push URL equals fetch URL', () => {

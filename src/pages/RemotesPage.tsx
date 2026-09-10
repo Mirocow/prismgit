@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { CloudDownload, RefreshCw, Plus, Trash, Pencil, ExternalLink, Loader, GitBranch, ChevronDown, ChevronRight, Check, Eye, EyeOff } from '../components/icons';
+import { CloudDownload, RefreshCw, Plus, Trash, Pencil, ExternalLink, Loader, GitBranch, ChevronDown, ChevronRight, Check, Eye, EyeOff, Settings } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -220,6 +220,11 @@ export function RemotesPage() {
         case 'toggle-background':
           setBackgroundFetchForRepo(repo.path, r.name, !isBackgroundFetchEnabled(repo.path, r.name));
           break;
+        case 'repo-settings':
+          // Same global event the Sidebar's "Repository Settings..." uses;
+          // the repo is already open when the Remotes tool is visible.
+          window.dispatchEvent(new CustomEvent('prismgit:repo-settings'));
+          break;
         case 'remove': void handleRemove(r); break;
       }
     });
@@ -233,6 +238,13 @@ export function RemotesPage() {
           <span className="text-2xs text-text-tertiary">{remotes.length} remotes</span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            className="icon-btn"
+            title="Repository Settings..."
+            onClick={() => window.dispatchEvent(new CustomEvent('prismgit:repo-settings'))}
+          >
+            <Settings size={13} />
+          </button>
           <button className="icon-btn" title="Refresh" onClick={load}>
             <RefreshCw size={13} />
           </button>
