@@ -164,12 +164,83 @@ app.whenReady().then(() => {
 
   mainWindow = createWindow();
 
+  // SmartGit Manual: Command-Line Options
+  // Parse process.argv for --open, --log, --blame, --anchor-commit, etc.
+  handleCliArgs(process.argv.slice(1));
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindow();
     }
   });
 });
+
+/**
+ * SmartGit Manual: Command-Line Options
+ * Supported flags:
+ *   --open <path>             Open repository at path
+ *   --cwd <path>              Set current working directory (affects --log/--blame path resolution)
+ *   --log <path>              Open History view for repository/file
+ *   --blame <path>            Open Blame view for file (append :lineNumber to scroll)
+ *   --anchor-commit=<sha>     Preselect commit in History/Blame view
+ *   --investigate <path>      Open DeepGit-style investigation (History view with file filter)
+ *
+ * These flags send IPC events to the renderer, which handles navigation.
+ */
+function handleCliArgs(args: string[]) {
+  if (!mainWindow) return;
+  let cwd = '';
+  let anchorCommit: string | undefined;
+  // Parse all args first to find anchor-commit + cwd before navigation
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--cwd' && args[i + 1]) {
+      cwd = args[i + 1];
+      i++;
+    } else if (arg.startsWith('--anchor-commit=')) {
+      anchorCommit = arg.substring('--anchor-commit='.length);
+    }
+  }
+
+  // After the window is ready, send navigation commands
+  mainWindow.webContents.once('did-finish-load', () => {
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === '--open' && args[i + 1]) {
+        const repoPath = args[i + 1];
+        i++;
+        mainWindow?.webContents.send('cli:open', { path: repoPath });
+      } else if (arg === '--log' && args[i + 1]) {
+        const target = args[i + 1];
+        i++;
+        // Resolve relative to --cwd if given
+        const fullPath = cwd && !target.startsWith('/') ? `${cwd}/${target}`.replace(/\/+/g, '/') : target;
+        mainWindow?.webContents.send('cli:log', { path: fullPath, anchorCommit });
+      } else if (arg === '--blame' && args[i + 1]) {
+        const target = args[i + 1];
+        i++;
+        // Optional :lineNumber suffix
+        let line: number | undefined;
+        let filePath = target;
+        const colonIdx = target.lastIndexOf(':');
+        if (colonIdx > 0) {
+          const maybeLine = parseInt(target.substring(colonIdx + 1), 10);
+          if (!isNaN(maybeLine) && maybeLine > 0) {
+            line = maybeLine;
+            filePath = target.substring(0, colonIdx);
+          }
+        }
+        const fullPath = cwd && !filePath.startsWith('/') ? `${cwd}/${filePath}`.replace(/\/+/g, '/') : filePath;
+        mainWindow?.webContents.send('cli:blame', { path: fullPath, line, anchorCommit });
+      } else if (arg === '--investigate' && args[i + 1]) {
+        const target = args[i + 1];
+        i++;
+        const fullPath = cwd && !target.startsWith('/') ? `${cwd}/${target}`.replace(/\/+/g, '/') : target;
+        mainWindow?.webContents.send('cli:investigate', { path: fullPath, anchorCommit });
+      }
+    }
+  });
+}
 
 app.on('window-all-closed', () => {
   stopAllWatchers();

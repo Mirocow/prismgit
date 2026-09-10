@@ -1,4 +1,4 @@
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, FolderTree, RotateCcw, FileText, Search, CloudDownload, Filter } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, FolderTree, RotateCcw, FileText, Search, CloudDownload, Filter, Recycle } from './icons';
 
 /**
  * Single source of truth for the app navigation.
@@ -55,6 +55,8 @@ export const NAV_ITEMS: NavItem[] = [
     description: 'Multiple working directories for the same repo. Useful for working on a feature while keeping main checked out.' },
   { path: '/reflog', label: 'Reflog', icon: RotateCcw, group: 'Refs',
     description: 'Reference log for HEAD and other refs. Shows every checkout, commit, merge, reset. Cherry-pick or reset to any entry.' },
+  { path: '/recyclable', label: 'Recyclable', icon: Recycle, group: 'Refs',
+    description: 'Unreachable reflog commits eligible for GC (default retention: 90 days). Recover by cherry-pick or branch creation, or expire them.' },
   { path: '/stashes', label: 'Stashes', icon: GitPullRequest, group: 'Refs',
     description: 'Saved stashes. Click a stash to view its diff (compared to its parent, not HEAD). Apply, pop, or drop.' },
   { path: '/submodules', label: 'Submodules', icon: Package, group: 'Refs',

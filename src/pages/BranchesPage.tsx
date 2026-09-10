@@ -706,6 +706,8 @@ export function BranchesPage() {
       // Group 2: Push
       items.push({ label: 'Push', accelerator: 'CmdOrCtrl+Up', clickId: 'push' });
       items.push({ label: 'Push To...', accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to' });
+      // SmartGit Manual: Push to Gerrit — refs/for/<branch>
+      items.push({ label: 'Push to Gerrit...', clickId: 'push-gerrit' });
       items.push({ type: 'separator' });
 
       // Group 3: Log / Reset
@@ -799,6 +801,20 @@ export function BranchesPage() {
             () => api.git.push(repo.path, remoteName, branchName, !b.tracking)
           ).then(() => { toast.success(`Pushed ${branchName} to ${remoteName}`); refreshStatus(repo.path); })
            .catch((e) => toast.error('Push failed', String(e)));
+        }
+
+        // === Push to Gerrit (refs/for/<branch>) === SmartGit Manual
+        else if (action === 'push-gerrit') {
+          const remoteName = b.tracking ? b.tracking.split('/')[0] : 'origin';
+          const branchName = b.name;
+          const topic = window.prompt(`Push '${branchName}' to Gerrit (refs/for/${branchName}).\n\nOptional topic:`, '');
+          try {
+            const output = await api.git.pushToGerrit(repo.path, branchName, remoteName, {
+              topic: topic || undefined,
+            });
+            toast.success(`Pushed to Gerrit: refs/for/${branchName}`, output.split('\n')[0] || '');
+            await refreshStatus(repo.path);
+          } catch (e) { toast.error('Push to Gerrit failed', String(e)); }
         }
 
         // === Log (show this branch's history in History page) ===

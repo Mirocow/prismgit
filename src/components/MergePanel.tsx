@@ -38,6 +38,8 @@ export function MergePanel({
   const [noFf, setNoFf] = useState(false);
   const [squash, setSquash] = useState(false);
   const [showConflicts, setShowConflicts] = useState(true);
+  // SmartGit Manual: Auto-stash — stash local changes before merge, pop after
+  const [autoStash, setAutoStash] = useState(false);
 
   const loadState = useCallback(async () => {
     try {
@@ -99,39 +101,65 @@ export function MergePanel({
   const handleMerge = async () => {
     setLoading(true);
     try {
-      const opts: { noFf?: boolean; squash?: boolean; ffOnly?: boolean } = {};
-      if (strategy === 'squash' || squash) opts.squash = true;
-      if (strategy === 'ff-only') opts.ffOnly = true;
-      if (noFf && strategy === 'merge') opts.noFf = true;
+      // SmartGit Manual: Auto-stash — stash local changes before merge, pop after
+      const runMerge = async () => {
+        const opts: { noFf?: boolean; squash?: boolean; ffOnly?: boolean } = {};
+        if (strategy === 'squash' || squash) opts.squash = true;
+        if (strategy === 'ff-only') opts.ffOnly = true;
+        if (noFf && strategy === 'merge') opts.noFf = true;
 
-      if (strategy === 'rebase') {
-        // Rebase current branch onto target
-        await api.git.rebase(repo.path, targetBranch);
-        toast.success(`Rebased onto ${targetBranch}`);
-        onClose();
-        await refreshStatus(repo.path);
-        return;
-      }
+        if (strategy === 'rebase') {
+          // Rebase current branch onto target
+          await api.git.rebase(repo.path, targetBranch);
+          toast.success(`Rebased onto ${targetBranch}`);
+          onClose();
+          await refreshStatus(repo.path);
+          return;
+        }
 
-      const result = await api.git.merge(repo.path, targetBranch, opts);
-      if (result.conflicts.length > 0) {
-        toast.warning(
-          `Merge conflicts in ${result.conflicts.length} files`,
-          result.conflicts.join('\n')
-        );
-        await loadState();
-        await refreshStatus(repo.path);
-      } else if (result.fastForward) {
-        toast.success('Fast-forward merge complete');
-        onClose();
-        await refreshStatus(repo.path);
-      } else if (result.alreadyUpToDate) {
-        toast.info('Already up to date');
-        onClose();
+        const result = await api.git.merge(repo.path, targetBranch, opts);
+        if (result.conflicts.length > 0) {
+          toast.warning(
+            `Merge conflicts in ${result.conflicts.length} files`,
+            result.conflicts.join('\n')
+          );
+          await loadState();
+          await refreshStatus(repo.path);
+        } else if (result.fastForward) {
+          toast.success('Fast-forward merge complete');
+          onClose();
+          await refreshStatus(repo.path);
+        } else if (result.alreadyUpToDate) {
+          toast.info('Already up to date');
+          onClose();
+        } else {
+          toast.success('Merge complete');
+          onClose();
+          await refreshStatus(repo.path);
+        }
+      };
+
+      if (autoStash) {
+        // Stash local changes, run merge, then pop stash
+        const status = await api.git.status(repo.path);
+        if (!status.isClean) {
+          toast.info('Auto-stashing local changes...');
+          await api.git.stashPush(repo.path, 'prismgit-autostash', true);
+          try {
+            await runMerge();
+          } finally {
+            try {
+              await api.git.stashPop(repo.path);
+              toast.success('Auto-stash restored');
+            } catch (popErr) {
+              toast.warning('Auto-stash pop failed — see Stashes view', String(popErr));
+            }
+          }
+        } else {
+          await runMerge();
+        }
       } else {
-        toast.success('Merge complete');
-        onClose();
-        await refreshStatus(repo.path);
+        await runMerge();
       }
     } catch (e) {
       toast.error('Merge failed', String(e));
@@ -313,6 +341,15 @@ export function MergePanel({
                   <input type="checkbox" checked={noFf}
                     onChange={(e) => setNoFf(e.target.checked)} />
                   <span>No fast-forward (always create merge commit)</span>
+                </label>
+              </div>
+            )}
+            {(strategy === 'merge' || strategy === 'rebase') && (
+              <div className="flex items-center gap-4 mb-3">
+                <label className="flex items-center gap-2 text-xs cursor-pointer" title="Stash local changes before merge/rebase, then pop after — useful when working tree is dirty">
+                  <input type="checkbox" checked={autoStash}
+                    onChange={(e) => setAutoStash(e.target.checked)} />
+                  <span>Auto-stash local changes</span>
                 </label>
               </div>
             )}

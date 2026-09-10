@@ -191,6 +191,44 @@ const api = {
       ipcRenderer.invoke('git:stageLines', repoPath, file, ranges),
     unstageLines: (repoPath: string, file: string, ranges: { start: number; end: number }[]) =>
       ipcRenderer.invoke('git:unstageLines', repoPath, file, ranges),
+
+    // SmartGit Manual extended features
+    recyclableCommits: (repoPath: string) => ipcRenderer.invoke('git:recyclableCommits', repoPath),
+    subtreeAdd: (repoPath: string, prefix: string, url: string, branch: string, squash?: boolean) =>
+      ipcRenderer.invoke('git:subtreeAdd', repoPath, prefix, url, branch, squash),
+    subtreePull: (repoPath: string, prefix: string, url: string, branch: string, squash?: boolean) =>
+      ipcRenderer.invoke('git:subtreePull', repoPath, prefix, url, branch, squash),
+    subtreePush: (repoPath: string, prefix: string, remote: string, branch: string, squash?: boolean) =>
+      ipcRenderer.invoke('git:subtreePush', repoPath, prefix, remote, branch, squash),
+    subtreeSplit: (repoPath: string, prefix: string, branch?: string, rejoin?: boolean) =>
+      ipcRenderer.invoke('git:subtreeSplit', repoPath, prefix, branch, rejoin),
+    lfsListLocks: (repoPath: string, remote?: string) => ipcRenderer.invoke('git:lfsListLocks', repoPath, remote),
+    lfsLock: (repoPath: string, file: string, remote?: string) => ipcRenderer.invoke('git:lfsLock', repoPath, file, remote),
+    lfsUnlock: (repoPath: string, file: string, remote?: string) => ipcRenderer.invoke('git:lfsUnlock', repoPath, file, remote),
+    notesList: (repoPath: string, ref?: string) => ipcRenderer.invoke('git:notesList', repoPath, ref),
+    noteShow: (repoPath: string, commit: string, ref?: string) => ipcRenderer.invoke('git:noteShow', repoPath, commit, ref),
+    noteAdd: (repoPath: string, commit: string, content: string, ref?: string, force?: boolean) =>
+      ipcRenderer.invoke('git:noteAdd', repoPath, commit, content, ref, force),
+    noteRemove: (repoPath: string, commit: string, ref?: string) => ipcRenderer.invoke('git:noteRemove', repoPath, commit, ref),
+    forceCompare: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) =>
+      ipcRenderer.invoke('git:forceCompare', repoPath, file, options),
+    isEolOnlyChange: (repoPath: string, file: string) => ipcRenderer.invoke('git:isEolOnlyChange', repoPath, file),
+    pushToGerrit: (repoPath: string, branch?: string, remote?: string, options?: { draft?: boolean; reviewers?: string[]; topic?: string }) =>
+      ipcRenderer.invoke('git:pushToGerrit', repoPath, branch, remote, options),
+    clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean }) =>
+      ipcRenderer.invoke('git:clonePartial', url, targetPath, filter, options),
+    setupCredentialHelper: (repoPath: string) => ipcRenderer.invoke('git:setupCredentialHelper', repoPath),
+    blameBidirectional: (repoPath: string, file: string, ref?: string) =>
+      ipcRenderer.invoke('git:blameBidirectional', repoPath, file, ref),
+    pickaxeSearch: (repoPath: string, file: string, search: string, options?: { regex?: boolean; ignoreCase?: boolean }) =>
+      ipcRenderer.invoke('git:pickaxeSearch', repoPath, file, search, options),
+    detectRenames: (repoPath: string, options?: { threshold?: number; ref?: string }) =>
+      ipcRenderer.invoke('git:detectRenames', repoPath, options),
+    isCommitPushed: (repoPath: string, hash: string) => ipcRenderer.invoke('git:isCommitPushed', repoPath, hash),
+    squashCommits: (repoPath: string, fromHash: string, toHash: string, message?: string) =>
+      ipcRenderer.invoke('git:squashCommits', repoPath, fromHash, toHash, message),
+    coalesceCommits: (repoPath: string, firstHash: string, secondHash: string) =>
+      ipcRenderer.invoke('git:coalesceCommits', repoPath, firstHash, secondHash),
   } as GitApi,
 
   // GitHub integration

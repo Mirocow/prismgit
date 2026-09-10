@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Tag as TagIcon, Plus, Trash, RefreshCw, Check, Pencil } from '../components/icons';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Tag as TagIcon, Plus, Trash, RefreshCw, Check, Pencil, ChevronDown, ChevronRight, FolderTree } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -11,6 +11,41 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useContextMenu } from '../lib/useContextMenu';
 import { copyToClipboard } from '../lib/utils';
+
+/** SmartGit Manual: Tag-Grouping — group tags by pattern (e.g., v1.0.0, v1.0.1 → "v1.0"). */
+interface TagGroup {
+  name: string;
+  tags: TagInfo[];
+  latest?: TagInfo;
+}
+
+function groupTagsByPattern(tags: TagInfo[]): TagGroup[] {
+  const groups = new Map<string, TagInfo[]>();
+  const ungrouped: TagInfo[] = [];
+  // Pattern: v<major>.<minor> (e.g., v1.0, 2.5)
+  const pattern = /^v?(\d+\.\d+)/;
+  for (const tag of tags) {
+    const match = tag.name.match(pattern);
+    if (match) {
+      const key = 'v' + match[1];
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(tag);
+    } else {
+      ungrouped.push(tag);
+    }
+  }
+  const result: TagGroup[] = [];
+  for (const [name, groupTags] of groups.entries()) {
+    groupTags.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    result.push({ name, tags: groupTags, latest: groupTags[0] });
+  }
+  result.sort((a, b) => (b.latest?.date || '').localeCompare(a.latest?.date || ''));
+  if (ungrouped.length > 0) {
+    result.push({ name: 'Other', tags: ungrouped });
+  }
+  return result;
+}
+
 export function TagsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
@@ -26,6 +61,9 @@ export function TagsPage() {
   // Rename state — git has no tag rename, so we create new + delete old
   const [renamingTag, setRenamingTag] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  // SmartGit Manual: Tag-Grouping toggle
+  const [groupByPattern, setGroupByPattern] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   const handleRename = async (tag: TagInfo) => {
     const newName = renameValue.trim();
@@ -117,6 +155,14 @@ export function TagsPage() {
           <span className="text-2xs text-text-tertiary">{tags.length} tags</span>
         </div>
         <div className="flex items-center gap-2">
+          {/* SmartGit Manual: Tag-Grouping toggle */}
+          <button
+            className={`icon-btn ${groupByPattern ? 'active' : ''}`}
+            title="Group tags by version pattern (e.g., v1.0.0, v1.0.1 → 'v1.0')"
+            onClick={() => setGroupByPattern(!groupByPattern)}
+          >
+            <FolderTree size={13} />
+          </button>
           <button className="icon-btn" title="Refresh" onClick={load}>
             <RefreshCw size={13} />
           </button>
@@ -145,6 +191,53 @@ export function TagsPage() {
               important checkpoints. Click "New Tag" above to create one.
             </div>
           </div>
+        ) : groupByPattern ? (
+          // SmartGit Manual: Tag-Grouping display — groups tags by pattern
+          (() => {
+            const groups = useMemo(() => groupTagsByPattern(tags), [tags]);
+            return (
+              <>
+                {groups.map((group) => {
+                  const collapsed = collapsedGroups.has(group.name);
+                  return (
+                    <div key={group.name}>
+                      <div
+                        className="flex items-center gap-2 px-3 py-1.5 bg-bg-tertiary border-b border-border-default cursor-pointer hover:bg-bg-hover text-xs font-semibold text-text-primary"
+                        onClick={() => {
+                          const next = new Set(collapsedGroups);
+                          if (collapsed) next.delete(group.name);
+                          else next.add(group.name);
+                          setCollapsedGroups(next);
+                        }}
+                      >
+                        {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                        <span>{group.name}</span>
+                        <span className="text-2xs text-text-tertiary font-normal">({group.tags.length} tags)</span>
+                        {group.latest && (
+                          <span className="text-2xs text-text-tertiary ml-auto font-mono">
+                            latest: {group.latest.name}
+                          </span>
+                        )}
+                      </div>
+                      {!collapsed && group.tags.map((t) => (
+                        <TagRow
+                          key={t.name}
+                          tag={t}
+                          renamingTag={renamingTag}
+                          renameValue={renameValue}
+                          setRenameValue={setRenameValue}
+                          setRenamingTag={setRenamingTag}
+                          handleRename={handleRename}
+                          handleDelete={handleDelete}
+                          showContextMenu={showContextMenu}
+                        />
+                      ))}
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()
         ) : (
           <>
             {tags.length > 200 && (
@@ -153,89 +246,18 @@ export function TagsPage() {
               </div>
             )}
             {tags.slice(0, 200).map((t) => (
-            <div
-              key={t.name}
-              className="group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
-              onClick={() => {
-                useSelectionStore.getState().selectCommit(t.hash);
-                window.location.hash = '#/history';
-              }}
-              title="Click to view this tag's commit in History"
-              onContextMenu={(e) => {
-                e.preventDefault();
-                showContextMenu([
-                  { label: 'Copy Name', clickId: 'copy-name' },
-                  { label: 'Copy Hash', clickId: 'copy-hash' },
-                  { type: 'separator' },
-                  { label: `Rename '${t.name}'...`, clickId: 'rename' },
-                  { label: `Delete Tag '${t.name}'...`, clickId: 'delete' },
-                  { type: 'separator' },
-                  { label: 'View Commit in History', clickId: 'view-commit' },
-                ], (action) => {
-                  switch (action) {
-                    case 'copy-name': copyToClipboard(t.name); toast.success('Copied'); break;
-                    case 'copy-hash': copyToClipboard(t.hash); toast.success('Copied'); break;
-                    case 'rename': setRenamingTag(t.name); setRenameValue(t.name); break;
-                    case 'delete': handleDelete(t); break;
-                    case 'view-commit':
-                      useSelectionStore.getState().selectCommit(t.hash);
-                      window.location.hash = '#/history';
-                      break;
-                  }
-                });
-              }}
-            >
-              <TagIcon size={14} className="text-status-modified flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  {renamingTag === t.name ? (
-                    <input
-                      type="text"
-                      className="text-xs w-32 px-1 py-0.5"
-                      autoFocus
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleRename(t);
-                        if (e.key === 'Escape') setRenamingTag(null);
-                      }}
-                      onBlur={() => handleRename(t)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  ) : (
-                    <span className="text-sm font-medium text-text-primary">{t.name}</span>
-                  )}
-                  {!t.lightweight && (
-                    <span className="badge badge-modified">ANNOTATED</span>
-                  )}
-                </div>
-                {t.annotation && (
-                  <div className="text-xs text-text-secondary truncate mt-0.5">
-                    {t.annotation}
-                  </div>
-                )}
-                <div className="text-xs text-text-tertiary mt-0.5">
-                  <CommitHashLink hash={t.hash} />
-                </div>
-              </div>
-              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
-                <button
-                  className="icon-btn !w-6 !h-6"
-                  title="Rename"
-                  onClick={(e) => { e.stopPropagation(); setRenamingTag(t.name); setRenameValue(t.name); }}
-                >
-                  <Pencil size={12} />
-                </button>
-                <button
-                  className="icon-btn !w-6 !h-6 hover:!text-status-deleted"
-                  title="Delete"
-                  onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
-                >
-                  <Trash size={12} />
-                </button>
-              </div>
-            </div>
-          ))
+              <TagRow
+                key={t.name}
+                tag={t}
+                renamingTag={renamingTag}
+                renameValue={renameValue}
+                setRenameValue={setRenameValue}
+                setRenamingTag={setRenamingTag}
+                handleRename={handleRename}
+                handleDelete={handleDelete}
+                showContextMenu={showContextMenu}
+              />
+            ))
             }
           </>
         )}
@@ -302,6 +324,111 @@ export function TagsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Tag row — used in both flat and grouped display. */
+function TagRow({
+  tag: t,
+  renamingTag,
+  renameValue,
+  setRenameValue,
+  setRenamingTag,
+  handleRename,
+  handleDelete,
+  showContextMenu,
+}: {
+  tag: TagInfo;
+  renamingTag: string | null;
+  renameValue: string;
+  setRenameValue: (v: string) => void;
+  setRenamingTag: (v: string | null) => void;
+  handleRename: (tag: TagInfo) => void;
+  handleDelete: (tag: TagInfo) => void;
+  showContextMenu: ReturnType<typeof useContextMenu>;
+}) {
+  return (
+    <div
+      className="group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
+      onClick={() => {
+        useSelectionStore.getState().selectCommit(t.hash);
+        window.location.hash = '#/history';
+      }}
+      title="Click to view this tag's commit in History"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        showContextMenu([
+          { label: 'Copy Name', clickId: 'copy-name' },
+          { label: 'Copy Hash', clickId: 'copy-hash' },
+          { type: 'separator' },
+          { label: `Rename '${t.name}'...`, clickId: 'rename' },
+          { label: `Delete Tag '${t.name}'...`, clickId: 'delete' },
+          { type: 'separator' },
+          { label: 'View Commit in History', clickId: 'view-commit' },
+        ], (action) => {
+          switch (action) {
+            case 'copy-name': copyToClipboard(t.name); break;
+            case 'copy-hash': copyToClipboard(t.hash); break;
+            case 'rename': setRenamingTag(t.name); setRenameValue(t.name); break;
+            case 'delete': handleDelete(t); break;
+            case 'view-commit':
+              useSelectionStore.getState().selectCommit(t.hash);
+              window.location.hash = '#/history';
+              break;
+          }
+        });
+      }}
+    >
+      <TagIcon size={14} className="text-status-modified flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          {renamingTag === t.name ? (
+            <input
+              type="text"
+              className="text-xs w-32 px-1 py-0.5"
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleRename(t);
+                if (e.key === 'Escape') setRenamingTag(null);
+              }}
+              onBlur={() => handleRename(t)}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span className="text-sm font-medium text-text-primary">{t.name}</span>
+          )}
+          {!t.lightweight && (
+            <span className="badge badge-modified">ANNOTATED</span>
+          )}
+        </div>
+        {t.annotation && (
+          <div className="text-xs text-text-secondary truncate mt-0.5">
+            {t.annotation}
+          </div>
+        )}
+        <div className="text-xs text-text-tertiary mt-0.5">
+          <CommitHashLink hash={t.hash} />
+        </div>
+      </div>
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
+        <button
+          className="icon-btn !w-6 !h-6"
+          title="Rename"
+          onClick={(e) => { e.stopPropagation(); setRenamingTag(t.name); setRenameValue(t.name); }}
+        >
+          <Pencil size={12} />
+        </button>
+        <button
+          className="icon-btn !w-6 !h-6 hover:!text-status-deleted"
+          title="Delete"
+          onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
+        >
+          <Trash size={12} />
+        </button>
+      </div>
     </div>
   );
 }

@@ -51,6 +51,7 @@ const TagsPage = lazy(() => import('./pages/TagsPage').then(m => ({ default: m.T
 const SubmodulesPage = lazy(() => import('./pages/SubmodulesPage').then(m => ({ default: m.SubmodulesPage })));
 const WorktreesPage = lazy(() => import('./pages/WorktreesPage').then(m => ({ default: m.WorktreesPage })));
 const ReflogPage = lazy(() => import('./pages/ReflogPage').then(m => ({ default: m.ReflogPage })));
+const RecyclablePage = lazy(() => import('./pages/RecyclablePage').then(m => ({ default: m.RecyclablePage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
 
 function PageLoader() {
@@ -333,6 +334,41 @@ export default function App() {
     return () => window.removeEventListener('prismgit:show-shortcuts', handler);
   }, []);
 
+  // SmartGit Manual: Command-Line Options
+  // Handle --open / --log / --blame / --investigate / --anchor-commit sent from electron/main.ts
+  useEffect(() => {
+    const cleanupOpen = window.smartgit.events.on('cli:open', (data: unknown) => {
+      const { path } = data as { path: string };
+      useRepositoryStore.getState().openRepository(path).catch((e) => {
+        toast.error('Failed to open repository', String(e));
+      });
+    });
+    const cleanupLog = window.smartgit.events.on('cli:log', (data: unknown) => {
+      const { path, anchorCommit } = data as { path: string; anchorCommit?: string };
+      // If path is a directory → open repo + navigate to History
+      // If path is a file → open repo + set path filter + navigate to History
+      useRepositoryStore.getState().openRepository(path).then(() => {
+        if (anchorCommit) useSelectionStore.getState().selectCommit(anchorCommit);
+        navigate('/history');
+      }).catch((e) => toast.error('Failed to open', String(e)));
+    });
+    const cleanupBlame = window.smartgit.events.on('cli:blame', (data: unknown) => {
+      const { path, anchorCommit } = data as { path: string; anchorCommit?: string };
+      useRepositoryStore.getState().openRepository(path).then(() => {
+        if (anchorCommit) useSelectionStore.getState().selectCommit(anchorCommit);
+        navigate('/blame');
+      }).catch((e) => toast.error('Failed to open', String(e)));
+    });
+    const cleanupInvestigate = window.smartgit.events.on('cli:investigate', (data: unknown) => {
+      const { path, anchorCommit } = data as { path: string; anchorCommit?: string };
+      useRepositoryStore.getState().openRepository(path).then(() => {
+        if (anchorCommit) useSelectionStore.getState().selectCommit(anchorCommit);
+        navigate('/history');
+      }).catch((e) => toast.error('Failed to open', String(e)));
+    });
+    return () => { cleanupOpen(); cleanupLog(); cleanupBlame(); cleanupInvestigate(); };
+  }, [navigate, toast]);
+
   // File watcher: start/stop when repo changes + auto-refresh on changes
   // Use a ref to track in-flight refresh and debounce to avoid loops.
   // The debounce is 2s (not 1s) to reduce git status spawn frequency —
@@ -484,6 +520,7 @@ export default function App() {
               <Route path="/submodules" element={<SubmodulesPage />} />
               <Route path="/worktrees" element={<WorktreesPage />} />
               <Route path="/reflog" element={<ReflogPage />} />
+              <Route path="/recyclable" element={<RecyclablePage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </Suspense>

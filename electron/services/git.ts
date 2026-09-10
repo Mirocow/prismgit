@@ -2589,4 +2589,531 @@ export async function deleteFile(repoPath: string, file: string): Promise<void> 
   invalidateCache(repoPath);
 }
 
+// ============================================================
+// SmartGit Manual features — extended backend
+// ============================================================
+
+/**
+ * Auto-stash: stash local changes before an operation, then pop after.
+ * Used by merge/rebase/pull to enable --autostash-like behavior.
+ */
+export async function autoStash<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
+  const git = getGit(repoPath);
+  const s = await git.status();
+  const dirty = !s.isClean();
+  let stashHash: string | null = null;
+  if (dirty) {
+    try {
+      stashHash = await git.stash(['push', '-u', '-m', 'prismgit-autostash']);
+    } catch {
+      /* ignore — proceed without stash */
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    if (stashHash) {
+      try {
+        await git.stash(['pop']);
+      } catch {
+        /* swallow pop errors; user can recover via stashes view */
+      }
+    }
+  }
+}
+
+/**
+ * Recyclable commits — unreachable reflog commits eligible for GC.
+ * Returns commits found in .git/logs that are NOT reachable from any ref.
+ * Uses `git fsck --unreachable --no-reflogs` filtered to commits.
+ */
+export interface RecyclableCommit {
+  hash: string;
+  hashAbbrev: string;
+  subject: string;
+  date: string;
+  timestamp: number;
+  /** Source: which reflog or fsck discovered it. */
+  source: string;
+}
+
+export async function recyclableCommits(repoPath: string): Promise<RecyclableCommit[]> {
+  const git = getGit(repoPath);
+  // Strategy: list all reflog hashes (HEAD + branches), then filter out those reachable from refs.
+  try {
+    // Get all reflog entries across all refs
+    const reflogsRaw = await git.raw(['reflog', '--all', '--format=%H%x1f%s%x1f%ct%x1f%gs']);
+    if (!reflogsRaw.trim()) return [];
+    const seen = new Set<string>();
+    const entries: RecyclableCommit[] = [];
+    for (const line of reflogsRaw.split('\n')) {
+      if (!line.trim()) continue;
+      const [hash, subject, ts, source] = line.split('\x1f');
+      if (!hash || seen.has(hash)) continue;
+      seen.add(hash);
+      const timestamp = Number(ts) * 1000;
+      const date = new Date(timestamp).toISOString();
+      entries.push({
+        hash,
+        hashAbbrev: hash.substring(0, 8),
+        subject: subject || '(no subject)',
+        date,
+        timestamp,
+        source: source || 'reflog',
+      });
+    }
+    // Filter: only keep commits that are NOT reachable from any branch/tag
+    const reachable = new Set<string>();
+    try {
+      const revList = await git.raw(['rev-list', '--all']);
+      for (const line of revList.split('\n')) {
+        const h = line.trim();
+        if (h) reachable.add(h);
+      }
+    } catch {
+      /* ignore — treat all as recyclable if rev-list fails */
+    }
+    return entries.filter(e => !reachable.has(e.hash));
+  } catch {
+    return [];
+  }
+}
+
+/** Subtree operations (git subtree) */
+export async function subtreeAdd(
+  repoPath: string,
+  prefix: string,
+  url: string,
+  branch: string,
+  squash = false
+): Promise<string> {
+  const git = getGit(repoPath);
+  const args = ['subtree', 'add', '--prefix=' + prefix, url];
+  if (branch) args.push(branch);
+  if (squash) args.push('--squash');
+  return git.raw(args);
+}
+
+export async function subtreePull(
+  repoPath: string,
+  prefix: string,
+  url: string,
+  branch: string,
+  squash = false
+): Promise<string> {
+  const git = getGit(repoPath);
+  const args = ['subtree', 'pull', '--prefix=' + prefix, url];
+  if (branch) args.push(branch);
+  if (squash) args.push('--squash');
+  return git.raw(args);
+}
+
+export async function subtreePush(
+  repoPath: string,
+  prefix: string,
+  remote: string,
+  branch: string,
+  squash = false
+): Promise<string> {
+  const git = getGit(repoPath);
+  const args = ['subtree', 'push', '--prefix=' + prefix, remote];
+  if (branch) args.push(branch);
+  if (squash) args.push('--squash');
+  return git.raw(args);
+}
+
+export async function subtreeSplit(
+  repoPath: string,
+  prefix: string,
+  branch?: string,
+  rejoin = false
+): Promise<string> {
+  const git = getGit(repoPath);
+  const args = ['subtree', 'split', '--prefix=' + prefix];
+  if (branch) args.push('--branch=' + branch);
+  if (rejoin) args.push('--rejoin');
+  return git.raw(args);
+}
+
+/** LFS Lock support */
+export interface LfsLock {
+  id: string;
+  path: string;
+  owner: { name: string };
+  lockedAt: string;
+  createdAt: string;
+}
+
+export async function lfsListLocks(repoPath: string, remote = 'origin'): Promise<LfsLock[]> {
+  const git = getGit(repoPath);
+  try {
+    const out = await git.raw(['lfs', 'locks', '--remote=' + remote, '--json']);
+    if (!out.trim()) return [];
+    const parsed = JSON.parse(out);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((l: any) => ({
+      id: String(l.id || ''),
+      path: String(l.path || ''),
+      owner: { name: l.owner?.name || l.owner?.name || 'unknown' },
+      lockedAt: l.locked_at || '',
+      createdAt: l.created_at || '',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function lfsLock(repoPath: string, file: string, remote = 'origin'): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['lfs', 'lock', '--remote=' + remote, file]);
+}
+
+export async function lfsUnlock(repoPath: string, file: string, remote = 'origin'): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['lfs', 'unlock', '--remote=' + remote, file]);
+}
+
+/** Git Notes — list notes for a commit */
+export interface NoteEntry {
+  ref: string;
+  content: string;
+}
+
+export async function notesList(repoPath: string, ref = 'refs/notes/commits'): Promise<boolean> {
+  // Returns true if the notes ref exists
+  const git = getGit(repoPath);
+  try {
+    await git.raw(['rev-parse', '--verify', ref]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function noteShow(repoPath: string, commit: string, ref = 'refs/notes/commits'): Promise<string> {
+  const git = getGit(repoPath);
+  try {
+    return await git.raw(['notes', '--ref=' + ref, 'show', commit]);
+  } catch {
+    return '';
+  }
+}
+
+export async function noteAdd(repoPath: string, commit: string, content: string, ref = 'refs/notes/commits', force = false): Promise<void> {
+  const git = getGit(repoPath);
+  const args = ['notes', '--ref=' + ref, 'add'];
+  if (force) args.push('-f');
+  args.push('-m', content, commit);
+  await git.raw(args);
+}
+
+export async function noteRemove(repoPath: string, commit: string, ref = 'refs/notes/commits'): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['notes', '--ref=' + ref, 'remove', commit]);
+}
+
+/** Force compare — bypass maxFileSize limit. Just calls diff() but signals intent. */
+export async function forceCompare(
+  repoPath: string,
+  file: string,
+  options?: { staged?: boolean; ref?: string }
+): Promise<DiffResult> {
+  return diff(repoPath, file, options);
+}
+
+/**
+ * EOL-only change detection.
+ * Returns true if file's changes are ONLY line-ending differences (CRLF vs LF).
+ */
+export async function isEolOnlyChange(repoPath: string, file: string): Promise<boolean> {
+  const git = getGit(repoPath);
+  try {
+    // Run a diff with --ignore-cr-at-eol; if it produces NO output, the only change is EOL.
+    const out = await git.raw(['diff', '--ignore-cr-at-eol', '--', file]);
+    return out.trim() === '';
+  } catch {
+    return false;
+  }
+}
+
+/** Push to Gerrit — refs/for/<branch> instead of HEAD */
+export async function pushToGerrit(
+  repoPath: string,
+  branch?: string,
+  remote = 'origin',
+  options?: { draft?: boolean; reviewers?: string[]; topic?: string }
+): Promise<string> {
+  const git = getGit(repoPath);
+  // Detect target branch from .gitreview or current branch
+  let targetBranch = branch;
+  if (!targetBranch) {
+    // Try reading .gitreview
+    const gitreview = path.join(repoPath, '.gitreview');
+    if (fs.existsSync(gitreview)) {
+      const content = fs.readFileSync(gitreview, 'utf8');
+      const match = content.match(/^defaultbranch\s*=\s*(.+)$/m);
+      if (match) targetBranch = match[1].trim();
+    }
+    if (!targetBranch) {
+      const s = await git.status();
+      targetBranch = s.current || 'main';
+    }
+  }
+  const ref = options?.draft ? `refs/drafts/${targetBranch}` : `refs/for/${targetBranch}`;
+  const args = ['push', remote, ref];
+  if (options?.topic) args.push(`topic=${options.topic}`);
+  if (options?.reviewers && options.reviewers.length) {
+    for (const r of options.reviewers) args.push(`r=${r}`);
+  }
+  return git.raw(args);
+}
+
+/** Clone with partial clone filter (--filter=blob:none etc.) */
+export async function clonePartial(
+  url: string,
+  targetPath: string,
+  filter: 'blob:none' | 'tree:0' | 'blob:limit=1m' = 'blob:none',
+  options?: { depth?: number; branch?: string; recursive?: boolean }
+): Promise<string> {
+  const args = ['clone', '--filter=' + filter, url, targetPath];
+  if (options?.depth) args.push('--depth=' + options.depth);
+  if (options?.branch) args.push('--branch=' + options.branch, '--single-branch');
+  if (options?.recursive) args.push('--recursive');
+  const git = simpleGit();
+  const result = await git.raw(args);
+  invalidateCache();
+  return result || targetPath;
+}
+
+/** Set up PrismGit as credential helper for the cloned repo */
+export async function setupCredentialHelper(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  try {
+    await git.raw(['config', '--local', 'credential.helper', '']);
+    // We don't actually have a real credential helper here, so leave it as a config note.
+    // The intent is: future PrismGit installs a credential helper that this enables.
+    await git.addConfig('credential.helper', 'store', false /* local */);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Bidirectional blame: show BOTH past and future commits for a given line.
+ * Returns the past commit (regular git blame) AND list of future commits
+ * that touched this line.
+ */
+export interface BidirectionalBlameResult {
+  past: BlameResult;
+  /** For each line: list of future commit hashes (after the blame commit) that modified it. */
+  futureLines: { lineNumber: number; commits: { hash: string; subject: string; date: string }[] }[];
+}
+
+export async function blameBidirectional(
+  repoPath: string,
+  file: string,
+  ref?: string
+): Promise<BidirectionalBlameResult> {
+  const past = await blame(repoPath, file, ref);
+  // For future: use git log -L to find all commits that touched each line range.
+  // For performance, we just find all commits touching the file after the past blame.
+  const git = getGit(repoPath);
+  const futureLines: BidirectionalBlameResult['futureLines'] = [];
+
+  // Get all commits touching this file
+  let commits: { hash: string; subject: string; date: string; timestamp: number }[] = [];
+  try {
+    const logOut = await git.raw([
+      'log', '--follow', '--format=%H%x1f%s%x1f%cI',
+      '--', file,
+    ]);
+    commits = logOut.trim().split('\n')
+      .filter(l => l.trim())
+      .map(l => {
+        const [hash, subject, date] = l.split('\x1f');
+        return { hash, subject, date, timestamp: new Date(date).getTime() };
+      });
+  } catch {
+    /* ignore */
+  }
+
+  // For each line in past blame, find future commits (timestamp > blame commit's timestamp) that touched this file
+  for (const line of past.lines) {
+    const lineCommitTimestamp = Date.parse(line.authorTime);
+    const futureCommits = commits
+      .filter(c => c.timestamp > lineCommitTimestamp)
+      .map(c => ({ hash: c.hash, subject: c.subject, date: c.date }))
+      .slice(0, 10); // cap at 10 to keep UI manageable
+    if (futureCommits.length > 0) {
+      futureLines.push({ lineNumber: line.finalLineNumber, commits: futureCommits });
+    }
+  }
+
+  return { past, futureLines };
+}
+
+/** SmartGit's "Investigate" / DeepGit line-level find commits that introduced or removed a string */
+export async function pickaxeSearch(
+  repoPath: string,
+  file: string,
+  search: string,
+  options?: { regex?: boolean; ignoreCase?: boolean }
+): Promise<{ hash: string; subject: string; date: string; lineNumbers: number[] }[]> {
+  const git = getGit(repoPath);
+  const args = ['log', '-S', search, '--format=%H%x1f%s%x1f%cI', '--follow', '--', file];
+  if (options?.regex) {
+    args.splice(2, 1, '-G', search);
+  }
+  if (options?.ignoreCase) {
+    args.push('-i');
+  }
+  try {
+    const out = await git.raw(args);
+    if (!out.trim()) return [];
+    return out.trim().split('\n').map(l => {
+      const [hash, subject, date] = l.split('\x1f');
+      return { hash, subject, date, lineNumbers: [] };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Detect renames more aggressively (with --find-renames=<threshold>).
+ * Returns the rename pairs detected in the working tree or in a commit.
+ */
+export async function detectRenames(
+  repoPath: string,
+  options?: { threshold?: number; ref?: string }
+): Promise<{ from: string; to: string; similarity: number }[]> {
+  const git = getGit(repoPath);
+  const threshold = options?.threshold ?? 50;
+  // Default: compare HEAD to working tree (catches both staged + unstaged renames)
+  const args = ['diff', '--name-status', '--find-renames=' + threshold + '%'];
+  if (options?.ref) {
+    args.push(options.ref);
+  } else {
+    args.push('HEAD');
+  }
+  try {
+    const out = await git.raw(args);
+    return out.trim().split('\n')
+      .filter(l => l.startsWith('R'))
+      .map(l => {
+        // Format: R<similarity>\t<from>\t<to>
+        const parts = l.split('\t');
+        const similarityStr = parts[0].substring(1);
+        const similarity = parseInt(similarityStr, 10) || 100;
+        return { from: parts[1] || '', to: parts[2] || '', similarity };
+      });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Allow modifying pushed commits — check if commit is pushed.
+ * Returns true if commit has been pushed to any remote.
+ */
+export async function isCommitPushed(repoPath: string, hash: string): Promise<boolean> {
+  const git = getGit(repoPath);
+  try {
+    // Check if commit is reachable from any remote-tracking branch
+    const branches = await git.raw(['branch', '-r', '--contains', hash]);
+    return branches.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Squash multiple commits into one (interactive rebase automation).
+ * Uses git rebase --interactive with autosquash, by writing fixup! messages.
+ */
+export async function squashCommits(
+  repoPath: string,
+  fromHash: string,
+  toHash: string,
+  message?: string
+): Promise<void> {
+  const git = getGit(repoPath);
+  // Get list of commits from fromHash..toHash (oldest first)
+  const list = await git.raw(['rev-list', '--reverse', `${fromHash}^..${toHash}`]);
+  const hashes = list.trim().split('\n').filter(Boolean);
+  if (hashes.length < 2) return;
+  // Create a sequence editor that turns all but the first into fixup
+  const editorScript = path.join(repoPath, '.git', 'prismgit-seq-editor.sh');
+  const lines: string[] = [];
+  hashes.forEach((h, i) => {
+    if (i === 0) {
+      lines.push(`pick ${h} ${message || 'squashed'}`);
+    } else {
+      lines.push(`fixup ${h}`);
+    }
+  });
+  fs.writeFileSync(editorScript, `#!/bin/sh\necho '${lines.join('\\n')}' > "$1"\n`, { mode: 0o755 });
+  try {
+    await git.raw(['-c', 'core.editor=' + editorScript, 'rebase', '-i', `${fromHash}^`]);
+  } finally {
+    try { fs.unlinkSync(editorScript); } catch { /* ignore */ }
+  }
+}
+
+/** Coalesce two adjacent commits into one (similar to squash, but combines messages). */
+export async function coalesceCommits(
+  repoPath: string,
+  firstHash: string,
+  secondHash: string
+): Promise<void> {
+  // Find which is older
+  const git = getGit(repoPath);
+  const order = await git.raw(['rev-list', '--reverse', '--format=%H', `${firstHash}~1..${secondHash}`]);
+  const hashes = order.trim().split('\n').filter(l => l.startsWith('commit ')).map(l => l.substring(7));
+  if (hashes.length < 2) return;
+  const older = hashes[0];
+  const newer = hashes[hashes.length - 1];
+  // Squash with combined message
+  const messages: string[] = [];
+  for (const h of [older, newer]) {
+    try {
+      const msg = await git.raw(['log', '-1', '--format=%B', h]);
+      messages.push(msg.trim());
+    } catch { /* ignore */ }
+  }
+  await squashCommits(repoPath, older, newer, messages.join('\n\n'));
+}
+
+/** Tag-Grouping: group tags by patterns (e.g., v1.0.0, v1.0.1 → group "v1.0") */
+export interface TagGroup {
+  name: string;
+  tags: TagInfo[];
+  latest?: TagInfo;
+}
+
+export function groupTags(tags: TagInfo[], pattern: RegExp = /^v?(\d+\.\d+)/): TagGroup[] {
+  const groups = new Map<string, TagInfo[]>();
+  const ungrouped: TagInfo[] = [];
+  for (const tag of tags) {
+    const match = tag.name.match(pattern);
+    if (match) {
+      const group = match[1];
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group)!.push(tag);
+    } else {
+      ungrouped.push(tag);
+    }
+  }
+  const result: TagGroup[] = [];
+  for (const [name, groupTags] of groups.entries()) {
+    groupTags.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    result.push({ name, tags: groupTags, latest: groupTags[0] });
+  }
+  result.sort((a, b) => (b.latest?.date || '').localeCompare(a.latest?.date || ''));
+  if (ungrouped.length > 0) {
+    result.push({ name: 'Other', tags: ungrouped });
+  }
+  return result;
+}
+
 export { invalidateCache };

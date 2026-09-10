@@ -18,6 +18,9 @@ import type {
   BlameResult,
   GitConfigEntry,
   DirNode,
+  RecyclableCommit,
+  LfsLock,
+  BidirectionalBlameResult,
 } from '../../electron/types/git-api';
 import type {
   GithubUser,
@@ -46,6 +49,9 @@ export type {
   BlameResult,
   GitConfigEntry,
   DirNode,
+  RecyclableCommit,
+  LfsLock,
+  BidirectionalBlameResult,
   GithubUser,
   GithubRepository,
   GithubPullRequest,

@@ -15,6 +15,10 @@ interface DiffViewerProps {
   mode?: 'unstaged' | 'staged' | 'commit';
   /** Called after partial staging/unstaging so the parent can refresh the status. */
   onStaged?: () => void;
+  /** SmartGit Manual: Force Compare callback — when provided, a "Force Compare" button
+   * appears for files exceeding the maxFileSize threshold. The parent should call
+   * api.git.forceCompare(...) and pass the result back as the new `diff` prop. */
+  onForceCompare?: () => void;
 }
 
 type ViewMode = 'unified' | 'split';
@@ -103,7 +107,7 @@ function shouldShowLine(line: DiffLine, wsMode: WhitespaceMode): boolean {
   return true;
 }
 
-export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit', onStaged }: DiffViewerProps) {
+export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit', onStaged, onForceCompare }: DiffViewerProps) {
   const toast = useToastStore();
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
   const [wsMode, setWsMode] = useState<WhitespaceMode>('normal');
@@ -457,6 +461,15 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
           <button className="btn btn-secondary text-xs" onClick={handleSaveBlob} disabled={savingBlob}>
             {savingBlob ? <Loader size={12} className="animate-spin" /> : <Download size={12} />}
             Save version from HEAD
+          </button>
+        )}
+        {onForceCompare && (
+          <button
+            className="btn btn-secondary text-xs"
+            title="SmartGit Manual: Force Compare — bypass the maximumFileSize limit and compare anyway. May be slow for very large files."
+            onClick={onForceCompare}
+          >
+            <RefreshCw size={12} /> Force Compare
           </button>
         )}
       </div>

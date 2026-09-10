@@ -466,3 +466,28 @@ export const Command = (p: IconProps) => (
     <path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z" />
   </Icon>
 );
+
+export const Recycle = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M7 19H4.815a1.83 1.83 0 0 1-1.57-.881 1.78 1.78 0 0 1-.004-1.784L7.196 9.5" />
+    <path d="M11 19h8.203a1.83 1.83 0 0 0 1.556-.88 1.78 1.78 0 0 0 0-1.785L17.196 9.5" />
+    <path d="m14 16-3 3 3 3" />
+    <path d="M8.293 13.596 6.5 9.5 3 11l2.5 4.5" />
+    <path d="m13.348 9.595-1.85-4.74a1.78 1.78 0 0 0-1.55-.95 1.83 1.83 0 0 0-1.573.881L7 9" />
+    <path d="m17 7 3-3-3-3" />
+  </Icon>
+);
+
+export const Lock = (p: IconProps) => (
+  <Icon {...p}>
+    <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </Icon>
+);
+
+export const Unlock = (p: IconProps) => (
+  <Icon {...p}>
+    <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+  </Icon>
+);

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Package, RefreshCw, Download, Upload, Plus, Loader, AlertCircle, Check } from '../components/icons';
+import { Package, RefreshCw, Download, Upload, Plus, Loader, AlertCircle, Check, Lock, Unlock } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
-import { api } from '../lib/api';
+import { api, type LfsLock } from '../lib/api';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 interface LfsFile {
@@ -17,6 +17,8 @@ export function LfsPage() {
   const [installed, setInstalled] = useState(false);
   const [files, setFiles] = useState<LfsFile[]>([]);
   const [tracked, setTracked] = useState<string[]>([]);
+  // SmartGit Manual: LFS Locks display
+  const [locks, setLocks] = useState<LfsLock[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [showTrack, setShowTrack] = useState(false);
@@ -26,13 +28,15 @@ export function LfsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [status, list] = await Promise.all([
+      const [status, list, lockList] = await Promise.all([
         api.git.lfsStatus(repo.path),
         api.git.lfsList(repo.path).catch(() => []),
+        api.git.lfsListLocks(repo.path).catch(() => []),
       ]);
       setInstalled(status.installed);
       setFiles(status.files);
       setTracked(list);
+      setLocks(lockList);
     } catch (e) {
       toast.error('Failed to load LFS status', String(e));
     } finally {
@@ -113,6 +117,32 @@ export function LfsPage() {
     }
   };
 
+  const handleLock = async (file: string) => {
+    setBusy('lock-' + file);
+    try {
+      await api.git.lfsLock(repo.path, file);
+      toast.success(`Locked: ${file}`);
+      await load();
+    } catch (e) {
+      toast.error('Lock failed', String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleUnlock = async (file: string) => {
+    setBusy('unlock-' + file);
+    try {
+      await api.git.lfsUnlock(repo.path, file);
+      toast.success(`Unlocked: ${file}`);
+      await load();
+    } catch (e) {
+      toast.error('Unlock failed', String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
@@ -167,9 +197,36 @@ export function LfsPage() {
           </div>
         ) : (
           <>
+            {/* LFS Locks — SmartGit Manual: LFS Lock command + lock-state display */}
+            <div>
+              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default flex items-center gap-2">
+                <Lock size={11} />
+                LFS Locks ({locks.length})
+              </div>
+              {locks.length === 0 ? (
+                <div className="px-3 py-3 text-xs text-text-tertiary">No active locks</div>
+              ) : (
+                locks.map((l, i) => (
+                  <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle hover:bg-bg-hover">
+                    <Lock size={12} className="text-status-modified shrink-0" />
+                    <code className="mono flex-1 truncate" title={l.path}>{l.path}</code>
+                    <span className="text-2xs text-text-tertiary">{l.owner?.name || 'unknown'}</span>
+                    <button
+                      className="icon-btn !w-5 !h-5"
+                      title="Unlock"
+                      onClick={() => handleUnlock(l.path)}
+                      disabled={busy === 'unlock-' + l.path}
+                    >
+                      <Unlock size={10} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
             {/* Tracked patterns */}
             <div>
-              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default">
+              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default mt-2">
                 Tracked Patterns ({tracked.length})
               </div>
               {tracked.length === 0 ? (
@@ -183,7 +240,7 @@ export function LfsPage() {
               )}
             </div>
 
-            {/* LFS files */}
+            {/* LFS files — with lock/unlock per file */}
             <div>
               <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-y border-border-default mt-2">
                 LFS Files ({files.length})
@@ -191,13 +248,35 @@ export function LfsPage() {
               {files.length === 0 ? (
                 <div className="px-3 py-3 text-xs text-text-tertiary">No LFS files in working tree</div>
               ) : (
-                files.map((f, i) => (
-                  <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle hover:bg-bg-hover">
-                    <Package size={12} className="text-text-tertiary" />
-                    <code className="mono flex-1 truncate">{f.path}</code>
-                    <span className="text-2xs text-text-tertiary">{f.status}</span>
-                  </div>
-                ))
+                files.map((f, i) => {
+                  const locked = locks.some(l => l.path === f.path);
+                  return (
+                    <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle hover:bg-bg-hover group">
+                      <Package size={12} className="text-text-tertiary" />
+                      <code className="mono flex-1 truncate">{f.path}</code>
+                      <span className="text-2xs text-text-tertiary">{f.status}</span>
+                      {locked ? (
+                        <button
+                          className="icon-btn !w-5 !h-5 text-status-modified opacity-100"
+                          title="Unlock this file"
+                          onClick={() => handleUnlock(f.path)}
+                          disabled={busy === 'unlock-' + f.path}
+                        >
+                          <Lock size={10} />
+                        </button>
+                      ) : (
+                        <button
+                          className="icon-btn !w-5 !h-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Lock this file (LFS server-side)"
+                          onClick={() => handleLock(f.path)}
+                          disabled={busy === 'lock-' + f.path}
+                        >
+                          <Unlock size={10} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </>

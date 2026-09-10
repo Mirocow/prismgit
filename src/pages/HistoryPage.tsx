@@ -529,6 +529,10 @@ export function HistoryPage() {
       { label: 'Split Off Files Into New Commit...', clickId: 'split-off' },
       { label: 'Start Interactive Edit (split commit)', clickId: 'split-commit' },
       { type: 'separator' },
+      { label: 'Add Git Note...', clickId: 'add-note' },
+      { label: 'Show Git Note', clickId: 'show-note' },
+      { label: 'Remove Git Note', clickId: 'remove-note' },
+      { type: 'separator' },
       { label: 'Copy Short Hash', clickId: 'copy-short' },
       { label: 'Copy Full Hash', clickId: 'copy-full' },
       { label: 'Copy Commit Message', clickId: 'copy-msg' },
@@ -569,8 +573,45 @@ export function HistoryPage() {
         case 'show-commit-diff': handleShowCommitDiff(entry); break;
         case 'split-off': handleOpenSplitOff(entry); break;
         case 'split-commit': handleStartSplitCommit(entry); break;
+        case 'add-note': handleAddNote(entry); break;
+        case 'show-note': handleShowNote(entry); break;
+        case 'remove-note': handleRemoveNote(entry); break;
       }
     });
+  };
+
+  // Git Notes — SmartGit Manual: Notes with custom categories
+  const handleAddNote = async (entry: LogEntry) => {
+    const content = window.prompt(`Add a Git Note for ${shortHash(entry.hash)}:`, '');
+    if (!content?.trim()) return;
+    try {
+      await api.git.noteAdd(repo.path, entry.hash, content.trim());
+      toast.success('Note added');
+    } catch (e) { toast.error('Failed to add note', String(e)); }
+  };
+
+  const handleShowNote = async (entry: LogEntry) => {
+    try {
+      const note = await api.git.noteShow(repo.path, entry.hash);
+      if (note.trim()) {
+        toast.info(`Note for ${shortHash(entry.hash)}`, note);
+      } else {
+        toast.info('No note for this commit');
+      }
+    } catch (e) { toast.error('Failed to load note', String(e)); }
+  };
+
+  const handleRemoveNote = async (entry: LogEntry) => {
+    if (!(await confirmDialog({
+      title: 'Remove Git Note',
+      message: `Remove the Git Note from ${shortHash(entry.hash)}?`,
+      confirmLabel: 'Remove',
+      danger: true,
+    }))) return;
+    try {
+      await api.git.noteRemove(repo.path, entry.hash);
+      toast.success('Note removed');
+    } catch (e) { toast.error('Failed to remove note', String(e)); }
   };
 
   // Tag-from-commit dialog state
@@ -698,6 +739,26 @@ export function HistoryPage() {
               title="Show only merge commits"
             >
               Merges
+            </button>
+            {/* Smart Views presets (SmartGit Manual) */}
+            <button
+              className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
+                authorFilter === 'recent' ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
+              onClick={() => {
+                if (authorFilter === 'recent') {
+                  setAuthorFilter('');
+                  setDateFrom('');
+                } else {
+                  setAuthorFilter('recent');
+                  // Last 7 days
+                  const d = new Date();
+                  d.setDate(d.getDate() - 7);
+                  setDateFrom(d.toISOString().slice(0, 10));
+                }
+              }}
+              title="Show commits from the last 7 days"
+            >
+              Recent
             </button>
           </div>
           <button className={cn('icon-btn !w-5 !h-5', showGraph && 'active')}

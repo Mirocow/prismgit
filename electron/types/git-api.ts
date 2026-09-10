@@ -387,4 +387,85 @@ export interface GitApi {
 
   // Repository directory tree (Changes view)
   listDirectories: (repoPath: string, maxDepth?: number) => Promise<DirNode[]>;
+
+  // ============================================================
+  // SmartGit Manual extended features
+  // ============================================================
+
+  /** Recyclable commits — unreachable reflog commits eligible for GC. */
+  recyclableCommits: (repoPath: string) => Promise<RecyclableCommit[]>;
+
+  /** Subtree: add (merge a remote project as a subdirectory). */
+  subtreeAdd: (repoPath: string, prefix: string, url: string, branch: string, squash?: boolean) => Promise<string>;
+  subtreePull: (repoPath: string, prefix: string, url: string, branch: string, squash?: boolean) => Promise<string>;
+  subtreePush: (repoPath: string, prefix: string, remote: string, branch: string, squash?: boolean) => Promise<string>;
+  subtreeSplit: (repoPath: string, prefix: string, branch?: string, rejoin?: boolean) => Promise<string>;
+
+  /** LFS Lock support. */
+  lfsListLocks: (repoPath: string, remote?: string) => Promise<LfsLock[]>;
+  lfsLock: (repoPath: string, file: string, remote?: string) => Promise<void>;
+  lfsUnlock: (repoPath: string, file: string, remote?: string) => Promise<void>;
+
+  /** Git Notes — add/show/remove notes on commits. */
+  notesList: (repoPath: string, ref?: string) => Promise<boolean>;
+  noteShow: (repoPath: string, commit: string, ref?: string) => Promise<string>;
+  noteAdd: (repoPath: string, commit: string, content: string, ref?: string, force?: boolean) => Promise<void>;
+  noteRemove: (repoPath: string, commit: string, ref?: string) => Promise<void>;
+
+  /** Force compare (bypass maxFileSize limit). */
+  forceCompare: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) => Promise<DiffResult>;
+
+  /** EOL-only change detection. */
+  isEolOnlyChange: (repoPath: string, file: string) => Promise<boolean>;
+
+  /** Push to Gerrit — refs/for/<branch>. */
+  pushToGerrit: (repoPath: string, branch?: string, remote?: string, options?: { draft?: boolean; reviewers?: string[]; topic?: string }) => Promise<string>;
+
+  /** Partial clone (--filter=blob:none). */
+  clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean }) => Promise<string>;
+
+  /** Setup PrismGit as credential helper. */
+  setupCredentialHelper: (repoPath: string) => Promise<void>;
+
+  /** Bidirectional blame (past + future). */
+  blameBidirectional: (repoPath: string, file: string, ref?: string) => Promise<BidirectionalBlameResult>;
+
+  /** Pickaxe search — find commits that introduced or removed a string. */
+  pickaxeSearch: (repoPath: string, file: string, search: string, options?: { regex?: boolean; ignoreCase?: boolean }) => Promise<{ hash: string; subject: string; date: string; lineNumbers: number[] }[]>;
+
+  /** Detect renames with --find-renames=<threshold>%. */
+  detectRenames: (repoPath: string, options?: { threshold?: number; ref?: string }) => Promise<{ from: string; to: string; similarity: number }[]>;
+
+  /** Check if commit has been pushed to any remote. */
+  isCommitPushed: (repoPath: string, hash: string) => Promise<boolean>;
+
+  /** Squash multiple commits into one. */
+  squashCommits: (repoPath: string, fromHash: string, toHash: string, message?: string) => Promise<void>;
+  /** Coalesce two adjacent commits (combine messages). */
+  coalesceCommits: (repoPath: string, firstHash: string, secondHash: string) => Promise<void>;
+}
+
+/** Recyclable commit (unreachable reflog commit). */
+export interface RecyclableCommit {
+  hash: string;
+  hashAbbrev: string;
+  subject: string;
+  date: string;
+  timestamp: number;
+  source: string;
+}
+
+/** LFS lock entry. */
+export interface LfsLock {
+  id: string;
+  path: string;
+  owner: { name: string };
+  lockedAt: string;
+  createdAt: string;
+}
+
+/** Bidirectional blame result. */
+export interface BidirectionalBlameResult {
+  past: BlameResult;
+  futureLines: { lineNumber: number; commits: { hash: string; subject: string; date: string }[] }[];
 }

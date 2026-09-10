@@ -644,6 +644,226 @@ export function SettingsPage() {
           </section>
         )}
 
+        {/* SmartGit Manual: Preferences → Commands */}
+        <section className="panel mb-4">
+          <div className="panel-header">Commands</div>
+          <div className="p-5 space-y-3 text-sm">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.allowModifyingPushedCommits ?? false}
+                onChange={(e) => setSetting('allowModifyingPushedCommits', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>Allow modifying pushed commits (e.g. forced-push)</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  When enabled, the amend / squash / rebase confirmation for pushed commits becomes a warning instead of a hard block.
+                </div>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.detectRenames ?? true}
+                onChange={(e) => setSetting('detectRenames', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>Detect renames in refresh</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  Pair added + deleted files as renames (git diff --find-renames=50%).
+                </div>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.distinguishEolChanges ?? false}
+                onChange={(e) => setSetting('distinguishEolChanges', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>Distinguish between content and EOL-only changes</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  Marks files whose only changes are line-ending differences (CRLF ↔ LF).
+                </div>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.autoStashOnCommonCommands ?? false}
+                onChange={(e) => setSetting('autoStashOnCommonCommands', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>Auto-stash on common commands</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  Stash local changes before merge/rebase/pull, then pop after.
+                </div>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.includeUntrackedInStash ?? false}
+                onChange={(e) => setSetting('includeUntrackedInStash', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>Include untracked files in stash</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  Passes -u to git stash push — also stashes untracked files.
+                </div>
+              </div>
+            </label>
+          </div>
+        </section>
+
+        {/* SmartGit Manual: External Tools system */}
+        <section className="panel mb-4">
+          <div className="panel-header">External Tools</div>
+          <div className="p-5 text-sm space-y-3">
+            <div className="text-2xs text-text-tertiary">
+              Configure external tools for opening files, comparing, and conflict solving.
+              Variables: <code className="mono text-accent">{`{filePath}`}</code>,{' '}
+              <code className="mono text-accent">{`{repositoryRootPath}`}</code>,{' '}
+              <code className="mono text-accent">{`{commit}`}</code>,{' '}
+              <code className="mono text-accent">{`{leftFile}`}</code>,{' '}
+              <code className="mono text-accent">{`{rightFile}`}</code>,{' '}
+              <code className="mono text-accent">{`{baseFile}`}</code>.
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                className="flex-1 text-xs font-mono"
+                placeholder="diff.tool name (e.g., vscode-diff)"
+                defaultValue={settings.diffTool || ''}
+                onBlur={(e) => setSetting('diffTool', e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                className="flex-1 text-xs font-mono"
+                placeholder="merge.tool name (e.g., vscode-merge)"
+                defaultValue={settings.mergeTool || ''}
+                onBlur={(e) => setSetting('mergeTool', e.target.value)}
+              />
+            </div>
+            <div className="text-2xs text-text-tertiary">
+              These write to git config <code>diff.tool</code> and <code>merge.tool</code>.
+              The actual tool command should be defined in <code>[difftool "..."]</code> /{' '}
+              <code>[mergetool "..."]</code> sections.
+            </div>
+          </div>
+        </section>
+
+        {/* SmartGit Manual: Low-Level Properties editor */}
+        <section className="panel mb-4">
+          <div className="panel-header">Low-Level Properties</div>
+          <div className="p-5 text-sm space-y-3">
+            <div className="text-2xs text-text-tertiary">
+              Advanced settings stored in <code>smartgit.properties</code>.
+              Changes apply on next restart.
+            </div>
+            <textarea
+              className="w-full font-mono text-xs h-32 resize-y p-2 border border-border-default rounded bg-bg-tertiary"
+              placeholder={`# SmartGit-compatible properties (key=value)
+# Examples:
+# changes.maximumFileSize=1048576
+# log.graph.overlap.enabled=true
+# log.file.followCopies=true
+# smartgit.refresh.inspectEol=true`}
+              defaultValue={settings.lowLevelProperties || ''}
+              onBlur={(e) => setSetting('lowLevelProperties', e.target.value)}
+            />
+            <div className="flex gap-2">
+              <button
+                className="btn btn-secondary text-xs"
+                onClick={() => {
+                  setSetting('lowLevelProperties', `# Default properties
+changes.maximumFileSize=1048576
+log.graph.overlap.enabled=true
+log.file.followCopies=true
+smartgit.refresh.inspectEol=true
+`);
+                }}
+              >
+                Reset to defaults
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* SmartGit Manual: AI Commit Messages (v25+) */}
+        <section className="panel mb-4">
+          <div className="panel-header">AI Commit Messages</div>
+          <div className="p-5 text-sm space-y-3">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.aiCommitMessagesEnabled ?? false}
+                onChange={(e) => setSetting('aiCommitMessagesEnabled', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>Enable AI integration</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  Use <code className="mono">@ai</code> in commit message to generate, or <code className="mono">WIP</code> for "WIP: &lt;ai message&gt;".
+                </div>
+              </div>
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">Provider</label>
+                <select
+                  className="w-full text-sm"
+                  value={settings.aiProvider || ''}
+                  onChange={(e) => setSetting('aiProvider', e.target.value)}
+                >
+                  <option value="">— Disabled —</option>
+                  <option value="openai">OpenAI (gpt-4o-mini)</option>
+                  <option value="anthropic">Anthropic (Claude)</option>
+                  <option value="github">GitHub Models</option>
+                  <option value="mistral">Mistral</option>
+                  <option value="ollama">Ollama (local)</option>
+                  <option value="custom">Custom (OpenAI-compatible)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">Model</label>
+                <input
+                  type="text"
+                  className="w-full text-sm font-mono"
+                  placeholder="gpt-4o-mini"
+                  defaultValue={settings.aiModel || ''}
+                  onBlur={(e) => setSetting('aiModel', e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">API URL</label>
+                <input
+                  type="text"
+                  className="w-full text-sm font-mono"
+                  placeholder="https://api.openai.com/v1/chat/completions (default for OpenAI)"
+                  defaultValue={settings.aiUrl || ''}
+                  onBlur={(e) => setSetting('aiUrl', e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">API Key</label>
+                <input
+                  type="password"
+                  className="w-full text-sm font-mono"
+                  placeholder="sk-..."
+                  defaultValue={settings.aiApiKey || ''}
+                  onBlur={(e) => setSetting('aiApiKey', e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="text-2xs text-text-tertiary">
+              For Ollama (local LLM), leave API Key empty and set URL to <code>http://localhost:11434</code>.
+              The model must already be pulled (<code className="mono">ollama pull llama3.2</code>).
+            </div>
+          </div>
+        </section>
+
         {/* About */}
         <section className="panel mb-4">
           <div className="panel-header">About</div>

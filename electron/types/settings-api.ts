@@ -56,6 +56,36 @@ export interface AppSettings {
    * interval while the repository is open. Key = absolute repo path.
    */
   backgroundFetchRemotes?: Record<string, string[]>;
+  // === SmartGit Manual: Preferences → Commands ===
+  /** Allow modifying pushed commits (e.g. amend, squash, rebase) without blocking. */
+  allowModifyingPushedCommits?: boolean;
+  /** Detect renames in refresh (pair added + deleted files). */
+  detectRenames?: boolean;
+  /** Distinguish between content changes and EOL-only changes. */
+  distinguishEolChanges?: boolean;
+  /** Auto-stash local changes before merge/rebase/pull, then pop after. */
+  autoStashOnCommonCommands?: boolean;
+  /** Include untracked files when stashing (-u flag). */
+  includeUntrackedInStash?: boolean;
+  // === SmartGit Manual: External Tools ===
+  /** git config diff.tool value (e.g., "vscode-diff"). */
+  diffTool?: string;
+  /** git config merge.tool value (e.g., "vscode-merge"). */
+  mergeTool?: string;
+  // === SmartGit Manual: Low-Level Properties ===
+  /** Contents of smartgit.properties file (UTF-8, key=value, # for comments). */
+  lowLevelProperties?: string;
+  // === SmartGit Manual: AI Commit Messages ===
+  /** Enable AI commit message generation in Changes view. */
+  aiCommitMessagesEnabled?: boolean;
+  /** LLM provider id (e.g., "openai", "anthropic", "ollama"). */
+  aiProvider?: string;
+  /** API key for the LLM provider. */
+  aiApiKey?: string;
+  /** Model name (e.g., "gpt-4o-mini", "claude-3-5-sonnet", "llama3.2"). */
+  aiModel?: string;
+  /** Provider URL (for Ollama: http://localhost:11434). */
+  aiUrl?: string;
 }
 
 export interface SettingsApi {

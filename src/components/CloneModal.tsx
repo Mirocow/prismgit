@@ -25,6 +25,12 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
   const [branch, setBranch] = useState('');
   const [depth, setDepth] = useState<number | ''>('');
   const [mirror, setMirror] = useState(false);
+  // SmartGit Manual: Partial clone (--filter=blob:none) — skip large files
+  const [partialClone, setPartialClone] = useState(false);
+  // SmartGit Manual: Configure PrismGit as credential helper for cloned repo
+  const [setupCredentialHelper, setSetupCredentialHelper] = useState(false);
+  // SmartGit Manual: Skip recursive submodule initialization
+  const [noRecursive, setNoRecursive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<'url' | 'github'>('url');
   const [repos, setRepos] = useState<GithubRepository[]>([]);
@@ -44,6 +50,9 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
       setBranch('');
       setDepth('');
       setMirror(false);
+      setPartialClone(false);
+      setSetupCredentialHelper(false);
+      setNoRecursive(false);
       if (authenticated) {
         loadRepos();
       }
@@ -153,13 +162,28 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
         // Mirror clone: copies ALL refs (heads, tags, notes, remotes) — bare backup copy
         await api.git.mirror(normalizedUrl, finalPath);
         await useRepositoryStore.getState().openRepository(finalPath);
+      } else if (partialClone) {
+        // SmartGit Manual: Partial clone — fetch tree without blobs, fetch on demand
+        await api.git.clonePartial(normalizedUrl, finalPath, 'blob:none', {
+          depth: depth ? Number(depth) : undefined,
+          branch: branch || undefined,
+          recursive: !noRecursive,
+        });
+        await useRepositoryStore.getState().openRepository(finalPath);
       } else {
         await cloneRepository(normalizedUrl, finalPath, {
           depth: depth ? Number(depth) : undefined,
           branch: branch || undefined,
         });
       }
-      toast.success(mirror ? 'Mirror clone created successfully' : 'Repository cloned successfully');
+      if (setupCredentialHelper) {
+        await api.git.setupCredentialHelper(finalPath).catch(() => {});
+      }
+      toast.success(
+        mirror ? 'Mirror clone created successfully'
+        : partialClone ? 'Partial clone created (large files fetched on demand)'
+        : 'Repository cloned successfully'
+      );
       onClose();
     } catch (e) {
       toast.error('Clone failed', String(e));
@@ -307,6 +331,39 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                   onChange={(e) => setMirror(e.target.checked)}
                 />
                 Mirror clone (--mirror, all refs, bare)
+              </label>
+              <label
+                className="flex items-center gap-2 text-sm cursor-pointer"
+                title="git clone --filter=blob:none: skips file contents — fetched on demand when you click a file. Saves bandwidth & disk space on huge repos."
+              >
+                <input
+                  type="checkbox"
+                  checked={partialClone}
+                  onChange={(e) => setPartialClone(e.target.checked)}
+                />
+                Partial clone (skip large files, fetch on demand)
+              </label>
+              <label
+                className="flex items-center gap-2 text-sm cursor-pointer"
+                title="Configure PrismGit as the credential helper for this repo — your GitHub PAT is reused by the git CLI."
+              >
+                <input
+                  type="checkbox"
+                  checked={setupCredentialHelper}
+                  onChange={(e) => setSetupCredentialHelper(e.target.checked)}
+                />
+                Use PrismGit as credential helper
+              </label>
+              <label
+                className="flex items-center gap-2 text-sm cursor-pointer"
+                title="Skip --recursive submodule initialization."
+              >
+                <input
+                  type="checkbox"
+                  checked={noRecursive}
+                  onChange={(e) => setNoRecursive(e.target.checked)}
+                />
+                Skip submodule initialization
               </label>
             </div>
           ) : (
