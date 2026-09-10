@@ -1,30 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import type { AppSettings } from '../../electron/types/settings-api';
+import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X, Sparkles, SplitSquareHorizontal } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { LazyFileList } from '../components/LazyFileList';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
-import { LazyFileList } from '../components/LazyFileList';
-import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
+import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, type LLMProvider } from '../lib/aiCommitMessages';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
-import { useContextMenu } from '../lib/useContextMenu';
-import { buildFileMenu, runFileAction, getIndexFlagsAsync, type IndexFlags } from '../lib/fileContextMenu';
-import { RefBadges } from '../lib/refBadge';
+import { buildFileMenu, getIndexFlagsAsync, runFileAction, type IndexFlags } from '../lib/fileContextMenu';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
-import { cn, getStatusColor } from '../lib/utils';
 import { describePushResult } from '../lib/pushResult';
+import { RefBadges } from '../lib/refBadge';
+import { useContextMenu } from '../lib/useContextMenu';
+import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore } from '../stores/toastStore';
-import { generateCommitMessage, applyAIPlaceholder, detectAIPlaceholder, type LLMProvider } from '../lib/aiCommitMessages';
-import type { AppSettings } from '../../electron/types/settings-api';
 
-import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 /** Build an LLMProvider from settings, or null if not configured. */
 function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvider | null {
@@ -1224,18 +1224,10 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           {/* Separate Staged/Unstaged view toggle (SmartGit 20.1) */}
           <button
             className={cn('icon-btn !w-5 !h-5', separateStagedView && 'active')}
-            title={separateStagedView ? 'Combined view (all files in one list)' : 'Separate Working Tree and Index (SmartGit 20.1)'}
+            title={separateStagedView ? 'Combined view (all files in one list)' : 'Group files by state (Modified/Added/Deleted/Staged)'}
             onClick={() => setSeparateStagedView(!separateStagedView)}
           >
             <ChevronsUpDown size={11} />
-          </button>
-          {/* Group by State toggle (SmartGit 23.1) */}
-          <button
-            className={cn('icon-btn !w-5 !h-5', groupByState && 'active')}
-            title={groupByState ? 'Ungroup files (default order)' : 'Group files by state (Modified/Added/Deleted)'}
-            onClick={() => setGroupByState(!groupByState)}
-          >
-            <ChevronsDownUp size={11} />
           </button>
           <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={handleRefresh}>
             <RefreshCw size={11} />
@@ -1450,46 +1442,6 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             ) : (
               /* === COMBINED VIEW: all files in one list === */
               <>
-                {/* Group by State (SmartGit 23.1): group files by their git status code */}
-                {groupByState ? (
-                  (() => {
-                    const groups: Record<string, typeof stagedFiles> = {};
-                    const allFiles = [...stagedFiles, ...unstagedFiles, ...untrackedFiles];
-                    for (const f of allFiles) {
-                      const code = (f.index as string) === '?' ? 'untracked' :
-                                   (f.index as string) === 'A' ? 'added' :
-                                   (f.index as string) === 'D' ? 'deleted' :
-                                   (f.index as string) === 'R' ? 'renamed' :
-                                   'modified';
-                      if (!groups[code]) groups[code] = [];
-                      groups[code].push(f);
-                    }
-                    const groupLabels: Record<string, { label: string; color: string; bg: string }> = {
-                      modified: { label: 'Modified', color: 'text-status-modified', bg: 'bg-status-modified/8' },
-                      added: { label: 'Added', color: 'text-status-added', bg: 'bg-status-added/8' },
-                      deleted: { label: 'Deleted', color: 'text-status-deleted', bg: 'bg-status-deleted/8' },
-                      renamed: { label: 'Renamed', color: 'text-status-renamed', bg: 'bg-status-renamed/8' },
-                      untracked: { label: 'Untracked', color: 'text-status-untracked', bg: 'bg-status-untracked/8' },
-                    };
-                    return Object.entries(groups).map(([code, files]) => {
-                      const info = groupLabels[code] || groupLabels.modified;
-                      return (
-                        <div key={code}>
-                          <div className={cn('px-2 py-1 text-2xs font-bold uppercase border-b border-border-subtle', info.color, info.bg)}>
-                            {info.label} ({files.length})
-                          </div>
-                          <LazyFileList files={files} isStaged={false} renderRow={renderFileRow} />
-                        </div>
-                      );
-                    });
-                  })()
-                ) : (
-                  <LazyFileList
-                    files={[...stagedFiles, ...unstagedFiles, ...untrackedFiles]}
-                    isStaged={false}
-                    renderRow={renderFileRow}
-                  />
-                )}
               </>
             )}
 
