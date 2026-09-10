@@ -309,6 +309,33 @@ export function SettingsPage() {
                 onChange={(e) => setSetting('showReflogInHistory', e.target.checked)}
               />
             </label>
+            <div className="border-t border-border-subtle pt-4 mt-4">
+              <div className="text-2xs uppercase text-text-tertiary mb-3 font-bold tracking-wider">Repository list</div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium">Remote check interval</div>
+                  <div className="text-xs text-text-tertiary">
+                    How often the sidebar fetches all remotes of every listed
+                    repository and shows ↓ incoming / ↑ outgoing badges.
+                    Minimum 30&nbsp;s; set 0 to disable the periodic check
+                    (the "Check now" button still works).
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <input
+                    type="number"
+                    min={0}
+                    max={3600}
+                    step={10}
+                    value={settings.repoRemoteCheckIntervalSec ?? 120}
+                    onChange={(e) => setSetting('repoRemoteCheckIntervalSec', Math.max(0, Number(e.target.value)))}
+                    className="w-20 text-sm"
+                    data-testid="remote-check-interval-input"
+                  />
+                  <span className="text-xs text-text-tertiary">sec</span>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 

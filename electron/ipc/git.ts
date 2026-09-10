@@ -76,6 +76,9 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:continueMerge', (_e, p: string) => gitService.continueMerge(p));
   ipcMain.handle('git:mergeTree', (_e, p: string, o: string, t: string) => gitService.mergeTree(p, o, t));
   ipcMain.handle('git:aheadBehind', (_e, p: string, b: string, c: string) => gitService.aheadBehind(p, b, c));
+  // Periodic remote check for the repository list (fetch + incoming/outgoing)
+  ipcMain.handle('git:pollRemoteSummary', (_e, p: string) => gitService.pollRemoteSummary(p));
+  ipcMain.handle('git:pollRemoteSummaries', (_e, paths: string[]) => gitService.pollRemoteSummaries(paths));
 
   // Diff
   ipcMain.handle('git:diff', (_e, p: string, f: string, o?: { staged?: boolean; ref?: string }) =>

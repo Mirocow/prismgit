@@ -35,6 +35,7 @@ import { useToastStore } from './stores/toastStore';
 import { useGitStore } from './stores/gitStore';
 import { useSelectionStore } from './stores/selectionStore';
 import { useBackgroundFetch } from './hooks/useBackgroundFetch';
+import { useRemotePolling } from './hooks/useRemotePolling';
 import { api } from './lib/api';
 import { loadProjectPrefs, saveProjectPrefs } from './lib/projectPrefs';
 
@@ -103,6 +104,8 @@ export default function App() {
 
   // SmartGit-style background "Poll or Fetch" for remotes marked in Configure remote properties
   useBackgroundFetch();
+  // Periodic remote check for the repository list (fetch --all + ↓/↑ badges)
+  useRemotePolling();
 
   useEffect(() => {
     loadRepos();

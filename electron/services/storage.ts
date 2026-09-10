@@ -1,5 +1,6 @@
 import * as path from 'path';
-import type { AppSettings, RepositoryEntry, RepositoryMetadata } from '../types/settings-api.js';
+import { randomUUID } from 'crypto';
+import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../types/settings-api.js';
 import simpleGit from 'simple-git';
 import { SimpleStore } from './simpleStore.js';
 
@@ -7,6 +8,7 @@ interface StoreSchema {
   settings: Partial<AppSettings>;
   repositories: RepositoryEntry[];
   repoMetadata: Record<string, RepositoryMetadata>;
+  repoGroups: RepoGroup[];
 }
 
 const store = new SimpleStore({
@@ -23,6 +25,7 @@ const store = new SimpleStore({
     },
     repositories: [],
     repoMetadata: {},
+    repoGroups: [],
   },
 });
 
@@ -218,4 +221,124 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
   } catch {
     return {};
   }
+}
+
+// ============= Repository Groups (tree in the sidebar) =============
+
+function getGroups(): RepoGroup[] {
+  return ((store.get('repoGroups') || []) as RepoGroup[]).slice();
+}
+
+/**
+ * True when `maybeDescendantId` equals `ancestorId` or lives somewhere in its
+ * subtree. Also tolerates corrupt data (cycles) via a visited-set guard.
+ */
+export function isDescendantGroup(groups: RepoGroup[], ancestorId: string, maybeDescendantId: string): boolean {
+  let cur = groups.find((g) => g.id === maybeDescendantId);
+  const seen = new Set<string>();
+  while (cur) {
+    if (cur.id === ancestorId) return true;
+    if (seen.has(cur.id)) return false; // corrupt data: cycle in parents
+    seen.add(cur.id);
+    cur = cur.parentId ? groups.find((g) => g.id === cur!.parentId) : undefined;
+  }
+  return false;
+}
+
+export function getRepoGroups(): RepoGroup[] {
+  return getGroups();
+}
+
+export function createRepoGroup(name: string, parentId: string | null = null): RepoGroup {
+  const trimmed = (name || '').trim();
+  if (!trimmed) throw new Error('Group name must not be empty');
+  const groups = getGroups();
+  const parent = parentId ?? null;
+  if (parent !== null && !groups.some((g) => g.id === parent)) {
+    throw new Error(`Parent group not found: ${parent}`);
+  }
+  const group: RepoGroup = {
+    id: randomUUID(),
+    name: trimmed,
+    parentId: parent,
+    expanded: true,
+    order: Date.now(),
+    createdAt: Date.now(),
+  };
+  groups.push(group);
+  store.set('repoGroups', groups);
+  return group;
+}
+
+export function renameRepoGroup(id: string, name: string): void {
+  const trimmed = (name || '').trim();
+  if (!trimmed) throw new Error('Group name must not be empty');
+  const groups = getGroups();
+  const group = groups.find((g) => g.id === id);
+  if (!group) throw new Error(`Group not found: ${id}`);
+  group.name = trimmed;
+  store.set('repoGroups', groups);
+}
+
+/**
+ * Delete a group. Child groups AND repositories are promoted to the deleted
+ * group's parent (nothing is ever destroyed along with the group) — the safe,
+ * predictable behaviour for a folder tree.
+ */
+export function deleteRepoGroup(id: string): void {
+  const groups = getGroups();
+  const group = groups.find((g) => g.id === id);
+  if (!group) return;
+  const parentId = group.parentId;
+  for (const other of groups) {
+    if (other.parentId === id) other.parentId = parentId;
+  }
+  store.set('repoGroups', groups.filter((g) => g.id !== id));
+
+  const repos = (store.get('repositories') || []) as RepositoryEntry[];
+  let changed = false;
+  for (const repo of repos) {
+    if (repo.groupId === id) {
+      repo.groupId = parentId;
+      changed = true;
+    }
+  }
+  if (changed) store.set('repositories', repos);
+}
+
+export function moveRepoGroup(id: string, newParentId: string | null): void {
+  const groups = getGroups();
+  const group = groups.find((g) => g.id === id);
+  if (!group) throw new Error(`Group not found: ${id}`);
+  const parent = newParentId ?? null;
+  if (parent === id) throw new Error('Cannot move a group into itself');
+  if (parent !== null) {
+    const target = groups.find((g) => g.id === parent);
+    if (!target) throw new Error(`Parent group not found: ${parent}`);
+    if (isDescendantGroup(groups, id, parent)) {
+      throw new Error('Cannot move a group into its own subtree');
+    }
+  }
+  group.parentId = parent;
+  store.set('repoGroups', groups);
+}
+
+export function setRepoGroupExpanded(id: string, expanded: boolean): void {
+  const groups = getGroups();
+  const group = groups.find((g) => g.id === id);
+  if (!group) return;
+  group.expanded = !!expanded;
+  store.set('repoGroups', groups);
+}
+
+export function setRepoGroup(repoPath: string, groupId: string | null): void {
+  const repos = (store.get('repositories') || []) as RepositoryEntry[];
+  const idx = repos.findIndex((r) => r.path === repoPath);
+  if (idx < 0) throw new Error(`Repository not found: ${repoPath}`);
+  const parent = groupId ?? null;
+  if (parent !== null && !getGroups().some((g) => g.id === parent)) {
+    throw new Error(`Group not found: ${parent}`);
+  }
+  repos[idx] = { ...repos[idx], groupId: parent };
+  store.set('repositories', repos);
 }

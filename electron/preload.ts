@@ -56,6 +56,8 @@ const api = {
       ipcRenderer.invoke('git:mergeTree', repoPath, ours, theirs),
     aheadBehind: (repoPath: string, base: string, compare: string) =>
       ipcRenderer.invoke('git:aheadBehind', repoPath, base, compare),
+    pollRemoteSummary: (repoPath: string) => ipcRenderer.invoke('git:pollRemoteSummary', repoPath),
+    pollRemoteSummaries: (paths: string[]) => ipcRenderer.invoke('git:pollRemoteSummaries', paths),
     diff: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) =>
       ipcRenderer.invoke('git:diff', repoPath, file, options),
     diffBranches: (repoPath: string, base: string, compare: string) =>
@@ -325,6 +327,19 @@ const api = {
     addTag: (path: string, tag: string) => ipcRenderer.invoke('settings:addTag', path, tag),
     removeTag: (path: string, tag: string) => ipcRenderer.invoke('settings:removeTag', path, tag),
     refreshRepoStats: (path: string) => ipcRenderer.invoke('settings:refreshRepoStats', path),
+
+    // Repository groups (tree in the sidebar)
+    getRepoGroups: () => ipcRenderer.invoke('settings:getRepoGroups'),
+    createRepoGroup: (name: string, parentId?: string | null) =>
+      ipcRenderer.invoke('settings:createRepoGroup', name, parentId ?? null),
+    renameRepoGroup: (id: string, name: string) => ipcRenderer.invoke('settings:renameRepoGroup', id, name),
+    deleteRepoGroup: (id: string) => ipcRenderer.invoke('settings:deleteRepoGroup', id),
+    moveRepoGroup: (id: string, newParentId: string | null) =>
+      ipcRenderer.invoke('settings:moveRepoGroup', id, newParentId),
+    setRepoGroupExpanded: (id: string, expanded: boolean) =>
+      ipcRenderer.invoke('settings:setRepoGroupExpanded', id, expanded),
+    setRepoGroup: (path: string, groupId: string | null) =>
+      ipcRenderer.invoke('settings:setRepoGroup', path, groupId),
   } as SettingsApi,
 
   // Window controls

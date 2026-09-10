@@ -71,6 +71,34 @@ export interface RemoteInfo {
   refs: { fetch: string; push: string };
 }
 
+/**
+ * Result of a periodic remote check for one repository in the sidebar list:
+ * fetches all remotes, then counts incoming/outgoing commits and local
+ * (uncommitted) changes. All counters are cheap local rev-list computations
+ * performed AFTER the fetch.
+ */
+export interface RemoteCheckSummary {
+  path: string;
+  /** Repo has at least one configured remote. */
+  hasRemote: boolean;
+  /** Remote names found in the repo (e.g. ["origin"]). */
+  remotes: string[];
+  /** Commits present on remote-tracking branches but missing locally. */
+  incoming: number;
+  /** Commits on local branches not present on any remote. */
+  outgoing: number;
+  /** Number of changed (unstaged+staged+untracked) files in the working tree. */
+  dirty: number;
+  /** Current checked-out branch (null when detached HEAD or not a repo). */
+  branch: string | null;
+  /** True when a `git fetch --all` succeeded during this check. */
+  fetched: boolean;
+  /** Epoch ms of the check. */
+  checkedAt: number;
+  /** Network/other error message (counters still reflect the last successful fetch). */
+  error?: string;
+}
+
 /** Real remote properties for the "Properties..." context-menu dialog. */
 export interface RemoteProperties {
   name: string;
@@ -249,6 +277,14 @@ export interface GitApi {
   mergeTree: (repoPath: string, ours: string, theirs: string) => Promise<{ conflicts: string[]; clean: boolean }>;
   /** Returns ahead/behind counts between two refs without touching the working tree. */
   aheadBehind: (repoPath: string, base: string, compare: string) => Promise<{ ahead: number; behind: number }>;
+  /**
+   * Periodic remote check for the repository list: `git fetch --all` then
+   * compute incoming/outgoing/dirty counters. Never throws — failures are
+   * reported in the summary's `error` field.
+   */
+  pollRemoteSummary: (repoPath: string) => Promise<RemoteCheckSummary>;
+  /** Batch version over several repos with bounded concurrency. */
+  pollRemoteSummaries: (paths: string[]) => Promise<Record<string, RemoteCheckSummary>>;
   diff: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) => Promise<DiffResult>;
   diffBranches: (repoPath: string, base: string, compare: string) => Promise<DiffResult>;
   diffCommit: (repoPath: string, hash: string, parentHash?: string) => Promise<DiffResult>;

@@ -3,6 +3,24 @@ export interface RepositoryEntry {
   name: string;
   lastOpened: number;
   pinned?: boolean;
+  /** Repository group (folder) this repo belongs to; null/undefined = root level. */
+  groupId?: string | null;
+}
+
+/**
+ * A user-defined group (folder) in the repository list, forming a tree via
+ * parentId. Repositories reference groups by `RepositoryEntry.groupId`.
+ */
+export interface RepoGroup {
+  id: string;
+  name: string;
+  /** Parent group id, or null for a top-level group. */
+  parentId: string | null;
+  /** Persisted UI expand/collapse state. */
+  expanded?: boolean;
+  /** Stable creation order used for sorting siblings. */
+  order: number;
+  createdAt: number;
 }
 
 export interface RepositoryMetadata {
@@ -86,6 +104,13 @@ export interface AppSettings {
   aiModel?: string;
   /** Provider URL (for Ollama: http://localhost:11434). */
   aiUrl?: string;
+  // === Repository list: periodic remote check ===
+  /**
+   * How often (in seconds) to poll every repository in the list: fetch all
+   * remotes and compute incoming/outgoing counters. Default 120, min 30.
+   * 0 disables the periodic check (manual "Check now" still works).
+   */
+  repoRemoteCheckIntervalSec?: number;
 }
 
 export interface SettingsApi {
@@ -107,4 +132,15 @@ export interface SettingsApi {
   addTag: (path: string, tag: string) => Promise<void>;
   removeTag: (path: string, tag: string) => Promise<void>;
   refreshRepoStats: (path: string) => Promise<Partial<RepositoryMetadata>>;
+
+  // Repository groups (tree in the sidebar)
+  getRepoGroups: () => Promise<RepoGroup[]>;
+  createRepoGroup: (name: string, parentId?: string | null) => Promise<RepoGroup>;
+  renameRepoGroup: (id: string, name: string) => Promise<void>;
+  deleteRepoGroup: (id: string) => Promise<void>;
+  /** Move a group under a new parent (null = root). Rejects cycles. */
+  moveRepoGroup: (id: string, newParentId: string | null) => Promise<void>;
+  setRepoGroupExpanded: (id: string, expanded: boolean) => Promise<void>;
+  /** Assign a repository to a group (null = ungrouped / root level). */
+  setRepoGroup: (repoPath: string, groupId: string | null) => Promise<void>;
 }

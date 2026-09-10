@@ -29,6 +29,7 @@ import type {
   BidirectionalBlameResult,
   UnreachableCommit,
   BugtraqConfig,
+  RemoteCheckSummary,
 } from '../types/git-api.js';
 
 const gitCache = new Map<string, SimpleGit>();
@@ -605,6 +606,136 @@ export async function aheadBehind(
   } catch {
     return { ahead: 0, behind: 0 };
   }
+}
+
+/** Never-resolving safety timeout for the network fetch of a remote check. */
+const REMOTE_FETCH_TIMEOUT_MS = 60_000;
+
+function emptyRemoteCheckSummary(repoPath: string): RemoteCheckSummary {
+  return {
+    path: repoPath,
+    hasRemote: false,
+    remotes: [],
+    incoming: 0,
+    outgoing: 0,
+    dirty: 0,
+    branch: null,
+    fetched: false,
+    checkedAt: Date.now(),
+  };
+}
+
+async function countRevList(git: SimpleGit, args: string[]): Promise<number> {
+  const out = await git.raw(args);
+  return parseInt(out.trim(), 10) || 0;
+}
+
+/**
+ * Periodic remote check for the repository list (SmartGit-style background
+ * poll): `git fetch --all` (network, guarded by a timeout — never prompts),
+ * then cheap local computations of incoming/outgoing commit counters and the
+ * working-tree change count. NEVER throws — all failures land in `error`.
+ */
+export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSummary> {
+  const summary = emptyRemoteCheckSummary(repoPath);
+  if (!fs.existsSync(path.join(repoPath, '.git'))) {
+    return summary;
+  }
+
+  const git = getGit(repoPath);
+
+  // 1. Remotes
+  try {
+    const remotes = (await git.getRemotes(true)) as Array<{ name: string; refs: { fetch: string } }>;
+    summary.remotes = remotes.map((r) => r.name);
+    summary.hasRemote = remotes.length > 0;
+  } catch {
+    return summary; // not a repo or unreadable — nothing else to report
+  }
+
+  // 2. Fetch all remotes (network). GIT_TERMINAL_PROMPT=0 so a credential
+  //    prompt can never hang the background poll; timeout as a safety net.
+  //    NOTE: only the override variable goes into .env() — spreading the full
+  //    process.env here would trip simple-git's "unsafe operations" guard
+  //    whenever the user's environment contains EDITOR/PAGER etc.
+  if (summary.hasRemote) {
+    try {
+      const fetchGit = simpleGit({ baseDir: repoPath, binary: 'git' })
+        .env({ GIT_TERMINAL_PROMPT: '0' });
+      await Promise.race([
+        fetchGit.raw(['fetch', '--all', '--prune', '--quiet']),
+        new Promise<never>((_, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error(`fetch timed out after ${REMOTE_FETCH_TIMEOUT_MS / 1000}s`)),
+            REMOTE_FETCH_TIMEOUT_MS
+          );
+          // Don't keep the process alive just for this timer.
+          (timer as { unref?: () => void }).unref?.();
+        }),
+      ]);
+      summary.fetched = true;
+    } catch (e) {
+      // Counters below still reflect the LAST successful fetch — worth showing.
+      summary.error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // 3. Current branch
+  try {
+    const name = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    summary.branch = name === 'HEAD' ? null : name; // detached HEAD
+  } catch { /* keep null */ }
+
+  // 4. Incoming: commits reachable from remote-tracking branches but not from
+  //    any local branch. Outgoing is the mirror image. These aggregates don't
+  //    require an upstream to be configured and cover all branches at once.
+  try {
+    summary.incoming = await countRevList(git, ['rev-list', '--count', '--remotes', '--not', '--branches']);
+  } catch { /* keep 0 */ }
+  try {
+    summary.outgoing = await countRevList(git, ['rev-list', '--count', '--branches', '--not', '--remotes']);
+  } catch { /* keep 0 */ }
+
+  // 5. Working tree changes (local only, cheap)
+  try {
+    const status = await git.raw(['status', '--porcelain']);
+    summary.dirty = status.split('\n').filter((line) => line.trim().length > 0).length;
+  } catch { /* keep 0 */ }
+
+  summary.checkedAt = Date.now();
+  return summary;
+}
+
+/**
+ * Batch remote check over several repositories with bounded concurrency
+ * (network-bound work — keep it gentle). Returns a map keyed by repo path;
+ * every entry is a valid summary even if that repo failed.
+ */
+export async function pollRemoteSummaries(paths: string[]): Promise<Record<string, RemoteCheckSummary>> {
+  const result: Record<string, RemoteCheckSummary> = {};
+  const unique = [...new Set(paths)].filter(Boolean);
+  const CONCURRENCY = 3;
+  let next = 0;
+
+  async function worker(): Promise<void> {
+    while (next < unique.length) {
+      const repoPath = unique[next++];
+      try {
+        result[repoPath] = await pollRemoteSummary(repoPath);
+      } catch (e) {
+        // pollRemoteSummary is designed not to throw — belt and braces.
+        result[repoPath] = {
+          ...emptyRemoteCheckSummary(repoPath),
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.max(1, Math.min(CONCURRENCY, unique.length)) }, worker)
+  );
+  return result;
 }
 
 function parseDiff(rawDiff: string, oldPath: string, newPath: string): { hunks: DiffHunk[]; newFile: boolean; deletedFile: boolean; renamedFile: boolean; modeChange?: { oldMode: number; newMode: number } } {

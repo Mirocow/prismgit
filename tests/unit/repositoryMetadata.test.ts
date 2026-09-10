@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 vi.mock('../../src/lib/api', () => ({
   api: {
     settings: {
-      getRepos: vi.fn(),
+      getRepos: vi.fn().mockResolvedValue([]),
       addRepo: vi.fn(),
       removeRepo: vi.fn(),
       updateRepo: vi.fn(),
@@ -13,9 +13,17 @@ vi.mock('../../src/lib/api', () => ({
       addTag: vi.fn(),
       removeTag: vi.fn(),
       refreshRepoStats: vi.fn(),
+      getRepoGroups: vi.fn().mockResolvedValue([]),
+      createRepoGroup: vi.fn(),
+      renameRepoGroup: vi.fn(),
+      deleteRepoGroup: vi.fn(),
+      moveRepoGroup: vi.fn(),
+      setRepoGroupExpanded: vi.fn(),
+      setRepoGroup: vi.fn(),
     },
     git: {
       isRepo: vi.fn(),
+      pollRemoteSummaries: vi.fn().mockResolvedValue({}),
     },
     fs: {
       pathBasename: vi.fn(),
