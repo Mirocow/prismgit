@@ -12,6 +12,8 @@
     "package": "npm run build && electron-builder",
     "package:win": "npm run build && electron-builder --win",
     "package:mac": "npm run build && electron-builder --mac",
+    "package:mac-arm": "npm run build && electron-builder --mac --arm64",
+    "package:mac-x64": "npm run build && electron-builder --mac --x64",
     "package:linux": "npm run build && electron-builder --linux",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

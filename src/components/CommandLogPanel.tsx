@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef, memo } from 'react';
 import { useCommandLogStore } from '../stores/commandLogStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { api, type CommandLogEntry } from '../lib/api';
 import { Check, X, ChevronDown, ChevronRight, Trash, Loader, Copy, Terminal, Search } from './icons';
 import { cn } from '../lib/utils';
-import { useResizableHeight } from './ResizableSplitter';
+import { useLazyList } from '../lib/useLazyList';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -44,7 +44,7 @@ function CommandStatusDot({ entry }: { entry: CommandLogEntry }) {
   );
 }
 
-function CommandEntry({ entry }: { entry: CommandLogEntry }) {
+const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEntry }) {
   const [expanded, setExpanded] = useState(false);
   const cmdline = `git ${entry.args.join(' ')}`;
   const failed = entry.exitCode !== 0;
@@ -124,7 +124,7 @@ function CommandEntry({ entry }: { entry: CommandLogEntry }) {
       )}
     </div>
   );
-}
+});
 
 export function CommandLogPanel({
   onClose,
@@ -136,6 +136,7 @@ export function CommandLogPanel({
   const [searchQuery, setSearchQuery] = useState('');
   const settings = useSettingsStore((s) => s.settings);
   const maxCommands = settings.commandLogLimit ?? 20;
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const entries = useCommandLogStore((s) => s.entries);
   const load = useCommandLogStore((s) => s.load);
@@ -171,6 +172,13 @@ export function CommandLogPanel({
     }
     return result.slice(0, maxCommands);
   }, [entries, showSystem, errorsOnly, searchQuery, maxCommands]);
+
+  // Lazy list for virtualized rendering — only renders visible rows
+  const ROW_HEIGHT = 32;
+  const lazyList = useLazyList({
+    itemCount: visibleEntries.length,
+    estimateRowHeight: ROW_HEIGHT,
+  });
 
   const copyAll = () => {
     const text = visibleEntries
@@ -266,8 +274,8 @@ export function CommandLogPanel({
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
+      {/* Content — use lazy list for performance with many entries */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin" ref={lazyList.scrollRef}>
         {visibleEntries.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-tertiary text-xs px-4 text-center">
             {errorsOnly
@@ -277,7 +285,13 @@ export function CommandLogPanel({
                 : 'No user commands yet. Only mutating commands (push, pull, commit, checkout, etc.) are shown by default. Enable "System" to see read-only commands too.'}
           </div>
         ) : (
-          visibleEntries.map((entry) => <CommandEntry key={entry.id} entry={entry} />)
+          <div style={{ height: lazyList.totalHeight, position: 'relative' }}>
+            <div style={{ position: 'absolute', top: lazyList.offsetY, left: 0, right: 0 }}>
+              {visibleEntries.slice(lazyList.visibleRange.start, lazyList.visibleRange.end).map((entry) => (
+                <CommandEntry key={entry.id} entry={entry} />
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>

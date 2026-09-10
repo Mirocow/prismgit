@@ -238,19 +238,38 @@ export function HistoryPage() {
 
   // Background fetch on History page load — silently fetch all remotes so
   // incoming (remote-only) commits show up in the graph with fresh data.
-  // Non-blocking: runs after initial load, reloads history if new commits arrive.
-  // Guarded by a REF keyed by repo path — a useState guard is stale during the
-  // second StrictMode effect invocation (dev), which fetched everything TWICE
-  // on every History open. A ref survives the double-invocation; keying by
-  // repo path re-arms the auto-fetch when another repository is opened.
+  // Non-blocking: runs after initial load, reloads history ONLY if the fetch
+  // actually changed something (new commits arrived).
   const remoteFetchedForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!repo || remoteFetchedForRef.current === repo.path) return;
     remoteFetchedForRef.current = repo.path;
-    api.git.fetchAll(repo.path, true).then(() => {
-      // Reload history after fetch — incoming commits will now appear
+
+    // Capture current HEAD before fetch — if it hasn't changed AND no new
+    // remote refs appeared, there's no reason to reload the whole graph.
+    api.git.revParse(repo.path, 'HEAD').then(async (headBefore) => {
+      // Now fetch
+      try {
+        await api.git.fetchAll(repo.path, true);
+      } catch {
+        return; // Silent — offline or no remotes
+      }
+      // Check if anything changed
+      try {
+        const headAfter = await api.git.revParse(repo.path, 'HEAD');
+        if (headBefore === headAfter) {
+          // HEAD didn't change — but remote refs might have. Only reload
+          // if we don't already have these commits in the graph.
+          // Cheap check: compare ref count (branches list)
+          const brs = await api.git.branches(repo.path);
+          const prevCount = branches.length;
+          setBranches(brs);
+          // Only reload history if branch count changed (new remote-tracking refs)
+          if (brs.length === prevCount) return;
+        }
+      } catch { /* ignore */ }
+      // Something changed — reload history + branches
       loadHistory();
-      // Also reload branches so the dropdown shows fresh remote-tracking refs
       api.git.branches(repo.path).then(setBranches).catch(() => {});
     }).catch(() => {
       // Silent — user may be offline or no remotes configured
