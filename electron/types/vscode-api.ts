@@ -33,6 +33,14 @@ export interface VsCodeApi {
   openFileDiff: (repoPath: string, file: string) => Promise<VsCodeOperationResult>;
   /** Open the three-way merge editor for a conflicted file. */
   openMerge: (repoPath: string, file: string) => Promise<VsCodeOperationResult>;
+  /** Open the file AS OF a commit (blob materialized to a temp copy). */
+  openFileVersion: (repoPath: string, sha: string, file: string) => Promise<VsCodeOperationResult>;
+  /** Open `code --diff` of the file between the commit's parent and the commit. */
+  openCommitFileDiff: (repoPath: string, sha: string, file: string) => Promise<VsCodeOperationResult>;
+  /** Open the full commit patch (`git show`) as a highlighted .patch file. */
+  openCommitPatch: (repoPath: string, sha: string) => Promise<VsCodeOperationResult>;
+  /** Open a set of folders as a multi-root `.code-workspace` in VS Code. */
+  openWorkspace: (name: string, folderPaths: string[]) => Promise<VsCodeOperationResult>;
   /** Read the repo's local diff.tool / merge.tool configuration. */
   diffToolStatus: (repoPath: string) => Promise<VsCodeDiffToolStatus>;
   /** Register VS Code as the repo's git difftool AND mergetool (local config). */

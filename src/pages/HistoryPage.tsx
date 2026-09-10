@@ -656,6 +656,15 @@ export function HistoryPage() {
     } catch (e) { toast.error('Failed to load commit diff', String(e)); }
   };
 
+  // VS Code: open the full commit patch (git show) as a highlighted .patch file
+  const handleOpenCommitPatch = async (entry: LogEntry) => {
+    try {
+      const res = await api.vscode.openCommitPatch(repo.path, entry.hash);
+      if (res.ok) toast.success('Opened in VS Code');
+      else toast.error(res.detail || 'VS Code CLI not found — install VS Code or set its path in Settings → External Tools');
+    } catch (e) { toast.error('Failed to open VS Code', String(e)); }
+  };
+
   // Start an interactive rebase stopped at this commit ('edit') — the user then
   // splits the commit by staging parts and continuing via the Rebase panel.
   const handleStartSplitCommit = async (entry: LogEntry) => {
@@ -826,6 +835,7 @@ export function HistoryPage() {
       { label: 'Open in Diff tool...', clickId: 'open-in-diff' },
       { label: 'Compare with Working Tree...', clickId: 'compare-wt' },
       { label: 'Show Full Commit Diff', clickId: 'show-commit-diff' },
+      { label: 'Open Commit Patch in VS Code', clickId: 'open-vscode-patch' },
       { type: 'separator' },
       { label: 'Split Off Files Into New Commit...', clickId: 'split-off' },
       { label: 'Start Interactive Edit (split commit)', clickId: 'split-commit' },
@@ -886,6 +896,7 @@ export function HistoryPage() {
         case 'format-patch': handleFormatPatch(entry); break;
         case 'browser': handleOpenInBrowser(); break;
         case 'show-commit-diff': handleShowCommitDiff(entry); break;
+        case 'open-vscode-patch': handleOpenCommitPatch(entry); break;
         case 'split-off': handleOpenSplitOff(entry); break;
         case 'split-commit': handleStartSplitCommit(entry); break;
         case 'show-note': handleShowNote(entry); break;
@@ -1665,6 +1676,7 @@ export function HistoryPage() {
                               repoPath: repo.path,
                               path: f.path,
                               mode: 'history' as const,
+                              commitSha: selected.hash,
                               onOpenDiff: () => {
                                 // Compare what THIS COMMIT changed for this file:
                                 // baseRef = commit^ (parent), compareRef = commit
@@ -1704,6 +1716,7 @@ export function HistoryPage() {
                               repoPath: repo.path,
                               path: f.path,
                               mode: 'history' as const,
+                              commitSha: selected.hash,
                               onOpenDiff: () => {
                                 // Compare what THIS COMMIT changed for this file:
                                 // baseRef = commit^ (parent), compareRef = commit

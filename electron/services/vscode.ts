@@ -315,6 +315,148 @@ export async function openMergeInVsCode(
   }
 }
 
+// ------------------------------------------------- commit archaeology -------
+
+/**
+ * Open the file AS OF a commit in VS Code (`sha:file` blob materialized to a
+ * temp copy). Useful from History file lists — inspect an old version with
+ * the real editor, no working-tree checkout needed.
+ */
+export async function openFileVersionInVsCode(
+  git: SimpleGit,
+  repoPath: string,
+  sha: string,
+  file: string
+): Promise<{ ok: boolean; detail?: string }> {
+  const det = await detectVsCodeCached();
+  if (!det.available) {
+    return { ok: false, detail: 'VS Code CLI not found — install VS Code or set its path in Settings → External Tools' };
+  }
+  let content: Buffer;
+  try {
+    content = await git.showBuffer(`${sha}:${file}`);
+  } catch {
+    return { ok: false, detail: `Could not read '${file}' at ${sha.slice(0, 8)}` };
+  }
+  const copy = tempCopy(repoPath, file, `V-${sha.slice(0, 8)}`, content);
+  try {
+    await spawnCli(det.path, [copy]);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Open the diff this commit introduced for ONE file in VS Code
+ * (`code --wait --diff <parent-copy> <commit-copy>`), i.e. `sha^:file` vs
+ * `sha:file`. Root commits have no parent — reported via `detail`.
+ */
+export async function openCommitFileDiffInVsCode(
+  git: SimpleGit,
+  repoPath: string,
+  sha: string,
+  file: string
+): Promise<{ ok: boolean; detail?: string }> {
+  const det = await detectVsCodeCached();
+  if (!det.available) {
+    return { ok: false, detail: 'VS Code CLI not found — install VS Code or set its path in Settings → External Tools' };
+  }
+  let parent: Buffer;
+  let commit: Buffer;
+  try {
+    parent = await git.showBuffer(`${sha}^:${file}`);
+    commit = await git.showBuffer(`${sha}:${file}`);
+  } catch {
+    return { ok: false, detail: `No parent version of '${file}' at ${sha.slice(0, 8)} (root commit or newly added file)` };
+  }
+  const parentCopy = tempCopy(repoPath, file, `P-${sha.slice(0, 8)}`, parent);
+  const commitCopy = tempCopy(repoPath, file, `C-${sha.slice(0, 8)}`, commit);
+  try {
+    await spawnCli(det.path, ['--wait', '--diff', parentCopy, commitCopy]);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Open the FULL commit patch in VS Code — `git show <sha>` written to a
+ * `.patch` file, which VS Code renders with diff syntax highlighting.
+ * Works for merge commits too (unlike the per-file parent diff).
+ */
+export async function openCommitPatchInVsCode(
+  git: SimpleGit,
+  repoPath: string,
+  sha: string
+): Promise<{ ok: boolean; detail?: string }> {
+  const det = await detectVsCodeCached();
+  if (!det.available) {
+    return { ok: false, detail: 'VS Code CLI not found — install VS Code or set its path in Settings → External Tools' };
+  }
+  let patch: string;
+  try {
+    patch = await git.raw(['show', '--format=fuller', sha]);
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+  const patchFile = tempCopy(repoPath, `commit-${sha.slice(0, 8)}.patch`, 'PATCH', patch);
+  try {
+    await spawnCli(det.path, [patchFile]);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// --------------------------------------------------------------- workspace --
+
+/** Pure builder — exported for unit tests. */
+export function buildWorkspaceJson(folderPaths: string[]): string {
+  return JSON.stringify(
+    { folders: folderPaths.map((p) => ({ path: p })), settings: {} },
+    null,
+    2
+  );
+}
+
+/**
+ * Open a set of folders as a multi-root VS Code workspace (`.code-workspace`
+ * file generated into the PrismGit temp dir, then opened via the CLI).
+ * Perfect fit for opening a whole PrismGit repo GROUP at once.
+ */
+export async function openWorkspaceInVsCode(
+  name: string,
+  folderPaths: string[]
+): Promise<{ ok: boolean; detail?: string }> {
+  if (folderPaths.length === 0) {
+    return { ok: false, detail: 'No folders to open' };
+  }
+  const det = await detectVsCodeCached();
+  if (!det.available) {
+    return { ok: false, detail: 'VS Code CLI not found — install VS Code or set its path in Settings → External Tools' };
+  }
+  const dir = path.join(os.tmpdir(), 'prismgit-vscode', 'workspaces');
+  fs.mkdirSync(dir, { recursive: true });
+  const slug = (name || 'workspace').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
+  const wsFile = path.join(dir, `prismgit-${slug}.code-workspace`);
+  fs.writeFileSync(wsFile, buildWorkspaceJson(folderPaths));
+  try {
+    await spawnCli(det.path, [wsFile]);
+    return { ok: true };
+  } catch {
+    // CLI spawned but failed — last resort: let the OS open the file
+    // (VS Code registers .code-workspace during installation).
+    try {
+      const { shell } = await import('electron');
+      const ok = await shell.openPath(wsFile);
+      return ok ? { ok: true } : { ok: false, detail: ok };
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    }
+  }
+}
+
 // ------------------------------------------------- git difftool/mergetool ----
 
 export interface DiffToolStatus {

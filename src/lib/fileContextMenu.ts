@@ -65,6 +65,9 @@ export interface FileMenuCtx {
   onFocusCommit?: () => void;
   /** Open the commit diff (History mode: "Open in Diff tool"). */
   onOpenDiff?: () => void;
+  /** Commit hash the file list belongs to (History mode) — enables the
+   * VS Code commit-archaeology actions (open version / parent↔commit diff). */
+  commitSha?: string;
   /** Refresh repo status after a mutation. */
   refresh?: () => void;
 }
@@ -142,6 +145,10 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
   }
   if (ctx.mode === 'changes') {
     items.push({ label: i18nT('vscode.openDiffInVscode'), clickId: 'open-vscode-diff' });
+  }
+  if (ctx.mode === 'history' && ctx.commitSha) {
+    items.push({ label: i18nT('vscode.openCommitFileDiff'), clickId: 'open-vscode-commit-diff' });
+    items.push({ label: i18nT('vscode.openFileVersion'), clickId: 'open-vscode-version' });
   }
   items.push({ label: 'File History (Log)', clickId: 'file-history' });
   items.push({ label: 'Blame this file', clickId: 'blame' });
@@ -297,6 +304,30 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     case 'open-vscode-diff': {
       try {
         const res = await api.vscode.openFileDiff(ctx.repoPath, ctx.path);
+        if (res.ok) t.success(i18nT('vscode.opened'));
+        else t.error(res.detail || i18nT('vscode.notFound'));
+      } catch (e) {
+        t.error(i18nT('vscode.openFailed'), String(e));
+      }
+      return true;
+    }
+    case 'open-vscode-commit-diff': {
+      // parent↔commit diff of this file in VS Code (history mode only)
+      if (!ctx.commitSha) return true;
+      try {
+        const res = await api.vscode.openCommitFileDiff(ctx.repoPath, ctx.commitSha, ctx.path);
+        if (res.ok) t.success(i18nT('vscode.opened'));
+        else t.error(res.detail || i18nT('vscode.notFound'));
+      } catch (e) {
+        t.error(i18nT('vscode.openFailed'), String(e));
+      }
+      return true;
+    }
+    case 'open-vscode-version': {
+      // the file AS OF the selected commit, in VS Code (history mode only)
+      if (!ctx.commitSha) return true;
+      try {
+        const res = await api.vscode.openFileVersion(ctx.repoPath, ctx.commitSha, ctx.path);
         if (res.ok) t.success(i18nT('vscode.opened'));
         else t.error(res.detail || i18nT('vscode.notFound'));
       } catch (e) {

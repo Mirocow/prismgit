@@ -10,6 +10,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useSelectionStore } from '../../src/stores/selectionStore';
 
 // --- api mock (vi.hoisted — factories run before module top-level code) -----
+const apiVscodeMock = vi.hoisted(() => ({
+  open: vi.fn().mockResolvedValue({ ok: true, via: 'cli' }),
+  openFileDiff: vi.fn().mockResolvedValue({ ok: true }),
+  openMerge: vi.fn().mockResolvedValue({ ok: true }),
+  openFileVersion: vi.fn().mockResolvedValue({ ok: true }),
+  openCommitFileDiff: vi.fn().mockResolvedValue({ ok: true }),
+  openCommitPatch: vi.fn().mockResolvedValue({ ok: true }),
+  openWorkspace: vi.fn().mockResolvedValue({ ok: true }),
+}));
 const apiGitMock = vi.hoisted(() => ({
   add: vi.fn().mockResolvedValue(undefined),
   resetFile: vi.fn().mockResolvedValue(undefined),
@@ -26,7 +35,7 @@ const apiGitMock = vi.hoisted(() => ({
   getIndexFlags: vi.fn().mockResolvedValue({ assumeUnchanged: false, skipWorktree: false, tracked: true }),
 }));
 
-vi.mock('../../src/lib/api', () => ({ api: { git: apiGitMock } }));
+vi.mock('../../src/lib/api', () => ({ api: { git: apiGitMock, vscode: apiVscodeMock } }));
 
 // --- dialogs mock (auto-confirm; configurable per test) ----------------------
 let confirmAnswer = true;
@@ -141,6 +150,44 @@ describe('buildFileMenu — diff / history modes', () => {
   it('history mode adds Open in Diff tool', () => {
     const items = labels(buildFileMenu(baseCtx({ mode: 'history', onOpenDiff: vi.fn() })));
     expect(items).toContain('Open in Diff tool');
+  });
+});
+
+describe('VS Code commit archaeology — history mode with commitSha', () => {
+  it('offers version-open and parent-diff items ONLY when commitSha is present', () => {
+    const withSha = labels(buildFileMenu(baseCtx({ mode: 'history', commitSha: 'abc1234' })));
+    expect(withSha).toContain('Open this version in VS Code');
+    expect(withSha).toContain('Open file diff (parent vs commit) in VS Code');
+
+    const withoutSha = labels(buildFileMenu(baseCtx({ mode: 'history' })));
+    expect(withoutSha).not.toContain('Open this version in VS Code');
+    expect(withoutSha).not.toContain('Open file diff (parent vs commit) in VS Code');
+  });
+
+  it('changes mode never shows the commit-archaeology items', () => {
+    const items = labels(buildFileMenu(baseCtx({ mode: 'changes', commitSha: 'abc1234' })));
+    expect(items).not.toContain('Open this version in VS Code');
+    expect(items).not.toContain('Open file diff (parent vs commit) in VS Code');
+  });
+
+  it('open-vscode-version passes repo, commitSha and file to the IPC layer', async () => {
+    await runFileAction('open-vscode-version', baseCtx({ mode: 'history', commitSha: 'deadbeef' }));
+    expect(apiVscodeMock.openFileVersion).toHaveBeenCalledWith('/repo', 'deadbeef', 'src/app/main.ts');
+  });
+
+  it('open-vscode-commit-diff passes repo, commitSha and file to the IPC layer', async () => {
+    await runFileAction('open-vscode-commit-diff', baseCtx({ mode: 'history', commitSha: 'feedface' }));
+    expect(apiVscodeMock.openCommitFileDiff).toHaveBeenCalledWith('/repo', 'feedface', 'src/app/main.ts');
+  });
+
+  it('open-vscode-version is a no-op without commitSha', async () => {
+    await runFileAction('open-vscode-version', baseCtx({ mode: 'history' }));
+    expect(apiVscodeMock.openFileVersion).not.toHaveBeenCalled();
+  });
+
+  it('open-vscode-diff still routes to the working-tree diff (HEAD vs WT)', async () => {
+    await runFileAction('open-vscode-diff', baseCtx({ mode: 'changes' }));
+    expect(apiVscodeMock.openFileDiff).toHaveBeenCalledWith('/repo', 'src/app/main.ts');
   });
 });
 

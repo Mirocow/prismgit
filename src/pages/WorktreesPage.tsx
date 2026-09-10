@@ -115,6 +115,18 @@ export function WorktreesPage() {
     await api.git.openFile(wt.path);
   };
 
+  // Open this worktree folder in VS Code (not the OS file manager)
+  const handleOpenInVsCode = async (wt: WorktreeInfo) => {
+    if (wt.bare) return;
+    try {
+      const res = await api.vscode.open(wt.path);
+      if (res.ok) toast.success(t('vscode.opened'));
+      else toast.error(t('vscode.openFailed'));
+    } catch (e) {
+      toast.error(t('vscode.openFailed'), String(e));
+    }
+  };
+
   // Move a linked worktree to a new location (git worktree move).
   // Does not touch the branch or the files inside — just relocates the directory.
   const handleMove = async (wt: WorktreeInfo) => {
@@ -230,6 +242,15 @@ export function WorktreesPage() {
                   >
                     {t('pages.open')}
                   </button>
+                  {!mainWorktree.bare && (
+                    <button
+                      className="btn btn-secondary text-xs"
+                      title={t('vscode.openInVscode')}
+                      onClick={() => handleOpenInVsCode(mainWorktree)}
+                    >
+                      VS Code
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -301,6 +322,13 @@ export function WorktreesPage() {
                             onClick={() => handleOpen(wt)}
                           >
                             {t('pages.open')}
+                          </button>
+                          <button
+                            className="btn btn-secondary text-xs"
+                            title={t('vscode.openInVscode')}
+                            onClick={() => handleOpenInVsCode(wt)}
+                          >
+                            VS Code
                           </button>
                           <button
                             className="btn btn-secondary text-xs"

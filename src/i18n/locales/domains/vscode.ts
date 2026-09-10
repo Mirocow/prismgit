@@ -12,6 +12,13 @@ export const en: Record<string, string> = {
   'vscode.notFound': 'VS Code CLI not found — install VS Code or set its path in Settings → External Tools',
   'vscode.openFailed': 'Failed to open VS Code',
 
+  'vscode.openAtLine': 'Open in VS Code at line {line}',
+  'vscode.openFileVersion': 'Open this version in VS Code',
+  'vscode.openCommitFileDiff': 'Open file diff (parent vs commit) in VS Code',
+  'vscode.openCommitPatch': 'Open commit patch in VS Code',
+  'vscode.openGroupWorkspace': 'Open group in VS Code (workspace, {count} repos)',
+  'vscode.workspaceOpened': 'Workspace opened in VS Code',
+
   'vscode.settings.title': 'Visual Studio Code',
   'vscode.settings.detect': 'Detect',
   'vscode.settings.detected': 'Found',
@@ -37,6 +44,13 @@ export const ru: Record<string, string> = {
   'vscode.mergeOpened': 'Редактор слияния открыт в VS Code',
   'vscode.notFound': 'VS Code CLI не найден — установите VS Code или укажите путь в Settings → External Tools',
   'vscode.openFailed': 'Не удалось открыть VS Code',
+
+  'vscode.openAtLine': 'Открыть в VS Code на строке {line}',
+  'vscode.openFileVersion': 'Открыть эту версию в VS Code',
+  'vscode.openCommitFileDiff': 'Открыть diff файла (родитель vs коммит) в VS Code',
+  'vscode.openCommitPatch': 'Открыть патч коммита в VS Code',
+  'vscode.openGroupWorkspace': 'Открыть группу в VS Code (workspace, {count} репозиториев)',
+  'vscode.workspaceOpened': 'Workspace открыт в VS Code',
 
   'vscode.settings.title': 'Visual Studio Code',
   'vscode.settings.detect': 'Найти',
@@ -64,6 +78,13 @@ export const zh: Record<string, string> = {
   'vscode.notFound': '未找到 VS Code CLI — 请安装 VS Code 或在 设置 → 外部工具 中设置路径',
   'vscode.openFailed': '无法打开 VS Code',
 
+  'vscode.openAtLine': '在 VS Code 中打开并跳到第 {line} 行',
+  'vscode.openFileVersion': '在 VS Code 中打开此版本',
+  'vscode.openCommitFileDiff': '在 VS Code 中打开文件 diff（父提交 vs 提交）',
+  'vscode.openCommitPatch': '在 VS Code 中打开提交补丁',
+  'vscode.openGroupWorkspace': '在 VS Code 中打开分组（工作区，{count} 个仓库）',
+  'vscode.workspaceOpened': '工作区已在 VS Code 中打开',
+
   'vscode.settings.title': 'Visual Studio Code',
   'vscode.settings.detect': '检测',
   'vscode.settings.detected': '已找到',
@@ -89,6 +110,13 @@ export const de: Record<string, string> = {
   'vscode.mergeOpened': 'Merge-Editor in VS Code geöffnet',
   'vscode.notFound': 'VS Code CLI nicht gefunden — VS Code installieren oder Pfad unter Einstellungen → Externe Tools setzen',
   'vscode.openFailed': 'VS Code konnte nicht geöffnet werden',
+
+  'vscode.openAtLine': 'In VS Code bei Zeile {line} öffnen',
+  'vscode.openFileVersion': 'Diese Version in VS Code öffnen',
+  'vscode.openCommitFileDiff': 'Datei-Diff (Eltern vs Commit) in VS Code öffnen',
+  'vscode.openCommitPatch': 'Commit-Patch in VS Code öffnen',
+  'vscode.openGroupWorkspace': 'Gruppe in VS Code öffnen (Workspace, {count} Repos)',
+  'vscode.workspaceOpened': 'Workspace in VS Code geöffnet',
 
   'vscode.settings.title': 'Visual Studio Code',
   'vscode.settings.detect': 'Erkennen',

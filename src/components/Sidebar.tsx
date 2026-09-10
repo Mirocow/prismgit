@@ -314,20 +314,42 @@ export function Sidebar() {
     }
   }, [deleteGroup, t]);
 
+  // VS Code multi-root workspace: open every repo in the group subtree at once
+  const handleOpenGroupWorkspace = useCallback(async (groupName: string, repoPaths: string[]) => {
+    try {
+      const res = await api.vscode.openWorkspace(groupName, repoPaths);
+      if (res.ok) toast.success(t('vscode.workspaceOpened'));
+      else toast.error(res.detail || t('vscode.openFailed'));
+    } catch (e) {
+      toast.error(t('vscode.openFailed'), String(e));
+    }
+  }, [toast, t]);
+
   const showGroupMenu = useCallback((e: React.MouseEvent, node: RepoGroupNode) => {
     e.preventDefault();
     e.stopPropagation();
+    // Collect every repo in this group's subtree (matches repoCount semantics)
+    const groupRepoPaths: string[] = [];
+    const walk = (n: RepoGroupNode | RepoItemNode) => {
+      if (n.type === 'repo') groupRepoPaths.push(n.repo.path);
+      else (n.children as Array<RepoGroupNode | RepoItemNode>).forEach(walk);
+    };
+    node.children.forEach(walk);
     void showContextMenu([
       { label: t('shell.newSubgroup'), clickId: 'subgroup' },
       { label: t('common.rename'), clickId: 'rename' },
+      ...(groupRepoPaths.length > 0 ? [
+        { label: t('vscode.openGroupWorkspace', { count: groupRepoPaths.length }), clickId: 'vscode-workspace' },
+      ] : []),
       { type: 'separator' },
       { label: t('shell.deleteGroup'), clickId: 'delete' },
     ], (clickId) => {
       if (clickId === 'subgroup') void handleCreateGroup(node.group.id);
       if (clickId === 'rename') void handleRenameGroup(node.group.id, node.group.name);
+      if (clickId === 'vscode-workspace') void handleOpenGroupWorkspace(node.group.name, groupRepoPaths);
       if (clickId === 'delete') void handleDeleteGroup(node.group.id, node.group.name);
     });
-  }, [showContextMenu, handleCreateGroup, handleRenameGroup, handleDeleteGroup, t]);
+  }, [showContextMenu, handleCreateGroup, handleRenameGroup, handleDeleteGroup, handleOpenGroupWorkspace, t]);
 
   const showRepoMenu = useCallback((e: React.MouseEvent, repoPath: string, repoGroupId: string | null | undefined) => {
     e.preventDefault();

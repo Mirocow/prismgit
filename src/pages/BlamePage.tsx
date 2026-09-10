@@ -5,12 +5,14 @@ import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type BlameResult } from '../lib/api';
 import { shortHash } from '../lib/utils';
+import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { useI18n } from '../lib/i18n';
 
 export function BlamePage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
+  const showContextMenu = useContextMenu();
   const [filePath, setFilePath] = useState('');
   const globalBranch = useSelectionStore((s) => s.selectedBranch);
   const globalTag = useSelectionStore((s) => s.selectedTag);
@@ -65,6 +67,29 @@ export function BlamePage() {
     }
     window.location.hash = '#/history';
   }, [filePath]);
+
+  // VS Code: open this file AT this line (uses the line param of vscode.open)
+  const openInVsCodeAtLine = useCallback(async (line: number) => {
+    if (!filePath.trim()) return;
+    try {
+      const res = await api.vscode.open(repo.path, { file: filePath.trim(), line });
+      if (res.ok) toast.success(t('vscode.opened'));
+      else toast.error(t('vscode.openFailed'));
+    } catch (e) {
+      toast.error(t('vscode.openFailed'), String(e));
+    }
+  }, [repo, filePath, toast, t]);
+
+  const showLineContextMenu = useCallback((e: React.MouseEvent, lineNumber: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const items: ContextMenuItem[] = [
+      { label: t('vscode.openAtLine', { line: lineNumber }), clickId: 'open-vscode-line' },
+    ];
+    showContextMenu(items, (action) => {
+      if (action === 'open-vscode-line') void openInVsCodeAtLine(lineNumber);
+    });
+  }, [showContextMenu, openInVsCodeAtLine, t]);
 
   const colorMap = useMemo(() => {
     if (!blame) return new Map<string, string>();
@@ -142,6 +167,7 @@ export function BlamePage() {
                 key={idx}
                 className="flex items-start hover:bg-bg-hover border-b border-border-subtle group"
                 style={{ backgroundColor: colorMap.get(line.hash) || 'transparent' }}
+                onContextMenu={(e) => showLineContextMenu(e, line.finalLineNumber)}
               >
                 <div className="w-36 flex-shrink-0 px-2 py-1 border-r border-border-subtle text-text-tertiary truncate">
                   <div className="flex items-center gap-1">
@@ -165,7 +191,14 @@ export function BlamePage() {
                 >
                   {line.content || ' '}
                 </pre>
-                {/* Hover button: jump to this commit in History */}
+                {/* Hover buttons: open at line in VS Code · jump to commit in History */}
+                <button
+                  className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0 m-1 transition-opacity"
+                  title={t('vscode.openAtLine', { line: line.finalLineNumber })}
+                  onClick={() => openInVsCodeAtLine(line.finalLineNumber)}
+                >
+                  <FileText size={10} />
+                </button>
                 <button
                   className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0 m-1 transition-opacity"
                   title={t('pages.blameViewCommitShort')}

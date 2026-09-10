@@ -8,6 +8,10 @@ import {
   openInVsCode,
   openFileDiffVsHead,
   openMergeInVsCode,
+  openFileVersionInVsCode,
+  openCommitFileDiffInVsCode,
+  openCommitPatchInVsCode,
+  openWorkspaceInVsCode,
   getDiffToolStatus,
   installVsCodeDiffMergeTool,
   removeVsCodeDiffMergeTool,
@@ -24,6 +28,18 @@ export function registerVscodeIpc(): void {
 
   ipcMain.handle('vscode:openMerge', (_e, repoPath: string, file: string) =>
     openMergeInVsCode(simpleGit(repoPath), repoPath, file));
+
+  ipcMain.handle('vscode:openFileVersion', (_e, repoPath: string, sha: string, file: string) =>
+    openFileVersionInVsCode(simpleGit(repoPath), repoPath, sha, file));
+
+  ipcMain.handle('vscode:openCommitFileDiff', (_e, repoPath: string, sha: string, file: string) =>
+    openCommitFileDiffInVsCode(simpleGit(repoPath), repoPath, sha, file));
+
+  ipcMain.handle('vscode:openCommitPatch', (_e, repoPath: string, sha: string) =>
+    openCommitPatchInVsCode(simpleGit(repoPath), repoPath, sha));
+
+  ipcMain.handle('vscode:openWorkspace', (_e, name: string, folderPaths: string[]) =>
+    openWorkspaceInVsCode(name, folderPaths));
 
   ipcMain.handle('vscode:diffToolStatus', (_e, repoPath: string) => getDiffToolStatus(repoPath));
 

@@ -424,6 +424,14 @@ const api = {
       ipcRenderer.invoke('vscode:open', repoPath, target),
     openFileDiff: (repoPath: string, file: string) => ipcRenderer.invoke('vscode:openFileDiff', repoPath, file),
     openMerge: (repoPath: string, file: string) => ipcRenderer.invoke('vscode:openMerge', repoPath, file),
+    openFileVersion: (repoPath: string, sha: string, file: string) =>
+      ipcRenderer.invoke('vscode:openFileVersion', repoPath, sha, file),
+    openCommitFileDiff: (repoPath: string, sha: string, file: string) =>
+      ipcRenderer.invoke('vscode:openCommitFileDiff', repoPath, sha, file),
+    openCommitPatch: (repoPath: string, sha: string) =>
+      ipcRenderer.invoke('vscode:openCommitPatch', repoPath, sha),
+    openWorkspace: (name: string, folderPaths: string[]) =>
+      ipcRenderer.invoke('vscode:openWorkspace', name, folderPaths),
     diffToolStatus: (repoPath: string) => ipcRenderer.invoke('vscode:diffToolStatus', repoPath),
     installDiffTool: (repoPath: string) => ipcRenderer.invoke('vscode:installDiffTool', repoPath),
     removeDiffTool: (repoPath: string) => ipcRenderer.invoke('vscode:removeDiffTool', repoPath),
