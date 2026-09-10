@@ -92,17 +92,54 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
           {conflicted.length > 0 && (
             <div className="text-2xs text-text-tertiary mt-0.5 flex flex-wrap gap-1">
               {conflicted.map((f) => (
-                <span
-                  key={f}
-                  className="mono px-1.5 py-0.5 bg-bg-tertiary rounded cursor-pointer hover:text-accent"
-                  title="Select this file — opens it in Changes / Conflict Solver"
-                  onClick={() => {
-                    useSelectionStore.getState().selectFile(f);
-                    window.location.hash = '#/changes';
-                  }}
-                >
-                  {f}
-                </span>
+                <div key={f} className="flex items-center gap-0.5 bg-bg-tertiary rounded px-1 py-0.5 group/conflict">
+                  <span
+                    className="mono cursor-pointer hover:text-accent truncate"
+                    style={{ maxWidth: 200 }}
+                    title="Select this file — opens it in Changes / Conflict Solver"
+                    onClick={() => {
+                      useSelectionStore.getState().selectFile(f);
+                      window.location.hash = '#/changes';
+                    }}
+                  >
+                    {f}
+                  </span>
+                  {/* Per-file inline resolution — Take ours / Take theirs / Solver.
+                      SmartGit/GitKraken pattern: no need to open the full solver
+                      for trivial conflicts. */}
+                  <button
+                    className="text-2xs px-1 rounded border border-status-added/30 bg-status-added/10 text-status-added hover:bg-status-added/20 transition-colors"
+                    title="Take ours (git checkout --ours)"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await api.git.raw(repoPath, ['checkout', '--ours', '--', f]);
+                        await api.git.add(repoPath, [f]);
+                        toast.success(`${f}: took ours`);
+                        await refreshStatus(repoPath);
+                        loadState();
+                      } catch (err) { toast.error('Take ours failed', String(err)); }
+                    }}
+                  >
+                    O
+                  </button>
+                  <button
+                    className="text-2xs px-1 rounded border border-status-modified/30 bg-status-modified/10 text-status-modified hover:bg-status-modified/20 transition-colors"
+                    title="Take theirs (git checkout --theirs)"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await api.git.raw(repoPath, ['checkout', '--theirs', '--', f]);
+                        await api.git.add(repoPath, [f]);
+                        toast.success(`${f}: took theirs`);
+                        await refreshStatus(repoPath);
+                        loadState();
+                      } catch (err) { toast.error('Take theirs failed', String(err)); }
+                    }}
+                  >
+                    T
+                  </button>
+                </div>
               ))}
             </div>
           )}

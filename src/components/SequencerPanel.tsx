@@ -89,6 +89,26 @@ export function SequencerPanel({ kind, repoPath, onClose }: SequencerPanelProps)
     }
   };
 
+  // Commit Empty — only for cherry-pick. When the pick is empty (changes
+  // already applied), `git cherry-pick --continue` refuses. The user can
+  // either Skip (drop) or Commit Empty (commit it anyway via --allow-empty).
+  // This folds the CherryPickStateBanner action into SequencerPanel so there
+  // is ONE banner during cherry-pick (deduplication).
+  const handleCommitEmpty = async () => {
+    if (kind !== 'cherry-pick') return;
+    setBusy('commit-empty');
+    try {
+      await api.git.cherryPickContinue(repoPath, true);
+      toast.success('Empty commit created', 'Cherry-pick finished.');
+      await refreshStatus(repoPath);
+      onClose?.();
+    } catch (e) {
+      toast.error('Commit Empty failed', String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const label = kind === 'cherry-pick' ? 'Cherry-pick' : 'Revert';
 
   // The sequencer may be in one of two states:
@@ -138,12 +158,25 @@ export function SequencerPanel({ kind, repoPath, onClose }: SequencerPanelProps)
           <button
             className="btn btn-primary text-xs"
             onClick={handleContinue}
-            disabled={busy !== null || conflicted.length > 0}
-            title={conflicted.length > 0 ? 'Stage resolved files first' : isEmptyCommit ? 'Empty commit — use Skip instead' : `git ${kind === 'cherry-pick' ? 'cherry-pick' : 'revert'} --continue`}
+            disabled={busy !== null || conflicted.length > 0 || isEmptyCommit}
+            title={conflicted.length > 0 ? 'Stage resolved files first' : isEmptyCommit ? 'Empty commit — use Skip or Commit Empty' : `git ${kind === 'cherry-pick' ? 'cherry-pick' : 'revert'} --continue`}
           >
             {busy === 'continue' ? <Loader size={12} className="animate-spin" /> : <Check size={12} />}
             Continue
           </button>
+          {/* Commit Empty — only for cherry-pick, only when the pick is empty.
+              Folds the CherryPickStateBanner action into this panel (dedup). */}
+          {kind === 'cherry-pick' && isEmptyCommit && (
+            <button
+              className="btn btn-secondary text-xs"
+              onClick={handleCommitEmpty}
+              disabled={busy !== null}
+              title="git commit --allow-empty — commit the empty pick anyway"
+            >
+              {busy === 'commit-empty' ? <Loader size={12} className="animate-spin" /> : <Check size={12} />}
+              Commit Empty
+            </button>
+          )}
           <button
             className="btn btn-secondary text-xs"
             onClick={handleSkip}

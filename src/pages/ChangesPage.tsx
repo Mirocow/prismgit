@@ -49,6 +49,10 @@ function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvide
 
 interface ChangesPageProps {
   onResolveConflict?: (file: string) => void;
+  /** Inline per-file conflict resolution — Take ours / Take theirs / Take both / Mark resolved.
+   *  Wired to the App.tsx resolveConflict handler so these run the same git commands
+   *  as the menu-driven actions (git checkout --ours/--theirs + git add). */
+  onResolveConflictAction?: (file: string, mode: 'ours' | 'theirs' | 'both' | 'resolved') => void;
 }
 
 type FileSortKey = 'name' | 'state' | 'dir';
@@ -113,7 +117,7 @@ function SortableHeader({
   );
 }
 
-export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
+export function ChangesPage({ onResolveConflict, onResolveConflictAction }: ChangesPageProps = {}) {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { status, lastRefresh, refreshStatus, stageFiles, stageAll, commit, push, pull } = useGitStore();
@@ -1531,9 +1535,6 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           }}
         />
       )}
-      {/* (A generic banner for merge / rebase / revert / bisect used to live
-          here — superseded by RepoStateBanner above, which covers ALL five
-          states with per-state resolution buttons.) */}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Directory tree panel (SmartGit-style) — selects the folder scope */}
@@ -1611,7 +1612,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               <span style={{ width: 92 }}></span>
             </div>
 
-            {/* Conflicts */}
+            {/* Conflicts — SmartGit/GitKraken-style inline resolution actions:
+                Take ours / Take theirs / Take both / Mark resolved + Open solver. */}
             {status?.conflicted && status.conflicted.length > 0 && (
               <div className="border-b border-status-conflict/30 bg-status-conflict/5">
                 {status.conflicted.map((filePath) => (
@@ -1627,7 +1629,41 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                     {!compressFilePaths && (
                       <span className="truncate whitespace-nowrap" style={{ width: colWidths.dir }}></span>
                     )}
-                    <span className="flex justify-end flex-shrink-0 overflow-hidden" style={{ width: 92 }}>
+                    {/* Inline resolution actions — visible on hover (SmartGit/GitKraken pattern).
+                        Each calls the same git commands as the menu actions. */}
+                    <span className="flex justify-end items-center gap-0.5 flex-shrink-0 overflow-hidden" style={{ width: 220 }}>
+                      {onResolveConflictAction && (
+                        <>
+                          <button
+                            className="text-2xs px-1.5 py-0.5 rounded border border-status-added/30 bg-status-added/10 text-status-added hover:bg-status-added/20 transition-colors"
+                            title="Take ours (git checkout --ours)"
+                            onClick={(e) => { e.stopPropagation(); onResolveConflictAction(filePath, 'ours'); }}
+                          >
+                            Ours
+                          </button>
+                          <button
+                            className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/30 bg-status-modified/10 text-status-modified hover:bg-status-modified/20 transition-colors"
+                            title="Take theirs (git checkout --theirs)"
+                            onClick={(e) => { e.stopPropagation(); onResolveConflictAction(filePath, 'theirs'); }}
+                          >
+                            Theirs
+                          </button>
+                          <button
+                            className="text-2xs px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors"
+                            title="Take both (concatenate ours + theirs)"
+                            onClick={(e) => { e.stopPropagation(); onResolveConflictAction(filePath, 'both'); }}
+                          >
+                            Both
+                          </button>
+                          <button
+                            className="text-2xs px-1.5 py-0.5 rounded border border-status-success/30 bg-status-success/10 text-status-success hover:bg-status-success/20 transition-colors"
+                            title="Mark as resolved (git add)"
+                            onClick={(e) => { e.stopPropagation(); onResolveConflictAction(filePath, 'resolved'); }}
+                          >
+                            ✓
+                          </button>
+                        </>
+                      )}
                       <button className="btn btn-primary text-2xs !py-0.5 !px-2" onClick={(e) => { e.stopPropagation(); onResolveConflict && onResolveConflict(filePath); }}>
                         {t('changes.resolve')}
                       </button>

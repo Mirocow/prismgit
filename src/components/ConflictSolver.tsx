@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Check, AlertCircle, Loader, ChevronLeft, ChevronRight, ExternalLink } from './icons';
+import { X, Check, AlertCircle, Loader, ChevronLeft, ChevronRight, ExternalLink, GitMerge } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -24,6 +24,10 @@ interface ConflictHunk {
 interface ConflictSolverProps {
   filePath: string;
   onClose: () => void;
+  /** Called after a file is successfully resolved & staged. The parent can
+   *  use this to auto-open the NEXT conflicted file (platypusgit pattern) —
+   *  no manual re-invoke needed. */
+  onResolved?: (resolvedFile: string) => void;
 }
 
 function parseConflicts(content: string): ConflictHunk[] {
@@ -63,7 +67,7 @@ function parseConflicts(content: string): ConflictHunk[] {
   return hunks;
 }
 
-export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
+export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolverProps) {
   useEscapeKey(true, onClose);
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
@@ -124,12 +128,22 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
       resolved = h.oursLines;
     } else if (resolution === 'theirs') {
       resolved = h.theirsLines;
+    } else if (resolution === 'base') {
+      // Use the base (common ancestor) version of this hunk's region.
+      // Without a full diff3 we approximate by slicing baseContent by the
+      // hunk's line range — this is best-effort but never silently uses
+      // ours (the previous fallthrough bug).
+      const baseAll = baseContent.split('\n');
+      resolved = baseAll.slice(h.startLine, Math.min(h.endLine, baseAll.length));
+      if (resolved.length === 0) resolved = h.oursLines;
     } else if (resolution === 'both-ours-first') {
       resolved = [...h.oursLines, '', ...h.theirsLines];
     } else if (resolution === 'both-theirs-first') {
       resolved = [...h.theirsLines, '', ...h.oursLines];
     } else {
-      resolved = h.oursLines;
+      // 'manual' — keep the original conflict block for hand-editing.
+      const allLines = content.split('\n');
+      resolved = allLines.slice(h.startLine, h.endLine);
     }
     next[idx] = { ...next[idx], resolution, resolvedContent: resolved };
     setHunks(next);
@@ -171,7 +185,13 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
       await api.git.add(repo.path, [filePath]);
       toast.success(t('changes.conflictResolvedStaged'));
       await refreshStatus(repo.path);
-      onClose();
+      // Auto-advance: notify parent so it can open the next conflicted file
+      // (platypusgit advance() pattern). If no onResolved callback, just close.
+      if (onResolved) {
+        onResolved(filePath);
+      } else {
+        onClose();
+      }
     } catch (e) {
       toast.error(t('changes.saveFailed'), String(e));
     } finally {
@@ -181,6 +201,39 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
 
   const unresolvedCount = hunks.filter((h) => !h.resolution).length;
   const resolvedCount = hunks.length - unresolvedCount;
+
+  // Keyboard chords (platypusgit pattern): F7/Shift+F7 next/prev conflict,
+  // Mod+1/2/3 ours/theirs/both, Mod+Enter apply (Save & Stage).
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'F7') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          setCurrentHunk((h) => Math.max(0, h - 1));
+        } else {
+          setCurrentHunk((h) => Math.min(hunks.length - 1, h + 1));
+        }
+        return;
+      }
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      if (e.key === '1') {
+        e.preventDefault();
+        resolveHunk(currentHunk, 'ours');
+      } else if (e.key === '2') {
+        e.preventDefault();
+        resolveHunk(currentHunk, 'theirs');
+      } else if (e.key === '3') {
+        e.preventDefault();
+        resolveHunk(currentHunk, 'both-ours-first');
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (unresolvedCount === 0 && !saving) void handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKey, true);
+    return () => window.removeEventListener('keydown', handleKey, true);
+  }, [hunks, currentHunk, resolveHunk, unresolvedCount, saving, handleSave]);
 
   if (loading) {
     return (
@@ -194,6 +247,86 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
   }
 
   if (hunks.length === 0) {
+    // Detect binary or delete/modify conflicts — these can't be resolved
+    // with the hunk-based editor. platypusgit's MergeWindow shows a chooser
+    // with "Take ours / Take theirs / Resolve as deleted" buttons.
+    const oursEmpty = oursContent.length === 0;
+    const theirsEmpty = theirsContent.length === 0;
+    const isBinary = !oursEmpty && !theirsEmpty && content.includes('\0');
+    const isDeleteModify = oursEmpty || theirsEmpty;
+
+    if (isBinary || isDeleteModify) {
+      return (
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={onClose}>
+          <div className="panel p-6 max-w-md" onClick={(e) => e.stopPropagation()}>
+            <AlertCircle size={28} className="mx-auto mb-3 text-status-modified" />
+            <div className="text-sm font-medium mb-1 text-center">
+              {isBinary ? 'Binary file conflict' : 'Delete / Modify conflict'}
+            </div>
+            <div className="text-xs text-text-tertiary mb-4 text-center">
+              {isBinary
+                ? 'This file is binary and cannot be merged with a text-based solver. Choose which version to keep.'
+                : oursEmpty
+                  ? 'The file was deleted on our side but modified on their side. Choose to keep theirs or delete.'
+                  : 'The file was deleted on their side but modified on our side. Choose to keep ours or delete.'}
+            </div>
+            <div className="flex items-center justify-center gap-2">
+              {!oursEmpty && (
+                <button
+                  className="btn btn-secondary text-xs"
+                  title="Keep our version (git checkout --ours)"
+                  onClick={async () => {
+                    try {
+                      await api.git.raw(repo.path, ['checkout', '--ours', '--', filePath]);
+                      await api.git.add(repo.path, [filePath]);
+                      toast.success('Took ours');
+                      await refreshStatus(repo.path);
+                      onClose();
+                    } catch (e) { toast.error('Failed', String(e)); }
+                  }}
+                >
+                  Take ours
+                </button>
+              )}
+              {!theirsEmpty && (
+                <button
+                  className="btn btn-secondary text-xs"
+                  title="Keep their version (git checkout --theirs)"
+                  onClick={async () => {
+                    try {
+                      await api.git.raw(repo.path, ['checkout', '--theirs', '--', filePath]);
+                      await api.git.add(repo.path, [filePath]);
+                      toast.success('Took theirs');
+                      await refreshStatus(repo.path);
+                      onClose();
+                    } catch (e) { toast.error('Failed', String(e)); }
+                  }}
+                >
+                  Take theirs
+                </button>
+              )}
+              {/* Resolve as deleted — git rm the file */}
+              <button
+                className="btn btn-danger text-xs"
+                title="Resolve as deleted (git rm)"
+                onClick={async () => {
+                  try {
+                    await api.git.raw(repo.path, ['rm', '--', filePath]);
+                    toast.success('Resolved as deleted');
+                    await refreshStatus(repo.path);
+                    onClose();
+                  } catch (e) { toast.error('Failed', String(e)); }
+                }}
+              >
+                Resolve as deleted
+              </button>
+              <button className="btn btn-secondary text-xs" onClick={onClose}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={onClose}>
         <div className="panel p-8 text-center" onClick={(e) => e.stopPropagation()}>
@@ -404,6 +537,26 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
           >
             <ExternalLink size={11} />
             {t('changes.external')}
+          </button>
+          {/* Use merge tool — runs `git mergetool -- <file>`. This invokes
+              the user's configured merge.tool (Settings → Merge Tool).
+              SmartGit/GitKraken both expose this as a one-click action. */}
+          <button
+            className="btn btn-secondary text-xs"
+            title="Run git mergetool (uses your configured merge.tool)"
+            onClick={async () => {
+              try {
+                await api.git.raw(repo.path, ['mergetool', '--', filePath]);
+                toast.success('Merge tool completed', 'Reloading file content…');
+                await loadFile();
+                await refreshStatus(repo.path);
+              } catch (e) {
+                toast.error('Merge tool failed', String(e));
+              }
+            }}
+          >
+            <GitMerge size={11} />
+            Merge Tool
           </button>
         </div>
         <div className="flex items-center gap-2">

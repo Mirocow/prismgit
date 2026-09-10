@@ -225,6 +225,35 @@ export default function App() {
     };
   }, [repoPath]);
 
+  // Resolve conflict — extracted as a useCallback so it can be used both
+  // from the menu event handler (inside the useEffect below) AND from the
+  // JSX (ChangesPage onResolveConflictAction prop). Without this, the handler
+  // was trapped inside the useEffect scope.
+  const resolveConflict = useCallback(async (mode: 'ours' | 'theirs' | 'both' | 'resolved', fileOverride?: string) => {
+    const repo = useRepositoryStore.getState().currentRepo;
+    const f = fileOverride ?? useSelectionStore.getState().selectedFilePath;
+    if (!repo) return;
+    if (!f) { toast.warning('No file selected', 'Select a file in Changes first'); return; }
+    try {
+      if (mode === 'both') {
+        await api.git.raw(repo.path, ['checkout', '--ours', '--', f]);
+        const theirs = await api.git.raw(repo.path, ['show', `:3:${f}`]).catch(() => '');
+        if (theirs) {
+          const fs = await import('fs');
+          const path = await import('path');
+          const fullPath = path.join(repo.path, f);
+          const current = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf-8') : '';
+          fs.writeFileSync(fullPath, current + '\n' + theirs);
+        }
+      } else if (mode !== 'resolved') {
+        await api.git.raw(repo.path, ['checkout', `--${mode}`, '--', f]);
+      }
+      await api.git.add(repo.path, [f]);
+      toast.success(`${f}: ${mode === 'resolved' ? 'marked resolved' : mode === 'both' ? 'took both' : `took ${mode}`}`);
+      useGitStore.getState().refreshStatus(repo.path);
+    } catch (e) { toast.error('Resolve failed', String(e)); }
+  }, [toast]);
+
   // Listen for menu events
   useEffect(() => {
     const handleOpenRepo = (path: string) => {
@@ -528,21 +557,9 @@ export default function App() {
       } catch (e) { toast.error('Remove failed', String(e)); }
     };
 
-    // ===== Resolve submenu =====
-    const resolveConflict = async (mode: 'ours' | 'theirs' | 'resolved') => {
-      const repo = requireRepo();
-      const f = selectedFile();
-      if (!repo) return;
-      if (!f) { warnNoFile(); return; }
-      try {
-        if (mode !== 'resolved') {
-          await api.git.raw(repo.path, ['checkout', `--${mode}`, '--', f]);
-        }
-        await api.git.add(repo.path, [f]);
-        toast.success(`${f}: ${mode === 'resolved' ? 'marked resolved' : `took ${mode}`}`);
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Resolve failed', String(e)); }
-    };
+    // ===== Resolve submenu ===== (resolveConflict is now a useCallback
+    // declared at the component level so it can also be passed to
+    // ChangesPage as onResolveConflictAction.)
     const handleConflictSolver = () => {
       const f = selectedFile();
       if (!f) { warnNoFile(); return; }
@@ -1168,7 +1185,7 @@ export default function App() {
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/" element={<Navigate to={defaultRoute} replace />} />
-              <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} />} />
+              <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} onResolveConflictAction={(f, mode) => resolveConflict(mode, f)} />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/diff" element={<DiffPage />} />
               {/* Annotate: file-history investigation (SmartGit "Log of file") */}
@@ -1238,7 +1255,27 @@ export default function App() {
       )}
       {conflictFile && (
         <Suspense fallback={null}>
-          <ConflictSolver filePath={conflictFile} onClose={() => setConflictFile(null)} />
+          <ConflictSolver
+            filePath={conflictFile}
+            onClose={() => setConflictFile(null)}
+            onResolved={async (_resolvedFile) => {
+              // Auto-advance to the next conflicted file (platypusgit pattern).
+              const repo = useRepositoryStore.getState().currentRepo;
+              if (!repo) { setConflictFile(null); return; }
+              try {
+                const st = await api.git.status(repo.path);
+                const next = st.conflicted.find((f: string) => f !== _resolvedFile);
+                if (next) {
+                  setConflictFile(next);
+                } else {
+                  setConflictFile(null);
+                  toast.success('All conflicts resolved', 'You can now Continue the merge / cherry-pick / rebase.');
+                }
+              } catch {
+                setConflictFile(null);
+              }
+            }}
+          />
         </Suspense>
       )}
       <CommandPalette
