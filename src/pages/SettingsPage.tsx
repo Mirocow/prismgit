@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Settings as SettingsIcon, Github, LogOut, Sun, Moon, Folder, Plus, RefreshCw, Trash, Loader, GitBranch } from '../components/icons';
-import { useSettingsStore } from '../stores/settingsStore';
-import { useAuthStore } from '../stores/authStore';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useCallback, useEffect, useState } from 'react';
+import { confirmDialog } from '../components/ConfirmDialog';
+import { Folder, Github, Loader, LogOut, Moon, Plus, RefreshCw, Settings as SettingsIcon, Sun, Trash } from '../components/icons';
 import { api, type GitConfigEntry } from '../lib/api';
 import { cn } from '../lib/utils';
-import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useAuthStore } from '../stores/authStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { useToastStore } from '../stores/toastStore';
 
 export function SettingsPage() {
   const { settings, theme, setSetting, toggleTheme } = useSettingsStore();
@@ -127,16 +127,6 @@ export function SettingsPage() {
               </p>
             </div>
           </div>
-          {currentRepo && (
-            <button
-              className="btn btn-secondary text-xs flex-shrink-0"
-              title="Per-repository settings: remotes, authorization, metadata"
-              onClick={() => window.dispatchEvent(new CustomEvent('prismgit:repo-settings'))}
-            >
-              <GitBranch size={12} />
-              Repository Settings...
-            </button>
-          )}
         </div>
 
         {/* Tab switcher */}
