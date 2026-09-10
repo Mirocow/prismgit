@@ -1657,7 +1657,7 @@ export function HistoryPage() {
 
       {/* Create Tag dialog */}
       {showTagDialog && (
-        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowTagDialog(false)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowTagDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-1 flex items-center gap-2">
               <TagIcon size={16} /> Create Tag at {shortHash(tagTarget || '')}
@@ -1696,7 +1696,7 @@ export function HistoryPage() {
 
       {/* Create Branch dialog */}
       {showBranchDialog && (
-        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowBranchDialog(false)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowBranchDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-1 flex items-center gap-2">
               <GitBranch size={16} /> Create Branch at {shortHash(branchTarget || '')}
@@ -1727,7 +1727,7 @@ export function HistoryPage() {
       )}
       {/* Compare with Working Tree dialog */}
       {compareDiff && (
-        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setCompareDiff(null)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setCompareDiff(null)}>
           <div className="panel w-[80vw] h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-2 border-b border-border-default">
               <h3 className="text-sm font-medium">{compareDiff.title}</h3>
@@ -1741,7 +1741,7 @@ export function HistoryPage() {
       )}
       {/* Split Off Files dialog */}
       {showSplitOff && splitOffEntry && (
-        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowSplitOff(false)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowSplitOff(false)}>
           <div className="panel w-[560px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-4 pt-4">
               <h3 className="text-base font-medium">Split Off Files Into New Commit</h3>

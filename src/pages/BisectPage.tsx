@@ -294,7 +294,7 @@ export function BisectPage() {
       {/* Bisect log dialog */}
       {showLog && (
         <div
-          className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
           onClick={() => setShowLog(false)}
         >
           <div className="panel w-[560px] max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>

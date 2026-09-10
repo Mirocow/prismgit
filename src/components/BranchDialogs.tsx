@@ -32,7 +32,7 @@ function DialogShell({ title, subtitle, children, buttons, onClose, width = 440 
 }) {
   return (
     <div
-      className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
       onClick={onClose}
     >
       <div className="panel p-4" style={{ width }} onClick={(e) => e.stopPropagation()}>

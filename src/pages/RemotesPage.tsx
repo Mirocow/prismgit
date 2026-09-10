@@ -412,7 +412,7 @@ export function RemotesPage() {
       {/* Add remote dialog */}
       {showAdd && (
         <div
-          className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
           onClick={() => setShowAdd(false)}
         >
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
@@ -466,7 +466,7 @@ export function RemotesPage() {
       {/* Edit URLs dialog */}
       {editRemote && (
         <div
-          className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
           onClick={() => setEditRemote(null)}
         >
           <div className="panel w-[480px] p-4" onClick={(e) => e.stopPropagation()}>
