@@ -49,7 +49,7 @@ describe('repositoryStore', () => {
   });
 
   describe('loadRepos', () => {
-    it('loads repositories sorted by pinned then lastOpened', async () => {
+    it('loads repositories sorted by pinned (stable order, NOT by lastOpened)', async () => {
       const mockRepos = [
         { path: '/a', name: 'a', lastOpened: 100, pinned: false },
         { path: '/b', name: 'b', lastOpened: 200, pinned: true },
@@ -61,10 +61,10 @@ describe('repositoryStore', () => {
 
       const state = useRepositoryStore.getState();
       expect(state.repos).toHaveLength(3);
-      // Pinned first, then by lastOpened descending
+      // Pinned first, then STABLE insertion order (not by lastOpened)
       expect(state.repos[0].path).toBe('/b'); // pinned
-      expect(state.repos[1].path).toBe('/c'); // 300 > 100
-      expect(state.repos[2].path).toBe('/a');
+      expect(state.repos[1].path).toBe('/a'); // /a was first in array → stays before /c
+      expect(state.repos[2].path).toBe('/c');
       expect(state.loading).toBe(false);
     });
 

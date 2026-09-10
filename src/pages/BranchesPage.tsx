@@ -443,24 +443,30 @@ export function BranchesPage() {
         )}
         {/* Hover actions */}
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
-          {!b.current && !b.remote && (
+          {!b.remote && (
             <>
-              <button className="icon-btn !w-5 !h-5" title="Merge into current"
-                onClick={(e) => { e.stopPropagation(); handleMerge(b.name); }}>
-                <GitMerge size={11} />
-              </button>
-              <button className="icon-btn !w-5 !h-5" title="Push"
-                onClick={(e) => { e.stopPropagation(); handlePushBranch(b); }}>
-                <Upload size={11} />
-              </button>
+              {!b.current && (
+                <button className="icon-btn !w-5 !h-5" title="Merge into current"
+                  onClick={(e) => { e.stopPropagation(); handleMerge(b.name); }}>
+                  <GitMerge size={11} />
+                </button>
+              )}
+              {!b.current && (
+                <button className="icon-btn !w-5 !h-5" title="Push"
+                  onClick={(e) => { e.stopPropagation(); handlePushBranch(b); }}>
+                  <Upload size={11} />
+                </button>
+              )}
               <button className="icon-btn !w-5 !h-5" title="Rename"
                 onClick={(e) => { e.stopPropagation(); setRenameTarget({ kind: 'branch', oldName: b.name }); }}>
                 <Pencil size={11} />
               </button>
-              <button className="icon-btn !w-5 !h-5 hover:!text-status-deleted" title="Delete"
-                onClick={(e) => { e.stopPropagation(); handleDelete(b); }}>
-                <Trash size={11} />
-              </button>
+              {!b.current && (
+                <button className="icon-btn !w-5 !h-5 hover:!text-status-deleted" title="Delete"
+                  onClick={(e) => { e.stopPropagation(); handleDelete(b); }}>
+                  <Trash size={11} />
+                </button>
+              )}
             </>
           )}
           {b.remote && (

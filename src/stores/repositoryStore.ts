@@ -39,15 +39,21 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const repos = await api.settings.getRepos();
+      // Sort: favorites first, then pinned — but DON'T re-sort by lastOpened.
+      // The user complaint was that repos "jump around like a goat" every time
+      // they open one — because lastOpened changed and the list re-sorted.
+      // Now we keep stable insertion order (preserving the order repos were added).
       const sorted = [...repos].sort((a, b) => {
         const metaA = get().metadata[a.path];
         const metaB = get().metadata[b.path];
-        // Favorites first, then pinned, then by lastOpened
+        // Favorites first
         if (metaA?.favorite && !metaB?.favorite) return -1;
         if (!metaA?.favorite && metaB?.favorite) return 1;
+        // Pinned second
         if (a.pinned && !b.pinned) return -1;
         if (!a.pinned && b.pinned) return 1;
-        return b.lastOpened - a.lastOpened;
+        // Otherwise: stable — keep insertion order (don't sort by lastOpened)
+        return 0;
       });
       set({ repos: sorted, loading: false });
     } catch (e) {

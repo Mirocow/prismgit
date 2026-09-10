@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Tag as TagIcon, Plus, Trash, RefreshCw, Check } from '../components/icons';
+import { Tag as TagIcon, Plus, Trash, RefreshCw, Check, Pencil } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useOperationLogStore } from '../stores/operationLogStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type TagInfo } from '../lib/api';
 import { shortHash } from '../lib/utils';
-
 import { useEscapeKey } from '../hooks/useEscapeKey';
 export function TagsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
@@ -19,6 +19,34 @@ export function TagsPage() {
   const [message, setMessage] = useState('');
   const [ref, setRef] = useState('HEAD');
   const [annotated, setAnnotated] = useState(true);
+  // Rename state — git has no tag rename, so we create new + delete old
+  const [renamingTag, setRenamingTag] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  const handleRename = async (tag: TagInfo) => {
+    const newName = renameValue.trim();
+    if (!newName || newName === tag.name) { setRenamingTag(null); return; }
+    try {
+      await useOperationLogStore.getState().logOperation(
+        `Rename Tag ${tag.name} → ${newName}`,
+        repo.path,
+        `git tag ${newName} ${tag.hash} && git tag -d ${tag.name}`,
+        async () => {
+          // Create new tag pointing to the same commit.
+          // tag.lightweight = true means NOT annotated; pass annotated = !lightweight.
+          await api.git.createTag(repo.path, newName, undefined, tag.hash, false, !tag.lightweight);
+          // Delete old tag
+          await api.git.deleteTag(repo.path, tag.name);
+        }
+      );
+      toast.success(`Tag '${tag.name}' renamed to '${newName}'`);
+      setRenamingTag(null);
+      await load();
+    } catch (e) {
+      toast.error('Failed to rename tag', String(e));
+      setRenamingTag(null);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,7 +156,23 @@ export function TagsPage() {
               <TagIcon size={14} className="text-status-modified flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-text-primary">{t.name}</span>
+                  {renamingTag === t.name ? (
+                    <input
+                      type="text"
+                      className="text-xs w-32 px-1 py-0.5"
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRename(t);
+                        if (e.key === 'Escape') setRenamingTag(null);
+                      }}
+                      onBlur={() => handleRename(t)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span className="text-sm font-medium text-text-primary">{t.name}</span>
+                  )}
                   {!t.lightweight && (
                     <span className="badge badge-modified">ANNOTATED</span>
                   )}
@@ -142,13 +186,22 @@ export function TagsPage() {
                   <CommitHashLink hash={t.hash} />
                 </div>
               </div>
-              <button
-                className="opacity-0 group-hover:opacity-100 icon-btn !w-6 !h-6 hover:!text-status-deleted"
-                title="Delete"
-                onClick={() => handleDelete(t)}
-              >
-                <Trash size={12} />
-              </button>
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
+                <button
+                  className="icon-btn !w-6 !h-6"
+                  title="Rename"
+                  onClick={(e) => { e.stopPropagation(); setRenamingTag(t.name); setRenameValue(t.name); }}
+                >
+                  <Pencil size={12} />
+                </button>
+                <button
+                  className="icon-btn !w-6 !h-6 hover:!text-status-deleted"
+                  title="Delete"
+                  onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
+                >
+                  <Trash size={12} />
+                </button>
+              </div>
             </div>
           ))
             }

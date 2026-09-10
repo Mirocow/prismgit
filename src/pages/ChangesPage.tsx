@@ -154,6 +154,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [diffLoading, setDiffLoading] = useState(false);
   const [commitMsg, setCommitMsg] = useState('');
   const [amend, setAmend] = useState(false);
+  // When true, commit auto-stages all changes before committing (git add . && git commit)
+  const [commitAll, setCommitAll] = useState(false);
   const [fileFilter, setFileFilter] = useState('');
   const [draggedFile, setDraggedFile] = useState<string | null>(null);
   const [journal, setJournal] = useState<LogEntry[]>([]);
@@ -549,10 +551,15 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       return;
     }
     try {
+      // If commitAll is checked, stage everything first (git add .)
+      if (commitAll) {
+        await stageAll(repo.path);
+      }
       const hash = await commit(repo.path, commitMsg, amend);
       toast.success('Commit created', `Hash: ${hash.substring(0, 7)}`);
       setCommitMsg('');
       setAmend(false);
+      setCommitAll(false);
       await loadJournal();
     } catch (e) {
       toast.error('Commit failed', String(e));
@@ -1305,6 +1312,14 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                 />
                 Amend
               </label>
+              <label className="flex items-center gap-1 text-2xs text-text-secondary cursor-pointer" title="Stage all changes before committing (git add . && git commit)">
+                <input
+                  type="checkbox"
+                  checked={commitAll}
+                  onChange={(e) => setCommitAll(e.target.checked)}
+                />
+                Commit All
+              </label>
               <button
                 className={cn('text-2xs px-1.5 py-0.5 rounded', showMarkdownPreview ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
                 onClick={() => setShowMarkdownPreview(!showMarkdownPreview)}
@@ -1316,7 +1331,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               <button
                 className="btn btn-secondary text-xs"
                 onClick={handleCommitAndPush}
-                disabled={!commitMsg.trim() || stagedFiles.length === 0}
+                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0)}
                 title="Commit then push"
               >
                 <GitPullRequest size={11} />
@@ -1325,7 +1340,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               <button
                 className="btn btn-primary text-xs"
                 onClick={handleCommit}
-                disabled={!commitMsg.trim() || stagedFiles.length === 0}
+                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0)}
                 title="Ctrl+Enter"
               >
                 <GitCommit size={11} />
