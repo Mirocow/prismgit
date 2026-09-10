@@ -173,33 +173,6 @@ describe('CommandLogPanel — Commands tab (raw git output)', () => {
   });
 });
 
-describe('CommandLogPanel — Operations tab', () => {
-  it('renders operation-log entries when switched to Operations', async () => {
-    useOperationLogStore.setState({
-      ops: [
-        {
-          id: 'op-1',
-          timestamp: 1757500000000,
-          action: 'Push',
-          command: 'git push origin main',
-          status: 'error',
-          // Different from currentRepo ('/test/repo') so the repo suffix renders
-          repoPath: '/other/repo',
-          duration: 640,
-          error: 'The remote branch has commits you do not have locally — pull first',
-        },
-      ],
-      runningIds: new Set(),
-    });
-    render(<CommandLogPanel onClose={() => {}} />);
-
-    fireEvent.click(await screen.findByText('Operations'));
-
-    expect(screen.getByText('Push')).toBeInTheDocument();
-    // repoPath basename: '/other/repo'.split('/').pop() === 'repo'
-    expect(screen.getByText(/· repo/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Push'));
-    expect(screen.getByText('git push origin main')).toBeInTheDocument();
-    expect(screen.getByText(/pull first/)).toBeInTheDocument();
-  });
-});
+// Operations tab was removed — all operations now show in the Commands tab
+// filtered by user/system classification. The operationLogStore is still
+// used internally by StatusBar for the running indicator.

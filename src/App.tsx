@@ -15,6 +15,7 @@ import { CommandLogPanel } from './components/CommandLogPanel';
 import { DragDropHandler } from './components/DragDropHandler';
 import { DeepLinkHandler } from './components/DeepLinkHandler';
 import { HelpBanner } from './components/HelpBanner';
+import { ResizableSplitter } from './components/ResizableSplitter';
 import { NAV_SHORTCUTS } from './components/navItems';
 import { RefActionDialog, type RefAction } from './components/RefActionDialog';
 import { useChunkPreload } from './hooks/useChunkPreload';
@@ -110,6 +111,7 @@ export default function App() {
   const [dismissRebase, setDismissRebase] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showCommandLog, setShowCommandLog] = useState(false);
+  const [commandLogHeight, setCommandLogHeight] = useState(260);
   const [refAction, setRefAction] = useState<RefAction | null>(null);
   const [indexEditorFile, setIndexEditorFile] = useState<string | null | undefined>(undefined);
   const [showIndexEditor, setShowIndexEditor] = useState(false);
@@ -1153,7 +1155,12 @@ export default function App() {
         </main>
       </div>
       {showCommandLog && (
-        <CommandLogPanel onClose={() => setShowCommandLog(false)} />
+        <>
+          <ResizableSplitter direction="vertical" onResize={(d) => setCommandLogHeight(h => Math.max(100, Math.min(600, h - d)))} />
+          <div style={{ height: commandLogHeight, flexShrink: 0 }}>
+            <CommandLogPanel onClose={() => setShowCommandLog(false)} />
+          </div>
+        </>
       )}
       <StatusBar
         showCommandLog={showCommandLog}
