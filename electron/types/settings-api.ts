@@ -50,6 +50,12 @@ export interface AppSettings {
   enableTelemetry: boolean;
   githubPAT?: string;
   pullStrategy: 'merge' | 'rebase';
+  /**
+   * SmartGit-style "Perform background Poll or Fetch" — per repo, the list of
+   * remote names that should be fetched quietly in the background on an
+   * interval while the repository is open. Key = absolute repo path.
+   */
+  backgroundFetchRemotes?: Record<string, string[]>;
 }
 
 export interface SettingsApi {

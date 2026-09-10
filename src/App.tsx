@@ -26,6 +26,7 @@ import { useAuthStore } from './stores/authStore';
 import { useToastStore } from './stores/toastStore';
 import { useGitStore } from './stores/gitStore';
 import { useSelectionStore } from './stores/selectionStore';
+import { useBackgroundFetch } from './hooks/useBackgroundFetch';
 import { api } from './lib/api';
 
 // Lazy-load pages for smaller initial bundle
@@ -80,6 +81,9 @@ export default function App() {
   const [dismissRebase, setDismissRebase] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showCommandLog, setShowCommandLog] = useState(false);
+
+  // SmartGit-style background "Poll or Fetch" for remotes marked in Configure remote properties
+  useBackgroundFetch();
 
   useEffect(() => {
     loadRepos();

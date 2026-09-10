@@ -1,21 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   GitBranch, Plus, RefreshCw, Trash, GitMerge, Check, ArrowUp, ArrowDown,
-  ExternalLink, Upload, ChevronDown, ChevronRight, X, Pencil,
+  ExternalLink, Upload, ChevronDown, ChevronRight, X, Pencil, CloudDownload,
+  Settings as Cog, Loader,
 } from '../components/icons';
 import { MergePanel } from '../components/MergePanel';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { api, type BranchInfo } from '../lib/api';
+import { api, type BranchInfo, type RemoteInfo } from '../lib/api';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { cn, formatDate, shortHash } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { RenameDialog, RemoteConfigDialog } from '../components/RemoteDialogs';
+import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
 export function BranchesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const { status, refreshStatus } = useGitStore();
+  const { refreshStatus } = useGitStore();
   const toast = useToastStore();
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -25,8 +28,11 @@ export function BranchesPage() {
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchStart, setNewBranchStart] = useState('HEAD');
   const [newBranchCheckout, setNewBranchCheckout] = useState(true);
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
+  // SmartGit-style dialogs: rename (branch/remote) + configure/add remote
+  const [renameTarget, setRenameTarget] = useState<{ kind: 'branch' | 'remote'; oldName: string } | null>(null);
+  const [configRemote, setConfigRemote] = useState<{ mode: 'configure' | 'add'; name?: string } | null>(null);
+  const [remotesMap, setRemotesMap] = useState<Record<string, RemoteInfo>>({});
+  const [remoteBusy, setRemoteBusy] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [draggedBranch, setDraggedBranch] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -35,8 +41,12 @@ export function BranchesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await api.git.branches(repo.path);
-      setBranches(result);
+      const [branchList, remoteList] = await Promise.all([
+        api.git.branches(repo.path),
+        api.git.remotes(repo.path).catch(() => [] as RemoteInfo[]),
+      ]);
+      setBranches(branchList);
+      setRemotesMap(Object.fromEntries(remoteList.map((r) => [r.name, r])));
     } catch (e) {
       toast.error('Failed to load branches', String(e));
     } finally {
@@ -88,14 +98,96 @@ export function BranchesPage() {
     } catch (e) { toast.error('Failed', String(e)); }
   };
 
-  const handleRename = async (oldName: string) => {
-    if (!renameValue.trim()) { setRenaming(null); return; }
+  const handleRenameSubmit = async (newName: string) => {
+    if (!renameTarget) return;
+    const { kind, oldName } = renameTarget;
+    setRemoteBusy(`rename-${oldName}`);
     try {
-      await api.git.renameBranch(repo.path, oldName, renameValue);
-      toast.success(`Renamed to '${renameValue}'`);
-      setRenaming(null); setRenameValue('');
+      if (kind === 'branch') {
+        await api.git.renameBranch(repo.path, oldName, newName);
+        toast.success(`Branch renamed to '${newName}'`);
+        await load();
+        await refreshStatus(repo.path);
+      } else {
+        await api.git.renameRemote(repo.path, oldName, newName);
+        toast.success(`Remote renamed to '${newName}'`);
+        await load();
+      }
+      setRenameTarget(null);
+    } catch (e) {
+      toast.error('Rename failed', String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
+  };
+
+  const validateBranchName = (name: string): string | null => {
+    if (name === renameTarget?.oldName) return null; // unchanged — submit disabled, no error
+    if (!name) return 'Name is required';
+    if (/\s/.test(name)) return 'Branch name must not contain whitespace';
+    if (name.startsWith('-') || name.startsWith('/')) return 'Branch name must not start with "-" or "/"';
+    if (name.endsWith('.lock') || name.includes('..') || /[~^:?*[\]\\@{]/.test(name)) return 'Branch name contains invalid characters';
+    if (branches.some((b) => b.name === name)) return `Branch '${name}' already exists`;
+    return null;
+  };
+
+  const handleFetchRemote = async (name: string) => {
+    setRemoteBusy(name);
+    try {
+      await api.git.fetch(repo.path, name, true);
+      toast.success(`Fetched '${name}' (with prune)`);
       await load();
-    } catch (e) { toast.error('Rename failed', String(e)); }
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error(`Fetch '${name}' failed`, String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
+  };
+
+  const handleRemoveRemote = async (name: string) => {
+    if (!confirm(`Remove remote '${name}'?\n\nThis only removes the remote configuration — local branches and data stay untouched.`)) return;
+    setRemoteBusy(name);
+    try {
+      await api.git.removeRemote(repo.path, name);
+      toast.success(`Remote '${name}' removed`);
+      await load();
+    } catch (e) {
+      toast.error('Remove remote failed', String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
+  };
+
+  const handleConfigSubmit = async (data: { name: string; fetchUrl: string; pushUrl: string; background: boolean }) => {
+    if (!configRemote) return;
+    setRemoteBusy('config');
+    try {
+      if (configRemote.mode === 'add') {
+        await api.git.addRemote(repo.path, data.name, data.fetchUrl);
+        toast.success(`Remote '${data.name}' added`);
+      } else {
+        const info = remotesMap[configRemote.name!];
+        if (data.fetchUrl !== info?.refs.fetch) {
+          await api.git.setRemoteUrl(repo.path, configRemote.name!, data.fetchUrl);
+        }
+        const existingPush = info?.refs.push ?? '';
+        if (data.pushUrl && data.pushUrl !== existingPush) {
+          await api.git.setRemoteUrl(repo.path, configRemote.name!, data.pushUrl, true);
+        } else if (!data.pushUrl && existingPush && existingPush !== data.fetchUrl) {
+          // Cleared the push URL — reset it back to the fetch URL
+          await api.git.setRemoteUrl(repo.path, configRemote.name!, data.fetchUrl, true);
+        }
+        toast.success(`Remote '${configRemote.name}' configured`);
+      }
+      setBackgroundFetchForRepo(repo.path, data.name, data.background);
+      setConfigRemote(null);
+      await load();
+    } catch (e) {
+      toast.error('Configure remote failed', String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
   };
 
   const handleMerge = async (branch: string) => {
@@ -206,7 +298,22 @@ export function BranchesPage() {
     e.preventDefault();
     e.stopPropagation();
     const items: ContextMenuItem[] = [];
-    if (!b.current && !b.remote) {
+    if (b.remote) {
+      items.push({ label: 'Checkout (create local tracking branch)', clickId: 'checkout-remote' });
+      items.push({ label: 'Create local branch from...', clickId: 'create-local' });
+      items.push({ label: 'Compare with current branch...', clickId: 'compare' });
+      items.push({ type: 'separator' });
+      items.push({ label: 'Merge into current', clickId: 'merge' });
+      items.push({ type: 'separator' });
+      items.push({ label: 'Open in Browser', clickId: 'browser' });
+      items.push({ label: 'Delete remote branch', clickId: 'delete-remote' });
+    } else if (b.current) {
+      // Current branch: SmartGit parity — rename works on HEAD (git branch -m), push too
+      items.push({ label: 'Push to origin', clickId: 'push' });
+      items.push({ label: 'Rename...', clickId: 'rename' });
+      items.push({ type: 'separator' });
+      items.push({ label: 'Open in Browser', clickId: 'browser' });
+    } else {
       items.push({ label: 'Checkout', clickId: 'checkout' });
       items.push({ label: 'Compare with current branch...', clickId: 'compare' });
       items.push({ type: 'separator' });
@@ -216,15 +323,6 @@ export function BranchesPage() {
       items.push({ label: 'Push to origin', clickId: 'push' });
       items.push({ label: 'Rename...', clickId: 'rename' });
       items.push({ label: 'Delete', clickId: 'delete' });
-    } else if (b.remote) {
-      items.push({ label: 'Checkout (create local tracking branch)', clickId: 'checkout-remote' });
-      items.push({ label: 'Create local branch from...', clickId: 'create-local' });
-      items.push({ label: 'Compare with current branch...', clickId: 'compare' });
-      items.push({ type: 'separator' });
-      items.push({ label: 'Merge into current', clickId: 'merge' });
-      items.push({ type: 'separator' });
-      items.push({ label: 'Open in Browser', clickId: 'browser' });
-      items.push({ label: 'Delete remote branch', clickId: 'delete-remote' });
     }
     if (items.length > 0) {
       showContextMenu(items, (action) => {
@@ -244,7 +342,7 @@ export function BranchesPage() {
         else if (action === 'merge') handleMerge(b.name);
         else if (action === 'rebase') api.git.rebase(repo.path, b.name).then(() => { toast.success('Rebase started'); refreshStatus(repo.path); }).catch((e) => toast.error('Rebase failed', String(e)));
         else if (action === 'push') handlePushBranch(b);
-        else if (action === 'rename') { setRenaming(b.name); setRenameValue(b.name); }
+        else if (action === 'rename') setRenameTarget({ kind: 'branch', oldName: b.name });
         else if (action === 'delete') handleDelete(b);
         else if (action === 'create-local') { const name = b.name.replace(/^[^/]+\//, ''); setNewBranchName(name); setNewBranchStart(b.name); setNewBranchCheckout(true); setShowNewDialog(true); }
         else if (action === 'browser') handleOpenInBrowser(b);
@@ -265,7 +363,6 @@ export function BranchesPage() {
   }
 
   const renderBranchRow = (b: BranchInfo) => {
-    const isRenaming = renaming === b.name;
     return (
       <div
         key={b.name}
@@ -315,32 +412,22 @@ export function BranchesPage() {
           {b.current && <span className="text-text-primary">▶</span>}
         </span>
         <GitBranch size={12} className={b.current ? 'text-accent' : 'text-text-tertiary'} flex-shrink-0 />
-        {/* Name or rename input */}
+        {/* Name */}
         <div className="flex-1 min-w-0">
-          {isRenaming ? (
-            <input
-              type="text" className="text-xs w-full" value={renameValue} autoFocus
-              onChange={(e) => setRenameValue(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleRename(b.name); if (e.key === 'Escape') setRenaming(null); }}
-              onBlur={() => handleRename(b.name)}
-            />
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="truncate">{b.name}</span>
-              {b.tracking && <span className="text-2xs text-text-tertiary">→ {b.tracking}</span>}
-              {b.ahead !== undefined && b.ahead > 0 && (
-                <span className="text-2xs text-status-added flex items-center gap-0.5">
-                  <ArrowUp size={9} />{b.ahead}
-                </span>
-              )}
-              {b.behind !== undefined && b.behind > 0 && (
-                <span className="text-2xs text-status-modified flex items-center gap-0.5">
-                  <ArrowDown size={9} />{b.behind}
-                </span>
-              )}
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <span className="truncate">{b.name}</span>
+            {b.tracking && <span className="text-2xs text-text-tertiary">→ {b.tracking}</span>}
+            {b.ahead !== undefined && b.ahead > 0 && (
+              <span className="text-2xs text-status-added flex items-center gap-0.5">
+                <ArrowUp size={9} />{b.ahead}
+              </span>
+            )}
+            {b.behind !== undefined && b.behind > 0 && (
+              <span className="text-2xs text-status-modified flex items-center gap-0.5">
+                <ArrowDown size={9} />{b.behind}
+              </span>
+            )}
+          </div>
         </div>
         {/* Last commit info */}
         {b.lastCommit && (
@@ -363,7 +450,7 @@ export function BranchesPage() {
                 <Upload size={11} />
               </button>
               <button className="icon-btn !w-5 !h-5" title="Rename"
-                onClick={(e) => { e.stopPropagation(); setRenaming(b.name); setRenameValue(b.name); }}>
+                onClick={(e) => { e.stopPropagation(); setRenameTarget({ kind: 'branch', oldName: b.name }); }}>
                 <Pencil size={11} />
               </button>
               <button className="icon-btn !w-5 !h-5 hover:!text-status-deleted" title="Delete"
@@ -393,17 +480,48 @@ export function BranchesPage() {
     );
   };
 
-  const renderGroup = (label: string, count: number, items: BranchInfo[], groupKey: string) => {
+  const showRemoteContextMenu = (e: React.MouseEvent, remoteName: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu([
+      { label: `Fetch '${remoteName}'`, clickId: 'fetch' },
+      { label: 'Configure remote properties...', clickId: 'configure' },
+      { type: 'separator' },
+      { label: 'Rename remote...', clickId: 'rename-remote' },
+      { label: 'Remove remote...', clickId: 'remove-remote' },
+      { type: 'separator' },
+      { label: 'Add new remote...', clickId: 'add-remote' },
+      { label: 'Manage all remotes (Remotes page)', clickId: 'manage' },
+    ], (action) => {
+      if (action === 'fetch') handleFetchRemote(remoteName);
+      else if (action === 'configure') setConfigRemote({ mode: 'configure', name: remoteName });
+      else if (action === 'rename-remote') setRenameTarget({ kind: 'remote', oldName: remoteName });
+      else if (action === 'remove-remote') handleRemoveRemote(remoteName);
+      else if (action === 'add-remote') setConfigRemote({ mode: 'add' });
+      else if (action === 'manage') window.location.hash = '#/remotes';
+    });
+  };
+
+  const renderGroup = (
+    label: React.ReactNode,
+    count: number,
+    items: BranchInfo[],
+    groupKey: string,
+    headerExtra?: React.ReactNode,
+    onHeaderContextMenu?: (e: React.MouseEvent) => void,
+  ) => {
     const collapsed = collapsedGroups.has(groupKey);
     return (
       <div key={groupKey}>
         <div
-          className="flex items-center gap-1 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default cursor-pointer hover:bg-bg-hover"
+          className="group flex items-center gap-1 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default cursor-pointer hover:bg-bg-hover"
           onClick={() => toggleGroup(groupKey)}
+          onContextMenu={onHeaderContextMenu}
         >
           {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
           <span>{label}</span>
           <span className="text-text-tertiary">({count})</span>
+          {headerExtra}
         </div>
         {/* Render only first 200 items to avoid perf issues on large repos.
             Lazy loading: show first 200, "Load more" button reveals next 200. */}
@@ -414,6 +532,50 @@ export function BranchesPage() {
         )}
         {!collapsed && items.slice(0, 200).map(renderBranchRow)}
       </div>
+    );
+  };
+
+  /** SmartGit-style remote node: 'origin (2) — http://...' with fetch/configure actions. */
+  const renderRemoteGroup = (remoteName: string, items: BranchInfo[], groupKey: string) => {
+    const url = remotesMap[remoteName]?.refs.fetch ?? '';
+    return renderGroup(
+      remoteName,
+      items.length,
+      items,
+      groupKey,
+      <>
+        {url && (
+          <span
+            className="ml-1 font-normal normal-case tracking-normal text-text-tertiary truncate min-w-0"
+            style={{ maxWidth: '45%' }}
+            title={`${remoteName} — ${url}`}
+          >
+            — {url}
+          </span>
+        )}
+        <span className="flex-1" />
+        {remoteBusy === remoteName ? (
+          <Loader size={10} className="animate-spin text-accent" />
+        ) : (
+          <span className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+            <button
+              className="icon-btn !w-4 !h-4"
+              title={`Fetch '${remoteName}' (with prune)`}
+              onClick={(e) => { e.stopPropagation(); handleFetchRemote(remoteName); }}
+            >
+              <CloudDownload size={10} />
+            </button>
+            <button
+              className="icon-btn !w-4 !h-4"
+              title="Configure remote properties..."
+              onClick={(e) => { e.stopPropagation(); setConfigRemote({ mode: 'configure', name: remoteName }); }}
+            >
+              <Cog size={10} />
+            </button>
+          </span>
+        )}
+      </>,
+      (e) => showRemoteContextMenu(e, remoteName),
     );
   };
 
@@ -452,18 +614,21 @@ export function BranchesPage() {
             {/* Local branches */}
             {renderGroup('Local Branches', localBranches.length, localBranches, 'local')}
 
-            {/* Remote groups */}
-            {Object.entries(remoteGroups).map(([remoteName, remoteBranches]) => {
-              // Try to get remote URL
-              const remoteBranch = remoteBranches[0];
-              const remoteUrl = remoteBranch?.name.includes('origin') ? status?.tracking?.split('->')[1]?.trim() : '';
-              return renderGroup(
-                `${remoteName}${remoteUrl ? ` — ${remoteUrl}` : ''}`,
-                remoteBranches.length,
-                remoteBranches,
-                `remote-${remoteName}`
-              );
-            })}
+            {/* Remote groups — SmartGit-style remote nodes with URL + management */}
+            {Object.entries(remoteGroups).map(([remoteName, remoteBranches]) =>
+              renderRemoteGroup(remoteName, remoteBranches, `remote-${remoteName}`)
+            )}
+            {Object.keys(remoteGroups).length === 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 text-2xs text-text-tertiary border-b border-border-subtle">
+                No remotes configured.
+                <button
+                  className="text-accent hover:underline"
+                  onClick={(e) => { e.stopPropagation(); setConfigRemote({ mode: 'add' }); }}
+                >
+                  Add remote...
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -512,6 +677,36 @@ export function BranchesPage() {
       {/* Merge panel */}
       {mergeTarget && (
         <MergePanel targetBranch={mergeTarget} onClose={() => setMergeTarget(null)} />
+      )}
+
+      {/* Rename branch / remote dialog (SmartGit-style) */}
+      {renameTarget && (
+        <RenameDialog
+          kind={renameTarget.kind}
+          oldName={renameTarget.oldName}
+          busy={remoteBusy === `rename-${renameTarget.oldName}`}
+          validate={renameTarget.kind === 'branch' ? validateBranchName : undefined}
+          onSubmit={handleRenameSubmit}
+          onClose={() => setRenameTarget(null)}
+        />
+      )}
+
+      {/* Configure / Add remote dialog (SmartGit-style: URL or Path + background poll) */}
+      {configRemote && (
+        <RemoteConfigDialog
+          mode={configRemote.mode}
+          name={configRemote.name}
+          fetchUrl={configRemote.mode === 'configure' ? remotesMap[configRemote.name!]?.refs.fetch : ''}
+          pushUrl={configRemote.mode === 'configure' ? remotesMap[configRemote.name!]?.refs.push : ''}
+          background={
+            configRemote.mode === 'configure' && configRemote.name
+              ? isBackgroundFetchEnabled(repo.path, configRemote.name)
+              : false
+          }
+          busy={remoteBusy === 'config'}
+          onSubmit={handleConfigSubmit}
+          onClose={() => setConfigRemote(null)}
+        />
       )}
 
       {/* Compare branches dialog */}

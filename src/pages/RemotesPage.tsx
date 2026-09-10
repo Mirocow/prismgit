@@ -7,6 +7,8 @@ import { api, type RemoteInfo } from '../lib/api';
 import { cn } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { RenameDialog } from '../components/RemoteDialogs';
+import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
 export function RemotesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -26,6 +28,10 @@ export function RemotesPage() {
   useEscapeKey(!!editRemote, () => setEditRemote(null));
   const [editFetchUrl, setEditFetchUrl] = useState('');
   const [editPushUrl, setEditPushUrl] = useState('');
+  const [editBackground, setEditBackground] = useState(false);
+
+  // Rename remote dialog (SmartGit-style modal instead of native prompt)
+  const [renameOld, setRenameOld] = useState<string | null>(null);
 
   // Expanded ls-remote previews per remote name
   const [preview, setPreview] = useState<Record<string, string>>({});
@@ -78,14 +84,14 @@ export function RemotesPage() {
     }
   };
 
-  const handleRename = async (remote: RemoteInfo) => {
-    const newName = prompt(`Rename remote '${remote.name}' to:`, remote.name);
-    if (!newName || !newName.trim() || newName.trim() === remote.name) return;
-    setBusy(remote.name);
+  const handleRenameSubmit = async (newName: string) => {
+    if (!renameOld) return;
+    setBusy(renameOld);
     try {
-      await api.git.renameRemote(repo.path, remote.name, newName.trim());
-      toast.success(`Remote '${remote.name}' renamed to '${newName.trim()}'`);
+      await api.git.renameRemote(repo.path, renameOld, newName);
+      toast.success(`Remote '${renameOld}' renamed to '${newName}'`);
       await load();
+      setRenameOld(null);
     } catch (e) {
       toast.error('Rename failed', String(e));
     } finally {
@@ -103,6 +109,7 @@ export function RemotesPage() {
       if (editPushUrl && editPushUrl !== editRemote.refs.push) {
         await api.git.setRemoteUrl(repo.path, editRemote.name, editPushUrl, true);
       }
+      setBackgroundFetchForRepo(repo.path, editRemote.name, editBackground);
       toast.success(`URLs updated for '${editRemote.name}'`);
       setEditRemote(null);
       await load();
@@ -239,14 +246,14 @@ export function RemotesPage() {
                       <button
                         className="icon-btn !w-6 !h-6"
                         title="Rename remote"
-                        onClick={() => handleRename(r)}
+                        onClick={() => setRenameOld(r.name)}
                       >
                         <Pencil size={12} />
                       </button>
                       <button
                         className="icon-btn !w-6 !h-6"
                         title="Edit URLs"
-                        onClick={() => { setEditRemote(r); setEditFetchUrl(r.refs.fetch); setEditPushUrl(r.refs.push); }}
+                        onClick={() => { setEditRemote(r); setEditFetchUrl(r.refs.fetch); setEditPushUrl(r.refs.push); setEditBackground(isBackgroundFetchEnabled(repo.path, r.name)); }}
                       >
                         <ExternalLink size={12} />
                       </button>
@@ -319,6 +326,17 @@ export function RemotesPage() {
         </div>
       )}
 
+      {/* Rename remote dialog (SmartGit-style) */}
+      {renameOld && (
+        <RenameDialog
+          kind="remote"
+          oldName={renameOld}
+          busy={busy === renameOld}
+          onSubmit={handleRenameSubmit}
+          onClose={() => setRenameOld(null)}
+        />
+      )}
+
       {/* Edit URLs dialog */}
       {editRemote && (
         <div
@@ -350,6 +368,17 @@ export function RemotesPage() {
               </div>
               <div className="text-2xs text-text-tertiary">
                 A separate push URL is useful for push-over-SSH setups where fetch goes through a mirror/CDN.
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={editBackground}
+                  onChange={(e) => setEditBackground(e.target.checked)}
+                />
+                Perform background Poll or Fetch
+              </label>
+              <div className="text-2xs text-text-tertiary">
+                When enabled, PrismGit quietly fetches this remote every 5 minutes while the repository is open.
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-4">
