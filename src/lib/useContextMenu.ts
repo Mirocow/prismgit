@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useRef, useCallback } from 'react';
 import { api } from './api';
 
 export interface ContextMenuItem {
@@ -8,6 +8,22 @@ export interface ContextMenuItem {
   enabled?: boolean;
   accelerator?: string;
   clickId?: string;
+}
+
+// Global singleton: only ONE listener for 'context-menu:click' across the
+// entire app. Previous implementation registered a new listener on every
+// showContextMenu() call, causing MaxListenersExceededWarning after 10+ menus.
+let globalClickHandler: ((clickId: string) => void) | null = null;
+let globalCleanup: (() => void) | null = null;
+
+function ensureGlobalListener() {
+  if (globalCleanup) return; // already installed
+  globalCleanup = api.contextMenu.onClick((clickId: string) => {
+    if (globalClickHandler) {
+      globalClickHandler(clickId);
+      globalClickHandler = null; // one-shot: consume and clear
+    }
+  });
 }
 
 /**
@@ -26,25 +42,21 @@ export interface ContextMenuItem {
  *   }} />
  */
 export function useContextMenu() {
-  // Keep a global listener alive
-  useEffect(() => {
-    const cleanup = api.contextMenu.onClick(() => {
-      // Clicks are handled per-invocation via callback
-    });
-    return () => { cleanup(); };
-  }, []);
+  // Ensure the global listener is installed once
+  ensureGlobalListener();
 
   return useCallback(async (
     items: ContextMenuItem[],
     onAction?: (clickId: string) => void
   ) => {
     if (onAction) {
-      const cleanup = api.contextMenu.onClick((clickId: string) => {
+      // Set the one-shot handler — will be called when the menu item is clicked
+      // and automatically cleared after invocation
+      globalClickHandler = (clickId: string) => {
         if (clickId) {
           onAction(clickId);
         }
-        cleanup();
-      });
+      };
     }
     await api.contextMenu.show(items);
   }, []);

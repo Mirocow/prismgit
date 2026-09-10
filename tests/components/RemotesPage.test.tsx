@@ -8,6 +8,10 @@ import { api } from '../../src/lib/api';
 const mockRemotes = vi.fn();
 const mockShow = vi.fn().mockResolvedValue(true);
 
+// Captured onClick callback — the singleton pattern in useContextMenu
+// registers the callback once; we capture it here so the test can invoke it.
+let capturedOnClick: ((clickId: string) => void) | null = null;
+
 vi.mock('../../src/lib/api', () => ({
   api: {
     git: {
@@ -15,7 +19,10 @@ vi.mock('../../src/lib/api', () => ({
     },
     contextMenu: {
       show: (...args: unknown[]) => mockShow(...args),
-      onClick: vi.fn(() => () => {}),
+      onClick: vi.fn((cb: (clickId: string) => void) => {
+        capturedOnClick = cb;
+        return () => { capturedOnClick = null; };
+      }),
     },
   },
 }));
@@ -92,10 +99,9 @@ describe('RemotesPage — right-click context menu on a remote row', () => {
     await waitFor(() => expect(mockShow).toHaveBeenCalledTimes(1));
 
     // Simulate the user picking "Repository Settings..." in the native menu:
-    // useContextMenu routes the clickId back through api.contextMenu.onClick.
-    const onClickMock = api.contextMenu.onClick as ReturnType<typeof vi.fn>;
-    const registered = onClickMock.mock.calls.at(-1)?.[0] as (id: string) => void;
-    registered('repo-settings');
+    // useContextMenu uses a global singleton listener — invoke the captured callback.
+    expect(capturedOnClick).toBeDefined();
+    capturedOnClick!('repo-settings');
 
     await waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
     window.removeEventListener('prismgit:repo-settings', listener);
