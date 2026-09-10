@@ -378,6 +378,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
   const [selectedRemote, setSelectedRemote] = useState('origin');
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [selectedBranch, setSelectedBranch] = useState('');
+  const [remoteBranch, setRemoteBranch] = useState('');
   const [setUpstream, setSetUpstream] = useState(false);
   const [force, setForce] = useState(false);
   const [pushTags, setPushTags] = useState(false);
@@ -417,18 +418,33 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
       setOpen(false);
       return;
     }
-    const cmd = `git push ${selectedRemote} ${b || ''} ${setUpstream ? '-u' : ''} ${force ? '--force-with-lease' : ''} ${pushTags ? '--tags' : ''}`.trim();
+    // Build the refspec. If the user specified a different remote branch
+    // (remoteBranch), use HEAD:remoteBranch so we push the current HEAD's
+    // commits to the named remote branch — e.g. push feature-branch commits
+    // to origin/main via `git push origin HEAD:main`.
+    // Without remoteBranch, use `branch` which pushes local→same-name remote.
+    const refspec = remoteBranch.trim()
+      ? `HEAD:${remoteBranch.trim()}`
+      : b;
+    const cmd = `git push ${selectedRemote} ${refspec} ${setUpstream ? '-u' : ''} ${force ? '--force-with-lease' : ''} ${pushTags ? '--tags' : ''}`.trim();
     try {
       const res = await useOperationLogStore.getState().logOperation(
-        `Push ${b || 'current'} → ${selectedRemote}${force ? ' (force)' : ''}${pushTags ? ' +tags' : ''}`,
+        `Push ${b || 'current'} → ${selectedRemote}${remoteBranch.trim() ? '/' + remoteBranch.trim() : ''}${force ? ' (force)' : ''}${pushTags ? ' +tags' : ''}`,
         currentRepo.path, cmd,
         async () => {
-          const r = await api.git.push(currentRepo.path, selectedRemote, b || undefined, setUpstream, force, pushTags);
+          // When using HEAD:remoteBranch, we need to pass the refspec directly.
+          // api.git.push takes `branch` as a simple name — but HEAD:main is a refspec.
+          // So we pass refspec as the branch parameter; git push handles it correctly.
+          const r = await api.git.push(currentRepo.path, selectedRemote, refspec, setUpstream && !remoteBranch.trim(), force, pushTags);
           await refreshStatus(currentRepo.path);
+          // Also refresh repo stats in sidebar
+          api.settings.refreshRepoStats(currentRepo.path).then(() => {
+            useRepositoryStore.getState().loadMetadata();
+          }).catch(() => {});
           return r;
         }
       );
-      const t = describePushResult(res, selectedRemote, b || undefined);
+      const t = describePushResult(res, selectedRemote, remoteBranch.trim() || b || undefined);
       if (t.kind === 'error') toast.error(t.title, t.detail);
       else if (t.kind === 'info') toast.info(t.title, t.detail);
       else toast.success(t.title, t.detail);
@@ -438,6 +454,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
     setOpen(false);
     setForce(false);
     setPushTags(false);
+    setRemoteBranch('');
   };
 
   return (
@@ -508,6 +525,18 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
                         </option>
                       ))}
                     </select>
+                  </div>
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">
+                      Remote branch (optional — leave empty for same name)
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                      placeholder="e.g. main (push current HEAD → this remote branch)"
+                      value={remoteBranch}
+                      onChange={(e) => setRemoteBranch(e.target.value)}
+                    />
                   </div>
                 </div>
                 <div className="px-3 py-1">

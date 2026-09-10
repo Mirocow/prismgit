@@ -142,7 +142,13 @@ export const useOperationLogStore = create<OperationLogState>((set, get) => ({
     const opId = startOp(action, repoPath, command);
     try {
       const result = await fn();
-      finishOp(opId, result !== undefined ? String(result).substring(0, 200) : undefined);
+      finishOp(opId, result !== undefined
+        ? (typeof result === 'string'
+          ? result.substring(0, 200)
+          : typeof result === 'object' && result !== null
+            ? JSON.stringify(result).substring(0, 200)
+            : String(result).substring(0, 200))
+        : undefined);
       return result;
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
