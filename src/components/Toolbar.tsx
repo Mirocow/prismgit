@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api, type BranchInfo, type RemoteInfo } from '../lib/api';
+import { describePushResult } from '../lib/pushResult';
 import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
@@ -9,9 +10,8 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
-import { describePushResult } from '../lib/pushResult';
 import { confirmDialog } from './ConfirmDialog';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Package, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Tag as TagIcon, Terminal, Trash, X } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -231,125 +231,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
 
       {/* Center: status badges + global selections (draggable area) */}
       <div className="flex-1 flex items-center justify-center titlebar-drag gap-2">
-        {currentRepo && status ? (
-          <div className="flex items-center gap-2 text-xs">
-            {isInProgress && (
-              <div className="flex items-center gap-1">
-                <span className="badge badge-modified flex items-center gap-1 animate-pulse">
-                  <AlertCircle size={9} />
-                  {status.isMerging ? 'MERGING' : status.isRebasing ? 'REBASING' : status.isCherryPicking ? 'CHERRY-PICK' : 'REVERT'}
-                </span>
-                {/* Continue / Abort buttons for cherry-pick and revert (SmartGit 22.1) */}
-                {(status.isCherryPicking || status.isReverting) && currentRepo && (
-                  <>
-                    <button
-                      className="text-2xs px-1.5 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 transition-colors"
-                      title={status.isCherryPicking ? 'Continue cherry-pick (after resolving conflicts)' : 'Continue revert (after resolving conflicts)'}
-                      onClick={() => {
-                        const op = status.isCherryPicking ? 'Cherry-Pick Continue' : 'Revert Continue';
-                        const cmd = status.isCherryPicking ? 'git cherry-pick --continue' : 'git revert --continue';
-                        useOperationLogStore.getState().logOperation(op, currentRepo.path, cmd,
-                          () => status.isCherryPicking
-                            ? api.git.cherryPickContinue(currentRepo.path)
-                            : api.git.revertContinue(currentRepo.path)
-                        ).then(() => { toast.success(`${op} successful`); refreshStatus(currentRepo.path); })
-                         .catch((e: unknown) => toast.error(`${op} failed`, String(e)));
-                      }}
-                    >
-                      Continue
-                    </button>
-                    <button
-                      className="text-2xs px-1.5 py-0.5 rounded bg-status-deleted/15 text-status-deleted hover:bg-status-deleted/25 transition-colors"
-                      title={status.isCherryPicking ? 'Abort cherry-pick' : 'Abort revert'}
-                      onClick={() => {
-                        const op = status.isCherryPicking ? 'Cherry-Pick Abort' : 'Revert Abort';
-                        const cmd = status.isCherryPicking ? 'git cherry-pick --abort' : 'git revert --abort';
-                        useOperationLogStore.getState().logOperation(op, currentRepo.path, cmd,
-                          () => status.isCherryPicking
-                            ? api.git.cherryPickAbort(currentRepo.path)
-                            : api.git.revertAbort(currentRepo.path)
-                        ).then(() => { toast.success(`${op} successful`); refreshStatus(currentRepo.path); })
-                         .catch((e: unknown) => toast.error(`${op} failed`, String(e)));
-                      }}
-                    >
-                      Abort
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-            {isBisecting && (
-              <span className="badge badge-modified flex items-center gap-1">
-                <AlertCircle size={9} /> BISECTING
-              </span>
-            )}
-            {(status.ahead > 0 || status.behind > 0) && (
-              <div className="flex items-center gap-1.5">
-                {status.ahead > 0 && (
-                  <span className="flex items-center gap-0.5 text-status-added">
-                    <ArrowUp size={10} />{status.ahead}
-                  </span>
-                )}
-                {status.behind > 0 && (
-                  <span className="flex items-center gap-0.5 text-status-modified">
-                    <ArrowDown size={10} />{status.behind}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        ) : null}
-        {selectedBranch && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-added/40 bg-status-added/10 text-status-added flex items-center gap-1" title={`Selected branch: ${selectedBranch}`}>
-            <GitBranch size={9} />{selectedBranch}
-            <button onClick={() => useSelectionStore.getState().selectBranch(null)} title="Clear branch selection">
-              <X size={8} />
-            </button>
-          </span>
-        )}
-        {selectedBranches.size > 0 && (
-          <span
-            className="text-2xs px-1.5 py-0.5 rounded border border-status-added/40 bg-status-added/10 text-status-added flex items-center gap-1"
-            title={`Selected branches: ${Array.from(selectedBranches).join(', ')}`}
-          >
-            <GitBranch size={9} />{selectedBranches.size} branches
-            <button onClick={() => useSelectionStore.getState().clearBranches()} title="Clear multi-branch selection">
-              <X size={8} />
-            </button>
-          </span>
-        )}
-        {selectedTag && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1" title={`Selected tag: ${selectedTag}`}>
-            <TagIcon size={9} />{selectedTag}
-            <button onClick={() => useSelectionStore.getState().selectTag(null)} title="Clear tag selection">
-              <X size={8} />
-            </button>
-          </span>
-        )}
-        {selectedStashIndex != null && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-warning/40 bg-status-warning/10 text-status-warning flex items-center gap-1" title={`Selected stash: stash@{${selectedStashIndex}}} — used by Stashes, Branches and Diff`}>
-            <Package size={9} />stash@{'{'}{selectedStashIndex}{'}'}
-            <button onClick={() => useSelectionStore.getState().selectStash(null)} title="Clear stash selection">
-              <X size={8} />
-            </button>
-          </span>
-        )}
-        {authorFilter && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-info/40 bg-status-info/10 text-status-info flex items-center gap-1" title={`Author filter — applied in History`}>
-            Author: {authorFilter}
-            <button onClick={() => useSelectionStore.getState().setAuthorFilter(null)} title="Clear author filter">
-              <X size={8} />
-            </button>
-          </span>
-        )}
-        {globalPathFilter && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/40 bg-status-modified/10 text-status-modified flex items-center gap-1" title={`File history filter: ${globalPathFilter}`}>
-            File: {globalPathFilter}
-            <button onClick={() => setGlobalPathFilter(null)} title="Clear file filter">
-              <X size={8} />
-            </button>
-          </span>
-        )}
+
       </div>
 
       {/* Right: utility buttons + customize */}
