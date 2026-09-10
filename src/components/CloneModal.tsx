@@ -30,6 +30,12 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
   const [repos, setRepos] = useState<GithubRepository[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [search, setSearch] = useState('');
+  // SmartGit 24.1: recent clone directories for easier selection
+  const [recentDirs, setRecentDirs] = useState<string[]>([]);
+  const [showRecentDirs, setShowRecentDirs] = useState(false);
+  // SmartGit 24.1: detect active branch from remote
+  const [detectedBranch, setDetectedBranch] = useState<string>('');
+  const [detectingBranch, setDetectingBranch] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -43,6 +49,41 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
       }
     }
   }, [open, authenticated, settings.defaultCloneDir]);
+
+  // SmartGit 24.1: detect active branch from remote via `git ls-remote --symref`
+  const detectActiveBranch = async (cloneUrl: string) => {
+    if (!cloneUrl || mirror) {
+      setDetectedBranch('');
+      return;
+    }
+    setDetectingBranch(true);
+    try {
+      // git ls-remote --symref <url> HEAD returns: ref: refs/heads/main\t<hash>
+      const output = await api.git.raw('', ['ls-remote', '--symref', cloneUrl, 'HEAD']);
+      const match = output.match(/ref:\s*refs\/heads\/(\S+)/);
+      if (match && match[1]) {
+        const branchName = match[1];
+        setDetectedBranch(branchName);
+        setBranch(branchName); // Pre-fill branch field
+      } else {
+        setDetectedBranch('');
+      }
+    } catch {
+      setDetectedBranch('');
+    } finally {
+      setDetectingBranch(false);
+    }
+  };
+
+  // Debounced branch detection when URL changes
+  useEffect(() => {
+    if (!url || mirror) {
+      setDetectedBranch('');
+      return;
+    }
+    const timer = setTimeout(() => detectActiveBranch(url), 500);
+    return () => clearTimeout(timer);
+  }, [url, mirror]);
 
   const loadRepos = async () => {
     setLoadingRepos(true);
@@ -227,8 +268,12 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-text-tertiary block mb-1">
+                  <label className="text-xs text-text-tertiary block mb-1 flex items-center gap-2">
                     Branch (optional)
+                    {detectingBranch && <span className="text-2xs text-accent">detecting...</span>}
+                    {detectedBranch && !detectingBranch && (
+                      <span className="text-2xs text-status-added">✓ {detectedBranch}</span>
+                    )}
                   </label>
                   <input
                     type="text"
