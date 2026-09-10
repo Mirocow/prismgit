@@ -57,6 +57,20 @@ export interface GithubApi {
   getCheckRuns: (owner: string, repo: string, shas: string[]) => Promise<Record<string, CommitCheckStatus>>;
   logout: () => Promise<void>;
   getAuthState: () => Promise<{ authenticated: boolean; user?: GithubUser }>;
+  // === SmartGit Manual: PR management — comment, approve, merge, close ===
+  addPRLineComment: (owner: string, repo: string, prNumber: number, data: {
+    body: string; path: string; line: number; side?: 'LEFT' | 'RIGHT'; commit_id?: string;
+  }) => Promise<void>;
+  addPRComment: (owner: string, repo: string, prNumber: number, body: string) => Promise<void>;
+  submitPRReview: (owner: string, repo: string, prNumber: number, event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT', body?: string) => Promise<void>;
+  mergePR: (owner: string, repo: string, prNumber: number, options?: {
+    commit_title?: string; merge_method?: 'merge' | 'squash' | 'rebase'; sha?: string;
+  }) => Promise<void>;
+  closePR: (owner: string, repo: string, prNumber: number) => Promise<void>;
+  reopenPR: (owner: string, repo: string, prNumber: number) => Promise<void>;
+  listPRComments: (owner: string, repo: string, prNumber: number) => Promise<Array<{
+    id: number; body: string; path?: string; line?: number; user: { login: string }; created_at: string;
+  }>>;
 }
 
 /** CI check-run summary for one commit (SmartGit "My History" CI badges). */

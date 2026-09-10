@@ -104,6 +104,28 @@ export interface AppSettings {
   aiModel?: string;
   /** Provider URL (for Ollama: http://localhost:11434). */
   aiUrl?: string;
+  /** Custom AI system prompt template with {{branch}}, {{author}}, etc. */
+  aiCustomPrompt?: string;
+  // === SmartGit Manual v25/26: Force Push policies ===
+  /** Force-push policy: 'deny' | 'feature-only' | 'allow'. */
+  forcePushPolicy?: 'deny' | 'feature-only' | 'allow';
+  /** Branches protected from force-push (glob patterns). */
+  protectedBranches?: string[];
+  // === CI/CD integration ===
+  /** Jenkins URL for CI status badges. */
+  jenkinsUrl?: string;
+  /** Jenkins API token (user:token). */
+  jenkinsToken?: string;
+  /** TeamCity URL for CI status badges. */
+  teamcityUrl?: string;
+  /** TeamCity access token. */
+  teamcityToken?: string;
+  /** GitLab URL for CI status (default https://gitlab.com). */
+  gitlabUrl?: string;
+  /** GitLab personal access token. */
+  gitlabToken?: string;
+  /** GitLab project ID (numeric). */
+  gitlabProjectId?: number;
   // === Repository list: periodic remote check ===
   /**
    * How often (in seconds) to poll every repository in the list: fetch all

@@ -24,4 +24,27 @@ export function registerGithubIpc(): void {
   );
   ipcMain.handle('github:logout', () => github.logout());
   ipcMain.handle('github:getAuthState', () => github.getStoredAuthState());
+
+  // === SmartGit Manual: PR management — comment, approve, merge, close ===
+  ipcMain.handle('github:addPRLineComment', (_e, owner: string, repo: string, prNumber: number, data: any) =>
+    github.addPRLineComment(owner, repo, prNumber, data)
+  );
+  ipcMain.handle('github:addPRComment', (_e, owner: string, repo: string, prNumber: number, body: string) =>
+    github.addPRComment(owner, repo, prNumber, body)
+  );
+  ipcMain.handle('github:submitPRReview', (_e, owner: string, repo: string, prNumber: number, event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT', body?: string) =>
+    github.submitPRReview(owner, repo, prNumber, event, body)
+  );
+  ipcMain.handle('github:mergePR', (_e, owner: string, repo: string, prNumber: number, options?: any) =>
+    github.mergePR(owner, repo, prNumber, options)
+  );
+  ipcMain.handle('github:closePR', (_e, owner: string, repo: string, prNumber: number) =>
+    github.closePR(owner, repo, prNumber)
+  );
+  ipcMain.handle('github:reopenPR', (_e, owner: string, repo: string, prNumber: number) =>
+    github.reopenPR(owner, repo, prNumber)
+  );
+  ipcMain.handle('github:listPRComments', (_e, owner: string, repo: string, prNumber: number) =>
+    github.listPRComments(owner, repo, prNumber)
+  );
 }

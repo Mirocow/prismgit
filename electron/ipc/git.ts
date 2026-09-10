@@ -369,4 +369,30 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:coalesceCommits', (_e, p: string, firstHash: string, secondHash: string) =>
     gitService.coalesceCommits(p, firstHash, secondHash)
   );
+
+  // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
+  ipcMain.handle('git:smartPull', (_e, p: string, r?: string, b?: string) => gitService.smartPull(p, r, b));
+  ipcMain.handle('git:octopusMerge', (_e, p: string, branches: string[]) => gitService.octopusMerge(p, branches));
+  // isForcePushAllowed is synchronous — wrap in Promise
+  ipcMain.handle('git:isForcePushAllowed', (_e, branch: string | undefined, policy: 'deny' | 'feature-only' | 'allow', protectedBranches?: string[]) =>
+    Promise.resolve(gitService.isForcePushAllowed(branch, policy, protectedBranches))
+  );
+  ipcMain.handle('git:applyLineEdit', (_e, p: string, f: string, ln: number, content: string, staged?: boolean) =>
+    gitService.applyLineEdit(p, f, ln, content, staged)
+  );
+  ipcMain.handle('git:editInfoExclude', (_e, p: string) => gitService.editInfoExclude(p));
+  ipcMain.handle('git:traceIgnoreRule', (_e, p: string, f: string) => gitService.traceIgnoreRule(p, f));
+  ipcMain.handle('git:detectRepoFormat', (_e, p: string) => gitService.detectRepoFormat(p));
+  ipcMain.handle('git:commitSigned', (_e, p: string, m: string, o?: { gpgSign?: boolean; sshSign?: boolean; signingKey?: string; noVerify?: boolean }) =>
+    gitService.commitSigned(p, m, o)
+  );
+  ipcMain.handle('git:createSignedTag', (_e, p: string, name: string, msg: string, ref?: string, sshSign?: boolean) =>
+    gitService.createSignedTag(p, name, msg, ref, sshSign)
+  );
+  ipcMain.handle('git:lfsFsck', (_e, p: string) => gitService.lfsFsck(p));
+  ipcMain.handle('git:batchOperation', (_e, repos: string[], op: 'fetch' | 'pull' | 'push' | 'status', o?: { remote?: string; branch?: string; force?: boolean }) =>
+    gitService.batchOperation(repos, op, o)
+  );
+  ipcMain.handle('git:exportConfig', (_e, p: string | null) => gitService.exportConfig(p));
+  ipcMain.handle('git:importConfig', (_e, p: string, config: any) => gitService.importConfig(p, config));
 }

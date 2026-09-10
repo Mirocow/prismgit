@@ -273,6 +273,34 @@ const api = {
       ipcRenderer.invoke('git:squashCommits', repoPath, fromHash, toHash, message),
     coalesceCommits: (repoPath: string, firstHash: string, secondHash: string) =>
       ipcRenderer.invoke('git:coalesceCommits', repoPath, firstHash, secondHash),
+
+    // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
+    smartPull: (repoPath: string, remote?: string, branch?: string) =>
+      ipcRenderer.invoke('git:smartPull', repoPath, remote, branch),
+    octopusMerge: (repoPath: string, branches: string[]) =>
+      ipcRenderer.invoke('git:octopusMerge', repoPath, branches),
+    isForcePushAllowed: (branch: string | undefined, policy: 'deny' | 'feature-only' | 'allow', protectedBranches?: string[]) =>
+      ipcRenderer.invoke('git:isForcePushAllowed', branch, policy, protectedBranches),
+    applyLineEdit: (repoPath: string, file: string, lineNumber: number, newContent: string, isStaged?: boolean) =>
+      ipcRenderer.invoke('git:applyLineEdit', repoPath, file, lineNumber, newContent, isStaged),
+    editInfoExclude: (repoPath: string) =>
+      ipcRenderer.invoke('git:editInfoExclude', repoPath),
+    traceIgnoreRule: (repoPath: string, file: string) =>
+      ipcRenderer.invoke('git:traceIgnoreRule', repoPath, file),
+    detectRepoFormat: (repoPath: string) =>
+      ipcRenderer.invoke('git:detectRepoFormat', repoPath),
+    commitSigned: (repoPath: string, message: string, options?: { gpgSign?: boolean; sshSign?: boolean; signingKey?: string; noVerify?: boolean }) =>
+      ipcRenderer.invoke('git:commitSigned', repoPath, message, options),
+    createSignedTag: (repoPath: string, name: string, message: string, ref?: string, sshSign?: boolean) =>
+      ipcRenderer.invoke('git:createSignedTag', repoPath, name, message, ref, sshSign),
+    lfsFsck: (repoPath: string) =>
+      ipcRenderer.invoke('git:lfsFsck', repoPath),
+    batchOperation: (repos: string[], operation: 'fetch' | 'pull' | 'push' | 'status', options?: { remote?: string; branch?: string; force?: boolean }) =>
+      ipcRenderer.invoke('git:batchOperation', repos, operation, options),
+    exportConfig: (repoPath: string | null) =>
+      ipcRenderer.invoke('git:exportConfig', repoPath),
+    importConfig: (repoPath: string, config: any) =>
+      ipcRenderer.invoke('git:importConfig', repoPath, config),
   } as GitApi,
 
   // GitHub integration
@@ -290,6 +318,21 @@ const api = {
       ipcRenderer.invoke('github:getCheckRuns', owner, repo, shas),
     logout: () => ipcRenderer.invoke('github:logout'),
     getAuthState: () => ipcRenderer.invoke('github:getAuthState'),
+    // SmartGit Manual: PR management
+    addPRLineComment: (owner: string, repo: string, prNumber: number, data: any) =>
+      ipcRenderer.invoke('github:addPRLineComment', owner, repo, prNumber, data),
+    addPRComment: (owner: string, repo: string, prNumber: number, body: string) =>
+      ipcRenderer.invoke('github:addPRComment', owner, repo, prNumber, body),
+    submitPRReview: (owner: string, repo: string, prNumber: number, event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT', body?: string) =>
+      ipcRenderer.invoke('github:submitPRReview', owner, repo, prNumber, event, body),
+    mergePR: (owner: string, repo: string, prNumber: number, options?: any) =>
+      ipcRenderer.invoke('github:mergePR', owner, repo, prNumber, options),
+    closePR: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:closePR', owner, repo, prNumber),
+    reopenPR: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:reopenPR', owner, repo, prNumber),
+    listPRComments: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:listPRComments', owner, repo, prNumber),
   } as GithubApi,
 
   // File system

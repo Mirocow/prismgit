@@ -1,0 +1,230 @@
+/**
+ * GitLab API integration — mirrors github.ts structure.
+ * SmartGit Manual: Hosting Provider integration for GitLab (self-hosted + cloud).
+ *
+ * Supports: PAT auth, list projects, list MRs, create MR, MR comments,
+ * approve MR, merge MR, pipeline status (GitLab CI).
+ */
+import * as https from 'https';
+import * as http from 'http';
+import { URL } from 'url';
+import { SimpleStore } from './simpleStore.js';
+
+export interface GitLabUser {
+  id: number;
+  username: string;
+  name: string;
+  email?: string;
+  avatar_url?: string;
+  web_url?: string;
+}
+
+export interface GitLabProject {
+  id: number;
+  name: string;
+  path_with_namespace: string;
+  description?: string;
+  web_url: string;
+  default_branch: string;
+  visibility: 'public' | 'private' | 'internal';
+}
+
+export interface GitLabMergeRequest {
+  id: number;
+  iid: number;
+  title: string;
+  description: string;
+  state: 'opened' | 'closed' | 'merged';
+  source_branch: string;
+  target_branch: string;
+  web_url: string;
+  author: { id: number; username: string; name: string };
+  merge_status: 'can_be_merged' | 'cannot_be_merged' | 'unchecked';
+}
+
+export interface GitLabPipeline {
+  id: number;
+  sha: string;
+  ref: string;
+  status: 'running' | 'pending' | 'success' | 'failed' | 'canceled' | 'skipped';
+  web_url: string;
+}
+
+interface GitLabAuthState {
+  token?: string;
+  baseUrl?: string; // default https://gitlab.com
+  user?: GitLabUser;
+}
+
+const store = new SimpleStore({
+  name: 'smartgit-gitlab',
+  defaults: {},
+});
+
+function getAuthState(): GitLabAuthState {
+  return (store.get('gitlab') || {}) as GitLabAuthState;
+}
+
+function setAuthState(state: GitLabAuthState): void {
+  store.set('gitlab', state);
+}
+
+function getBaseUrl(): string {
+  return getAuthState().baseUrl || 'https://gitlab.com';
+}
+
+async function apiJson<T>(
+  endpoint: string,
+  options: { method?: string; body?: string; token?: string } = {}
+): Promise<T> {
+  const baseUrl = getBaseUrl();
+  const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}/api/v4${endpoint}`;
+  const u = new URL(url);
+  const isHttps = u.protocol === 'https:';
+  const lib = isHttps ? https : http;
+  const headers: Record<string, string> = {
+    'User-Agent': 'PrismGit-Electron/2.0',
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+  const token = options.token || getAuthState().token;
+  if (token) {
+    headers['PRIVATE-TOKEN'] = token;
+  }
+  return new Promise<T>((resolve, reject) => {
+    const req = lib.request(
+      {
+        hostname: u.hostname,
+        port: u.port,
+        path: u.pathname + u.search,
+        method: options.method || 'GET',
+        headers,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(data ? JSON.parse(data) : null);
+            } catch (e) {
+              reject(new Error(`JSON parse error: ${e}`));
+            }
+          } else {
+            reject(new Error(`GitLab API ${res.statusCode}: ${data}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    if (options.body) {
+      req.write(options.body);
+    }
+    req.end();
+  });
+}
+
+export async function authWithPAT(
+  token: string,
+  baseUrl?: string
+): Promise<GitLabUser> {
+  // Save base URL if provided
+  if (baseUrl) {
+    setAuthState({ ...getAuthState(), baseUrl });
+  }
+  const user = await apiJson<GitLabUser>('/user', { token });
+  setAuthState({ token, baseUrl: baseUrl || getBaseUrl(), user });
+  return user;
+}
+
+export function logout(): void {
+  setAuthState({});
+}
+
+export function getAuthStatePublic(): { token?: string; user?: GitLabUser; baseUrl?: string } {
+  return getAuthState();
+}
+
+export async function listProjects(
+  page = 1,
+  perPage = 50
+): Promise<GitLabProject[]> {
+  return apiJson<GitLabProject[]>(`/projects?membership=true&page=${page}&per_page=${perPage}&order_by=last_activity_at`);
+}
+
+export async function listMergeRequests(
+  projectId: number,
+  state: 'opened' | 'closed' | 'merged' | 'all' = 'opened'
+): Promise<GitLabMergeRequest[]> {
+  return apiJson<GitLabMergeRequest[]>(`/projects/${projectId}/merge_requests?state=${state}`);
+}
+
+export async function createMergeRequest(
+  projectId: number,
+  data: {
+    title: string;
+    source_branch: string;
+    target_branch: string;
+    description?: string;
+  }
+): Promise<GitLabMergeRequest> {
+  return apiJson<GitLabMergeRequest>(`/projects/${projectId}/merge_requests`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function approveMergeRequest(
+  projectId: number,
+  mrIid: number
+): Promise<void> {
+  await apiJson(`/projects/${projectId}/merge_requests/${mrIid}/approve`, {
+    method: 'POST',
+  });
+}
+
+export async function mergeMergeRequest(
+  projectId: number,
+  mrIid: number,
+  options: { squash?: boolean; should_remove_source_branch?: boolean } = {}
+): Promise<GitLabMergeRequest> {
+  return apiJson<GitLabMergeRequest>(`/projects/${projectId}/merge_requests/${mrIid}/merge`, {
+    method: 'PUT',
+    body: JSON.stringify(options),
+  });
+}
+
+export async function addMRComment(
+  projectId: number,
+  mrIid: number,
+  body: string
+): Promise<void> {
+  await apiJson(`/projects/${projectId}/merge_requests/${mrIid}/notes`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  });
+}
+
+/**
+ * List pipelines for a project — GitLab CI integration.
+ * Returns recent pipeline runs (one per commit usually).
+ */
+export async function listPipelines(
+  projectId: number,
+  sha?: string
+): Promise<GitLabPipeline[]> {
+  const query = sha ? `?sha=${encodeURIComponent(sha)}` : '';
+  return apiJson<GitLabPipeline[]>(`/projects/${projectId}/pipelines${query}`);
+}
+
+/**
+ * Get pipeline status for a specific commit SHA.
+ * Returns the most recent pipeline status for that SHA.
+ */
+export async function getCommitPipelineStatus(
+  projectId: number,
+  sha: string
+): Promise<GitLabPipeline | null> {
+  const pipelines = await listPipelines(projectId, sha);
+  return pipelines.length > 0 ? pipelines[0] : null;
+}

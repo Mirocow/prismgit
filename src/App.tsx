@@ -204,8 +204,12 @@ export default function App() {
     const handlePull = () => {
       const repo = useRepositoryStore.getState().currentRepo;
       if (!repo) return;
-      useGitStore.getState().pull(repo.path)
-        .then(() => toast.success('Pulled successfully'))
+      // SmartGit Manual: Smart Pull — prevents divergence after remote force-push
+      api.git.smartPull(repo.path)
+        .then((result) => {
+          toast.success(`Smart pull: ${result.strategy}`, result.message);
+          useGitStore.getState().refreshStatus(repo.path);
+        })
         .catch((e) => toast.error('Pull failed', String(e)));
     };
     const handleFetch = () => {

@@ -1,10 +1,31 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, AlertCircle, Check, RotateCcw, Loader, GitMerge, GitPullRequest, ArrowDown, ArrowUp } from '../components/icons';
+import { X, AlertCircle, Check, RotateCcw, Loader, GitMerge, GitPullRequest, ArrowDown, ArrowUp, Sparkles } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { api } from '../lib/api';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
+import type { LLMProvider } from '../lib/aiCommitMessages';
+import type { AppSettings } from '../../electron/types/settings-api';
+
+/** Build an LLMProvider from settings, or null if not configured. */
+function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvider | null {
+  if (!settings?.aiProvider) return null;
+  const type = settings.aiProvider as LLMProvider['type'];
+  const id = settings.aiProvider;
+  const url = settings.aiUrl || '';
+  const model = settings.aiModel || '';
+  if (!model) return null;
+  return {
+    id,
+    name: id,
+    type,
+    url,
+    apiKey: settings.aiApiKey,
+    model,
+  };
+}
 
 interface MergeState {
   inProgress: boolean;
@@ -356,6 +377,47 @@ export function MergePanel({
             {strategy === 'squash' && (
               <div className="text-xs text-text-tertiary mb-3">
                 All commits from <code className="mono">{targetBranch}</code> will be combined into a single new commit.
+              </div>
+            )}
+
+            {/* SmartGit Manual: AI for Merge descriptions — generate merge message */}
+            {strategy === 'merge' && (
+              <div className="mb-3">
+                <button
+                  className="btn btn-secondary text-xs"
+                  onClick={async () => {
+                    const settings = useSettingsStore.getState().settings;
+                    if (!settings?.aiCommitMessagesEnabled) {
+                      toast.warning('AI integration is disabled', 'Enable it in Settings → AI Commit Messages');
+                      return;
+                    }
+                    const provider = buildAIProvider(settings);
+                    if (!provider) {
+                      toast.warning('No AI provider configured');
+                      return;
+                    }
+                    try {
+                      const { generateMergeMessage } = await import('../lib/aiCommitMessages');
+                      // Get diff between current and target branch
+                      const diffResult = await api.git.diffBranches(repo.path, 'HEAD', targetBranch);
+                      const diffText = diffResult.hunks.map(h => h.header + '\n' + h.lines.map(l => l.content).join('\n')).join('\n').slice(0, 48000);
+                      const message = await generateMergeMessage({
+                        sourceBranch: targetBranch,
+                        targetBranch: 'current',
+                        diff: diffText,
+                        commitCount: preview.kind === 'clean' ? preview.ahead : 0,
+                        provider,
+                      });
+                      toast.success('AI merge message generated', message.split('\n')[0]);
+                      // Copy to clipboard for user to paste
+                      navigator.clipboard.writeText(message);
+                    } catch (e) {
+                      toast.error('AI generation failed', String(e));
+                    }
+                  }}
+                >
+                  <Sparkles size={11} /> Generate merge message with AI
+                </button>
               </div>
             )}
 

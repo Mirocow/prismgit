@@ -512,6 +512,34 @@ export interface GitApi {
   squashCommits: (repoPath: string, fromHash: string, toHash: string, message?: string) => Promise<void>;
   /** Coalesce two adjacent commits (combine messages). */
   coalesceCommits: (repoPath: string, firstHash: string, secondHash: string) => Promise<void>;
+
+  // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
+  /** Smart Pull — prevents divergence after remote force-push. */
+  smartPull: (repoPath: string, remote?: string, branch?: string) => Promise<SmartPullResult>;
+  /** Octopus Merge — merge 3+ branches in one commit. */
+  octopusMerge: (repoPath: string, branches: string[]) => Promise<{ conflicts: string[]; success: boolean }>;
+  /** Check if force-push is allowed by policy. */
+  isForcePushAllowed: (branch: string | undefined, policy: ForcePushPolicy, protectedBranches?: string[]) => Promise<{ allowed: boolean; reason: string }>;
+  /** Edit code in Diff view — apply a single-line change. */
+  applyLineEdit: (repoPath: string, file: string, lineNumber: number, newContent: string, isStaged?: boolean) => Promise<void>;
+  /** Edit .git/info/exclude (local-only ignore patterns). */
+  editInfoExclude: (repoPath: string) => Promise<string>;
+  /** Trace which .gitignore rule matches a file. */
+  traceIgnoreRule: (repoPath: string, file: string) => Promise<IgnoreRuleTrace | null>;
+  /** Detect repository object format (SHA-1 vs SHA-256) and ref storage. */
+  detectRepoFormat: (repoPath: string) => Promise<RepoFormatInfo>;
+  /** Commit with GPG/SSH signing (-S flag). */
+  commitSigned: (repoPath: string, message: string, options?: { gpgSign?: boolean; sshSign?: boolean; signingKey?: string; noVerify?: boolean }) => Promise<string>;
+  /** Create signed tag (annotated + signed). */
+  createSignedTag: (repoPath: string, name: string, message: string, ref?: string, sshSign?: boolean) => Promise<void>;
+  /** LFS fsck — validate LFS object integrity. */
+  lfsFsck: (repoPath: string) => Promise<LfsFsckResult>;
+  /** Multi-repo batch operation. */
+  batchOperation: (repos: string[], operation: 'fetch' | 'pull' | 'push' | 'status', options?: { remote?: string; branch?: string; force?: boolean }) => Promise<BatchOpResult[]>;
+  /** Export repo config as JSON for backup/migration. */
+  exportConfig: (repoPath: string | null) => Promise<ExportableConfig>;
+  /** Import config from JSON blob into a repo. */
+  importConfig: (repoPath: string, config: ExportableConfig) => Promise<void>;
 }
 
 /** Recyclable commit (unreachable reflog commit). */
@@ -597,4 +625,60 @@ export interface BugtraqConfig {
   logfilterregex?: string;
   /** Project prefixes substituted into %PROJECT%. */
   projects?: string[];
+}
+
+// ============================================================
+// SmartGit Manual v25/26 — extended types (batch 1-7)
+// ============================================================
+
+/** Force-push safety policy (SmartGit Manual: Force Push policies). */
+export type ForcePushPolicy = 'deny' | 'feature-only' | 'allow';
+
+/** Repository object format (Git 3.0 readiness — SHA-1 vs SHA-256). */
+export type ObjectFormat = 'sha1' | 'sha256';
+
+/** Reference storage backend (Git 3.0 readiness — files vs reftable). */
+export type RefStorage = 'files' | 'reftable';
+
+/** Result of a smart pull (prevents divergence after remote force-push). */
+export interface SmartPullResult {
+  strategy: 'reset' | 'rebase' | 'merge' | 'noop';
+  message: string;
+}
+
+/** Repository format detection result. */
+export interface RepoFormatInfo {
+  objectFormat: ObjectFormat;
+  refStorage: RefStorage;
+}
+
+/** Batch operation result for one repo. */
+export interface BatchOpResult {
+  repo: string;
+  success: boolean;
+  error?: string;
+}
+
+/** Trace result for `git check-ignore -v`. */
+export interface IgnoreRuleTrace {
+  source: string;
+  lineNumber: number;
+  pattern: string;
+}
+
+/** Exportable config blob for backup/migration. */
+export interface ExportableConfig {
+  version: string;
+  exportedAt: string;
+  gitConfig?: { key: string; value: string }[];
+  gitignore?: string;
+  infoExclude?: string;
+  bugtraq?: string;
+  gitreview?: string;
+}
+
+/** LFS fsck validation result. */
+export interface LfsFsckResult {
+  ok: boolean;
+  output: string;
 }

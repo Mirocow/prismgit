@@ -3865,4 +3865,391 @@ export function groupTags(tags: TagInfo[], pattern: RegExp = /^v?(\d+\.\d+)/): T
   }
   return result;
 }
+
+// ============================================================
+// SmartGit Manual v25/26 — extended backend (batch 1-7)
+// ============================================================
+
+/**
+ * Smart Pull — prevents divergence after remote force-push.
+ * Strategy:
+ *   1. Fetch the remote branch
+ *   2. Check if local HEAD has commits not on remote (ahead)
+ *   3. If local is clean (no uncommitted changes) AND local has no unique commits:
+ *      reset --hard to remote tracking branch (avoid divergence)
+ *   4. Otherwise: regular pull --rebase (preserve local commits)
+ */
+export async function smartPull(
+  repoPath: string,
+  remote = 'origin',
+  branch?: string
+): Promise<{ strategy: 'reset' | 'rebase' | 'merge' | 'noop'; message: string }> {
+  const git = getGit(repoPath);
+  // Resolve current branch if not given
+  let targetBranch = branch;
+  if (!targetBranch) {
+    const cur = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    if (!cur || cur === 'HEAD') {
+      // Detached HEAD — fall back to regular pull
+      await pull(repoPath, remote, branch, true);
+      return { strategy: 'rebase', message: 'Detached HEAD — pulled with --rebase' };
+    }
+    targetBranch = cur;
+  }
+  // Fetch first
+  try {
+    await git.raw(['fetch', remote, targetBranch]);
+  } catch {
+    /* ignore fetch errors */
+  }
+  // Check ahead/behind
+  const remoteRef = `${remote}/${targetBranch}`;
+  let ahead = 0, behind = 0;
+  try {
+    const counts = await git.raw(['rev-list', '--left-right', '--count', `HEAD...${remoteRef}`]);
+    const parts = counts.trim().split(/\s+/);
+    behind = parseInt(parts[0] || '0', 10) || 0;
+    ahead = parseInt(parts[1] || '0', 10) || 0;
+  } catch {
+    // Remote ref may not exist — fall back to regular pull
+    await pull(repoPath, remote, targetBranch, true);
+    return { strategy: 'rebase', message: 'No remote tracking ref — pulled with --rebase' };
+  }
+  // Check working tree status
+  const st = await git.status();
+  if (st.isClean() && ahead === 0) {
+    // Safe to reset to remote — prevents divergence after remote force-push
+    await git.raw(['reset', '--hard', remoteRef]);
+    return { strategy: 'reset', message: `Reset to ${remoteRef} (clean tree, no local commits)` };
+  }
+  if (ahead > 0) {
+    // Has local commits — rebase to preserve them
+    await git.raw(['rebase', remoteRef]);
+    return { strategy: 'rebase', message: `Rebased onto ${remoteRef} (${ahead} local commit${ahead > 1 ? 's' : ''})` };
+  }
+  // Behind only — fast-forward
+  await git.raw(['merge', '--ff-only', remoteRef]);
+  return { strategy: 'merge', message: `Fast-forwarded to ${remoteRef}` };
+}
+
+/**
+ * Octopus Merge — merge 3+ branches in one commit with multiple parents.
+ * Uses `git merge -s octopus branch1 branch2 branch3...`.
+ */
+export async function octopusMerge(
+  repoPath: string,
+  branches: string[]
+): Promise<{ conflicts: string[]; success: boolean }> {
+  const git = getGit(repoPath);
+  if (branches.length < 2) {
+    throw new Error('Octopus merge requires at least 2 branches');
+  }
+  try {
+    await git.raw(['merge', '-s', 'octopus', ...branches]);
+    const st = await status(repoPath);
+    return { conflicts: st.conflicted, success: st.conflicted.length === 0 };
+  } catch (e) {
+    const st = await status(repoPath);
+    return { conflicts: st.conflicted, success: false };
+  }
+}
+
+/**
+ * Force Push policy check — SmartGit Manual: configurable safety.
+ * Returns true if force-push is allowed for the given branch.
+ */
+export type ForcePushPolicy = 'deny' | 'feature-only' | 'allow';
+
+export function isForcePushAllowed(
+  branch: string | undefined,
+  policy: ForcePushPolicy,
+  protectedBranches: string[] = ['main', 'master', 'develop', 'release/*']
+): { allowed: boolean; reason: string } {
+  if (policy === 'allow') return { allowed: true, reason: 'Force push allowed by policy' };
+  if (policy === 'deny') return { allowed: false, reason: 'Force push denied by global policy' };
+  // feature-only: allow on non-protected branches
+  if (!branch) return { allowed: false, reason: 'No branch specified' };
+  const isProtected = protectedBranches.some(pattern => {
+    if (pattern.endsWith('/*')) {
+      const prefix = pattern.slice(0, -2);
+      return branch.startsWith(prefix + '/');
+    }
+    return branch === pattern;
+  });
+  if (isProtected) {
+    return { allowed: false, reason: `Branch '${branch}' is protected` };
+  }
+  return { allowed: true, reason: `Force push allowed on feature branch '${branch}'` };
+}
+
+/**
+ * Edit code in Diff view — apply a single-line change to the working tree.
+ * Used by DiffViewer's inline edit mode.
+ */
+export async function applyLineEdit(
+  repoPath: string,
+  file: string,
+  lineNumber: number,
+  newContent: string,
+  isStaged: boolean = false
+): Promise<void> {
+  const git = getGit(repoPath);
+  // Read current file content
+  const absPath = path.join(repoPath, file);
+  const content = fs.readFileSync(absPath, 'utf8');
+  const lines = content.split('\n');
+  if (lineNumber < 1 || lineNumber > lines.length) {
+    throw new Error(`Line ${lineNumber} out of range (1..${lines.length})`);
+  }
+  lines[lineNumber - 1] = newContent;
+  fs.writeFileSync(absPath, lines.join('\n'));
+  if (isStaged) {
+    await git.raw(['add', '--', file]);
+  }
+  invalidateCache(repoPath);
+}
+
+/**
+ * .git/info/exclude management — local-only exclude patterns.
+ */
+export async function editInfoExclude(repoPath: string): Promise<string> {
+  const excludePath = path.join(repoPath, '.git', 'info', 'exclude');
+  // Create if doesn't exist
+  if (!fs.existsSync(excludePath)) {
+    fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+    fs.writeFileSync(excludePath, '# Local exclude patterns (not shared with team)\n');
+  }
+  // Open in default editor
+  return excludePath;
+}
+
+/**
+ * Trace which .gitignore rule matches a file — `git check-ignore -v`.
+ * Returns the rule source file, line number, and pattern.
+ */
+export async function traceIgnoreRule(
+  repoPath: string,
+  file: string
+): Promise<{ source: string; lineNumber: number; pattern: string } | null> {
+  const git = getGit(repoPath);
+  try {
+    const out = await git.raw(['check-ignore', '-v', '--', file]);
+    // Format: <source>:<line>:<pattern>\t<file>
+    const match = out.trim().match(/^([^:]+):(\d+):(.+?)\t/);
+    if (match) {
+      return {
+        source: match[1],
+        lineNumber: parseInt(match[2], 10),
+        pattern: match[3],
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detect repository object format (SHA-1 vs SHA-256) and ref storage (files vs reftable).
+ * SmartGit Manual v26: Git 3.0 readiness.
+ */
+export async function detectRepoFormat(
+  repoPath: string
+): Promise<{ objectFormat: 'sha1' | 'sha256'; refStorage: 'files' | 'reftable' }> {
+  const git = getGit(repoPath);
+  let objectFormat: 'sha1' | 'sha256' = 'sha1';
+  let refStorage: 'files' | 'reftable' = 'files';
+  try {
+    // Check extensions.objectFormat in config
+    const fmt = await git.raw(['config', '--get', 'extensions.objectformat']);
+    if (fmt.trim() === 'sha256') objectFormat = 'sha256';
+  } catch { /* default sha1 */ }
+  try {
+    // Check extensions.refStorage in config
+    const rs = await git.raw(['config', '--get', 'extensions.refstorage']);
+    if (rs.trim() === 'reftable') refStorage = 'reftable';
+  } catch { /* default files */ }
+  // Also check for reftable directory existence
+  const reftableDir = path.join(repoPath, '.git', 'reftable');
+  if (fs.existsSync(reftableDir)) {
+    refStorage = 'reftable';
+  }
+  return { objectFormat, refStorage };
+}
+
+/**
+ * Commit with GPG signing — passes -S flag.
+ * SmartGit Manual: GPG-signed commits.
+ */
+export async function commitSigned(
+  repoPath: string,
+  message: string,
+  options: { gpgSign?: boolean; sshSign?: boolean; signingKey?: string; noVerify?: boolean } = {}
+): Promise<string> {
+  const git = getGit(repoPath);
+  const args: string[] = ['commit', '-m', message];
+  if (options.gpgSign) args.push('-S');
+  if (options.sshSign) {
+    // Configure for SSH signing: gpg.format=ssh, user.signingkey=ssh:<key>
+    if (options.signingKey) {
+      await git.addConfig('gpg.format', 'ssh', false, 'local');
+      await git.addConfig('user.signingkey', options.signingKey, false, 'local');
+    }
+    args.push('-S');
+  }
+  if (options.noVerify) args.push('--no-verify');
+  const result = await git.raw(args);
+  // Extract commit hash from output
+  const hashMatch = result.match(/\[([a-f0-9]{7,40})\]/);
+  return hashMatch ? hashMatch[1] : '';
+}
+
+/**
+ * Create signed tag — annotated + signed (-s).
+ */
+export async function createSignedTag(
+  repoPath: string,
+  name: string,
+  message: string,
+  ref?: string,
+  sshSign: boolean = false
+): Promise<void> {
+  const git = getGit(repoPath);
+  const args: string[] = ['tag', '-s', '-a', name, '-m', message];
+  if (ref) args.push(ref);
+  if (sshSign) {
+    await git.addConfig('gpg.format', 'ssh', false, 'local');
+  }
+  await git.raw(args);
+}
+
+/**
+ * LFS fsck — validate LFS object integrity.
+ * SmartGit Manual: LFS validation.
+ */
+export async function lfsFsck(repoPath: string): Promise<{ ok: boolean; output: string }> {
+  const git = getGit(repoPath);
+  try {
+    const out = await git.raw(['lfs', 'fsck']);
+    return { ok: true, output: out };
+  } catch (e) {
+    return { ok: false, output: String(e) };
+  }
+}
+
+/**
+ * Multi-repo batch operation — run a git command across multiple repos.
+ * SmartGit Manual: Batch operations for multi-repo management.
+ */
+export async function batchOperation(
+  repos: string[],
+  operation: 'fetch' | 'pull' | 'push' | 'status',
+  options: { remote?: string; branch?: string; force?: boolean } = {}
+): Promise<{ repo: string; success: boolean; error?: string }[]> {
+  const results: { repo: string; success: boolean; error?: string }[] = [];
+  for (const repo of repos) {
+    try {
+      const git = getGit(repo);
+      switch (operation) {
+        case 'fetch':
+          await git.raw(['fetch', options.remote || 'origin', '--prune']);
+          break;
+        case 'pull':
+          await git.raw(['pull', options.remote || 'origin', options.branch || '']);
+          break;
+        case 'push':
+          await git.raw(['push', options.remote || 'origin', ...(options.force ? ['--force-with-lease'] : [])]);
+          break;
+        case 'status':
+          await git.status();
+          break;
+      }
+      results.push({ repo, success: true });
+    } catch (e) {
+      results.push({ repo, success: false, error: String(e) });
+    }
+  }
+  return results;
+}
+
+/**
+ * Export all settings, hotkeys, and tool configs as a JSON blob.
+ * SmartGit Manual: Config export/import for backup or migration.
+ */
+export async function exportConfig(
+  repoPath: string | null
+): Promise<{
+  version: string;
+  exportedAt: string;
+  gitConfig?: { key: string; value: string }[];
+  gitignore?: string;
+  infoExclude?: string;
+  bugtraq?: string;
+  gitreview?: string;
+}> {
+  const result: any = {
+    version: '2.0.0',
+    exportedAt: new Date().toISOString(),
+  };
+  if (repoPath) {
+    try {
+      const list = await configList(repoPath, 'local');
+      result.gitConfig = list.map(e => ({ key: e.key, value: e.value }));
+    } catch { /* ignore */ }
+    try {
+      const gi = path.join(repoPath, '.gitignore');
+      if (fs.existsSync(gi)) result.gitignore = fs.readFileSync(gi, 'utf8');
+    } catch { /* ignore */ }
+    try {
+      const ie = path.join(repoPath, '.git', 'info', 'exclude');
+      if (fs.existsSync(ie)) result.infoExclude = fs.readFileSync(ie, 'utf8');
+    } catch { /* ignore */ }
+    try {
+      const bt = path.join(repoPath, '.gitbugtraq');
+      if (fs.existsSync(bt)) result.bugtraq = fs.readFileSync(bt, 'utf8');
+    } catch { /* ignore */ }
+    try {
+      const gr = path.join(repoPath, '.gitreview');
+      if (fs.existsSync(gr)) result.gitreview = fs.readFileSync(gr, 'utf8');
+    } catch { /* ignore */ }
+  }
+  return result;
+}
+
+/**
+ * Import config from a JSON blob back into a repo.
+ */
+export async function importConfig(
+  repoPath: string,
+  config: {
+    gitConfig?: { key: string; value: string }[];
+    gitignore?: string;
+    infoExclude?: string;
+    bugtraq?: string;
+    gitreview?: string;
+  }
+): Promise<void> {
+  if (config.gitConfig) {
+    for (const { key, value } of config.gitConfig) {
+      try {
+        await configSet(repoPath, key, value, 'local');
+      } catch { /* ignore individual failures */ }
+    }
+  }
+  if (config.gitignore) {
+    fs.writeFileSync(path.join(repoPath, '.gitignore'), config.gitignore);
+  }
+  if (config.infoExclude) {
+    const dir = path.join(repoPath, '.git', 'info');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'exclude'), config.infoExclude);
+  }
+  if (config.bugtraq) {
+    fs.writeFileSync(path.join(repoPath, '.gitbugtraq'), config.bugtraq);
+  }
+  if (config.gitreview) {
+    fs.writeFileSync(path.join(repoPath, '.gitreview'), config.gitreview);
+  }
+}
+
 export { invalidateCache };

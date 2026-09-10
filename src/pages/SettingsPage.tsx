@@ -889,6 +889,130 @@ smartgit.refresh.inspectEol=true
               For Ollama (local LLM), leave API Key empty and set URL to <code>http://localhost:11434</code>.
               The model must already be pulled (<code className="mono">ollama pull llama3.2</code>).
             </div>
+            {/* SmartGit Manual v26: Custom AI Prompts with template vars */}
+            <div>
+              <label className="text-xs text-text-tertiary block mb-1">
+                Custom System Prompt (optional — supports {'{{branch}}'}, {'{{author}}'}, {'{{date}}'}, {'{{repository}}'} template vars)
+              </label>
+              <textarea
+                className="w-full font-mono text-xs h-16 resize-none p-2 border border-border-default rounded bg-bg-tertiary"
+                placeholder="Leave empty for default prompt. Example: 'You are a senior developer working on the {{repository}} project. Write commit messages in conventional commits format.'"
+                defaultValue={settings.aiCustomPrompt || ''}
+                onBlur={(e) => setSetting('aiCustomPrompt', e.target.value)}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* SmartGit Manual: Force Push Policies */}
+        <section className="panel mb-4">
+          <div className="panel-header">Force Push Policy</div>
+          <div className="p-5 space-y-3 text-sm">
+            <div>
+              <label className="text-xs text-text-tertiary block mb-1">Policy</label>
+              <select
+                className="w-full text-sm"
+                value={settings.forcePushPolicy || 'feature-only'}
+                onChange={(e) => setSetting('forcePushPolicy', e.target.value as 'deny' | 'feature-only' | 'allow')}
+              >
+                <option value="allow">Allow force push on all branches (dangerous)</option>
+                <option value="feature-only">Allow on feature branches only (protect main/master)</option>
+                <option value="deny">Deny force push globally (safest)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-text-tertiary block mb-1">
+                Protected branches (one glob per line — e.g., main, master, develop, release/*)
+              </label>
+              <textarea
+                className="w-full font-mono text-xs h-20 resize-none p-2 border border-border-default rounded bg-bg-tertiary"
+                placeholder={'main\nmaster\ndevelop\nrelease/*'}
+                defaultValue={(settings.protectedBranches || ['main', 'master', 'develop', 'release/*']).join('\n')}
+                onBlur={(e) => setSetting('protectedBranches', e.target.value.split('\n').map(s => s.trim()).filter(Boolean))}
+              />
+            </div>
+            <div className="text-2xs text-text-tertiary">
+              When policy is <code>feature-only</code>, force push is rejected on protected branches.
+              SmartGit Manual: thin safety configuration for force push.
+            </div>
+          </div>
+        </section>
+
+        {/* SmartGit Manual: CI/CD Integration (Jenkins, TeamCity, GitLab CI) */}
+        <section className="panel mb-4">
+          <div className="panel-header">CI/CD Integration</div>
+          <div className="p-5 space-y-3 text-sm">
+            <div className="text-2xs text-text-tertiary">
+              Configure CI servers to display pipeline status badges in History.
+              GitHub Actions is configured via GitHub PAT (see GitHub Integration above).
+            </div>
+            {/* Jenkins */}
+            <div className="border-t border-border-subtle pt-3">
+              <div className="text-xs font-semibold mb-2">Jenkins</div>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  className="text-xs font-mono"
+                  placeholder="https://ci.example.com"
+                  defaultValue={settings.jenkinsUrl || ''}
+                  onBlur={(e) => setSetting('jenkinsUrl', e.target.value)}
+                />
+                <input
+                  type="password"
+                  className="text-xs font-mono"
+                  placeholder="user:api-token"
+                  defaultValue={settings.jenkinsToken || ''}
+                  onBlur={(e) => setSetting('jenkinsToken', e.target.value)}
+                />
+              </div>
+            </div>
+            {/* TeamCity */}
+            <div className="border-t border-border-subtle pt-3">
+              <div className="text-xs font-semibold mb-2">TeamCity</div>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  className="text-xs font-mono"
+                  placeholder="https://teamcity.example.com"
+                  defaultValue={settings.teamcityUrl || ''}
+                  onBlur={(e) => setSetting('teamcityUrl', e.target.value)}
+                />
+                <input
+                  type="password"
+                  className="text-xs font-mono"
+                  placeholder="access token"
+                  defaultValue={settings.teamcityToken || ''}
+                  onBlur={(e) => setSetting('teamcityToken', e.target.value)}
+                />
+              </div>
+            </div>
+            {/* GitLab CI */}
+            <div className="border-t border-border-subtle pt-3">
+              <div className="text-xs font-semibold mb-2">GitLab CI</div>
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  type="text"
+                  className="text-xs font-mono"
+                  placeholder="https://gitlab.com"
+                  defaultValue={settings.gitlabUrl || ''}
+                  onBlur={(e) => setSetting('gitlabUrl', e.target.value)}
+                />
+                <input
+                  type="password"
+                  className="text-xs font-mono"
+                  placeholder="private token"
+                  defaultValue={settings.gitlabToken || ''}
+                  onBlur={(e) => setSetting('gitlabToken', e.target.value)}
+                />
+                <input
+                  type="number"
+                  className="text-xs font-mono"
+                  placeholder="project ID"
+                  defaultValue={settings.gitlabProjectId || ''}
+                  onBlur={(e) => setSetting('gitlabProjectId', e.target.value ? Number(e.target.value) : undefined)}
+                />
+              </div>
+            </div>
           </div>
         </section>
 

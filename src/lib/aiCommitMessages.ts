@@ -257,3 +257,117 @@ export function applyAIPlaceholder(message: string, aiMessage: string, kind: 'ai
   if (kind === 'wip') return `WIP: ${aiMessage.split('\n')[0]}`;
   return aiMessage;
 }
+
+/**
+ * SmartGit Manual: Custom AI Prompts with template variables.
+ * Substitutes {{var}} placeholders in a prompt template.
+ *
+ * Supported variables:
+ *   {{branch}}         — current branch name
+ *   {{author}}        — git config user.name
+ *   {{date}}          — ISO date string
+ *   {{repository}}    — repository name (basename)
+ *   {{remoteUrl}}     — remote URL (origin)
+ *   {{commitCount}}   — number of commits being merged/stashed/etc
+ *   {{fileCount}}     — number of files changed
+ *   {{diff}}          — the diff content
+ *   {{recentMessages}} — recent commit messages for style reference
+ */
+export function substitutePromptTemplate(
+  template: string,
+  vars: Record<string, string | number>
+): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (full, key: string) => {
+    const val = vars[key];
+    return val !== undefined ? String(val) : full;
+  });
+}
+
+/**
+ * Generate a merge commit message using AI.
+ * SmartGit Manual: AI for Merge descriptions.
+ */
+export interface GenerateMergeMessageParams {
+  /** The branch being merged in. */
+  sourceBranch: string;
+  /** The branch being merged into (usually current). */
+  targetBranch: string;
+  /** Diff of the merge (source branch commits). */
+  diff: string;
+  /** Number of commits being merged. */
+  commitCount: number;
+  /** LLM provider. */
+  provider: LLMProvider;
+  /** Optional custom prompt template. */
+  systemPrompt?: string;
+}
+
+export async function generateMergeMessage(params: GenerateMergeMessageParams): Promise<string> {
+  const { sourceBranch, targetBranch, diff, commitCount, provider, systemPrompt } = params;
+  const prompt = systemPrompt || `You are a helpful assistant that writes Git merge commit messages.
+Given the source branch, target branch, and a diff of changes being merged, write a clear merge commit message.
+
+Rules:
+1. First line: "Merge branch '<source>' into <target>" or describe the feature being merged.
+2. Optional body: summarize what was changed, wrapped at 72 chars.
+3. If the source branch name indicates a feature/fix, mention it in the body.
+
+Output ONLY the merge commit message, no explanation.`;
+  const userPrompt = `Source branch: ${sourceBranch}\nTarget branch: ${targetBranch}\nCommits being merged: ${commitCount}\n\nDiff:\n${diff.slice(0, 48000)}`;
+  return callProvider(provider, prompt, userPrompt, 256);
+}
+
+/**
+ * Generate a stash message using AI.
+ * SmartGit Manual: AI for Stash descriptions.
+ */
+export interface GenerateStashMessageParams {
+  /** Diff of the stashed changes. */
+  diff: string;
+  /** Number of files in the stash. */
+  fileCount: number;
+  /** Current branch name. */
+  branch?: string;
+  /** LLM provider. */
+  provider: LLMProvider;
+  /** Optional custom prompt template. */
+  systemPrompt?: string;
+}
+
+export async function generateStashMessage(params: GenerateStashMessageParams): Promise<string> {
+  const { diff, fileCount, branch, provider, systemPrompt } = params;
+  const prompt = systemPrompt || `You are a helpful assistant that writes Git stash messages.
+Given a diff of stashed changes, write a short, descriptive stash message.
+
+Rules:
+1. Single line, no more than 72 characters.
+2. Start with "WIP:" or describe what was being worked on.
+3. Mention the primary file or feature being changed.
+
+Output ONLY the stash message, no explanation.`;
+  const userPrompt = `Branch: ${branch || 'unknown'}\nFiles: ${fileCount}\n\nDiff:\n${diff.slice(0, 32000)}`;
+  return callProvider(provider, prompt, userPrompt, 128);
+}
+
+/** Internal: call the appropriate provider. */
+async function callProvider(
+  provider: LLMProvider,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number
+): Promise<string> {
+  switch (provider.type) {
+    case 'openai':
+    case 'custom':
+    case 'github':
+      return callOpenAICompatible(provider, systemPrompt, userPrompt, maxTokens);
+    case 'anthropic':
+      return callAnthropic(provider, systemPrompt, userPrompt, maxTokens);
+    case 'ollama':
+      return callOllama(provider, systemPrompt, userPrompt, maxTokens);
+    case 'mistral':
+      return callOpenAICompatible(provider, systemPrompt, userPrompt, maxTokens);
+    default:
+      throw new Error(`Unsupported provider type: ${provider.type}`);
+  }
+}
