@@ -1,0 +1,531 @@
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { RefreshCw, FileText, GitBranch, GitCommit, ChevronDown, Search } from '../components/icons';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { CommitHashLink } from '../components/StatusBar';
+import { api, type DiffResult, type LogEntry, type BranchInfo, type CommitFile } from '../lib/api';
+import { DiffViewer } from '../components/DiffViewer';
+import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
+import { cn, shortHash } from '../lib/utils';
+import { useLazyList } from '../lib/useLazyList';
+import { useContextMenu } from '../lib/useContextMenu';
+import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
+import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
+
+/**
+ * Diff Tool — standalone comparison tool.
+ *
+ * Lets user pick:
+ *   1. A file (or "all files" via '.')
+ *   2. A "base" ref (commit hash, branch name, or HEAD)
+ *   3. A "compare" ref (another commit, working tree, or staged)
+ *
+ * Shows the diff between the two via DiffViewer.
+ *
+ * Connected to global selectionStore:
+ *   - selectedFilePath pre-fills the file path
+ *   - selectedCommitHash pre-fills the "base" ref
+ *   - diffRequest (one-shot) is consumed on first render — used by Stashes page
+ *     to ask Diff to compare stash^ vs stash (instead of HEAD vs working tree)
+ *
+ * This is NOT the inline diff in Changes — that stays in Changes.
+ * This is a dedicated tool for comparing arbitrary refs.
+ */
+export function DiffPage() {
+  const repo = useRepositoryStore((s) => s.currentRepo)!;
+  const toast = useToastStore();
+  const globalFilePath = useSelectionStore((s) => s.selectedFilePath);
+  const globalCommitHash = useSelectionStore((s) => s.selectedCommitHash);
+  const globalBranch = useSelectionStore((s) => s.selectedBranch);
+  // A tag selected in Tags/Branches is also a valid base ref — keep Diff in sync
+  const globalTag = useSelectionStore((s) => s.selectedTag);
+  // One-shot diff request — when set, override local state and clear it.
+  // Used by Stashes (and any future caller) to programmatically configure Diff.
+  const diffRequest = useSelectionStore((s) => s.diffRequest);
+  const clearDiffRequest = useSelectionStore((s) => s.setDiffRequest);
+
+  const [filePath, setFilePath] = useState('.');
+  const [baseRef, setBaseRef] = useState('HEAD');
+  const [compareMode, setCompareMode] = useState<'working' | 'staged' | 'ref'>('working');
+  const [compareRef, setCompareRef] = useState('');
+  // Stash viewer mode (set via diffRequest from Stashes page): file list and
+  // file diffs are read through the stash's PARENT structure, because untracked
+  // files live in the stash's third parent, NOT in the stash tree itself.
+  const [stashHash, setStashHash] = useState<string | null>(null);
+  const [diff, setDiff] = useState<DiffResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [recentCommits, setRecentCommits] = useState<LogEntry[]>([]);
+  // File list for multi-file diff (when filePath === '.')
+  const [changedFiles, setChangedFiles] = useState<CommitFile[]>([]);
+  const [selectedFileInList, setSelectedFileInList] = useState<string | null>(null);
+  // Filter box above the file list — with 200+ changed files, scrolling to
+  // find one path is not something a human should do.
+  const [fileListFilter, setFileListFilter] = useState('');
+  // Width of the file-list sidebar — splitter lets the user resize it.
+  // Bug fix: previously the file list was a fixed `w-56` with no splitter, so
+  // users couldn't widen it for long paths. Now we use useResizableWidth.
+  const { width: fileListWidth, setWidth: setFileListWidth, handleResize: handleFileListResize } = useResizableWidth(224, 140, 480);
+  const showContextMenu = useContextMenu();
+
+  // Per-project file-list width (projectPrefs) — apply on repo open, save
+  // back debounced while the user drags the splitter.
+  useEffect(() => {
+    const v = loadProjectPrefs(repo.path).diffFileListWidth;
+    if (v != null && Number.isFinite(v)) setFileListWidth(Math.max(140, Math.min(480, v)));
+  }, [repo.path, setFileListWidth]);
+
+  useEffect(() => {
+    const t = setTimeout(() => saveProjectPrefs(repo.path, { diffFileListWidth: fileListWidth }), 500);
+    return () => clearTimeout(t);
+  }, [repo.path, fileListWidth]);
+
+  // Pre-fill from global selections
+  useEffect(() => {
+    if (globalFilePath) setFilePath(globalFilePath);
+  }, [globalFilePath]);
+  useEffect(() => {
+    if (globalCommitHash) setBaseRef(globalCommitHash);
+  }, [globalCommitHash]);
+  useEffect(() => {
+    if (globalBranch) setBaseRef(globalBranch);
+  }, [globalBranch]);
+  useEffect(() => {
+    if (globalTag) setBaseRef(globalTag);
+  }, [globalTag]);
+
+  // Consume one-shot diffRequest — when Stashes (or any tool) sets it,
+  // apply base/compare/filePath to local state, then clear the request.
+  // This must run BEFORE the computeDiff effect so the new state is in place.
+  useEffect(() => {
+    if (!diffRequest) return;
+    setBaseRef(diffRequest.baseRef);
+    setCompareRef(diffRequest.compareRef);
+    setCompareMode('ref');
+    setStashHash(diffRequest.stashHash ?? null);
+    if (diffRequest.filePath) {
+      setFilePath(diffRequest.filePath);
+      // Also sync to global so other consumers see the same path
+      useSelectionStore.getState().selectFile(diffRequest.filePath);
+    }
+    // Clear the request so a subsequent mount of DiffPage doesn't re-apply it.
+    clearDiffRequest(null);
+  }, [diffRequest, clearDiffRequest]);
+
+  // Load branches and recent commits for dropdowns
+  useEffect(() => {
+    if (!repo) return;
+    api.git.branches(repo.path).then(setBranches).catch(() => {});
+    api.git.log(repo.path, { maxCount: 30 }).then(setRecentCommits).catch(() => {});
+  }, [repo]);
+
+  const computeDiff = useCallback(async () => {
+    if (!repo) return;
+    setLoading(true);
+    try {
+      // Stash viewer (View Stash from the Stashes page): plain `diff stash^..stash`
+      // renders EMPTY when the stash contains untracked files — they are stored
+      // ONLY in the stash's third parent. api.git.stashFiles/stashFileRawDiff
+      // read both the tracked and the untracked part.
+      if (stashHash && (filePath === '.' || filePath === '')) {
+        const files = await api.git.stashFiles(repo.path, stashHash);
+        setChangedFiles(files);
+        if (!selectedFileInList && files.length > 0) {
+          setSelectedFileInList(files[0].path);
+        }
+        const fileToDiff = selectedFileInList || files[0]?.path;
+        if (fileToDiff) {
+          const rawDiff = await api.git.stashFileRawDiff(repo.path, stashHash, fileToDiff);
+          setDiff(parseRawDiff(rawDiff, fileToDiff));
+        } else {
+          setDiff(null);
+        }
+      } else if (stashHash) {
+        // Single file inside a stash
+        setChangedFiles([]);
+        const rawDiff = await api.git.stashFileRawDiff(repo.path, stashHash, filePath || '.');
+        setDiff(parseRawDiff(rawDiff, filePath));
+      } else if ((filePath === '.' || filePath === '') && compareMode === 'working') {
+        // Get changed files between baseRef and working tree
+        const rawFiles = await api.git.raw(repo.path, ['diff', '--name-status', '--no-color', baseRef]);
+        const files: CommitFile[] = rawFiles.split('\n').filter(Boolean).map(line => {
+          const parts = line.split('\t');
+          const status = parts[0];
+          const path = parts[parts.length - 1] || '';
+          return { path, status: status[0] || 'M', additions: 0, deletions: 0, binary: false, mode: '' };
+        });
+        setChangedFiles(files);
+        // If no specific file selected, auto-select the first one
+        if (!selectedFileInList && files.length > 0) {
+          setSelectedFileInList(files[0].path);
+        }
+        // Load diff for the selected file (or first file)
+        const fileToDiff = selectedFileInList || files[0]?.path;
+        if (fileToDiff) {
+          const result = await api.git.diff(repo.path, fileToDiff, { ref: baseRef });
+          setDiff(result);
+        } else {
+          setDiff(null);
+        }
+      } else if ((filePath === '.' || filePath === '') && compareMode === 'ref' && compareRef) {
+        // Diff between two refs — get file list.
+        // IMPORTANT: use `..` (double-dot) not `...` (triple-dot) for direct ref
+        // comparison. Triple-dot diff compares from merge-base, which gives
+        // wrong results for stash commits (stash^...stash vs stash^..stash).
+        // Stash commits have parent[0] = base, so direct diff is what we want.
+        const rawFiles = await api.git.raw(repo.path, ['diff', '--name-status', '--no-color', `${baseRef}..${compareRef}`]);
+        const files: CommitFile[] = rawFiles.split('\n').filter(Boolean).map(line => {
+          const parts = line.split('\t');
+          const status = parts[0];
+          const path = parts[parts.length - 1] || '';
+          return { path, status: status[0] || 'M', additions: 0, deletions: 0, binary: false, mode: '' };
+        });
+        setChangedFiles(files);
+        if (!selectedFileInList && files.length > 0) {
+          setSelectedFileInList(files[0].path);
+        }
+        const fileToDiff = selectedFileInList || files[0]?.path;
+        if (fileToDiff) {
+          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', fileToDiff]);
+          // Parse
+          const result = parseRawDiff(rawDiff, fileToDiff);
+          setDiff(result);
+        } else {
+          setDiff(null);
+        }
+      } else {
+        // Single file diff
+        setChangedFiles([]);
+        let result: DiffResult;
+        if (compareMode === 'working') {
+          result = await api.git.diff(repo.path, filePath || '.', { ref: baseRef });
+        } else if (compareMode === 'staged') {
+          result = await api.git.diff(repo.path, filePath || '.', { staged: true, ref: baseRef });
+        } else {
+          // Same `..` rationale here — direct ref comparison, not merge-base.
+          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', filePath || '.']);
+          result = parseRawDiff(rawDiff, filePath);
+        }
+        setDiff(result);
+      }
+    } catch (e) {
+      toast.error('Failed to compute diff', String(e));
+      setDiff(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [repo, filePath, baseRef, compareMode, compareRef, stashHash, toast, selectedFileInList]);
+
+  // Auto-compute when inputs change
+  useEffect(() => {
+    if (repo && baseRef) {
+      const timer = setTimeout(computeDiff, 300); // debounce 300ms
+      return () => clearTimeout(timer);
+    }
+  }, [computeDiff, repo, baseRef]);
+
+  // Reload diff when user clicks a different file in the file list
+  const loadFileDiff = async (file: string) => {
+    if (!repo) return;
+    setSelectedFileInList(file);
+    setLoading(true);
+    try {
+      let result: DiffResult;
+      if (stashHash) {
+        const rawDiff = await api.git.stashFileRawDiff(repo.path, stashHash, file);
+        result = parseRawDiff(rawDiff, file);
+      } else if (compareMode === 'ref' && compareRef) {
+        const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', file]);
+        result = parseRawDiff(rawDiff, file);
+      } else {
+        result = await api.git.diff(repo.path, file, { ref: baseRef, staged: compareMode === 'staged' });
+      }
+      setDiff(result);
+    } catch (e) {
+      toast.error('Failed to load file diff', String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reset file selection when baseRef or compareMode changes
+  useEffect(() => {
+    setSelectedFileInList(null);
+  }, [baseRef, compareMode, compareRef]);
+
+  if (!repo) {
+    return <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">No repository open</div>;
+  }
+
+  const title = stashHash
+    ? `Stash ${shortHash(stashHash)} content`
+    : compareMode === 'ref' && compareRef
+      ? `${baseRef} → ${compareRef}`
+      : compareMode === 'staged'
+        ? `${baseRef} → Staged`
+        : `${baseRef} → Working Tree`;
+
+  // The file the toolbar actions (Blame) and the header bar refer to.
+  const blameTarget = selectedFileInList || filePath;
+
+  // Filtered view of the changed-file list (case-insensitive substring).
+  const visibleFiles = useMemo(() => {
+    const q = fileListFilter.trim().toLowerCase();
+    if (!q) return changedFiles;
+    return changedFiles.filter((f) => f.path.toLowerCase().includes(q));
+  }, [changedFiles, fileListFilter]);
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+      {/* Header with comparison controls */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border-default bg-bg-tertiary flex-wrap">
+        <span className="text-xs font-semibold flex-shrink-0">Diff</span>
+
+        {/* File path input */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <FileText size={11} className="text-text-tertiary" />
+          <input
+            type="text"
+            placeholder="file path (or . for all)"
+            value={filePath}
+            onChange={(e) => setFilePath(e.target.value)}
+            className="text-xs w-48 px-2 py-1 font-mono bg-bg-secondary border border-border-default rounded"
+            title="File to compare. Use '.' to compare all files."
+          />
+        </div>
+
+        {/* Base ref selector */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <span className="text-2xs text-text-tertiary">Base:</span>
+          <select
+            value={baseRef}
+            onChange={(e) => setBaseRef(e.target.value)}
+            className="text-xs px-1.5 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+            title="Base reference (what to compare FROM)"
+          >
+            <option value="HEAD">HEAD</option>
+            {branches.filter(b => !b.remote).map(b => (
+              <option key={b.name} value={b.name}>{b.name}</option>
+            ))}
+            {branches.filter(b => b.remote).map(b => (
+              <option key={b.name} value={b.name}>{b.name}</option>
+            ))}
+            {recentCommits.map(c => (
+              <option key={c.hash} value={c.hash}>{shortHash(c.hash)} · {c.subject.substring(0, 40)}</option>
+            ))}
+          </select>
+          {/* Cross-tool link: apply the commit currently selected in History/Tags
+              without hunting for it in the dropdown */}
+          {globalCommitHash && baseRef !== globalCommitHash && (
+            <button
+              className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent whitespace-nowrap"
+              title={`Use the commit selected in History (${shortHash(globalCommitHash)}) as base`}
+              onClick={() => setBaseRef(globalCommitHash)}
+            >
+              → {shortHash(globalCommitHash)}
+            </button>
+          )}
+        </div>
+
+        {/* Arrow */}
+        <span className="text-text-tertiary flex-shrink-0">→</span>
+
+        {/* Compare mode selector */}
+        <div className="flex items-center gap-0">
+          <button
+            className={cn('text-2xs px-2.5 py-1 rounded-l border',
+              compareMode === 'working' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default hover:bg-bg-hover')}
+            onClick={() => setCompareMode('working')}
+            title="Compare with working tree (unstaged changes)"
+          >
+            Working Tree
+          </button>
+          <button
+            className={cn('text-2xs px-2.5 py-1 border-t border-b',
+              compareMode === 'staged' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default hover:bg-bg-hover')}
+            onClick={() => setCompareMode('staged')}
+            title="Compare with staged (index)"
+          >
+            Staged
+          </button>
+          <button
+            className={cn('text-2xs px-2.5 py-1 rounded-r border',
+              compareMode === 'ref' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default hover:bg-bg-hover')}
+            onClick={() => setCompareMode('ref')}
+            title="Compare with another ref (commit/branch)"
+          >
+            Ref...
+          </button>
+        </div>
+
+        {/* Compare ref input (only for 'ref' mode) */}
+        {compareMode === 'ref' && (
+          <select
+            value={compareRef}
+            onChange={(e) => setCompareRef(e.target.value)}
+            className="text-xs px-1.5 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+            title="Compare TO this reference"
+          >
+            <option value="">Select ref...</option>
+            {branches.filter(b => !b.remote).map(b => (
+              <option key={b.name} value={b.name}>{b.name}</option>
+            ))}
+            {recentCommits.map(c => (
+              <option key={c.hash} value={c.hash}>{shortHash(c.hash)} · {c.subject.substring(0, 40)}</option>
+            ))}
+          </select>
+        )}
+
+        {/* Blame the file currently shown in the diff (or the selected one
+            from the file list) — mirrors the "Blame this file..." entry of
+            the file context menu. */}
+        <button
+          className="icon-btn !w-6 !h-6 ml-auto"
+          title="Blame this file — line-by-line authorship"
+          disabled={!blameTarget || blameTarget === '.'}
+          onClick={() => {
+            if (!blameTarget || blameTarget === '.') return;
+            useSelectionStore.getState().selectFile(blameTarget);
+            window.location.hash = '#/blame';
+          }}
+        >
+          <Search size={12} />
+        </button>
+        <button className="icon-btn !w-6 !h-6" title="Refresh" onClick={computeDiff}>
+          <RefreshCw size={12} className={loading ? 'spin' : ''} />
+        </button>
+      </div>
+
+      {/* Diff title bar */}
+      <div className="px-3 py-1 border-b border-border-subtle bg-bg-secondary text-2xs text-text-tertiary font-mono truncate">
+        {loading ? 'Computing diff...' : title} · {selectedFileInList || filePath}
+      </div>
+
+      {/* Body: file list (left, when multi-file) + splitter + diff viewer (right) */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* File list sidebar — shown when comparing all files ('.') */}
+        {changedFiles.length > 0 && (
+          <>
+            <div
+              className="flex-shrink-0 border-r border-border-default overflow-y-auto bg-bg-secondary"
+              style={{ width: fileListWidth }}
+            >
+              <div className="px-2 py-1.5 text-2xs font-bold uppercase tracking-wider text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary">
+                Changed Files ({visibleFiles.length}{visibleFiles.length !== changedFiles.length ? ` of ${changedFiles.length}` : ''})
+              </div>
+              {changedFiles.length > 5 && (
+                <div className="px-2 py-1 border-b border-border-subtle">
+                  <input
+                    type="text"
+                    className="w-full text-2xs px-1.5 py-0.5 bg-bg-primary border border-border-default rounded"
+                    placeholder="Filter files..."
+                    value={fileListFilter}
+                    onChange={(e) => setFileListFilter(e.target.value)}
+                  />
+                </div>
+              )}
+              {visibleFiles.length === 0 && changedFiles.length > 0 && (
+                <div className="px-2 py-2 text-2xs text-text-tertiary">No files match '{fileListFilter.trim()}'</div>
+              )}
+              {visibleFiles.slice(0, 200).map((f, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    'flex items-center gap-1.5 px-2 py-1 text-2xs cursor-pointer hover:bg-bg-hover transition-colors',
+                    selectedFileInList === f.path && 'bg-bg-selected'
+                  )}
+                  onClick={() => loadFileDiff(f.path)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // Select + load the file under the cursor first, so the
+                    // diff pane and any action act on exactly this file.
+                    if (selectedFileInList !== f.path) loadFileDiff(f.path);
+                    const fileCtx = {
+                      repoPath: repo.path,
+                      path: f.path,
+                      mode: 'diff' as const,
+                    };
+                    showContextMenu(buildFileMenu(fileCtx), async (action) => {
+                      await runFileAction(action, fileCtx);
+                    });
+                  }}
+                  title="Click to load diff · Right-click for more actions"
+                >
+                  <span className="font-mono font-bold w-3 text-center flex-shrink-0"
+                    style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
+                    {f.status}
+                  </span>
+                  <span className="flex-1 truncate font-mono text-text-secondary">{f.path}</span>
+                </div>
+              ))}
+              {changedFiles.length > 200 && (
+                <div className="px-2 py-1 text-2xs text-text-tertiary border-t border-border-subtle">
+                  Showing first 200 of {changedFiles.length}
+                </div>
+              )}
+            </div>
+            {/* Resizable splitter between file list and diff viewer — fixes the
+                "no splitter between tree and Diff window" complaint. Drag left/right
+                to shrink/grow the file list panel. */}
+            <ResizableSplitter direction="horizontal" onResize={handleFileListResize} />
+          </>
+        )}
+
+        {/* Diff viewer — scrollable */}
+        <div className="flex-1 overflow-auto">
+          {diff ? (
+            <DiffViewer diff={diff} filePath={selectedFileInList || filePath} />
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm p-8">
+              {loading ? 'Loading...' : 'Select base and compare refs to see diff'}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Helper to parse raw git diff output into DiffResult
+function parseRawDiff(rawDiff: string, file: string): DiffResult {
+  const lines = rawDiff.split('\n');
+  const hunks: any[] = [];
+  let currentHunk: any = null;
+  let oldLine = 0, newLine = 0;
+  for (const line of lines) {
+    if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) continue;
+    if (line.startsWith('@@')) {
+      if (currentHunk) hunks.push(currentHunk);
+      const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (match) {
+        currentHunk = {
+          oldStart: parseInt(match[1]), oldLines: parseInt(match[2] || '1'),
+          newStart: parseInt(match[3]), newLines: parseInt(match[4] || '1'),
+          header: line, lines: []
+        };
+        oldLine = parseInt(match[1]);
+        newLine = parseInt(match[3]);
+      }
+      continue;
+    }
+    if (currentHunk) {
+      if (line.startsWith('+')) {
+        currentHunk.lines.push({ type: 'add', content: line.substring(1), oldLineNumber: null, newLineNumber: newLine++ });
+      } else if (line.startsWith('-')) {
+        currentHunk.lines.push({ type: 'del', content: line.substring(1), oldLineNumber: oldLine++, newLineNumber: null });
+      } else if (line.startsWith(' ')) {
+        currentHunk.lines.push({ type: 'context', content: line.substring(1), oldLineNumber: oldLine++, newLineNumber: newLine++ });
+      }
+    }
+  }
+  if (currentHunk) hunks.push(currentHunk);
+  return {
+    oldContent: '', newContent: '', oldPath: file, newPath: file,
+    hunks, binary: rawDiff.includes('Binary files'),
+    newFile: rawDiff.includes('new file mode'),
+    deletedFile: rawDiff.includes('deleted file mode'),
+    renamedFile: rawDiff.includes('rename from') || rawDiff.includes('rename to'),
+  };
+}

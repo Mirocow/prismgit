@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# =============================================================
+# smartgit-electron pre-push hook
+#
+# Runs the full verify gate (typecheck + all vitest suites + build)
+# before EVERY `git push`, so broken code never reaches origin.
+#
+# Install once:  npm run hooks:install   (or bash scripts/install-hooks.sh)
+# Emergency skip: SMARTGIT_SKIP_VERIFY=1 git push
+# =============================================================
+set -u
+
+if [ "${SMARTGIT_SKIP_VERIFY:-0}" = "1" ]; then
+  echo "[pre-push] SMARTGIT_SKIP_VERIFY=1 — verify gate SKIPPED"
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$REPO_ROOT" ]; then
+  echo "[pre-push] not inside a git repository — skipping"
+  exit 0
+fi
+cd "$REPO_ROOT" || exit 1
+
+echo "[pre-push] verify gate: typecheck + tests + build ..."
+npm run verify
+STATUS=$?
+
+if [ $STATUS -ne 0 ]; then
+  echo ""
+  echo "[pre-push] verify FAILED (exit $STATUS) — push ABORTED."
+  echo "[pre-push]   Fix the errors above, or push once with: SMARTGIT_SKIP_VERIFY=1 git push"
+fi
+
+exit $STATUS

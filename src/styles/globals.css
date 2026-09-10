@@ -1,0 +1,973 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Ollama-code inspired theme (Ayu Dark palette)
+ * Background: #0b0e14 (deep blue-black)
+ * Foreground: #bfbdb6 (warm gray)
+ * Accent Blue: #39BAE6 (cyan)
+ * Accent Purple: #D2A6FF
+ * Accent Green: #AAD94C (diff added)
+ * Accent Red: #F26D78 (diff removed)
+ * Accent Yellow: #FFD700
+ * Gray: #3D4149 (borders)
+ * Comment: #646A71
+ */
+
+:root {
+  /* Ollama-code Light theme (Ayu Light) — default */
+  /* Slightly warmer, more layered backgrounds for better visual hierarchy */
+  --bg-primary: #f7f8fa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #eef0f3;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(15, 23, 42, 0.05);
+  --bg-active: rgba(57, 158, 230, 0.13);
+  --bg-selected: #ddeeff;
+  --bg-sidebar-selected: #e4f0fb;
+
+  --border-default: #d8dade;
+  --border-subtle: #e6e7eb;
+  --border-strong: #c2c7cd;
+  --border-focused: #399ee6;
+
+  /* Slightly darker text for better contrast on light backgrounds */
+  --text-primary: #2c3138;
+  --text-secondary: #5c6166;
+  --text-tertiary: #868b92;
+  --text-inverse: #ffffff;
+  --text-link: #2585d4;
+
+  --accent: #399ee6;
+  --accent-hover: #55b4d4;
+  --accent-active: #1c7eb4;
+  --accent-muted: rgba(57, 158, 230, 0.10);
+  --accent-light-blue: #55b4d4;
+  --accent-purple: #a37acc;
+  --accent-cyan: #4cbf99;
+  --accent-green: #86b300;
+  --accent-yellow: #f2ae49;
+  --accent-yellow-dim: #8B7000;
+  --accent-red: #f07171;
+  --accent-red-dim: #993333;
+
+  --status-added: #86b300;
+  --status-modified: #f2ae49;
+  --status-deleted: #f07171;
+  --status-renamed: #399ee6;
+  --status-untracked: #4cbf99;
+  --status-conflict: #ff6b35;
+  --status-success: #86b300;
+  --status-warning: #f2ae49;
+  --status-error: #f07171;
+  --status-info: #399ee6;
+
+  --diff-added-bg: rgba(134, 179, 0, 0.22);
+  --diff-removed-bg: rgba(240, 113, 113, 0.22);
+  --diff-added-line: rgba(134, 179, 0, 0.10);
+  --diff-removed-line: rgba(240, 113, 113, 0.10);
+  --diff-added-word: rgba(134, 179, 0, 0.40);
+  --diff-removed-word: rgba(240, 113, 113, 0.40);
+
+  --tag-bg: rgba(57, 158, 230, 0.08);
+  --tag-border: rgba(57, 158, 230, 0.3);
+  --tag-text: #399ee6;
+
+  --warning-bg: #fef9e7;
+  --warning-icon: #f2ae49;
+  --warning-border: #f0e0a0;
+
+  --comment: #abadb1;
+  --graph-line: #c8cacf;
+  --graph-node-fill: #ffffff;
+  --graph-node-border: #5c6166;
+  --graph-node-selected: #399ee6;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+
+  /* Scrollbar — translucent, visually distinct from the 1px splitter hairline */
+  --scrollbar-thumb: rgba(23, 26, 33, 0.22);
+  --scrollbar-thumb-hover: rgba(23, 26, 33, 0.40);
+
+  --splitter-color-hover: #399ee6;
+}
+
+/* Ollama-code Dark theme (Ayu Dark) */
+.dark {
+  --bg-primary: #0b0e14;
+  --bg-secondary: #0f1218;
+  --bg-tertiary: #131721;
+  --bg-elevated: #1a1f29;
+  --bg-hover: rgba(255, 255, 255, 0.04);
+  --bg-active: rgba(57, 186, 230, 0.12);
+  --bg-selected: rgba(57, 186, 230, 0.15);
+  --bg-sidebar-selected: rgba(57, 186, 230, 0.12);
+
+  --border-default: #1f2530;
+  --border-subtle: #161a23;
+  --border-strong: #2a313e;
+  --border-focused: #39BAE6;
+
+  --text-primary: #bfbdb6;
+  --text-secondary: #8a8f98;
+  --text-tertiary: #5c6168;
+  --text-inverse: #0b0e14;
+  --text-link: #39BAE6;
+
+  --accent: #39BAE6;
+  --accent-hover: #59C2FF;
+  --accent-active: #1c8eb4;
+  --accent-muted: rgba(57, 186, 230, 0.15);
+  --accent-light-blue: #59C2FF;
+  --accent-purple: #D2A6FF;
+  --accent-cyan: #95E6CB;
+  --accent-green: #AAD94C;
+  --accent-yellow: #FFD700;
+  --accent-yellow-dim: #8B7530;
+  --accent-red: #F26D78;
+  --accent-red-dim: #8B3A4A;
+
+  --status-added: #AAD94C;
+  --status-modified: #FFD700;
+  --status-deleted: #F26D78;
+  --status-renamed: #39BAE6;
+  --status-untracked: #95E6CB;
+  --status-conflict: #FF8F6F;
+  --status-success: #AAD94C;
+  --status-warning: #FFD700;
+  --status-error: #F26D78;
+  --status-info: #39BAE6;
+
+  --diff-added-bg: rgba(170, 217, 76, 0.18);
+  --diff-removed-bg: rgba(242, 109, 120, 0.18);
+  --diff-added-line: rgba(170, 217, 76, 0.08);
+  --diff-removed-line: rgba(242, 109, 120, 0.08);
+  --diff-added-word: rgba(170, 217, 76, 0.35);
+  --diff-removed-word: rgba(242, 109, 120, 0.35);
+
+  --tag-bg: rgba(57, 186, 230, 0.10);
+  --tag-border: rgba(57, 186, 230, 0.3);
+  --tag-text: #39BAE6;
+
+  --warning-bg: rgba(255, 215, 0, 0.08);
+  --warning-icon: #FFD700;
+  --warning-border: rgba(255, 215, 0, 0.2);
+
+  --comment: #646A71;
+  --graph-line: #3D4149;
+  --graph-node-fill: #0b0e14;
+  --graph-node-border: #bfbdb6;
+  --graph-node-selected: #39BAE6;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* Scrollbar — translucent, visually distinct from the 1px splitter hairline */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.14);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+
+  --splitter-color-hover: #39BAE6;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  /* Use system UI font stack for non-code text — much more readable than pure monospace */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 13.5px;
+  --font-size-base: 13.5px;
+  --font-size-tree: 12.5px;
+  --font-size-list: 12.5px;
+  --font-size-diff: 12px;
+  --font-size-mono: 11.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* All code paths, hashes, branches, file paths stay monospace */
+.mono, code, pre, kbd, .font-mono {
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace !important;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+  -webkit-app-region: no-drag;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  padding: 5px 10px;
+  outline: none;
+  transition: border-color 0.12s ease;
+}
+
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.15s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* Thin scrollbar variant — for tight panels like file trees */
+::-webkit-scrollbar.thin {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* === Buttons === */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 5px;
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+  letter-spacing: -0.005em;
+}
+
+.btn-primary {
+  background-color: var(--accent);
+  color: var(--text-inverse);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(57, 158, 230, 0.2);
+}
+
+.btn-primary:hover {
+  background-color: var(--accent-hover);
+  box-shadow: 0 2px 5px rgba(57, 158, 230, 0.3);
+}
+
+.btn-primary:disabled {
+  background-color: var(--bg-elevated);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+}
+
+.btn-secondary:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.btn-ghost {
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.btn-danger {
+  background-color: var(--status-deleted);
+  color: #ffffff;
+}
+
+.btn-danger:hover {
+  background-color: #ff7a85;
+}
+
+/* Author badge — colored background with theme-aware text color.
+   In light theme: dark text on light colored backgrounds for contrast.
+   In dark theme: white text on dark colored backgrounds. */
+.author-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  border-radius: 2px;
+  color: var(--author-text, #ffffff);
+  flex-shrink: 0;
+}
+
+:root {
+  --author-text: #ffffff;
+  --overlay-bg: rgba(0, 0, 0, 0.30);
+  --overlay-backdrop: blur(2px);
+}
+
+.dark {
+  --author-text: #ffffff;
+  --overlay-bg: rgba(0, 0, 0, 0.55);
+  --overlay-backdrop: blur(2px);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.icon-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.icon-btn.active {
+  background-color: var(--bg-active);
+  color: var(--accent);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* === Panels === */
+.panel {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-default);
+  background-color: var(--bg-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-secondary);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+/* === List items === */
+.list-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background-color 0.1s ease;
+  user-select: none;
+}
+
+.list-item:hover {
+  background-color: var(--bg-hover);
+}
+
+.list-item.active {
+  background-color: var(--bg-selected);
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+}
+
+/* === Badges === */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid transparent;
+  line-height: 1.2;
+}
+
+.badge-added { background-color: rgba(170, 217, 76, 0.12); color: var(--status-added); border-color: rgba(170, 217, 76, 0.25); }
+.badge-modified { background-color: rgba(255, 215, 0, 0.12); color: var(--status-modified); border-color: rgba(255, 215, 0, 0.25); }
+.badge-deleted { background-color: rgba(242, 109, 120, 0.12); color: var(--status-deleted); border-color: rgba(242, 109, 120, 0.25); }
+.badge-renamed { background-color: rgba(57, 186, 230, 0.12); color: var(--status-renamed); border-color: rgba(57, 186, 230, 0.25); }
+.badge-untracked { background-color: rgba(149, 230, 203, 0.12); color: var(--status-untracked); border-color: rgba(149, 230, 203, 0.25); }
+.badge-conflict { background-color: rgba(255, 143, 111, 0.15); color: var(--status-conflict); border-color: rgba(255, 143, 111, 0.3); }
+
+input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* === Animations (subtle, minimal) === */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.18s ease-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.22s ease-out;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.18s ease-out;
+}
+
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+/* === Reduce motion === */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* === Code/mono text === */
+.mono {
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* === Small text utility (replaces text-2xs misuses) === */
+.text-2xs {
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+/* === Syntax highlighting colors (Ayu Dark) === */
+.text-keyword { color: var(--accent-yellow); }
+.text-string { color: var(--status-added); }
+.text-number { color: var(--accent-purple); }
+.text-comment { color: var(--comment); font-style: italic; }
+.text-function { color: var(--accent-blue); }
+.text-type { color: var(--accent-cyan); }
+
+/* === Drag and drop === */
+.drag-over {
+  background-color: var(--bg-active) !important;
+  border: 1px dashed var(--accent) !important;
+}
+
+.dragging {
+  opacity: 0.5;
+}
+
+/* === Truncate === */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* === Split view divider === */
+/* Crisp 1px hairline (no gray slab). Fat invisible hit area via ::after (7px).
+   Hover/drag paints the accent color — no layout shift, color only.
+   The splitter IS the divider: adjacent panels must NOT add border-r/border-l/border-t. */
+.split-divider {
+  width: 1px;
+  background: var(--border-default);
+  cursor: col-resize;
+  transition: background 0.12s;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.split-divider:hover,
+.split-divider.dragging {
+  background: var(--splitter-color-hover);
+}
+
+.split-divider::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
+
+.split-divider-horizontal {
+  height: 1px;
+  width: 100%;
+  background: var(--border-default);
+  cursor: row-resize;
+  transition: background 0.12s;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.split-divider-horizontal:hover,
+.split-divider-horizontal.dragging {
+  background: var(--splitter-color-hover);
+}
+
+.split-divider-horizontal::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  bottom: -3px;
+}
+
+/* === Resizable panel === */
+.resizable-panel {
+  position: relative;
+}
+
+/* ===========================================================================
+ * UX Polish: Focus rings + keyboard nav affordances
+ * ===========================================================================
+ *
+ * Visible focus indicators are critical for keyboard users. We use a
+ * 2px accent-colored ring with a 1px offset so it doesn't overlap the
+ * element's border. This matches Windows 11 / macOS system focus rings.
+ *
+ * We only show focus rings when the user is navigating by keyboard
+ * (:focus-visible), not on every mouse click (which would be noisy).
+ */
+
+/* Focus-visible: only shown when navigating by keyboard (Tab/Shift+Tab) */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 3px;
+  z-index: 1;
+  position: relative;
+}
+
+/* Remove the default browser outline (we replace it with focus-visible above) */
+*:focus {
+  outline: none;
+}
+
+/* Buttons get a subtle box-shadow on focus-visible for extra prominence */
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+
+/* Inputs: use a thinner focus ring (they already have a border) */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+/* List items (sidebar nav, file rows, commit rows): left accent border */
+.list-item:focus-visible,
+[role="option"]:focus-visible,
+[role="treeitem"]:focus-visible,
+aside nav button:focus-visible {
+  outline: none;
+  background-color: var(--bg-active);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* ===========================================================================
+ * UX Polish: Hover states — make interactive elements feel tactile
+ * ===========================================================================
+ */
+
+/* Smooth transition on all interactive elements */
+button,
+a,
+[role="button"],
+.list-item,
+select {
+  transition: background-color 0.15s ease, color 0.15s ease,
+    border-color 0.15s ease, box-shadow 0.15s ease, transform 0.08s ease;
+}
+
+/* Buttons: subtle press feedback */
+button:active:not(:disabled),
+[role="button"]:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* ===========================================================================
+ * UX Polish: Tooltip shortcut hints
+ * ===========================================================================
+ *
+ * When a button has title="... (Ctrl+K)" the shortcut is shown in a
+ * subtle grey below the main tooltip text. This is handled by the
+ * native title attribute + a kbd-styled span where applicable.
+ */
+
+/* kbd element styling — for keyboard shortcut hints in tooltips */
+kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-secondary);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  box-shadow: 0 1px 0 var(--border-subtle);
+}
+
+/* ===========================================================================
+ * UX Polish: Empty states — make "nothing here" feel intentional
+ * ===========================================================================
+ *
+ * When a list/panel is empty (clean working tree, no commits, no tags),
+ * show a friendly illustration + actionable hint instead of a blank void.
+ */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 12px;
+  opacity: 0.4;
+  color: var(--text-tertiary);
+}
+
+.empty-state-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.empty-state-desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.empty-state-action {
+  margin-top: 16px;
+}
+
+/* ===========================================================================
+ * UX Polish: Loading states — spinners + skeleton screens
+ * ===========================================================================
+ */
+
+/* Pulse animation for skeleton placeholders */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.skeleton {
+  background-color: var(--bg-tertiary);
+  border-radius: 4px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Loading spinner — small, accent-colored */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+/* ===========================================================================
+ * UX Polish: Scrollbar improvements — thin + auto-hide on mac
+ * ===========================================================================
+ */
+
+/* On macOS, scrollbars auto-hide by default. On Windows/Linux, they're
+ * always visible. We make them thin (6px) and only show on hover. */
+
+/* Thin scrollbar variant — applied to tight panels (file trees, sidebars) */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* ===========================================================================
+ * UX Polish: Clickable "N files hidden" — turns into a button
+ * ===========================================================================
+ *
+ * In the Changes view, "8 files hidden" is shown when the file filter
+ * excludes files (e.g., ignored files, or files outside the current dir
+ * scope). Make it look clickable so users know they can click to reveal.
+ */
+
+.clickable-text {
+  cursor: pointer;
+  color: var(--accent);
+  text-decoration: none;
+  transition: color 0.15s ease, text-decoration 0.15s ease;
+}
+
+.clickable-text:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+/* ===========================================================================
+ * UX Polish: Keyboard shortcut overlay (Ctrl+? / Cmd+?)
+ * ===========================================================================
+ *
+ * Modal overlay that shows all available keyboard shortcuts. Triggered by
+ * Ctrl+? or Cmd+? (or Ctrl+/ on some layouts). Rendered by App.tsx.
+ */
+
+.shortcut-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--overlay-bg, rgba(0, 0, 0, 0.4));
+  backdrop-filter: var(--overlay-backdrop, blur(2px));
+  -webkit-backdrop-filter: var(--overlay-backdrop, blur(2px));
+}
+
+.shortcut-overlay-panel {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.2s ease-out;
+}
+
+.shortcut-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.shortcut-overlay-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.shortcut-overlay-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.shortcut-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 12.5px;
+}
+
+.shortcut-row-desc {
+  color: var(--text-secondary);
+}
+
+.shortcut-row-keys {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.shortcut-row-keys kbd {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+/* ===========================================================================
+ * UX Polish: Selection highlight for commit/file rows
+ * ===========================================================================
+ */
+
+/* When a row is "selected" (clicked), show a stronger highlight than hover */
+.row-selected {
+  background-color: var(--bg-selected) !important;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Hover state for rows — subtle background change */
+.row-hoverable:hover {
+  background-color: var(--bg-hover);
+  cursor: pointer;
+}
+
+/* ===========================================================================
+ * UX Polish: Reduced motion — respect user's OS preference
+ * ===========================================================================
+ *
+ * If the user has "Reduce motion" enabled in their OS settings, disable
+ * all transitions and animations. This is an accessibility requirement.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===========================================================================
+ * UX Polish: Keyboard focus visibility
+ * ===========================================================================
+ *
+ * Mouse users should not see focus outlines (noisy), but keyboard users MUST
+ * see where they are — otherwise Tab navigation is unusable. :focus-visible
+ * only matches keyboard-initiated focus, giving both groups what they need.
+ */
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+/* Rows / tree items (divs with onClick) opt in via the .focusable class. */
+.focusable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The generic outline above would double up with the browser ring on the
+   panel-style inputs; keep those smooth instead. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline-offset: 0;
+}

@@ -1,0 +1,56 @@
+# =============================================================================
+# PrismGit — Multi-platform Docker Build Orchestration
+# =============================================================================
+# Build all platforms:
+#   docker compose up --build
+#
+# Or build individual platforms:
+#   docker compose run --rm build-linux
+#   docker compose run --rm build-win
+#   docker compose run --rm build-mac
+#   docker compose run --rm build-mac-arm64
+# =============================================================================
+
+services:
+  build-linux:
+    build:
+      context: .
+      dockerfile: Dockerfile.linux
+    image: smartgit-electron:linux
+    container_name: smartgit-build-linux
+    volumes:
+      - ./release/linux:/release
+
+  build-win:
+    build:
+      context: .
+      dockerfile: Dockerfile.win
+    image: smartgit-electron:win
+    container_name: smartgit-build-win
+    volumes:
+      - ./release/win:/release
+    environment:
+      - WINEPREFIX=/tmp/wine
+      - WINEDEBUG=-all
+
+  build-mac:
+    build:
+      context: .
+      dockerfile: Dockerfile.mac
+      args:
+        ARCH: x64
+    image: smartgit-electron:mac
+    container_name: smartgit-build-mac
+    volumes:
+      - ./release/mac:/release
+
+  build-mac-arm64:
+    build:
+      context: .
+      dockerfile: Dockerfile.mac
+      args:
+        ARCH: arm64
+    image: smartgit-electron:mac-arm64
+    container_name: smartgit-build-mac-arm64
+    volumes:
+      - ./release/mac-arm64:/release

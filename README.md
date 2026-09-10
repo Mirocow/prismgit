@@ -1,93 +1,156 @@
-# gitclient
+# PrismGit
 
+A modern, cross-platform Git client built on Electron + React + TypeScript, inspired by SmartGit 20–24 with **Ollama-code** design language (Ayu Dark/Light palettes).
 
+[![Tests](https://img.shields.io/badge/tests-161%20passing-brightgreen)](tests/) [![Bundle](https://img.shields.io/badge/bundle-240KB%20gzip%2072KB-blue)](#) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## Getting started
+## Quick Start
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+```bash
+# Clone and install
+git clone <repo-url>
+cd prismgit-electron
+make install
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+# Development
+make dev
 
-## Add your files
+# Build all platforms via Docker
+make docker-all
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+# Run tests
+make test
+```
+
+## Features
+
+### Working Tree
+- **Changes** — stage/unstage/restore/ignore/delete/reveal with drag & drop
+- **History** — commit log with graph visualization, search, file tree per commit
+- **Annotate** — inline annotations with overlap analysis (SmartGit 24)
+- **Investigate** — file history with rename following
+- **Blame** — line-by-line authorship with commit colors
+- **Journal** — operation history with filters
+
+### Workflows
+- **Git-Flow** — Feature/Release/Hotfix with start/finish workflows
+- **Pull Requests** — GitHub PR management (list, create, open)
+- **Distributed Reviews** — offline code review stored in git notes (SmartGit add-on)
+
+### Refs
+- **Branches** — local/remote, checkout, create, rename, delete, merge, push
+- **Tags** — annotated/lightweight, create, delete, push
+- **Worktrees** — add, remove, prune
+- **Reflog** — view, delete entries
+- **Stashes** — push, pop, apply, drop, branch
+- **Submodules** — init, update, sync, deinit, add
+- **Git LFS** — install, pull, push, fetch, track, list
+
+### SmartGit 24 Features
+- **Interactive Rebase** — visual todo editor (pick/reword/edit/squash/fixup/drop)
+- **Conflict Solver** — 3-pane view (Base | Ours | Theirs) with 4 layouts
+- **Smart Views** — preset filters for Graph (All, Current Branch, My Commits, Recent, etc.)
+- **Overlap Column** — visualization of related commits
+- **Find Object** — search branch/tag/remote refs (Ctrl+F)
+- **Split Commit** — split via interactive rebase
+- **Edit Commit Message** — inline editor
+- **Cherry Pick / Revert** — with conflict detection
+- **Tolerant Clone URL** — strips "git clone " prefix, auto-derives folder name
+
+### Three Window Styles
+- **Standard** — full sidebar + all pages
+- **Log** — History-focused (sidebar hidden)
+- **Working Tree** — Changes-focused
+
+Switch with Ctrl+Shift+1/2/3 or toolbar button.
+
+### Two Themes (Ollama-code)
+- **Dark** (default) — Ayu Dark: `#0b0e14` background
+- **Light** — Ayu Light: `#f8f9fa` background
+
+Toggle with Ctrl+Shift+T.
+
+## Tech Stack
+
+- Electron 32, React 18, TypeScript 5.6, Vite 5
+- Tailwind CSS 3, Zustand, simple-git, electron-store
+- Custom SVG icons (no icon library)
+- Vitest + Testing Library for tests
+- Docker + Wine for cross-platform builds
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) — system design and data flow
+- [API Reference](docs/API.md) — all Git operations and IPC channels
+- [Contributing](docs/CONTRIBUTING.md) — development setup and guidelines
+- [Changelog](docs/CHANGELOG.md) — version history
+- [Docker Build](docs/DOCKER-BUILD.md) — multi-platform build guide
+- [Testing](docs/TESTING.md) — test suite documentation
+
+## Project Structure
 
 ```
-cd existing_repo
-git remote add origin http://192.168.1.2/web/git/gitclient.git
-git branch -M main
-git push -uf origin main
+├── electron/                 # Main process
+│   ├── main.ts               # Entry, window state, context menu
+│   ├── preload.ts            # Context bridge API
+│   ├── menu.ts               # Application menu
+│   ├── ipc/                  # IPC handlers (5 modules)
+│   ├── services/             # Business logic
+│   │   ├── git.ts            # Git operations (simple-git)
+│   │   ├── github.ts         # GitHub API client
+│   │   ├── storage.ts        # Persistent settings
+│   │   └── watcher.ts        # File watcher for auto-refresh
+│   └── types/                # TypeScript API contracts
+├── src/                      # Renderer process
+│   ├── App.tsx               # Root with lazy routes + hotkeys
+│   ├── components/           # UI components
+│   ├── pages/                # 18 lazy-loaded pages
+│   ├── stores/               # Zustand state management
+│   ├── lib/                  # Utilities and business logic
+│   └── styles/               # Ayu Dark/Light themes
+├── tests/                    # Vitest test suite
+│   ├── unit/                 # Unit tests
+│   ├── integration/          # Service integration tests
+│   └── components/           # React component tests
+├── Dockerfile                # Multi-platform Docker build
+├── docker-compose.yml        # 4 build services
+├── Makefile                  # All-in-one task runner
+└── vitest.config.ts          # Test configuration
 ```
 
-## Integrate with your tools
+## Keyboard Shortcuts
 
-- [ ] [Set up project integrations](http://192.168.1.2/web/git/gitclient/-/settings/integrations)
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+O | Open Repository |
+| Ctrl+Shift+O | Clone Repository |
+| Ctrl+Enter | Commit |
+| Ctrl+Shift+P | Push |
+| Ctrl+Shift+L | Pull |
+| Ctrl+Shift+F | Fetch |
+| Ctrl+Shift+G | Git-Flow dialog |
+| Ctrl+Shift+R | Interactive Rebase |
+| Ctrl+Shift+N | New Branch |
+| Ctrl+Alt+S | Stash |
+| Ctrl+Shift+T | Toggle Theme |
+| Ctrl+Shift+1/2/3 | Window Style (Standard/Log/Working Tree) |
+| Ctrl+F | Find Object |
+| Esc | Close dialog |
 
-## Collaborate with your team
+## Docker Build
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+All builds happen in Docker containers:
 
-## Test and Deploy
+```bash
+make docker-all          # All platforms
+make docker-linux        # Linux only
+make docker-win          # Windows (via Wine)
+make docker-mac          # macOS Intel
+make docker-mac-arm64    # macOS Apple Silicon
+```
 
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+See [docs/DOCKER-BUILD.md](docs/DOCKER-BUILD.md) for details.
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+MIT

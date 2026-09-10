@@ -1,0 +1,110 @@
+{
+  "name": "prismgit-electron",
+  "version": "2.0.0",
+  "description": "A modern Git client built on Electron + React + TypeScript — visual history, smart merges, and a clean Ayu palette.",
+  "author": "PrismGit Team",
+  "license": "MIT",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "package": "npm run build && electron-builder",
+    "package:win": "npm run build && electron-builder --win",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:linux": "npm run build && electron-builder --linux",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit tests/components",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
+    "test:e2e": "playwright test --workers=1",
+    "test:e2e:headed": "xvfb-run -a playwright test --workers=1",
+    "test:verify": "npm run typecheck && npm run test && npm run build && npm run test:e2e",
+    "verify": "npm run typecheck && npm run test && npm run build",
+    "hooks:install": "bash scripts/install-hooks.sh",
+    "test:simple-git": "node --test tests/simple-git-suite.mjs"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.27.0",
+    "simple-git": "^3.27.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@testing-library/jest-dom": "^6.5.0",
+    "@testing-library/react": "^16.0.1",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.2",
+    "@vitest/coverage-v8": "^2.1.2",
+    "@vitest/ui": "^2.1.2",
+    "autoprefixer": "^10.4.20",
+    "electron": "^32.1.2",
+    "electron-builder": "^25.1.8",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8",
+    "vite-plugin-electron": "^0.28.8",
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^2.1.2"
+  },
+  "build": {
+    "appId": "com.prismgit.electron",
+    "productName": "PrismGit",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  }
+}
