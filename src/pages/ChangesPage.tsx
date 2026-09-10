@@ -1208,49 +1208,66 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             </div>
             <div className="overflow-y-auto" style={{ height: 'calc(100% - 24px)' }}>
               {journalLoading ? (
-                <div className="px-2 py-2 text-xs text-text-tertiary">Loading...</div>
+                <div className="px-2 py-2 text-xs text-text-tertiary flex items-center gap-2">
+                  <span className="spinner" /> Loading...
+                </div>
               ) : journal.length === 0 ? (
                 <div className="px-2 py-2 text-xs text-text-tertiary">No commits yet</div>
               ) : (
-                journal.map((entry) => {
-                  const initials = getInitials(entry.author.name);
-                  const color = getAuthorColor(entry.author.name);
-                  return (
-                    <div
-                      key={entry.hash}
-                      className="group flex items-center gap-2 px-2 py-1 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
-                      onClick={() => {
-                        // Click on a commit in journal → jump to History with this commit selected
-                        useSelectionStore.getState().selectCommit(entry.hash);
-                        window.location.hash = '#/history';
-                      }}
-                      title="Click to view this commit in History"
-                    >
-                      {/* Author badge */}
-                      <span
-                        className="flex-shrink-0 rounded author-badge text-center"
-                        style={{
-                          backgroundColor: color.bg,
-                          width: 24,
-                          height: 18,
-                          fontSize: 9,
-                          lineHeight: '18px',
-                        }}
-                      >
-                        {initials}
-                      </span>
-                      {/* Decorations (tags / HEAD / branches) — were missing here
-                          entirely: the journal showed no tags at all. */}
-                      <RefBadges refs={entry.refs} max={3} />
-                      {/* Message */}
-                      <span className="flex-1 truncate text-text-primary">{entry.subject}</span>
-                      {/* Hash — clickable */}
-                      <CommitHashLink hash={entry.hash} />
-                      {/* Date */}
-                      <span className="text-text-tertiary flex-shrink-0">{formatTime(entry.author.date)}</span>
+                (() => {
+                  // Group commits by relative time period for better scannability.
+                  // Instead of repeating "5m ago" on every row, group them:
+                  //   "3 commits · 5m ago"
+                  //   "1 commit · 1h ago"
+                  type Group = { label: string; entries: typeof journal };
+                  const groups: Group[] = [];
+                  let currentGroup: Group | null = null;
+                  for (const entry of journal) {
+                    const timeLabel = formatTime(entry.author.date);
+                    if (!currentGroup || currentGroup.label !== timeLabel) {
+                      currentGroup = { label: timeLabel, entries: [] };
+                      groups.push(currentGroup);
+                    }
+                    currentGroup.entries.push(entry);
+                  }
+                  return groups.map((grp, gi) => (
+                    <div key={gi}>
+                      {grp.entries.length > 1 && (
+                        <div className="px-2 py-0.5 bg-bg-tertiary/50 text-2xs text-text-tertiary border-b border-border-subtle">
+                          {grp.entries.length} commits · {grp.label}
+                        </div>
+                      )}
+                      {grp.entries.map((entry) => {
+                        const initials = getInitials(entry.author.name);
+                        const color = getAuthorColor(entry.author.name);
+                        return (
+                          <div
+                            key={entry.hash}
+                            className="group flex items-center gap-2 px-2 py-1 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
+                            onClick={() => {
+                              useSelectionStore.getState().selectCommit(entry.hash);
+                              window.location.hash = '#/history';
+                            }}
+                            title="Click to view this commit in History"
+                          >
+                            <span
+                              className="flex-shrink-0 rounded author-badge text-center"
+                              style={{ backgroundColor: color.bg, width: 24, height: 18, fontSize: 9, lineHeight: '18px' }}
+                            >
+                              {initials}
+                            </span>
+                            <RefBadges refs={entry.refs} max={3} />
+                            <span className="flex-1 truncate font-medium text-text-primary">{entry.subject}</span>
+                            <CommitHashLink hash={entry.hash} />
+                            {grp.entries.length === 1 && (
+                              <span className="text-text-tertiary flex-shrink-0">{grp.label}</span>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })
+                  ));
+                })()
               )}
             </div>
           </div>
