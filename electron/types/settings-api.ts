@@ -140,6 +140,8 @@ export interface AppSettings {
    * 0 disables the periodic check (manual "Check now" still works).
    */
   repoRemoteCheckIntervalSec?: number;
+  /** Max number of commands shown in the Output panel (default 20). */
+  commandLogLimit?: number;
   // === Per-remote authorization (Repository Settings → Remotes) ===
   /**
    * HTTP(S) credentials used for push/pull/fetch per remote.

@@ -571,7 +571,6 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     }
     try {
       // SmartGit Manual: AI Commit Messages — @ai placeholder → replace with AI-generated
-      // message; WIP (entire message) → "WIP: <ai message>"
       let finalMsg = commitMsg.trim();
       const placeholder = detectAIPlaceholder(finalMsg);
       if (placeholder && settings?.aiCommitMessagesEnabled) {
@@ -844,6 +843,23 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       if (fileStatusFilter === 'all' || fileStatusFilter === 'untracked') return true;
       return false;
     })), [status, sortFiles, fileFilter, fileStatusFilter, fileStatusFilterSet, fileScopeDir]);
+
+  // Ctrl/Cmd+A: select all visible files in the file list
+  // (placed after stagedFiles/unstagedFiles/untrackedFiles are declared)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      if (isInInput) return;
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        e.preventDefault();
+        const allFiles = [...stagedFiles, ...unstagedFiles, ...untrackedFiles];
+        setSelectedFiles(new Set(allFiles.map(f => f.path)));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [stagedFiles, unstagedFiles, untrackedFiles]);
 
   const totalChanged = (status?.files.length ?? 0);
 

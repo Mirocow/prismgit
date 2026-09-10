@@ -1145,6 +1145,31 @@ smartgit.refresh.inspectEol=true
         </section>
         )}
 
+        {/* Output / Command Log Settings */}
+        {showApp && (
+        <section className="panel mb-4">
+          <div className="panel-header">Output Panel</div>
+          <div className="p-5 space-y-3 text-sm">
+            <label className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Command log limit</div>
+                <div className="text-xs text-text-tertiary">
+                  Maximum number of commands shown in the Output panel's Commands tab (default 20)
+                </div>
+              </div>
+              <input
+                type="number"
+                min={5}
+                max={500}
+                className="w-20 text-sm"
+                value={settings.commandLogLimit ?? 20}
+                onChange={(e) => setSetting('commandLogLimit', Math.max(5, Math.min(500, Number(e.target.value))))}
+              />
+            </label>
+          </div>
+        </section>
+        )}
+
         {/* About */}
         {showApp && (
         <section className="panel mb-4">

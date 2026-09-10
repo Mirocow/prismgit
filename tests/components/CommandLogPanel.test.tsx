@@ -45,7 +45,7 @@ function entry(partial: Partial<CommandLogEntry>): CommandLogEntry {
     id: idCounter,
     timestamp: 1757500000000 + idCounter * 1000,
     repo: '/repos/project',
-    args: ['status'],
+    args: ['push'],  // default to a user command so it's visible by default
     exitCode: 0,
     signal: null,
     durationMs: 42,
@@ -68,7 +68,7 @@ const failedPush = entry({
 });
 
 const okStatus = entry({
-  args: ['status', '--porcelain', '-b'],
+  args: ['fetch', 'origin'],
   stdout: '## feature/x...origin/feature/x [ahead 1]\n',
   durationMs: 17,
 });
@@ -90,7 +90,7 @@ describe('CommandLogPanel — Commands tab (raw git output)', () => {
     render(<CommandLogPanel onClose={() => {}} />);
 
     expect(await screen.findByText('git push origin feature/x')).toBeInTheDocument();
-    expect(screen.getByText('git status --porcelain -b')).toBeInTheDocument();
+    expect(screen.getByText('git fetch origin')).toBeInTheDocument();
     expect(screen.getByText(/exit 1/)).toBeInTheDocument();
     expect(screen.getByText('812ms')).toBeInTheDocument();
     // failed counter badge in the tab
@@ -118,7 +118,7 @@ describe('CommandLogPanel — Commands tab (raw git output)', () => {
     mockList.mockResolvedValue([okStatus]);
     render(<CommandLogPanel onClose={() => {}} />);
 
-    fireEvent.click(await screen.findByText('git status --porcelain -b'));
+    fireEvent.click(await screen.findByText('git fetch origin'));
 
     expect(screen.getByText('stdout:')).toBeInTheDocument();
     expect(screen.getByText(/## feature\/x\.\.\.origin\/feature\/x \[ahead 1\]/)).toBeInTheDocument();
@@ -130,12 +130,12 @@ describe('CommandLogPanel — Commands tab (raw git output)', () => {
     render(<CommandLogPanel onClose={() => {}} />);
 
     await screen.findByText('git push origin feature/x');
-    expect(screen.getByText('git status --porcelain -b')).toBeInTheDocument();
+    expect(screen.getByText('git fetch origin')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle('Show only failed commands (non-zero exit code)'));
 
     expect(screen.getByText('git push origin feature/x')).toBeInTheDocument();
-    expect(screen.queryByText('git status --porcelain -b')).not.toBeInTheDocument();
+    expect(screen.queryByText('git fetch origin')).not.toBeInTheDocument();
   });
 
   it('"Copy" puts all visible commands with their output on the clipboard', async () => {
@@ -148,7 +148,7 @@ describe('CommandLogPanel — Commands tab (raw git output)', () => {
     expect(mockWriteText).toHaveBeenCalledTimes(1);
     const text = mockWriteText.mock.calls[0][0] as string;
     expect(text).toContain('$ git push origin feature/x');
-    expect(text).toContain('$ git status --porcelain -b');
+    expect(text).toContain('$ git fetch origin');
     expect(text).toContain('failed to push some refs');
   });
 
@@ -156,19 +156,19 @@ describe('CommandLogPanel — Commands tab (raw git output)', () => {
     mockList.mockResolvedValue([okStatus]);
     render(<CommandLogPanel onClose={() => {}} />);
 
-    await screen.findByText('git status --porcelain -b');
+    await screen.findByText('git fetch origin');
     fireEvent.click(screen.getByTitle('Clear command log'));
 
     await waitFor(() => expect(mockClear).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(useCommandLogStore.getState().entries).toEqual([]));
-    expect(screen.queryByText('git status --porcelain -b')).not.toBeInTheDocument();
+    expect(screen.queryByText('git fetch origin')).not.toBeInTheDocument();
   });
 
   it('shows a helpful empty state when nothing was captured', async () => {
     mockList.mockResolvedValue([]);
     render(<CommandLogPanel onClose={() => {}} />);
     expect(
-      await screen.findByText(/No git commands captured yet/),
+      await screen.findByText(/No user commands yet/),
     ).toBeInTheDocument();
   });
 });
