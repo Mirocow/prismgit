@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api, type StatusResult } from '../lib/api';
+import { useOperationLogStore } from './operationLogStore';
 
 interface GitState {
   status: StatusResult | null;
@@ -38,28 +39,72 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   stageAll: async (repoPath) => {
-    await api.git.addAll(repoPath);
-    await get().refreshStatus(repoPath);
+    const log = useOperationLogStore.getState();
+    const opId = log.startOp('Stage All', repoPath, `git add .`);
+    try {
+      await api.git.addAll(repoPath);
+      await get().refreshStatus(repoPath);
+      log.finishOp(opId, 'All files staged');
+    } catch (e) {
+      log.failOp(opId, String(e));
+      throw e;
+    }
   },
 
   commit: async (repoPath, message, amend) => {
-    const hash = await api.git.commit(repoPath, message, amend);
-    await get().refreshStatus(repoPath);
-    return hash;
+    const log = useOperationLogStore.getState();
+    const cmd = amend ? 'git commit --amend' : 'git commit';
+    const opId = log.startOp(amend ? 'Commit (Amend)' : 'Commit', repoPath, `${cmd} -m "..."`);
+    try {
+      const hash = await api.git.commit(repoPath, message, amend);
+      await get().refreshStatus(repoPath);
+      log.finishOp(opId, `Commit ${hash.substring(0, 7)}`);
+      return hash;
+    } catch (e) {
+      log.failOp(opId, String(e));
+      throw e;
+    }
   },
 
   push: async (repoPath, remote, branch, setUpstream) => {
-    await api.git.push(repoPath, remote, branch, setUpstream);
-    await get().refreshStatus(repoPath);
+    const log = useOperationLogStore.getState();
+    const cmd = `git push ${remote || 'origin'} ${branch || ''} ${setUpstream ? '-u' : ''}`.trim();
+    const opId = log.startOp('Push', repoPath, cmd);
+    try {
+      await api.git.push(repoPath, remote, branch, setUpstream);
+      await get().refreshStatus(repoPath);
+      log.finishOp(opId, 'Pushed successfully');
+    } catch (e) {
+      log.failOp(opId, String(e));
+      throw e;
+    }
   },
 
   pull: async (repoPath, remote, branch) => {
-    await api.git.pull(repoPath, remote, branch);
-    await get().refreshStatus(repoPath);
+    const log = useOperationLogStore.getState();
+    const cmd = `git pull ${remote || 'origin'} ${branch || ''}`.trim();
+    const opId = log.startOp('Pull (Merge)', repoPath, cmd);
+    try {
+      await api.git.pull(repoPath, remote, branch);
+      await get().refreshStatus(repoPath);
+      log.finishOp(opId, 'Pulled successfully');
+    } catch (e) {
+      log.failOp(opId, String(e));
+      throw e;
+    }
   },
 
   fetch: async (repoPath, remote, prune) => {
-    await api.git.fetch(repoPath, remote, prune);
-    await get().refreshStatus(repoPath);
+    const log = useOperationLogStore.getState();
+    const cmd = `git fetch ${remote || 'origin'} ${prune ? '--prune' : ''}`.trim();
+    const opId = log.startOp('Fetch', repoPath, cmd);
+    try {
+      await api.git.fetch(repoPath, remote, prune);
+      await get().refreshStatus(repoPath);
+      log.finishOp(opId, 'Fetched successfully');
+    } catch (e) {
+      log.failOp(opId, String(e));
+      throw e;
+    }
   },
 }));

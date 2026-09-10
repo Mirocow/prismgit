@@ -17,6 +17,7 @@ import { SequencerPanel } from './components/SequencerPanel';
 import { ApplyPatchModal } from './components/ApplyPatchModal';
 import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
+import { CommandLogPanel } from './components/CommandLogPanel';
 import { NAV_SHORTCUTS } from './components/navItems';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
@@ -78,6 +79,7 @@ export default function App() {
   const [conflictFile, setConflictFile] = useState<string | null>(null);
   const [dismissRebase, setDismissRebase] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showCommandLog, setShowCommandLog] = useState(false);
 
   useEffect(() => {
     loadRepos();
@@ -132,6 +134,7 @@ export default function App() {
     const handleGitFlow = () => setShowGitFlow(true);
     const handleIRebase = () => setShowIRebase(true);
     const handleShowShortcuts = () => setShowShortcuts(true);
+    const handleToggleCommandLog = () => setShowCommandLog(s => !s);
 
     const cleanups = [
       window.smartgit.events.on('menu:openRepository', (path) => handleOpenRepo(path as string)),
@@ -145,6 +148,7 @@ export default function App() {
       window.smartgit.events.on('menu:gitFlow', handleGitFlow),
       window.smartgit.events.on('menu:interactiveRebase', handleIRebase),
       window.smartgit.events.on('menu:showShortcuts', handleShowShortcuts),
+      window.smartgit.events.on('menu:commandLog', handleToggleCommandLog),
     ];
     return () => cleanups.forEach((fn) => fn && fn());
   }, [toast]);
@@ -194,6 +198,12 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && (e.key === '?' || e.key === '/')) {
         e.preventDefault();
         setShowShortcuts(s => !s);
+      }
+      // Ctrl+Shift+U — toggle Output panel (command log)
+      // (J was taken by Pull, O by Clone — U is "Output" mnemonic, like VS Code uses Ctrl+Shift+U)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'U' && !isInInput) {
+        e.preventDefault();
+        setShowCommandLog(s => !s);
       }
       // Alt+number navigation: Alt+1=Changes, Alt+2=History, Alt+3=Diff,
       // Alt+4=Branches, Alt+5=Tags, Alt+6=Stashes, Alt+, =Settings
@@ -343,7 +353,10 @@ export default function App() {
             </Suspense>
           </div>
         </div>
-        <StatusBar />
+        <StatusBar
+          showCommandLog={showCommandLog}
+          onToggleCommandLog={() => setShowCommandLog(s => !s)}
+        />
         <ToastContainer />
         <CloneModal open={showClone} onClose={() => setShowClone(false)} />
         <InitModal open={showInit} onClose={() => setShowInit(false)} />
@@ -408,7 +421,13 @@ export default function App() {
           </Suspense>
         </main>
       </div>
-      <StatusBar />
+      {showCommandLog && (
+        <CommandLogPanel onClose={() => setShowCommandLog(false)} />
+      )}
+      <StatusBar
+        showCommandLog={showCommandLog}
+        onToggleCommandLog={() => setShowCommandLog(s => !s)}
+      />
       <ToastContainer />
       <CloneModal open={showClone} onClose={() => setShowClone(false)} />
       <InitModal open={showInit} onClose={() => setShowInit(false)} />

@@ -2,10 +2,11 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
+import { useOperationLogStore } from '../stores/operationLogStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
-import { ArrowUp, ArrowDown } from './icons';
+import { ArrowUp, ArrowDown, Loader, ChevronUp, ChevronDown } from './icons';
 
 /**
  * Clickable commit hash — clicking jumps to History and focuses that commit.
@@ -46,7 +47,13 @@ export function CommitHashLink({ hash, short = true, className }: {
   );
 }
 
-export function StatusBar() {
+export function StatusBar({
+  showCommandLog,
+  onToggleCommandLog,
+}: {
+  showCommandLog?: boolean;
+  onToggleCommandLog?: () => void;
+}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const status = useGitStore((s) => s.status);
   const lastRefresh = useGitStore((s) => s.lastRefresh);
@@ -54,6 +61,11 @@ export function StatusBar() {
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const selectCommit = useSelectionStore((s) => s.selectCommit);
   const toast = useToastStore();
+  // Running operations — show a spinner + progress in the status bar
+  const runningIds = useOperationLogStore((s) => s.runningIds);
+  const ops = useOperationLogStore((s) => s.ops);
+  const runningCount = runningIds.size;
+  const currentRunningOp = ops.find((o) => runningIds.has(o.id));
 
   // HEAD commit hash — fetch once when branch changes
   const [headHash, setHeadHash] = useState<string | null>(null);
@@ -115,25 +127,36 @@ export function StatusBar() {
         )}
       </div>
       <div className="flex items-center gap-3">
-        {/* Clickable counters — quick jump to the working tree */}
-        <button
-          className="flex items-center gap-1 hover:text-text-primary transition-colors cursor-pointer px-1 rounded"
-          onClick={() => { window.location.hash = '#/changes'; }}
-          title="Open Changes (Ctrl+1)"
-        >
-          {staged > 0 && (
-            <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
-              {staged} staged
-            </span>
-          )}
-          {changed > 0 && (
-            <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-status-modified inline-block" />
-              {changed} changed
-            </span>
-          )}
-        </button>
+        {/* Running operation indicator — spinner + action name */}
+        {runningCount > 0 && currentRunningOp ? (
+          <span className="flex items-center gap-1.5 text-accent" title={currentRunningOp.command || currentRunningOp.action}>
+            <Loader size={10} className="spin" />
+            <span className="text-2xs font-medium">{currentRunningOp.action}</span>
+            {runningCount > 1 && (
+              <span className="text-2xs text-text-tertiary">+{runningCount - 1} more</span>
+            )}
+          </span>
+        ) : (
+          /* Clickable counters — quick jump to the working tree */
+          <button
+            className="flex items-center gap-1 hover:text-text-primary transition-colors cursor-pointer px-1 rounded"
+            onClick={() => { window.location.hash = '#/changes'; }}
+            title="Open Changes (Ctrl+1)"
+          >
+            {staged > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
+                {staged} staged
+              </span>
+            )}
+            {changed > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-status-modified inline-block" />
+                {changed} changed
+              </span>
+            )}
+          </button>
+        )}
         {/* Ahead / behind — click to push / pull (VS Code-style sync buttons) */}
         {status?.ahead ? (
           <button
@@ -172,6 +195,15 @@ export function StatusBar() {
             updated {new Date(lastRefresh).toLocaleTimeString()}
           </button>
         )}
+        {/* Command Log toggle button */}
+        <button
+          className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
+          onClick={() => onToggleCommandLog && onToggleCommandLog()}
+          title="Toggle Output panel (Ctrl+Shift+L)"
+        >
+          {showCommandLog ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
+          <span className="text-2xs">Output</span>
+        </button>
       </div>
     </footer>
   );

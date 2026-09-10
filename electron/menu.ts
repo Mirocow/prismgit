@@ -94,6 +94,13 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
             getMainWindow()?.webContents.send('menu:showShortcuts');
           },
         },
+        {
+          label: 'Toggle Output Panel',
+          accelerator: 'CmdOrCtrl+Shift+U',
+          click: () => {
+            getMainWindow()?.webContents.send('menu:commandLog');
+          },
+        },
       ],
     },
     {
