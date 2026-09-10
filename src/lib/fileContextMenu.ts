@@ -110,7 +110,7 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
     items.push({ label: 'Open in Diff tool', clickId: 'open-diff' });
   }
   items.push({ label: 'File History (Log)', clickId: 'file-history' });
-  items.push({ label: 'Blame', clickId: 'blame' });
+  items.push({ label: 'Blame this file', clickId: 'blame' });
   items.push({ type: 'separator' });
 
   // --- Working-tree operations (Changes mode only) -------------------------
@@ -229,6 +229,9 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       goTo('#/history', true);
       return true;
     case 'blame':
+      // selectFile sets globalFilePath which BlamePage watches —
+      // it auto-triggers the blame for this file.
+      useSelectionStore.getState().selectFile(ctx.path);
       goTo('#/blame', false);
       return true;
 

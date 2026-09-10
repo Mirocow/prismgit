@@ -76,7 +76,7 @@ describe('buildFileMenu — changes mode', () => {
     expect(items).toContain('Reveal in File Manager');
     expect(items).toContain('Show Changes');
     expect(items).toContain('File History (Log)');
-    expect(items).toContain('Blame');
+    expect(items).toContain('Blame this file');
     expect(items).toContain('Stage');
     expect(items).toContain('Commit...');
     expect(items).toContain('Stash Selection...');
@@ -132,7 +132,7 @@ describe('buildFileMenu — diff / history modes', () => {
     expect(items).not.toContain('Stage');
     expect(items).not.toContain('Discard Changes...');
     expect(items).not.toContain('Move or Rename...');
-    expect(items).toContain('Blame');
+    expect(items).toContain('Blame this file');
   });
 
   it('history mode adds Open in Diff tool', () => {
