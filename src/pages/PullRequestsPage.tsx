@@ -38,17 +38,27 @@ export function PullRequestsPage() {
   }, [repo.path]);
 
   const loadPRs = useCallback(async () => {
+    // Guard: don't even try if not authenticated or not a GitHub repo.
+    // The useEffect below fires whenever repoInfo or state changes, and
+    // without this guard it would spam IPC errors every time the user
+    // opens the Pull Requests tab without GitHub auth configured.
+    if (!authenticated) return;
     if (!repoInfo.owner || !repoInfo.repo || repoInfo.provider !== 'github') return;
     setLoading(true);
     try {
       const result = await api.github.listPullRequests(repoInfo.owner, repoInfo.repo, state);
       setPRs(result);
     } catch (e) {
-      toast.error('Failed to load pull requests', String(e));
+      // Don't spam the toast on every retry — only show if it's a real error
+      // (not just "not authenticated" which is handled by the auth check above)
+      const msg = String(e);
+      if (!msg.includes('Not authenticated')) {
+        toast.error('Failed to load pull requests', msg);
+      }
     } finally {
       setLoading(false);
     }
-  }, [repoInfo, state, toast]);
+  }, [authenticated, repoInfo, state, toast]);
 
   useEffect(() => {
     loadRepoInfo();

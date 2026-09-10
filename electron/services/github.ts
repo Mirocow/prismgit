@@ -128,7 +128,12 @@ export async function listPullRequests(
   state: 'open' | 'closed' | 'all' = 'open'
 ): Promise<GithubPullRequest[]> {
   const { token } = getAuthState();
-  if (!token) throw new Error('Not authenticated with GitHub');
+  // Return empty array instead of throwing when not authenticated.
+  // The renderer checks `authenticated` before calling, but there's a race:
+  // the auth state may change between the check and the IPC call. Returning
+  // [] is the correct degraded behavior — the UI shows "No PRs" which is
+  // better than an IPC error popup that spams the console.
+  if (!token) return [];
   return httpsJson<GithubPullRequest[]>(
     `https://api.github.com/repos/${owner}/${repo}/pulls?state=${state}&per_page=100`,
     { token }
