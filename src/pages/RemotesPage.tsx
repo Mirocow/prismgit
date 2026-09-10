@@ -4,7 +4,9 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type RemoteInfo } from '../lib/api';
-import { cn } from '../lib/utils';
+import { cn, copyToClipboard } from '../lib/utils';
+import { useContextMenu } from '../lib/useContextMenu';
+import { buildRemoteContextMenu } from '../lib/remoteContextMenu';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { RenameDialog } from '../components/RemoteDialogs';
@@ -44,6 +46,9 @@ export function RemotesPage() {
   const [preview, setPreview] = useState<Record<string, string>>({});
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  // Native context menu (same pattern as the repository list in the sidebar)
+  const showContextMenu = useContextMenu();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -159,6 +164,17 @@ export function RemotesPage() {
     }
   };
 
+  const openEditRemote = useCallback((r: RemoteInfo) => {
+    setEditRemote(r);
+    setEditFetchUrl(r.refs.fetch);
+    setEditPushUrl(r.refs.push);
+    setEditBackground(isBackgroundFetchEnabled(repo.path, r.name));
+    const cred = getRemoteAuth(repo.path, r.name);
+    setEditUsername(cred.username ?? '');
+    setEditPassword(cred.password ?? '');
+    setShowEditPassword(false);
+  }, [repo.path]);
+
   const togglePreview = async (remote: RemoteInfo) => {
     const next = new Set(expanded);
     if (next.has(remote.name)) {
@@ -180,6 +196,33 @@ export function RemotesPage() {
       }
     }
   };
+
+  // Right-click menu on a remote row — mirrors the sidebar's native repo menu
+  // and exposes the same actions as the row buttons (plus clipboard helpers).
+  const showRemoteMenu = useCallback((e: React.MouseEvent, r: RemoteInfo) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const items = buildRemoteContextMenu(r, {
+      busy: busy === r.name,
+      expanded: expanded.has(r.name),
+      backgroundFetch: isBackgroundFetchEnabled(repo.path, r.name),
+    });
+    void showContextMenu(items, (clickId) => {
+      switch (clickId) {
+        case 'fetch': void handleFetchOne(r); break;
+        case 'preview': void togglePreview(r); break;
+        case 'copy-fetch': void copyToClipboard(r.refs.fetch); break;
+        case 'copy-push': void copyToClipboard(r.refs.push); break;
+        case 'branches': window.location.hash = '#/branches'; break;
+        case 'edit': openEditRemote(r); break;
+        case 'rename': setRenameOld(r.name); break;
+        case 'toggle-background':
+          setBackgroundFetchForRepo(repo.path, r.name, !isBackgroundFetchEnabled(repo.path, r.name));
+          break;
+        case 'remove': void handleRemove(r); break;
+      }
+    });
+  }, [showContextMenu, repo.path, busy, expanded, openEditRemote]);
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -220,7 +263,10 @@ export function RemotesPage() {
         ) : (
           remotes.map((r) => (
             <div key={r.name} className="border-b border-border-subtle">
-              <div className="group flex items-center gap-3 px-3 py-3 hover:bg-bg-hover">
+              <div
+                className="group flex items-center gap-3 px-3 py-3 hover:bg-bg-hover"
+                onContextMenu={(e) => showRemoteMenu(e, r)}
+              >
                 <button
                   className="icon-btn !w-5 !h-5 flex-shrink-0"
                   title="Preview remote refs (git ls-remote)"
@@ -280,17 +326,8 @@ export function RemotesPage() {
                       </button>
                       <button
                         className="icon-btn !w-6 !h-6"
-                        title="Edit URLs"
-                        onClick={() => {
-                          setEditRemote(r);
-                          setEditFetchUrl(r.refs.fetch);
-                          setEditPushUrl(r.refs.push);
-                          setEditBackground(isBackgroundFetchEnabled(repo.path, r.name));
-                          const cred = getRemoteAuth(repo.path, r.name);
-                          setEditUsername(cred.username ?? '');
-                          setEditPassword(cred.password ?? '');
-                          setShowEditPassword(false);
-                        }}
+                        title="Edit URLs / authorization"
+                        onClick={() => openEditRemote(r)}
                       >
                         <ExternalLink size={12} />
                       </button>
