@@ -2307,4 +2307,110 @@ export async function addAnnotatedTag(
   return name;
 }
 
+// ---------------------------------------------------------------------------
+// Working-tree file operations (SmartGit-style file context menu actions)
+// ---------------------------------------------------------------------------
+
+/** Ensure an absolute path stays inside the repository root. */
+function assertInsideRepo(repoPath: string, relPath: string): string {
+  const root = path.resolve(repoPath);
+  const abs = path.resolve(root, relPath);
+  if (abs !== root && !abs.startsWith(root + path.sep)) {
+    throw new Error(`Path escapes repository: ${relPath}`);
+  }
+  return abs;
+}
+
+/**
+ * Move or rename a file within the repository (SmartGit 'Move or Rename...').
+ * Tracked files go through `git mv` so the index is updated too; untracked
+ * (or index-less) files fall back to a plain filesystem rename. Missing
+ * target directories are created automatically.
+ */
+export async function moveFile(repoPath: string, fromPath: string, toPath: string): Promise<void> {
+  const root = path.resolve(repoPath);
+  const fromAbs = assertInsideRepo(repoPath, fromPath);
+  const toAbs = assertInsideRepo(repoPath, toPath);
+  if (fromAbs === toAbs) return;
+  if (!fs.existsSync(fromAbs)) {
+    throw new Error(`Source not found: ${fromPath}`);
+  }
+  fs.mkdirSync(path.dirname(toAbs), { recursive: true });
+  try {
+    const git = getGit(repoPath);
+    await git.raw(['mv', '--', fromPath, toPath]);
+  } catch {
+    // Untracked file (git mv refuses) → filesystem rename
+    fs.renameSync(fromAbs, toAbs);
+  }
+  invalidateCache(repoPath);
+}
+
+/**
+ * Current index flags of a file via `git ls-files -v`:
+ *   'S'                    → skip-worktree
+ *   lowercase tag (h, m…)  → assume-unchanged
+ * Returns tracked=false for paths unknown to the index (untracked files).
+ */
+export async function getIndexFlags(
+  repoPath: string,
+  file: string
+): Promise<{ assumeUnchanged: boolean; skipWorktree: boolean; tracked: boolean }> {
+  const git = getGit(repoPath);
+  try {
+    const out = await git.raw(['ls-files', '-v', '--', file]);
+    const line = out.split('\n').find((l) => l.trim().length > 1);
+    if (!line) return { assumeUnchanged: false, skipWorktree: false, tracked: false };
+    const tag = line.charAt(0);
+    // ls-files -v tag codes: 'H' cached, 'S' skip-worktree, 'M' unmerged, ...
+    // Lowercase tag ⇒ assume-unchanged variant of that code (h = cached+au).
+    return {
+      assumeUnchanged: tag !== 'S' && /[a-z]/.test(tag),
+      skipWorktree: tag === 'S',
+      tracked: true,
+    };
+  } catch {
+    return { assumeUnchanged: false, skipWorktree: false, tracked: false };
+  }
+}
+
+/**
+ * Set/clear an index flag on a tracked file:
+ *   assume-unchanged — git stops reporting working-tree changes for the file
+ *   skip-worktree    — like assume-unchanged but also survives some checkouts
+ */
+export async function setIndexFlag(
+  repoPath: string,
+  file: string,
+  flag: 'assume-unchanged' | 'skip-worktree',
+  value: boolean
+): Promise<void> {
+  const git = getGit(repoPath);
+  assertInsideRepo(repoPath, file);
+  const opt =
+    flag === 'assume-unchanged'
+      ? value ? '--assume-unchanged' : '--no-assume-unchanged'
+      : value ? '--skip-worktree' : '--no-skip-worktree';
+  await git.raw(['update-index', opt, '--', file]);
+  invalidateCache(repoPath);
+}
+
+/**
+ * Delete a file from the working tree (and the index when tracked).
+ * Tracked files go through `git rm -f` (removes from index + disk);
+ * untracked files are removed from disk directly — `git rm` refuses them,
+ * which made the old untracked 'Delete file' menu item silently fail.
+ */
+export async function deleteFile(repoPath: string, file: string): Promise<void> {
+  const git = getGit(repoPath);
+  assertInsideRepo(repoPath, file);
+  try {
+    await git.raw(['rm', '-f', '--', file]);
+  } catch {
+    const abs = path.resolve(repoPath, file);
+    if (fs.existsSync(abs)) fs.rmSync(abs, { force: true });
+  }
+  invalidateCache(repoPath);
+}
+
 export { invalidateCache };

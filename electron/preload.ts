@@ -158,6 +158,13 @@ const api = {
     extractRepoInfo: (repoPath: string) => ipcRenderer.invoke('git:extractRepoInfo', repoPath),
     revealInFileManager: (fullPath: string) => ipcRenderer.invoke('git:revealInFileManager', fullPath),
     openFile: (fullPath: string) => ipcRenderer.invoke('git:openFile', fullPath),
+    moveFile: (repoPath: string, fromPath: string, toPath: string) =>
+      ipcRenderer.invoke('git:moveFile', repoPath, fromPath, toPath),
+    getIndexFlags: (repoPath: string, file: string) =>
+      ipcRenderer.invoke('git:getIndexFlags', repoPath, file),
+    setIndexFlag: (repoPath: string, file: string, flag: 'assume-unchanged' | 'skip-worktree', value: boolean) =>
+      ipcRenderer.invoke('git:setIndexFlag', repoPath, file, flag, value),
+    deleteFile: (repoPath: string, file: string) => ipcRenderer.invoke('git:deleteFile', repoPath, file),
 
     // LFS support
     lfsStatus: (repoPath: string) => ipcRenderer.invoke('git:lfsStatus', repoPath),

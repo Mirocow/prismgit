@@ -43,6 +43,13 @@ export function registerGitIpc(): void {
     gitService.checkout(p, b, o)
   );
   ipcMain.handle('git:checkoutFile', (_e, p: string, f: string, ref?: string) => gitService.checkoutFile(p, f, ref));
+  // Working-tree file operations (file context menu)
+  ipcMain.handle('git:moveFile', (_e, p: string, from: string, to: string) => gitService.moveFile(p, from, to));
+  ipcMain.handle('git:getIndexFlags', (_e, p: string, f: string) => gitService.getIndexFlags(p, f));
+  ipcMain.handle('git:setIndexFlag', (_e, p: string, f: string, flag: 'assume-unchanged' | 'skip-worktree', v: boolean) =>
+    gitService.setIndexFlag(p, f, flag, v)
+  );
+  ipcMain.handle('git:deleteFile', (_e, p: string, f: string) => gitService.deleteFile(p, f));
   ipcMain.handle('git:createBranch', (_e, p: string, n: string, sp?: string, f?: boolean, t?: boolean) =>
     gitService.createBranch(p, n, sp, f, t)
   );

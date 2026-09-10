@@ -331,6 +331,16 @@ export interface GitApi {
   revealInFileManager: (fullPath: string) => Promise<boolean>;
   openFile: (fullPath: string) => Promise<boolean>;
 
+  // Working-tree file operations (file context menu)
+  /** Move/rename a file: `git mv` for tracked, fs rename for untracked. */
+  moveFile: (repoPath: string, fromPath: string, toPath: string) => Promise<void>;
+  /** Index flags of a file (assume-unchanged / skip-worktree / tracked). */
+  getIndexFlags: (repoPath: string, file: string) => Promise<{ assumeUnchanged: boolean; skipWorktree: boolean; tracked: boolean }>;
+  /** Set/clear assume-unchanged or skip-worktree on a tracked file. */
+  setIndexFlag: (repoPath: string, file: string, flag: 'assume-unchanged' | 'skip-worktree', value: boolean) => Promise<void>;
+  /** Delete file: `git rm -f` when tracked, fs removal for untracked. */
+  deleteFile: (repoPath: string, file: string) => Promise<void>;
+
   // LFS support
   lfsStatus: (repoPath: string) => Promise<{ installed: boolean; files: { path: string; size: string; status: string }[] }>;
   lfsPull: (repoPath: string, files?: string[]) => Promise<void>;

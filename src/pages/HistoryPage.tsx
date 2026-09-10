@@ -23,6 +23,7 @@ import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
+import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { useLazyList } from '../lib/useLazyList';
 import { cn, copyToClipboard, shortHash } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
@@ -1101,33 +1102,18 @@ export function HistoryPage() {
                           onFileContextMenu={(e, f) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            const items: ContextMenuItem[] = [
-                              { label: 'View file history...', clickId: 'file-history' },
-                              { label: 'Open in Diff tool...', clickId: 'open-diff' },
-                              { label: 'Blame this file...', clickId: 'blame' },
-                              { type: 'separator' },
-                              { label: 'Copy path', clickId: 'copy-path' },
-                              { label: 'Copy full path', clickId: 'copy-full-path' },
-                            ];
-                            showContextMenu(items, (action) => {
-                              if (action === 'file-history') {
-                                useSelectionStore.getState().selectFile(f.path);
-                                useSelectionStore.getState().setPathFilter(f.path);
-                                window.location.hash = '#/history';
-                              } else if (action === 'open-diff') {
+                            const fileCtx = {
+                              repoPath: repo.path,
+                              path: f.path,
+                              mode: 'history' as const,
+                              onOpenDiff: () => {
                                 useSelectionStore.getState().selectFile(f.path);
                                 useSelectionStore.getState().selectCommit(selected.hash);
                                 window.location.hash = '#/diff';
-                              } else if (action === 'blame') {
-                                useSelectionStore.getState().selectFile(f.path);
-                                window.location.hash = '#/blame';
-                              } else if (action === 'copy-path') {
-                                copyToClipboard(f.path);
-                                toast.success('Path copied');
-                              } else if (action === 'copy-full-path') {
-                                copyToClipboard(`${repo.path}/${f.path}`.replace(/\/+/g, '/'));
-                                toast.success('Full path copied');
-                              }
+                              },
+                            };
+                            showContextMenu(buildFileMenu(fileCtx), async (action) => {
+                              await runFileAction(action, fileCtx);
                             });
                           }}
                         />
@@ -1148,33 +1134,18 @@ export function HistoryPage() {
                           onContextMenu={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            const items: ContextMenuItem[] = [
-                              { label: 'View file history...', clickId: 'file-history' },
-                              { label: 'Open in Diff tool...', clickId: 'open-diff' },
-                              { label: 'Blame this file...', clickId: 'blame' },
-                              { type: 'separator' },
-                              { label: 'Copy path', clickId: 'copy-path' },
-                              { label: 'Copy full path', clickId: 'copy-full-path' },
-                            ];
-                            showContextMenu(items, (action) => {
-                              if (action === 'file-history') {
-                                useSelectionStore.getState().selectFile(f.path);
-                                useSelectionStore.getState().setPathFilter(f.path);
-                                window.location.hash = '#/history';
-                              } else if (action === 'open-diff') {
+                            const fileCtx = {
+                              repoPath: repo.path,
+                              path: f.path,
+                              mode: 'history' as const,
+                              onOpenDiff: () => {
                                 useSelectionStore.getState().selectFile(f.path);
                                 useSelectionStore.getState().selectCommit(selected.hash);
                                 window.location.hash = '#/diff';
-                              } else if (action === 'blame') {
-                                useSelectionStore.getState().selectFile(f.path);
-                                window.location.hash = '#/blame';
-                              } else if (action === 'copy-path') {
-                                copyToClipboard(f.path);
-                                toast.success('Path copied');
-                              } else if (action === 'copy-full-path') {
-                                copyToClipboard(`${repo.path}/${f.path}`.replace(/\/+/g, '/'));
-                                toast.success('Full path copied');
-                              }
+                              },
+                            };
+                            showContextMenu(buildFileMenu(fileCtx), async (action) => {
+                              await runFileAction(action, fileCtx);
                             });
                           }}
                           title={isHighlighted ? `${f.path} — matches your file-history filter` : 'Click to view file history · Right-click for more actions'}

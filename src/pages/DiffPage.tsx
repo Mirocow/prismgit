@@ -7,9 +7,10 @@ import { CommitHashLink } from '../components/StatusBar';
 import { api, type DiffResult, type LogEntry, type BranchInfo, type CommitFile } from '../lib/api';
 import { DiffViewer } from '../components/DiffViewer';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
-import { cn, copyToClipboard, shortHash } from '../lib/utils';
+import { cn, shortHash } from '../lib/utils';
 import { useLazyList } from '../lib/useLazyList';
-import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
+import { useContextMenu } from '../lib/useContextMenu';
+import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 
 /**
@@ -394,28 +395,13 @@ export function DiffPage() {
                     // Select + load the file under the cursor first, so the
                     // diff pane and any action act on exactly this file.
                     if (selectedFileInList !== f.path) loadFileDiff(f.path);
-                    const items: ContextMenuItem[] = [
-                      { label: 'View file history...', clickId: 'file-history' },
-                      { label: 'Blame this file...', clickId: 'blame' },
-                      { type: 'separator' },
-                      { label: 'Copy path', clickId: 'copy-path' },
-                      { label: 'Copy full path', clickId: 'copy-full-path' },
-                    ];
-                    showContextMenu(items, (action) => {
-                      if (action === 'file-history') {
-                        useSelectionStore.getState().selectFile(f.path);
-                        useSelectionStore.getState().setPathFilter(f.path);
-                        window.location.hash = '#/history';
-                      } else if (action === 'blame') {
-                        useSelectionStore.getState().selectFile(f.path);
-                        window.location.hash = '#/blame';
-                      } else if (action === 'copy-path') {
-                        copyToClipboard(f.path);
-                        toast.success('Path copied');
-                      } else if (action === 'copy-full-path') {
-                        copyToClipboard(`${repo.path}/${f.path}`.replace(/\/+/g, '/'));
-                        toast.success('Full path copied');
-                      }
+                    const fileCtx = {
+                      repoPath: repo.path,
+                      path: f.path,
+                      mode: 'diff' as const,
+                    };
+                    showContextMenu(buildFileMenu(fileCtx), async (action) => {
+                      await runFileAction(action, fileCtx);
                     });
                   }}
                   title="Click to load diff · Right-click for more actions"

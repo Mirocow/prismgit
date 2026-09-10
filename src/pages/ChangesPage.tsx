@@ -8,9 +8,10 @@ import { LazyFileList } from '../components/LazyFileList';
 import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
-import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
+import { useContextMenu } from '../lib/useContextMenu';
+import { buildFileMenu, runFileAction, getIndexFlagsAsync, type IndexFlags } from '../lib/fileContextMenu';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
-import { cn, copyToClipboard, getStatusColor } from '../lib/utils';
+import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -449,57 +450,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     }
   };
 
-  // Reset a staged file back to HEAD (unstage exactly this path via git reset -- <file>)
-  const handleResetFile = async (file: string) => {
-    try {
-      await api.git.resetFile(repo.path, file);
-      toast.success(`'${file}' reset to HEAD (unstaged)`);
-      await refreshStatus(repo.path);
-    } catch (e) {
-      toast.error('Reset file failed', String(e));
-    }
-  };
-
   // Restore a file from an arbitrary ref (git checkout <ref> -- <file>) — e.g. recover
   // an older version from another branch or commit without leaving the current branch.
-  const handleCheckoutFileFromRef = async (file: string) => {
-    const ref = await promptDialog({
-      title: `Restore '${file}' from a ref`,
-      message: 'Enter a ref (commit hash, branch, tag, HEAD~1, …). The working tree copy will be overwritten with that version.',
-      confirmLabel: 'Restore',
-      input: { placeholder: 'HEAD~1' },
-    });
-    if (!ref || !ref.trim()) return;
-    try {
-      await api.git.checkoutFile(repo.path, file, ref.trim());
-      toast.success(`'${file}' restored from ${ref.trim()}`);
-      await refreshStatus(repo.path);
-    } catch (e) {
-      toast.error(`Restore from ${ref.trim()} failed`, String(e));
-    }
-  };
-
-  // Check whether a path is excluded by .gitignore rules
-  const handleIsIgnored = async (file: string) => {
-    try {
-      const ignored = await api.git.isIgnored(repo.path, file);
-      if (ignored) toast.info(`'${file}' IS ignored (matches .gitignore rules)`);
-      else toast.info(`'${file}' is NOT ignored`);
-    } catch (e) {
-      toast.error('Check failed', String(e));
-    }
-  };
-
-  // Open the effective ignore file in the system editor
-  const handleEditIgnoreFile = async (scope: 'local' | 'global') => {
-    try {
-      const path = await api.git.editIgnoreFile(repo.path, scope);
-      await api.git.openFile(path);
-      toast.success(`Opened ${scope} ignore file`);
-    } catch (e) {
-      toast.error('Failed to open ignore file', String(e));
-    }
-  };
+  // (The context-menu variant of this flow lives in fileContextMenu.ts.)
 
   // Clean untracked files/directories: dry-run preview first, then confirm
   const [showCleanDialog, setShowCleanDialog] = useState(false);
@@ -542,7 +495,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       danger: true,
     }))) return;
     try {
-      await api.git.raw(repo.path, ['rm', '-f', '--', file]);
+      // deleteFile handles BOTH tracked (git rm -f) and untracked (fs delete)
+      // files — the old `git rm`-only version silently failed for untracked.
+      await api.git.deleteFile(repo.path, file);
       toast.success('File deleted');
       await refreshStatus(repo.path);
     } catch (e) {
@@ -811,100 +766,37 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
+          setSelectedFiles(new Set([file.path]));
           setSelectedFile(file.path);
-          const items: ContextMenuItem[] = [];
-          if (isStaged) {
-            items.push({ label: 'Unstage', clickId: 'unstage' });
-            items.push({ label: 'Discard staged changes', clickId: 'discard-staged' });
-          } else {
-            items.push({ label: 'Stage', clickId: 'stage' });
-            if (!isUntracked) {
-              items.push({ label: 'Restore to last commit (discard)', clickId: 'restore' });
-              items.push({ label: 'Restore from ref...', clickId: 'restore-from-ref' });
-            }
-          }
-          items.push({ type: 'separator' });
-          if (isUntracked) {
-            items.push({ label: 'Add to .gitignore', clickId: 'ignore' });
-            items.push({ label: 'Check if ignored', clickId: 'check-ignored' });
-            items.push({ label: 'Delete file', clickId: 'delete' });
-            items.push({ type: 'separator' });
-            items.push({ label: 'Edit .gitignore', clickId: 'edit-ignore-local' });
-            items.push({ label: 'Edit global ignore file', clickId: 'edit-ignore-global' });
-          }
-          if (isConflict) {
-            items.push({ type: 'separator' });
-            items.push({ label: 'Resolve Conflict...', clickId: 'resolve' });
-          }
-          items.push({ type: 'separator' });
-          items.push({ label: 'Reveal in File Manager', clickId: 'reveal' });
-          items.push({ label: 'Open in Editor', clickId: 'open' });
-          items.push({ type: 'separator' });
-          items.push({ label: 'View file history...', clickId: 'file-history' });
-          items.push({ label: 'Blame this file...', clickId: 'blame' });
-          items.push({ type: 'separator' });
-          items.push({ label: 'Stash this file only...', clickId: 'stash-file' });
-          items.push({ type: 'separator' });
-          items.push({ label: 'Copy path', clickId: 'copy-path' });
-          items.push({ label: 'Copy full path', clickId: 'copy-full-path' });
-          showContextMenu(items, async (action) => {
-            if (action === 'stage') handleStageFile(file.path);
-            else if (action === 'unstage') handleUnstageFile(file.path);
-            else if (action === 'restore') handleRestoreFile(file.path);
-            else if (action === 'discard-staged') {
-              if (!(await confirmDialog({
-                title: 'Discard staged changes',
-                message: `Discard staged changes for '${file.path}'?\nThis will unstage AND restore the file to HEAD.`,
-                confirmLabel: 'Discard',
-                danger: true,
-              }))) return;
-              api.git.raw(repo.path, ['reset', 'HEAD', '--', file.path]).then(() =>
-                api.git.restore(repo.path, [file.path])
-              ).then(() => {
-                toast.success('Staged changes discarded');
-                refreshStatus(repo.path);
-              }).catch((e) => toast.error('Discard failed', String(e)));
-            }
-            else if (action === 'ignore') handleIgnoreFile(file.path);
-            else if (action === 'check-ignored') handleIsIgnored(file.path);
-            else if (action === 'restore-from-ref') handleCheckoutFileFromRef(file.path);
-            else if (action === 'edit-ignore-local') handleEditIgnoreFile('local');
-            else if (action === 'edit-ignore-global') handleEditIgnoreFile('global');
-            else if (action === 'delete') handleDeleteFile(file.path);
-            else if (action === 'resolve' && onResolveConflict) onResolveConflict(file.path);
-            else if (action === 'reveal') handleRevealFile(file.path);
-            else if (action === 'open') {
-              const fullPath = `${repo.path}/${file.path}`.replace(/\/+/g, '/');
-              api.git.openFile(fullPath);
-            }
-            else if (action === 'file-history') {
-              // Set global path filter and navigate to History page
-              useSelectionStore.getState().selectFile(file.path);
-              useSelectionStore.getState().setPathFilter(file.path);
-              window.location.hash = '#/history';
-            }
-            else if (action === 'blame') {
-              useSelectionStore.getState().selectFile(file.path);
-              window.location.hash = '#/blame';
-            }
-            else if (action === 'stash-file') {
-              // Stash only this file: git stash push -- <file>
-              try {
-                await api.git.stashPush(repo.path, undefined, false, false, [file.path]);
-                toast.success(`Stashed file: ${file.path}`);
-                refreshStatus(repo.path);
-              } catch (e) {
-                toast.error('Stash failed', String(e));
-              }
-            }
-            else if (action === 'copy-path') {
-              copyToClipboard(file.path);
-              toast.success('Path copied');
-            }
-            else if (action === 'copy-full-path') {
-              copyToClipboard(`${repo.path}/${file.path}`.replace(/\/+/g, '/'));
-              toast.success('Full path copied');
-            }
+          const focusCommitBox = () => {
+            const box = document.getElementById('commit-message-input') as HTMLTextAreaElement | null;
+            box?.focus();
+            box?.scrollIntoView({ block: 'nearest' });
+          };
+          const makeCtx = (indexFlags?: IndexFlags) => ({
+            repoPath: repo.path,
+            path: file.path,
+            mode: 'changes' as const,
+            isStaged,
+            isUntracked,
+            isConflict,
+            indexFlags,
+            onShowChanges: () => {
+              setSelectedFiles(new Set([file.path]));
+              setSelectedFile(file.path);
+            },
+            onSelectDirectory: handleSelectDir,
+            onFocusCommit: focusCommitBox,
+            refresh: () => refreshStatus(repo.path),
+          });
+          // SmartGit-style unified menu: fetch live index flags first so the
+          // 'Assume Unchanged' / 'Skip Worktree' checkboxes show real state.
+          const flagsPromise: Promise<IndexFlags | undefined> =
+            isUntracked || isDirEntry ? Promise.resolve(undefined) : getIndexFlagsAsync(repo.path, file.path);
+          flagsPromise.then((indexFlags) => {
+            showContextMenu(buildFileMenu(makeCtx(indexFlags)), async (action) => {
+              await runFileAction(action, makeCtx(indexFlags));
+            });
           });
         }}
       >
@@ -1368,6 +1260,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             </div>
             <div className="flex-1 flex overflow-hidden">
               <textarea
+                id="commit-message-input"
                 className="flex-1 text-sm font-mono resize-none p-2 bg-bg-primary border-r border-border-subtle"
                 placeholder="Commit message... (supports markdown)"
                 value={commitMsg}
