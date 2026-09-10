@@ -6,6 +6,8 @@ import { registerGithubIpc } from './ipc/github.js';
 import { registerAiIpc } from './ipc/ai.js';
 import { registerWindowIpc } from './ipc/window.js';
 import { registerSettingsIpc } from './ipc/settings.js';
+import { registerCommandLogIpc } from './ipc/commandLog.js';
+import { installGitCommandLogger } from './services/commandLog.js';
 import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
 import { SimpleStore } from './services/simpleStore.js';
 import { buildAppMenu } from './menu.js';
@@ -165,6 +167,18 @@ function registerContextMenuIpc() {
 }
 
 app.whenReady().then(() => {
+  // Raw git command logger — MUST be installed before any IPC registration:
+  // it wraps child_process.spawn so every git process spawned afterwards
+  // (simple-git, push/pull helpers, background polls) is captured with its
+  // full stdout/stderr and exit code for the Output panel's Commands tab.
+  installGitCommandLogger({
+    onEntry: (entry) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send('command-log:entry', entry);
+      }
+    },
+  });
+
   // Register IPC handlers
   registerGitIpc();
   registerFsIpc();
@@ -172,6 +186,7 @@ app.whenReady().then(() => {
   registerAiIpc();
   registerWindowIpc();
   registerSettingsIpc();
+  registerCommandLogIpc();
   registerWatcherIpc();
   registerContextMenuIpc();
 

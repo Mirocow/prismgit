@@ -37,6 +37,7 @@ import type {
   CommitCheckStatus,
 } from '../../electron/types/github-api';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../../electron/types/settings-api';
+import type { CommandLogEntry } from '../../electron/types/command-log-api';
 
 export type {
   StatusResult,
@@ -69,6 +70,7 @@ export type {
   BugtraqConfig,
   RemoteCheckSummary,
   PushResult,
+  CommandLogEntry,
   GithubUser,
   GithubRepository,
   GithubPullRequest,

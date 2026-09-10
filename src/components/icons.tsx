@@ -577,3 +577,19 @@ export const Sparkles = (p: IconProps) => (
     <path d="M5 18H3" />
   </Icon>
 );
+
+export const ListChecks = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 5h1M3 12h1M3 19h1" />
+    <path d="m8 5 2 2 4-4" />
+    <path d="m8 12 2 2 4-4" />
+    <path d="m8 19 2 2 4-4" />
+  </Icon>
+);
+
+export const Terminal = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="4 17 10 11 4 5" />
+    <line x1="12" y1="19" x2="20" y2="19" />
+  </Icon>
+);

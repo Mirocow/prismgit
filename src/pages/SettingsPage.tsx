@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { Folder, Github, Loader, LogOut, Moon, Plus, RefreshCw, Settings as SettingsIcon, Sun, Trash, GitBranch } from '../components/icons';
+import { Folder, Github, Loader, LogOut, Moon, Plus, RefreshCw, Settings as SettingsIcon, Sun, Trash } from '../components/icons';
 import { api, type GitConfigEntry } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
@@ -127,16 +127,6 @@ export function SettingsPage() {
               </p>
             </div>
           </div>
-          {currentRepo && (
-            <button
-              className="btn btn-secondary text-xs flex-shrink-0"
-              title="Per-repository settings: remotes, authorization, metadata"
-              onClick={() => window.dispatchEvent(new CustomEvent('prismgit:repo-settings'))}
-            >
-              <GitBranch size={12} />
-              Repository Settings...
-            </button>
-          )}
         </div>
 
         {/* Tab switcher */}
