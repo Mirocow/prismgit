@@ -16,6 +16,10 @@ export function SettingsPage() {
   const { repos, removeRepo, loadRepos } = useRepositoryStore();
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
+  // Top-level tab: Application Settings vs Project Settings
+  const [activeTab, setActiveTab] = useState<'application' | 'project'>('application');
+  const showApp = activeTab === 'application';
+  const showProject = activeTab === 'project' && !!currentRepo;
 
   // === Git Config section state ===
   const [configScope, setConfigScope] = useState<'local' | 'global' | 'system'>('local');
@@ -107,14 +111,20 @@ export function SettingsPage() {
   return (
     <div className="flex flex-col flex-1 overflow-y-auto bg-bg-primary">
       <div className="max-w-3xl mx-auto p-6 w-full">
-        <div className="flex items-center justify-between gap-3 mb-6 pb-4 border-b border-border-default">
+        <div className="flex items-center justify-between gap-3 mb-4 pb-4 border-b border-border-default">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-accent-muted flex items-center justify-center">
               <SettingsIcon size={20} className="text-accent" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-text-primary tracking-tight">Project Settings</h1>
-              <p className="text-xs text-text-tertiary">Configure appearance, Git, and integrations</p>
+              <h1 className="text-xl font-bold text-text-primary tracking-tight">
+                {showApp ? 'Application Settings' : 'Project Settings'}
+              </h1>
+              <p className="text-xs text-text-tertiary">
+                {showApp
+                  ? 'Global application preferences (appearance, integrations, AI, CI/CD)'
+                  : 'Per-repository configuration (Git, remotes, pull strategy, config)'}
+              </p>
             </div>
           </div>
           {currentRepo && (
@@ -129,7 +139,50 @@ export function SettingsPage() {
           )}
         </div>
 
-        {/* Appearance */}
+        {/* Tab switcher */}
+        <div className="flex border-b border-border-default mb-4">
+          <button
+            className={cn(
+              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+              showApp
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            )}
+            onClick={() => setActiveTab('application')}
+          >
+            Application Settings
+          </button>
+          <button
+            className={cn(
+              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              showProject
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary',
+              !currentRepo && 'opacity-50 cursor-not-allowed'
+            )}
+            onClick={() => currentRepo && setActiveTab('project')}
+            disabled={!currentRepo}
+            title={currentRepo ? undefined : 'Open a repository to access Project Settings'}
+          >
+            Project Settings
+            {currentRepo && (
+              <span className="text-2xs text-text-tertiary font-normal truncate max-w-32">
+                {currentRepo.name}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* No repo open for Project Settings tab */}
+        {activeTab === 'project' && !currentRepo && (
+          <div className="panel p-8 text-center text-text-tertiary">
+            <SettingsIcon size={32} className="mx-auto mb-3 opacity-40" />
+            <div className="text-sm">Open a repository to access Project Settings</div>
+          </div>
+        )}
+
+        {/* Appearance — Application Settings */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">Appearance</div>
           <div className="p-5 space-y-5">
@@ -269,8 +322,10 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+        )}
 
         {/* Git */}
+        {showProject && (
         <section className="panel mb-4">
           <div className="panel-header">Git</div>
           <div className="p-5 space-y-5">
@@ -369,8 +424,10 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+        )}
 
         {/* GitHub Integration */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">
             <span className="flex items-center gap-2">
@@ -439,8 +496,10 @@ export function SettingsPage() {
             )}
           </div>
         </section>
+        )}
 
         {/* Repositories */}
+        {showProject && (
         <section className="panel mb-4">
           <div className="panel-header">
             <span>Known Repositories ({repos.length})</span>
@@ -485,8 +544,10 @@ export function SettingsPage() {
             )}
           </div>
         </section>
+        )}
 
         {/* External Tools */}
+        {showProject && (
         <section className="panel mb-4">
           <div className="panel-header">External Tools</div>
           <div className="p-5 space-y-4">
@@ -533,8 +594,10 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+        )}
 
         {/* Pull Strategy */}
+        {showProject && (
         <section className="panel mb-4">
           <div className="panel-header">Pull Strategy</div>
           <div className="p-5 space-y-4">
@@ -574,9 +637,10 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+        )}
 
         {/* Git Config */}
-        {currentRepo && (
+        {showProject && (
           <section className="panel mb-4">
             <div className="panel-header flex items-center justify-between">
               <span>Git Config — {currentRepo.name}</span>
@@ -704,6 +768,7 @@ export function SettingsPage() {
         )}
 
         {/* SmartGit Manual: Preferences → Commands */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">Commands</div>
           <div className="p-5 space-y-3 text-sm">
@@ -774,8 +839,10 @@ export function SettingsPage() {
             </label>
           </div>
         </section>
+        )}
 
         {/* SmartGit Manual: External Tools system */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">External Tools</div>
           <div className="p-5 text-sm space-y-3">
@@ -813,8 +880,10 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+        )}
 
         {/* SmartGit Manual: Low-Level Properties editor */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">Low-Level Properties</div>
           <div className="p-5 text-sm space-y-3">
@@ -850,8 +919,10 @@ smartgit.refresh.inspectEol=true
             </div>
           </div>
         </section>
+        )}
 
         {/* SmartGit Manual: AI Commit Messages (v25+) */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">AI Commit Messages</div>
           <div className="p-5 text-sm space-y-3">
@@ -934,8 +1005,10 @@ smartgit.refresh.inspectEol=true
             </div>
           </div>
         </section>
+        )}
 
         {/* SmartGit Manual: Force Push Policies */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">Force Push Policy</div>
           <div className="p-5 space-y-3 text-sm">
@@ -968,8 +1041,10 @@ smartgit.refresh.inspectEol=true
             </div>
           </div>
         </section>
+        )}
 
         {/* SmartGit Manual: CI/CD Integration (Jenkins, TeamCity, GitLab CI) */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">CI/CD Integration</div>
           <div className="p-5 space-y-3 text-sm">
@@ -1046,8 +1121,10 @@ smartgit.refresh.inspectEol=true
             </div>
           </div>
         </section>
+        )}
 
         {/* About */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">About</div>
           <div className="p-5 text-sm space-y-2">
@@ -1065,6 +1142,7 @@ smartgit.refresh.inspectEol=true
             </div>
           </div>
         </section>
+        )}
       </div>
     </div>
   );
