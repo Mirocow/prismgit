@@ -53,6 +53,10 @@ export function HistoryPage() {
   const status = useGitStore((s) => s.status);
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [branches, setBranches] = useState<BranchInfo[]>([]);
+  // Set of commit hashes that are ONLY reachable from remote-tracking refs
+  // (not from any local branch). Used to draw them with a dashed/hollow style
+  // in the graph, like VS Code does for incoming commits.
+  const [incomingHashes, setIncomingHashes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [search, setSearch] = useState('');
@@ -178,6 +182,31 @@ export function HistoryPage() {
       }
       const result = await api.git.log(repo.path, logOpts);
       setEntries(result);
+      // Compute incoming commits: reachable from remote-tracking refs
+      // (refs/remotes/*) but NOT from any local branch (refs/heads/*).
+      // These are "not yet pulled" commits — drawn dashed/hollow in graph.
+      try {
+        const localOids = new Set<string>();
+        const remoteOids = new Set<string>();
+        // Get all local branch OIDs
+        const localList = await api.git.raw(repo.path, ['rev-list', '--all', '--no-merges', '--max-count=500']);
+        for (const line of localList.trim().split('\n')) {
+          if (line.trim()) localOids.add(line.trim());
+        }
+        // Get OIDs reachable only from remote-tracking branches
+        const remoteOnly = await api.git.raw(repo.path, ['rev-list', '--remotes', '--no-merges', '--max-count=500', '--not', '--branches']);
+        for (const line of remoteOnly.trim().split('\n')) {
+          if (line.trim()) remoteOids.add(line.trim());
+        }
+        // Incoming = in remoteOids but NOT in localOids
+        const incoming = new Set<string>();
+        for (const oid of remoteOids) {
+          if (!localOids.has(oid)) incoming.add(oid);
+        }
+        setIncomingHashes(incoming);
+      } catch {
+        setIncomingHashes(new Set());
+      }
       // Load branches for the filter dropdown
       try {
         const brs = await api.git.branches(repo.path);
@@ -205,6 +234,24 @@ export function HistoryPage() {
   }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // Background fetch on History page load — silently fetch all remotes so
+  // incoming (remote-only) commits show up in the graph with fresh data.
+  // Non-blocking: runs after initial load, reloads history if new commits arrive.
+  const [remoteFetchDone, setRemoteFetchDone] = useState(false);
+  useEffect(() => {
+    if (!repo || remoteFetchDone) return;
+    setRemoteFetchDone(true);
+    api.git.fetchAll(repo.path, true).then(() => {
+      // Reload history after fetch — incoming commits will now appear
+      loadHistory();
+      // Also reload branches so the dropdown shows fresh remote-tracking refs
+      api.git.branches(repo.path).then(setBranches).catch(() => {});
+    }).catch(() => {
+      // Silent — user may be offline or no remotes configured
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo?.path]);
 
   // ⚠ selectedIdx indexes the FILTERED list — resolving the hash against the
   // UNfiltered `entries` used to clobber selectedIdx with an out-of-range
@@ -1155,6 +1202,7 @@ export function HistoryPage() {
                               const isSelected = selectedIdx === idx;
                               const isMerge = row.node!.isMerge;
                               const isTruncated = row.node!.truncated;
+                              const isIncoming = incomingHashes.has(row.node!.entry.hash);
                               const r = isMerge ? 5 : 4;
                               return (
                                 <g>
@@ -1165,7 +1213,13 @@ export function HistoryPage() {
                                   <circle cx={cx} cy={cy} r={r}
                                     fill={isSelected ? laneColor(row.node!.color) : 'var(--graph-node-fill)'}
                                     stroke={laneColor(row.node!.color)} strokeWidth={1.5}
-                                    strokeDasharray={isTruncated ? '2 2' : undefined} />
+                                    strokeDasharray={isTruncated ? '2 2' : isIncoming ? '3 2' : undefined}
+                                    opacity={isIncoming ? 0.7 : 1} />
+                                  {isIncoming && (
+                                    <circle cx={cx} cy={cy} r={r + 3} fill="none"
+                                      stroke={laneColor(row.node!.color)} strokeWidth={0.8}
+                                      strokeDasharray="2 3" opacity={0.4} />
+                                  )}
                                 </g>
                               );
                             })()}
@@ -1218,6 +1272,14 @@ export function HistoryPage() {
                     {/* Decorations: tags first, then HEAD/branches/remotes — parsed
                         from BOTH short and --decorate=full shapes (see refBadge). */}
                     <RefBadges refs={entry.refs} max={3} hash={entry.hash} onChanged={loadHistory} />
+
+                    {/* Incoming badge — commit exists only on remote, not yet pulled */}
+                    {incomingHashes.has(entry.hash) && (
+                      <span className="flex-shrink-0 text-2xs px-1 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium"
+                        title="Incoming — this commit exists on a remote but has not been pulled into a local branch yet">
+                        ↓
+                      </span>
+                    )}
 
                     {/* GitHub Actions CI badge (SmartGit "My History" CI integrations) */}
                     {ciStatus[entry.hash]?.conclusion && (

@@ -813,6 +813,41 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded-md shadow-lg z-50 min-w-64">
+            {/* Quick actions: Fetch from / Fetch All */}
+            <div className="px-3 py-2 border-b border-border-subtle flex gap-2">
+              <button
+                className="btn btn-secondary text-2xs flex-1"
+                onClick={async () => {
+                  if (!currentRepo || !selectedRemote) return;
+                  try {
+                    await api.git.fetch(currentRepo.path, selectedRemote, true, true);
+                    toast.success(`Fetched from ${selectedRemote}`, 'Remote branches and tags updated');
+                    await refreshStatus(currentRepo.path);
+                    loadRemoteBranches();
+                  } catch (e) { toast.error(`Fetch ${selectedRemote} failed`, String(e)); }
+                }}
+                disabled={!selectedRemote || remotes.length === 0}
+                title={`git fetch ${selectedRemote || '<remote>'} --prune --tags`}
+              >
+                <CloudDownload size={11} /> Fetch from
+              </button>
+              <button
+                className="btn btn-secondary text-2xs flex-1"
+                onClick={async () => {
+                  if (!currentRepo) return;
+                  try {
+                    await api.git.fetchAll(currentRepo.path, true);
+                    toast.success('Fetched all remotes', 'All remote branches and tags updated');
+                    await refreshStatus(currentRepo.path);
+                    loadRemoteBranches();
+                  } catch (e) { toast.error('Fetch all failed', String(e)); }
+                }}
+                disabled={remotes.length === 0}
+                title="git fetch --all --prune --tags"
+              >
+                <CloudDownload size={11} /> Fetch All
+              </button>
+            </div>
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
               Pull from remote
             </div>
