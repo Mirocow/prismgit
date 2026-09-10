@@ -220,10 +220,49 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
         {currentRepo && status ? (
           <div className="flex items-center gap-2 text-xs">
             {isInProgress && (
-              <span className="badge badge-modified flex items-center gap-1 animate-pulse">
-                <AlertCircle size={9} />
-                {status.isMerging ? 'MERGING' : status.isRebasing ? 'REBASING' : 'CHERRY-PICK'}
-              </span>
+              <div className="flex items-center gap-1">
+                <span className="badge badge-modified flex items-center gap-1 animate-pulse">
+                  <AlertCircle size={9} />
+                  {status.isMerging ? 'MERGING' : status.isRebasing ? 'REBASING' : status.isCherryPicking ? 'CHERRY-PICK' : 'REVERT'}
+                </span>
+                {/* Continue / Abort buttons for cherry-pick and revert (SmartGit 22.1) */}
+                {(status.isCherryPicking || status.isReverting) && currentRepo && (
+                  <>
+                    <button
+                      className="text-2xs px-1.5 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 transition-colors"
+                      title={status.isCherryPicking ? 'Continue cherry-pick (after resolving conflicts)' : 'Continue revert (after resolving conflicts)'}
+                      onClick={() => {
+                        const op = status.isCherryPicking ? 'Cherry-Pick Continue' : 'Revert Continue';
+                        const cmd = status.isCherryPicking ? 'git cherry-pick --continue' : 'git revert --continue';
+                        useOperationLogStore.getState().logOperation(op, currentRepo.path, cmd,
+                          () => status.isCherryPicking
+                            ? api.git.cherryPickContinue(currentRepo.path)
+                            : api.git.revertContinue(currentRepo.path)
+                        ).then(() => { toast.success(`${op} successful`); refreshStatus(currentRepo.path); })
+                         .catch((e: unknown) => toast.error(`${op} failed`, String(e)));
+                      }}
+                    >
+                      Continue
+                    </button>
+                    <button
+                      className="text-2xs px-1.5 py-0.5 rounded bg-status-deleted/15 text-status-deleted hover:bg-status-deleted/25 transition-colors"
+                      title={status.isCherryPicking ? 'Abort cherry-pick' : 'Abort revert'}
+                      onClick={() => {
+                        const op = status.isCherryPicking ? 'Cherry-Pick Abort' : 'Revert Abort';
+                        const cmd = status.isCherryPicking ? 'git cherry-pick --abort' : 'git revert --abort';
+                        useOperationLogStore.getState().logOperation(op, currentRepo.path, cmd,
+                          () => status.isCherryPicking
+                            ? api.git.cherryPickAbort(currentRepo.path)
+                            : api.git.revertAbort(currentRepo.path)
+                        ).then(() => { toast.success(`${op} successful`); refreshStatus(currentRepo.path); })
+                         .catch((e: unknown) => toast.error(`${op} failed`, String(e)));
+                      }}
+                    >
+                      Abort
+                    </button>
+                  </>
+                )}
+              </div>
             )}
             {isBisecting && (
               <span className="badge badge-modified flex items-center gap-1">

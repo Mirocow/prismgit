@@ -40,6 +40,29 @@ export const BRANCH_COLORS = [
   '#d4a05a', // amber
 ];
 
+/**
+ * Deterministic color from branch name (SmartGit 22.1 feature).
+ * The same branch name always gets the same color on every machine.
+ * Local and remote branches with the same name get the same color.
+ *
+ * Uses a simple hash: sum of char codes mod palette length.
+ * This is stable, fast, and distributes colors evenly across the palette.
+ */
+const branchColorCache = new Map<string, number>();
+export function branchColorIndex(branchName: string): number {
+  // Strip remote prefix (origin/main → main) so local and remote match
+  const name = branchName.replace(/^[^/]+\//, '');
+  const cached = branchColorCache.get(name);
+  if (cached !== undefined) return cached;
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  }
+  const idx = Math.abs(hash) % BRANCH_COLORS.length;
+  branchColorCache.set(name, idx);
+  return idx;
+}
+
 interface ActiveLane {
   /** OID of the parent this lane is currently waiting for. */
   expects: string;
