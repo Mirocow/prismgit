@@ -17,6 +17,7 @@
  * "refs/tags/v2.0". parseDecoratedRef normalizes both shapes into
  * { kind, label } so every surface shows clean "v2.0"-style badges.
  */
+import { memo } from 'react';
 import { Tag as TagIcon } from '../components/icons';
 import { cn } from './utils';
 
@@ -95,7 +96,7 @@ export function RefBadge({ ref: parsed, size = 8 }: { ref: ParsedRef; size?: num
  * Row of ref badges for a commit. Tags first (SmartGit order), optional cap —
  * graph rows cap at 3 to stay compact; the detail panel shows all.
  */
-export function RefBadges({
+export const RefBadges = memo(function RefBadges({
   refs,
   max,
   size = 8,
@@ -122,4 +123,4 @@ export function RefBadges({
       )}
     </div>
   );
-}
+});

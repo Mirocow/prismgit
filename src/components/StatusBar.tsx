@@ -5,7 +5,7 @@ import { useToastStore } from '../stores/toastStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState, useCallback } from 'react';
 import { ArrowUp, ArrowDown, Loader, ChevronUp, ChevronDown } from './icons';
 
 /**
@@ -20,21 +20,18 @@ import { ArrowUp, ArrowDown, Loader, ChevronUp, ChevronDown } from './icons';
  *   if it's already in the loaded list, otherwise the next loadHistory() will
  *   include it (or user can search by hash)
  */
-export function CommitHashLink({ hash, short = true, className }: {
+export const CommitHashLink = memo(function CommitHashLink({ hash, short = true, className }: {
   hash: string;
   short?: boolean;
   className?: string;
 }) {
   const selectCommit = useSelectionStore((s) => s.selectCommit);
-  const handleClick = () => {
-    // Set global selection FIRST — History's useEffect will pick this up
-    // and scroll to the commit if it's already loaded, or trigger a reload.
+  const handleClick = useCallback(() => {
     selectCommit(hash);
-    // Only navigate if we're not already on /history
     if (!window.location.hash.startsWith('#/history')) {
       window.location.hash = '#/history';
     }
-  };
+  }, [hash, selectCommit]);
   const display = short ? hash.substring(0, 7) : hash;
   return (
     <code
@@ -45,7 +42,7 @@ export function CommitHashLink({ hash, short = true, className }: {
       {display}
     </code>
   );
-}
+});
 
 export function StatusBar({
   showCommandLog,

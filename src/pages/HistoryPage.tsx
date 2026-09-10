@@ -51,6 +51,13 @@ export function HistoryPage() {
   const [loading, setLoading] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+  // Debounced search — avoids re-filtering on every keystroke for large repos.
+  // The filter runs on `debouncedSearch` (updated 250ms after typing stops).
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [showGraph, setShowGraph] = useState(true);
   const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -172,12 +179,13 @@ export function HistoryPage() {
 
   const filtered = useMemo(() => {
     let result = searchPool;
-    // Text search (subject, author, hash) — supports regex
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    // Text search (subject, author, hash) — supports regex.
+    // Uses debouncedSearch to avoid re-filtering on every keystroke.
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       if (useRegex) {
         try {
-          const re = new RegExp(search, 'i');
+          const re = new RegExp(debouncedSearch, 'i');
           result = result.filter(e =>
             re.test(e.subject) || re.test(e.author.name) || re.test(e.hash)
           );
@@ -214,7 +222,7 @@ export function HistoryPage() {
       if (!isNaN(toTs)) result = result.filter(e => e.author.timestamp <= toTs);
     }
     return result;
-  }, [searchPool, search, authorFilter, pathFilter, dateFrom, dateTo, useRegex]);
+  }, [searchPool, debouncedSearch, authorFilter, pathFilter, dateFrom, dateTo, useRegex]);
 
   const { rows: graphRows, maxLane } = useMemo(() => {
     if (!showGraph || filtered.length === 0) return { rows: [], maxLane: 0 };
@@ -274,7 +282,7 @@ export function HistoryPage() {
   // Debounced hash-prefix lookup: resolves commits outside the loaded log window
   // (log is capped at maxCount, so an old commit's hash would otherwise never match).
   useEffect(() => {
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     if (!/^[0-9a-f]{4,40}$/.test(q)) {
       setHashHit(null);
       return;
@@ -288,7 +296,7 @@ export function HistoryPage() {
       }
     }, 250);
     return () => clearTimeout(timer);
-  }, [search, repo.path, entries]);
+  }, [debouncedSearch, repo.path, entries]);
 
   // Jump straight to the hash-lookup hit: select it so the list + detail panel show it.
   const handledHashHitRef = useRef<string | null>(null);
