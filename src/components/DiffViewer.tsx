@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { type DiffResult, type DiffHunk, type DiffLine } from '../lib/api';
 import { api } from '../lib/api';
 import { useToastStore } from '../stores/toastStore';
@@ -114,6 +114,11 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set());
   const [useWordDiff, setUseWordDiff] = useState(true);
   const [savingBlob, setSavingBlob] = useState(false);
+  // SmartGit manual: Compact mode — hides sections of the file which are unchanged
+  const [compactMode, setCompactMode] = useState(false);
+  // SmartGit manual: current hunk index for prev/next navigation
+  const [currentHunkIdx, setCurrentHunkIdx] = useState(0);
+  const diffScrollRef = useRef<HTMLDivElement>(null);
 
   const lang = useMemo(() => (filePath ? getLangFromFile(filePath) : ''), [filePath]);
 
@@ -261,11 +266,17 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
 
     return diff.hunks.map((hunk, hi) => {
       const isCollapsed = collapsedHunks.has(hi);
-      const visibleLines = hunk.lines.filter(l => shouldShowLine(l, wsMode));
+      // SmartGit manual: Compact mode — hide unchanged context lines,
+      // show only add/del/hunk-header lines. This makes large diffs much
+      // easier to scan (like SmartGit's compact mode).
+      let visibleLines = hunk.lines.filter(l => shouldShowLine(l, wsMode));
+      if (compactMode) {
+        visibleLines = visibleLines.filter(l => l.type !== 'context');
+      }
 
       if (viewMode === 'unified') {
         return (
-          <div key={hi} className="font-mono text-xs">
+          <div key={hi} id={`hunk-${hi}`} className="font-mono text-xs">
             <div
               className="bg-bg-tertiary text-text-secondary px-3 py-1.5 sticky top-0 cursor-pointer flex items-center gap-2 hover:bg-bg-hover border-b border-border-subtle"
               onClick={() => toggleHunk(hi)}
@@ -509,6 +520,48 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
           >
             Word diff
           </button>
+          {/* SmartGit manual: Compact mode — hide unchanged sections */}
+          <button
+            className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', compactMode
+              ? 'bg-accent text-text-inverse border-accent'
+              : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover')}
+            onClick={() => setCompactMode(!compactMode)}
+            title="Compact mode — hide unchanged lines (SmartGit)"
+          >
+            Compact
+          </button>
+          {/* SmartGit manual: prev/next hunk navigation arrows */}
+          {diff.hunks.length > 1 && (
+            <div className="flex items-center gap-0.5">
+              <button
+                className="icon-btn !w-5 !h-5"
+                title="Previous hunk"
+                onClick={() => {
+                  const prev = Math.max(0, currentHunkIdx - 1);
+                  setCurrentHunkIdx(prev);
+                  document.getElementById(`hunk-${prev}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                disabled={currentHunkIdx === 0}
+              >
+                <ChevronRight size={11} className="rotate-180" />
+              </button>
+              <span className="text-2xs text-text-tertiary">
+                {currentHunkIdx + 1}/{diff.hunks.length}
+              </span>
+              <button
+                className="icon-btn !w-5 !h-5"
+                title="Next hunk"
+                onClick={() => {
+                  const next = Math.min(diff.hunks.length - 1, currentHunkIdx + 1);
+                  setCurrentHunkIdx(next);
+                  document.getElementById(`hunk-${next}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                disabled={currentHunkIdx === diff.hunks.length - 1}
+              >
+                <ChevronRight size={11} />
+              </button>
+            </div>
+          )}
           <div className="flex bg-bg-tertiary rounded overflow-hidden border border-border-default">
             <button
               className={cn('px-2.5 py-0.5 text-2xs transition-colors', viewMode === 'unified' ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
