@@ -10,7 +10,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { launchApp, navigateTo, waitForText, screenshot, FIXTURE_REPO } from './helpers';
+import { launchApp, navigateTo, waitForText, screenshot, enableStatusFilter, FIXTURE_REPO } from './helpers';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -41,6 +41,10 @@ test.describe('Changes workflow', () => {
       const newFile = path.join(FIXTURE_REPO, 'e2e-new-file.txt');
       fs.writeFileSync(newFile, 'e2e test content\n');
 
+      // MADS filters are active by default (Untracked OFF) — enable Untracked
+      // so the fresh file is visible in the list
+      await enableStatusFilter(ctx.page, 'Untracked');
+
       // Wait for the file watcher to pick up the change and refresh the status
       await ctx.page.waitForTimeout(1500);
       await screenshot(ctx.page, 'changes-with-new-file');
@@ -62,6 +66,9 @@ test.describe('Changes workflow', () => {
       const newFile = path.join(FIXTURE_REPO, 'e2e-stage-test.txt');
       fs.writeFileSync(newFile, 'staging test\n');
       await ctx.page.waitForTimeout(1500);
+
+      // Untracked files are hidden by default (MADS filters) — enable Untracked
+      await enableStatusFilter(ctx.page, 'Untracked');
 
       // The file should appear as untracked (status U)
       await waitForText(ctx.page, 'e2e-stage-test.txt', 10000);
@@ -101,6 +108,9 @@ test.describe('Changes workflow', () => {
       const newFile = path.join(FIXTURE_REPO, 'e2e-commit-test.txt');
       fs.writeFileSync(newFile, 'commit test content\n');
       await ctx.page.waitForTimeout(1500);
+
+      // Untracked files are hidden by default (MADS filters) — enable Untracked
+      await enableStatusFilter(ctx.page, 'Untracked');
 
       // Wait for the file to appear
       await waitForText(ctx.page, 'e2e-commit-test.txt', 10000);
