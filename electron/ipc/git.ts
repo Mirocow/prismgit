@@ -37,6 +37,9 @@ export function registerGitIpc(): void {
   );
   ipcMain.handle('git:findCommit', (_e, p: string, q: string) => gitService.findCommit(p, q));
   ipcMain.handle('git:commitFiles', (_e, p: string, h: string) => gitService.commitFiles(p, h));
+  ipcMain.handle('git:mergeNestedCommits', (_e, p: string, h: string) => gitService.mergeNestedCommits(p, h));
+  ipcMain.handle('git:tagsAt', (_e, p: string, h: string) => gitService.tagsAt(p, h));
+  ipcMain.handle('git:trackedFiles', (_e, p: string) => gitService.trackedFiles(p));
   ipcMain.handle('git:diffCommit', (_e, p: string, h: string, ph?: string) => gitService.diffCommit(p, h, ph));
   ipcMain.handle('git:commitExists', (_e, p: string, h: string) => gitService.commitExists(p, h));
 
@@ -128,7 +131,7 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:revParseArgs', (_e, p: string, a: string[]) => gitService.revParseArgs(p, a));
   ipcMain.handle('git:raw', (_e, p: string, a: string[]) => gitService.raw(p, a));
   // New: full git CLI surface coverage (added per simple-git comprehensive test spec)
-  ipcMain.handle('git:grep', (_e, p: string, pat: string, opts?: string[]) => gitService.grep(p, pat, opts));
+  ipcMain.handle('git:grep', (_e, p: string, pat: string, opts?: string[], pathspec?: string) => gitService.grep(p, pat, opts, pathspec));
   ipcMain.handle('git:applyPatch', (_e, p: string, patch: string | string[], opts?: Record<string, null> | string[]) => gitService.applyPatch(p, patch, opts));
   ipcMain.handle('git:show', (_e, p: string, a: string[]) => gitService.show(p, a));
   ipcMain.handle('git:showBuffer', (_e, p: string, a: string[]) => gitService.showBuffer(p, a));

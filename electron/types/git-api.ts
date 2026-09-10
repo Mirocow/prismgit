@@ -289,6 +289,12 @@ export interface GitApi {
   diffBranches: (repoPath: string, base: string, compare: string) => Promise<DiffResult>;
   diffCommit: (repoPath: string, hash: string, parentHash?: string) => Promise<DiffResult>;
   commitFiles: (repoPath: string, hash: string) => Promise<CommitFile[]>;
+  /** Nested commits brought in by a MERGE commit (git log <merge>^1..<merge>, merge itself included). Empty for non-merges. */
+  mergeNestedCommits: (repoPath: string, hash: string) => Promise<LogEntry[]>;
+  /** Tags pointing AT a commit with annotated-tag metadata (tagger, date, message). */
+  tagsAt: (repoPath: string, hash: string) => Promise<{ name: string; annotated: boolean; tagger?: string; date?: string; message?: string }[]>;
+  /** All tracked files (git ls-files) — file-name search for the Search tool. */
+  trackedFiles: (repoPath: string) => Promise<string[]>;
   /**
    * Cheap preflight: does the commit object exist in the repo?
    * Returns false silently for non-existent / unreachable commits
@@ -332,7 +338,7 @@ export interface GitApi {
   raw: (repoPath: string, args: string[]) => Promise<string>;
 
   // New: full git CLI surface coverage (added per simple-git comprehensive test spec)
-  grep: (repoPath: string, pattern: string, options?: string[]) => Promise<string>;
+  grep: (repoPath: string, pattern: string, options?: string[], pathspec?: string) => Promise<string>;
   applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => Promise<string>;
   show: (repoPath: string, args: string[]) => Promise<string>;
   showBuffer: (repoPath: string, args: string[]) => Promise<Buffer>;

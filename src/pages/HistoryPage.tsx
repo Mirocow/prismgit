@@ -8,6 +8,7 @@ import {
   ExternalLink, FileText,
   Filter,
   GitBranch,
+  GitMerge,
   GitPullRequest,
   Pencil,
   RefreshCw,
@@ -65,6 +66,12 @@ export function HistoryPage() {
   const [showGraph, setShowGraph] = useState(true);
   const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  // Merge-commit enrichment: nested commits the merge brought in + tag
+  // metadata (annotated tag message) for tags pointing at the selected commit.
+  const [nestedCommits, setNestedCommits] = useState<LogEntry[]>([]);
+  const [loadingNested, setLoadingNested] = useState(false);
+  const [showNested, setShowNested] = useState(true);
+  const [tagsHere, setTagsHere] = useState<{ name: string; annotated: boolean; tagger?: string; date?: string; message?: string }[]>([]);
   const [showFiles, setShowFiles] = useState(true);
   const [filesPage, setFilesPage] = useState(0);
   const [filesViewMode, setFilesViewMode] = useState<'list' | 'tree'>('list');
@@ -199,21 +206,15 @@ export function HistoryPage() {
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  // Auto-scroll to selected commit when global selection changes from another tool
-  // (e.g. user clicked a tag in Tags page → navigates to History → we should scroll to that commit)
+  // ⚠ selectedIdx indexes the FILTERED list — resolving the hash against the
+  // UNfiltered `entries` used to clobber selectedIdx with an out-of-range
+  // index whenever a search/author/date filter was active: the detail panel
+  // then showed "Select a commit" even though a row was clicked (found in the
+  // merge-commit e2e). Effect lives below the `filtered` memo and resolves in
+  // `filtered` space; if the commit is hidden by the LOCAL filters, clear them
+  // so cross-tool navigation (tag click, commit link) still lands.
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const scrollToIndexRef = useRef<((idx: number) => void) | null>(null);
-  useEffect(() => {
-    if (!selectedCommitHash || entries.length === 0) return;
-    const idx = entries.findIndex(e => e.hash === selectedCommitHash);
-    if (idx >= 0 && idx !== selectedIdx) {
-      setSelectedIdx(idx);
-      // Scroll into view via lazyList's scrollToIndex (works with virtualized list)
-      requestAnimationFrame(() => {
-        scrollToIndexRef.current?.(idx);
-      });
-    }
-  }, [selectedCommitHash, entries, selectedIdx]);
 
   // Search pool: loaded entries + (optionally) the commit resolved by hash prefix lookup.
   // The hit is prepended so it stays visible even when it's outside the loaded log window.
@@ -270,6 +271,40 @@ export function HistoryPage() {
     }
     return result;
   }, [searchPool, debouncedSearch, authorFilter, pathFilter, dateFrom, dateTo, useRegex]);
+
+  // Auto-scroll to the globally selected commit (set here or from another tool —
+  // e.g. a tag click in Tags page). See the index-space warning above.
+  // prevSelectedRef guards the filter-reset: only a NEW external selection may
+  // clear filters — otherwise clearing would wipe the user's query mid-typing
+  // whenever the currently selected commit falls outside their filter.
+  const prevSelectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedCommitHash || entries.length === 0) return;
+    const idxF = filtered.findIndex(e => e.hash === selectedCommitHash);
+    if (idxF >= 0) {
+      prevSelectedRef.current = selectedCommitHash;
+      if (idxF !== selectedIdx) {
+        setSelectedIdx(idxF);
+        // Scroll into view via lazyList's scrollToIndex (works with virtualized list)
+        requestAnimationFrame(() => {
+          scrollToIndexRef.current?.(idxF);
+        });
+      }
+      return;
+    }
+    // The commit exists in the log but is hidden by local filters — reset them,
+    // but ONLY for a fresh (cross-tool) selection, not while the user filters.
+    if (prevSelectedRef.current !== selectedCommitHash) {
+      prevSelectedRef.current = selectedCommitHash;
+      if (debouncedSearch || authorFilter || dateFrom || dateTo) {
+        setSearch('');
+        setDebouncedSearch('');
+        setAuthorFilter('');
+        setDateFrom('');
+        setDateTo('');
+      }
+    }
+  }, [selectedCommitHash, entries, filtered, selectedIdx, debouncedSearch, authorFilter, dateFrom, dateTo]);
 
   const { rows: graphRows, maxLane } = useMemo(() => {
     if (!showGraph || filtered.length === 0) return { rows: [], maxLane: 0 };
@@ -383,6 +418,17 @@ export function HistoryPage() {
       .then(setCommitFiles)
       .catch(() => setCommitFiles([]))
       .finally(() => setLoadingFiles(false));
+    // Merge-commit enrichment: nested commits brought in by the merge +
+    // annotated-tag metadata for tags pointing at this commit. Both are
+    // empty/fast for regular commits, so they run on every selection.
+    setLoadingNested(true);
+    api.git.mergeNestedCommits(repo.path, selected.hash)
+      .then(setNestedCommits)
+      .catch(() => setNestedCommits([]))
+      .finally(() => setLoadingNested(false));
+    api.git.tagsAt(repo.path, selected.hash)
+      .then(setTagsHere)
+      .catch(() => setTagsHere([]));
   }, [selectedIdx, repo.path, filtered]);
 
   // GitHub Actions CI badges (Standard Window "My History" feature) — only for
@@ -1248,6 +1294,25 @@ export function HistoryPage() {
               )}
               {/* Tags and branch refs on this commit (shared badge renderer) */}
               <RefBadges refs={selected.refs} className="mb-3" hash={selected.hash} onChanged={loadHistory} />
+              {/* Annotated-tag details — SmartGit shows the tag message in the
+                  commit description. Lightweight tags only get a badge above. */}
+              {tagsHere.filter(t => t.annotated).length > 0 && (
+                <div className="mb-3 space-y-1">
+                  {tagsHere.filter(t => t.annotated).map((t) => (
+                    <div key={t.name} className="px-2 py-1.5 rounded bg-tag-bg/40 border border-tag-border/40">
+                      <div className="flex items-center gap-1.5 text-2xs text-tag-text">
+                        <TagIcon size={11} />
+                        <span className="font-semibold">{t.name}</span>
+                        {t.tagger && <span className="text-text-tertiary">· {t.tagger}</span>}
+                        {t.date && <span className="text-text-tertiary">· {formatTime(t.date)}</span>}
+                      </div>
+                      {t.message && (
+                        <div className="text-2xs text-text-secondary mt-0.5 whitespace-pre-wrap">{t.message}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-2 mb-3">
                 <CommitHashLink hash={selected.hash} />
                 <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>
@@ -1276,6 +1341,47 @@ export function HistoryPage() {
                       <CommitHashLink hash={p} />
                     </div>
                   ))}
+                </div>
+              )}
+              {/* MERGE commit: list every nested commit the merge brought in
+                  (`git log <merge>^1..<merge>` — includes the merge itself, so
+                  a real merge shows ≥ 2 rows). Octopus merges list commits from
+                  ALL merged branches. Click a row → that commit is selected. */}
+              {nestedCommits.length > 1 && (
+                <div className="mb-3">
+                  <button
+                    className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-1"
+                    onClick={() => setShowNested(!showNested)}
+                    title="Commits merged by this merge commit (relative to the first parent)"
+                  >
+                    <span className="flex items-center gap-1">
+                      {showNested ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                      <GitMerge size={10} /> Merged commits ({nestedCommits.length - 1})
+                    </span>
+                  </button>
+                  {showNested && (
+                    <div className="space-y-0.5">
+                      {loadingNested && <div className="text-2xs text-text-tertiary">Loading...</div>}
+                      {nestedCommits.map((c) => (
+                        <div
+                          key={c.hash}
+                          className={cn(
+                            'flex items-center gap-1 text-2xs px-1 py-0.5 rounded hover:bg-bg-hover cursor-pointer',
+                            c.hash === selected.hash && 'text-text-tertiary'
+                          )}
+                          onClick={() => selectCommit(c.hash)}
+                          title={c.hash === selected.hash ? 'This merge commit' : 'Jump to commit'}
+                        >
+                          {c.hash === selected.hash
+                            ? <GitMerge size={10} className="text-text-tertiary flex-shrink-0" />
+                            : <CornerDownRight size={10} className="text-text-tertiary flex-shrink-0" />}
+                          <span className="font-mono flex-shrink-0">{c.hashAbbrev || shortHash(c.hash)}</span>
+                          <span className="truncate flex-1 min-w-0">{c.subject}</span>
+                          <span className="text-text-tertiary flex-shrink-0">{c.author.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {selected.body && !editingMessage && (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api, type BranchInfo, type RemoteInfo } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -10,7 +10,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Minus, Moon, Package, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Tag as TagIcon, Trash, X } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Package, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Tag as TagIcon, Trash, X } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -650,9 +650,16 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
 
 /**
  * Pull dropdown — button + small chevron that opens a menu with:
- *   - Pull from: <branch> (dropdown of remote branches)
+ *   - Remote selector (ALL configured remotes — mirrors the Push dropdown)
+ *   - Remote branch selector scoped to the chosen remote
  *   - [✓] Rebase instead of merge
  *   - [✓] No fast-forward
+ *   - "Fetch <remote> now" when the remote has no fetched branches yet
+ *
+ * Fixes the old behavior where the one-click Pull silently did NOTHING until
+ * the user first opened the options menu (selectedBranch was only loaded on
+ * open), and where a freshly added remote (nothing fetched) left an EMPTY
+ * branch dropdown with no way to pull from it at all.
  */
 function PullDropdown({ disabled }: { disabled: boolean }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
@@ -660,39 +667,75 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const settings = useSettingsStore((s) => s.settings);
   const [open, setOpen] = useState(false);
-  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
+  const [selectedRemote, setSelectedRemote] = useState('');
+  const [remoteBranches, setRemoteBranches] = useState<BranchInfo[]>([]);
+  // Stored as "origin/main" — remote + branch in one ref name
   const [selectedBranch, setSelectedBranch] = useState('');
   const [useRebase, setUseRebase] = useState(false);
   const [noFF, setNoFF] = useState(false);
+  const [fetching, setFetching] = useState(false);
 
+  // Remotes load on MOUNT (repo change too) — the one-click Pull button needs
+  // a valid remote without opening the options menu first.
   useEffect(() => {
-    if (!open || !currentRepo) return;
-    api.git.branches(currentRepo.path).then(brs => {
-      const remotes = brs.filter(b => b.remote);
-      setBranches(remotes);
-      // If a branch is globally selected (Branches page) and has a remote
-      // counterpart like "origin/<name>", preselect it — otherwise origin/<current>
-      const globallySelected = useSelectionStore.getState().selectedBranch;
-      const selectedRemote = globallySelected
-        ? remotes.find(r => r.name === globallySelected || r.name === `origin/${globallySelected}`)
-        : undefined;
-      if (selectedRemote) {
-        setSelectedBranch(selectedRemote.name);
-        return;
-      }
-      // Default to origin/<current>
-      const cur = brs.find(b => b.current);
-      if (cur) {
-        const match = remotes.find(r => r.name === `origin/${cur.name}`);
-        setSelectedBranch(match?.name || remotes[0]?.name || '');
-      } else {
-        setSelectedBranch(remotes[0]?.name || '');
-      }
+    if (!currentRepo) return;
+    api.git.remotes(currentRepo.path).then(rs => {
+      setRemotes(rs);
+      setSelectedRemote(prev =>
+        prev && rs.some(r => r.name === prev)
+          ? prev
+          : (rs.find(r => r.name === 'origin')?.name || rs[0]?.name || '')
+      );
     }).catch(() => {});
-  }, [open, currentRepo]);
+  }, [currentRepo]);
+
+  // Remote branches load on mount + when the menu opens or the remote changes.
+  const loadRemoteBranches = useCallback(async () => {
+    if (!currentRepo || !selectedRemote) { setRemoteBranches([]); return; }
+    try {
+      const brs = await api.git.branches(currentRepo.path);
+      const prefix = `${selectedRemote}/`;
+      const rem = brs.filter(b => b.remote && b.name.startsWith(prefix));
+      setRemoteBranches(rem);
+      // Default: upstream-tracking remote branch of the CURRENT branch, then
+      // <remote>/<current>, then the remote's first branch.
+      setSelectedBranch(prev => {
+        if (prev && rem.some(b => b.name === prev)) return prev;
+        const cur = brs.find(b => b.current);
+        const match = cur ? rem.find(r => r.name === `${prefix}${cur.name}`) : undefined;
+        return match?.name || rem[0]?.name || '';
+      });
+    } catch { setRemoteBranches([]); }
+  }, [currentRepo, selectedRemote]);
+  useEffect(() => { loadRemoteBranches(); }, [loadRemoteBranches, open]);
+
+  const fetchRemoteNow = async () => {
+    if (!currentRepo || !selectedRemote) return;
+    setFetching(true);
+    try {
+      await api.git.fetch(currentRepo.path, selectedRemote, false, true);
+      toast.success(`Fetched ${selectedRemote}`, 'Remote branches and tags updated');
+    } catch (e) {
+      toast.error(`Fetch ${selectedRemote} failed`, String(e));
+    } finally {
+      setFetching(false);
+      loadRemoteBranches();
+    }
+  };
 
   const doPull = async () => {
-    if (!currentRepo || !selectedBranch) return;
+    if (!currentRepo) return;
+    if (!selectedBranch) {
+      toast.warning(
+        'Nothing to pull from',
+        remotes.length === 0
+          ? 'No remotes configured — add one on the Remotes page'
+          : `No fetched branches on '${selectedRemote || 'any remote'}' — open Pull options and Fetch first`
+      );
+      setOpen(false);
+      return;
+    }
     try {
       // Extract remote + branch from "origin/branch-name"
       const parts = selectedBranch.split('/');
@@ -726,6 +769,7 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
     setNoFF(false);
   };
 
+  const pullTarget = selectedBranch || selectedRemote;
   return (
     <div className="relative">
       <div className="flex items-center">
@@ -734,7 +778,7 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
           style={{ color: '#399ee6' }}
           onClick={() => doPull()}
           disabled={disabled}
-          title="Pull from origin (current branch)"
+          title={pullTarget ? `Pull ${pullTarget} into the current branch` : 'Pull — no remote branches available'}
         >
           <ArrowDown size={14} />
           <span className="hidden md:inline">Pull</span>
@@ -743,7 +787,7 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
           className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
           onClick={() => setOpen(!open)}
           disabled={disabled}
-          title="Pull options — select branch, rebase, no-ff"
+          title="Pull options — select remote, branch, rebase, no-ff"
         >
           <ChevronDown size={12} />
         </button>
@@ -755,40 +799,82 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
               Pull from remote
             </div>
-            <div className="p-2">
-              <label className="text-2xs text-text-tertiary block mb-1">Remote branch</label>
-              <select
-                className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
-                value={selectedBranch}
-                onChange={(e) => setSelectedBranch(e.target.value)}
-              >
-                {branches.map(b => (
-                  <option key={b.name} value={b.name}>{b.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="px-3 py-1">
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input type="checkbox" checked={useRebase} onChange={(e) => setUseRebase(e.target.checked)} />
-                <span>Rebase instead of merge</span>
-              </label>
-            </div>
-            <div className="px-3 py-1">
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input type="checkbox" checked={noFF} onChange={(e) => setNoFF(e.target.checked)} />
-                <span>No fast-forward (always create merge commit)</span>
-              </label>
-            </div>
-            <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
-              <button
-                className="btn btn-primary text-xs flex-1"
-                onClick={() => doPull()}
-                disabled={!selectedBranch}
-              >
-                <ArrowDown size={12} /> Pull{useRebase ? ' (rebase)' : ''}
-              </button>
-              <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>Cancel</button>
-            </div>
+            {remotes.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-text-tertiary">
+                No remotes configured.
+                <div className="mt-1">Add one on the <b>Remotes</b> page to pull.</div>
+              </div>
+            ) : (
+              <>
+                <div className="p-2 space-y-2">
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">Remote</label>
+                    <select
+                      className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                      value={selectedRemote}
+                      onChange={(e) => { setSelectedRemote(e.target.value); setSelectedBranch(''); }}
+                    >
+                      {remotes.map(r => (
+                        <option key={r.name} value={r.name} title={r.refs?.fetch}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">Remote branch</label>
+                    {remoteBranches.length > 0 ? (
+                      <select
+                        className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                        value={selectedBranch}
+                        onChange={(e) => setSelectedBranch(e.target.value)}
+                      >
+                        {remoteBranches.map(b => (
+                          <option key={b.name} value={b.name}>{b.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-xs text-text-tertiary px-1 py-1">
+                        No branches fetched from <b>{selectedRemote}</b> yet.
+                      </div>
+                    )}
+                  </div>
+                  {remoteBranches.length === 0 && (
+                    <button
+                      className="btn btn-secondary text-xs w-full"
+                      onClick={fetchRemoteNow}
+                      disabled={fetching || !selectedRemote}
+                      title={`git fetch ${selectedRemote} --tags`}
+                    >
+                      {fetching ? <Loader size={12} className="spin" /> : <CloudDownload size={12} />}
+                      Fetch {selectedRemote} now
+                    </button>
+                  )}
+                </div>
+                <div className="px-3 py-1">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={useRebase} onChange={(e) => setUseRebase(e.target.checked)} />
+                    <span>Rebase instead of merge</span>
+                  </label>
+                </div>
+                <div className="px-3 py-1">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={noFF} onChange={(e) => setNoFF(e.target.checked)} />
+                    <span>No fast-forward (always create merge commit)</span>
+                  </label>
+                </div>
+                <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
+                  <button
+                    className="btn btn-primary text-xs flex-1"
+                    onClick={() => doPull()}
+                    disabled={!selectedBranch}
+                  >
+                    <ArrowDown size={12} /> Pull{useRebase ? ' (rebase)' : ''}
+                  </button>
+                  <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>Cancel</button>
+                </div>
+              </>
+            )}
           </div>
         </>
       )}

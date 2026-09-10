@@ -1,36 +1,15 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, FileText, Loader, GitCommit, CornerDownRight, ExternalLink, Copy, History } from '../components/icons';
+import { Search, FileText, Loader, GitCommit, CornerDownRight, ExternalLink, Copy, History, FolderOpen, ChevronDown, ChevronRight } from '../components/icons';
+import { RefBadges } from '../lib/refBadge';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type LogEntry } from '../lib/api';
 import { cn, formatDate, shortHash } from '../lib/utils';
+import { parseGrepOutput, highlight, filterTrackedFiles, type GrepMatch } from '../lib/searchUtils';
 
-type Tab = 'commits' | 'history' | 'grep' | 'revparse';
-
-interface GrepMatch {
-  file: string;
-  line: number;
-  text: string;
-}
-
-function parseGrepOutput(raw: string): GrepMatch[] {
-  return raw
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => {
-      const first = l.indexOf(':');
-      if (first === -1) return null;
-      const second = l.indexOf(':', first + 1);
-      if (second === -1) return null;
-      const file = l.slice(0, first);
-      const line = parseInt(l.slice(first + 1, second), 10);
-      if (Number.isNaN(line)) return null;
-      return { file, line, text: l.slice(second + 1) };
-    })
-    .filter((m): m is GrepMatch => m !== null);
-}
+type Tab = 'commits' | 'files' | 'history' | 'grep' | 'revparse';
 
 export function InvestigatePage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
@@ -38,66 +17,87 @@ export function InvestigatePage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('commits');
 
-  // === Commit message search tab (git log --grep) ===
+  // === Commit message search tab (git log --grep, LIVE as-you-type) ===
   const [commitQuery, setCommitQuery] = useState('');
+  const [commitLiveQuery, setCommitLiveQuery] = useState(''); // debounced
   const [commitIgnoreCase, setCommitIgnoreCase] = useState(true);
   const [commitEntries, setCommitEntries] = useState<LogEntry[]>([]);
   const [commitLoading, setCommitLoading] = useState(false);
   const [commitSearched, setCommitSearched] = useState(false);
+  const commitSeq = useRef(0);
+
+  // Debounce the commit query — search runs automatically while typing
+  useEffect(() => {
+    const t = setTimeout(() => setCommitLiveQuery(commitQuery), 300);
+    return () => clearTimeout(t);
+  }, [commitQuery]);
+
+  useEffect(() => {
+    const q = commitLiveQuery.trim();
+    if (q.length < 2) {
+      setCommitEntries([]);
+      setCommitSearched(false);
+      return;
+    }
+    const seq = ++commitSeq.current;
+    setCommitLoading(true);
+    setCommitSearched(true);
+    api.git.log(repo.path, { maxCount: 200, all: true, grep: q, grepIgnoreCase: commitIgnoreCase })
+      .then((result) => { if (commitSeq.current === seq) setCommitEntries(result); })
+      .catch((e) => {
+        if (commitSeq.current === seq) { toast.error('Commit search failed', String(e)); setCommitEntries([]); }
+      })
+      .finally(() => { if (commitSeq.current === seq) setCommitLoading(false); });
+  }, [commitLiveQuery, commitIgnoreCase, repo.path, toast]);
+
+  // === Tracked files (shared by the Files tab + File History path helper) ===
+  const [trackedFiles, setTrackedFiles] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    setTrackedFiles([]);
+    api.git.trackedFiles(repo.path)
+      .then((files) => { if (!cancelled) setTrackedFiles(files); })
+      .catch(() => { /* Files tab degrades to manual path entry */ });
+    return () => { cancelled = true; };
+  }, [repo.path]);
+
+  // === Files tab — live file-NAME search over git ls-files ===
+  const [fileQuery, setFileQuery] = useState('');
+  const fileResults = useMemo(
+    () => filterTrackedFiles(trackedFiles, fileQuery, 200),
+    [trackedFiles, fileQuery]
+  );
+
+  const openFileHistory = useCallback((path: string) => {
+    setFilePath(path);
+    setHistQuery(path);
+    setTab('history');
+  }, []);
+  const openInChanges = useCallback((path: string) => {
+    useSelectionStore.getState().selectFile(path);
+    navigate('/changes');
+  }, [navigate]);
 
   // === File history tab ===
   const [filePath, setFilePath] = useState('');
+  const [histQuery, setHistQuery] = useState(''); // drives the path-helper dropdown
   const [followRenames, setFollowRenames] = useState(true);
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<LogEntry | null>(null);
   const [searched, setSearched] = useState(false);
-
-  // === Content search (git grep) tab ===
-  const [grepPattern, setGrepPattern] = useState('');
-  const [grepIgnoreCase, setGrepIgnoreCase] = useState(false);
-  const [grepWord, setGrepWord] = useState(false);
-  const [grepUntracked, setGrepUntracked] = useState(false);
-  const [grepMatches, setGrepMatches] = useState<GrepMatch[]>([]);
-  const [grepLoading, setGrepLoading] = useState(false);
-  const [grepSearched, setGrepSearched] = useState(false);
-
-  // === Rev-parse tab ===
-  const [revInput, setRevInput] = useState('HEAD');
-  const [revResult, setRevResult] = useState<string | null>(null);
-  const [revError, setRevError] = useState<string | null>(null);
-  const [revBusy, setRevBusy] = useState(false);
-  const [currentBranch, setCurrentBranch] = useState<string | null>(null);
+  const histPathHelper = useMemo(() => {
+    const q = histQuery.trim().toLowerCase();
+    if (!q) return [];
+    return trackedFiles.filter((f) => f.toLowerCase().includes(q)).slice(0, 12);
+  }, [trackedFiles, histQuery]);
 
   // Prefill the File History path from the file selected elsewhere in the app
   // (Changes / History) — makes the tab instantly usable without typing paths.
   useEffect(() => {
     const sel = useSelectionStore.getState().selectedFilePath;
-    if (sel) setFilePath(sel);
+    if (sel) { setFilePath(sel); setHistQuery(sel); }
   }, []);
-
-  const handleCommitSearch = useCallback(async () => {
-    if (!commitQuery.trim()) {
-      toast.warning('Search pattern is required');
-      return;
-    }
-    setCommitLoading(true);
-    setCommitSearched(true);
-    try {
-      const result = await api.git.log(repo.path, {
-        maxCount: 200,
-        all: true,
-        grep: commitQuery,
-        grepIgnoreCase: commitIgnoreCase,
-      });
-      setCommitEntries(result);
-    } catch (e) {
-      toast.error('Commit search failed', String(e));
-      setCommitEntries([]);
-    } finally {
-      setCommitLoading(false);
-    }
-  }, [repo.path, commitQuery, commitIgnoreCase, toast]);
 
   const handleInvestigate = useCallback(async () => {
     if (!filePath.trim()) {
@@ -123,6 +123,18 @@ export function InvestigatePage() {
     }
   }, [repo.path, filePath, followRenames, toast]);
 
+  // === Content search (git grep) tab ===
+  const [grepPattern, setGrepPattern] = useState('');
+  const [grepIgnoreCase, setGrepIgnoreCase] = useState(false);
+  const [grepWord, setGrepWord] = useState(false);
+  const [grepUntracked, setGrepUntracked] = useState(false);
+  const [grepPathspec, setGrepPathspec] = useState('');
+  const [grepMatches, setGrepMatches] = useState<GrepMatch[]>([]);
+  const [grepLoading, setGrepLoading] = useState(false);
+  const [grepSearched, setGrepSearched] = useState(false);
+  const [grepError, setGrepError] = useState('');
+  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
+
   const handleGrep = useCallback(async () => {
     if (!grepPattern.trim()) {
       toast.warning('Search pattern is required');
@@ -130,25 +142,45 @@ export function InvestigatePage() {
     }
     setGrepLoading(true);
     setGrepSearched(true);
+    setGrepError('');
     try {
       const options = ['--line-number'];
       if (grepIgnoreCase) options.push('-i');
       if (grepWord) options.push('-w');
       if (grepUntracked) options.push('--untracked');
-      const raw = await api.git.grep(repo.path, grepPattern, options);
+      const raw = await api.git.grep(repo.path, grepPattern, options, grepPathspec || undefined);
       setGrepMatches(parseGrepOutput(raw));
     } catch (e) {
+      const msg = String(e);
       // git grep exits with code 1 when there are no matches — treat as empty result
-      if (String(e).includes('exit code 1') || String(e).includes('no matches')) {
+      if (msg.includes('exit code 1') || msg.includes('no matches')) {
         setGrepMatches([]);
       } else {
-        toast.error('Grep failed', String(e));
+        setGrepError(msg);
         setGrepMatches([]);
       }
     } finally {
       setGrepLoading(false);
     }
-  }, [repo.path, grepPattern, grepIgnoreCase, grepWord, grepUntracked, toast]);
+  }, [repo.path, grepPattern, grepIgnoreCase, grepWord, grepUntracked, grepPathspec, toast]);
+
+  // Group grep matches per file, preserving git's order
+  const grepGroups = useMemo(() => {
+    const map = new Map<string, GrepMatch[]>();
+    for (const m of grepMatches) {
+      const arr = map.get(m.file);
+      if (arr) arr.push(m);
+      else map.set(m.file, [m]);
+    }
+    return Array.from(map.entries());
+  }, [grepMatches]);
+
+  // === Rev-parse tab ===
+  const [revInput, setRevInput] = useState('HEAD');
+  const [revResult, setRevResult] = useState<string | null>(null);
+  const [revError, setRevError] = useState<string | null>(null);
+  const [revBusy, setRevBusy] = useState(false);
+  const [currentBranch, setCurrentBranch] = useState<string | null>(null);
 
   const handleRevParse = useCallback(async () => {
     setRevBusy(true);
@@ -193,9 +225,10 @@ export function InvestigatePage() {
   };
 
   const TABS: { id: Tab; label: string; title: string }[] = [
-    { id: 'commits', label: 'Commits', title: 'Search commit messages across ALL branches (git log --grep --all)' },
+    { id: 'commits', label: 'Commits', title: 'Live commit-message search across ALL branches (git log --grep --all)' },
+    { id: 'files', label: 'Files', title: 'Find tracked files by name (git ls-files)' },
     { id: 'history', label: 'File History', title: 'Commit history of a single file (with rename following)' },
-    { id: 'grep', label: 'Content Search', title: 'git grep — search tracked file contents' },
+    { id: 'grep', label: 'Content', title: 'git grep — search tracked file contents, optionally narrowed to a path' },
     { id: 'revparse', label: 'Rev-Parse', title: 'Evaluate git rev-parse expressions (HEAD~3, main@{yesterday}, v1.0^{commit}, ...)' },
   ];
 
@@ -203,7 +236,8 @@ export function InvestigatePage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border-default bg-bg-secondary">
         <Search size={14} />
-        <span className="text-sm font-medium">Investigate</span>
+        <span className="text-sm font-medium">Search</span>
+        <span className="text-2xs text-text-tertiary truncate" title={repo.path}>{repo.name}</span>
         <div className="flex items-center gap-1 ml-4">
           {TABS.map((t) => (
             <button
@@ -223,45 +257,33 @@ export function InvestigatePage() {
         </div>
       </div>
 
-      {/* ================= Commit message search tab ================= */}
+      {/* ================= Commit message search tab (LIVE) ================= */}
       {tab === 'commits' && (
         <>
           <div className="flex items-center gap-2 p-3 border-b border-border-default bg-bg-tertiary">
+            <Search size={14} className="text-text-tertiary flex-shrink-0" />
             <input
               type="text"
               className="flex-1 text-sm"
-              placeholder="Search commit messages (regex supported) — e.g. 'fix: stash', 'rebase'"
+              placeholder="Search commit messages — live as you type (regex supported), across ALL branches"
               value={commitQuery}
               autoFocus
               onChange={(e) => setCommitQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCommitSearch()}
             />
             <label className="flex items-center gap-1 text-xs cursor-pointer text-text-secondary" title="-i">
               <input type="checkbox" checked={commitIgnoreCase} onChange={(e) => setCommitIgnoreCase(e.target.checked)} />
               Ignore case
             </label>
-            <button
-              className="btn btn-primary text-xs"
-              onClick={handleCommitSearch}
-              disabled={commitLoading || !commitQuery.trim()}
-            >
-              {commitLoading ? <Loader size={12} className="spin" /> : <Search size={12} />}
-              Search
-            </button>
+            {commitLoading && <Loader size={13} className="spin text-text-tertiary" />}
           </div>
           <div className="flex-1 overflow-y-auto">
-            {commitLoading ? (
-              <div className="p-8 text-center text-text-tertiary text-sm flex items-center justify-center gap-2">
-                <Loader size={14} className="spin" />
-                Searching commit messages...
-              </div>
-            ) : !commitSearched ? (
+            {commitQuery.trim().length < 2 ? (
               <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
                 <GitCommit size={32} className="mb-2 opacity-50" />
-                <div className="text-sm">No commit search yet</div>
-                <div className="text-xs mt-1">Searches ALL branches — type a pattern above</div>
+                <div className="text-sm">Type at least 2 characters</div>
+                <div className="text-xs mt-1">Searches commit messages on all branches — results appear live</div>
               </div>
-            ) : commitEntries.length === 0 ? (
+            ) : commitSearched && !commitLoading && commitEntries.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
                 <GitCommit size={32} className="mb-2 opacity-50" />
                 <div className="text-sm">No commits match “{commitQuery}”</div>
@@ -269,7 +291,8 @@ export function InvestigatePage() {
             ) : (
               <>
                 <div className="px-3 py-1.5 text-2xs text-text-tertiary border-b border-border-default bg-bg-secondary">
-                  {commitEntries.length} commit{commitEntries.length === 1 ? '' : 's'} match “{commitQuery}”
+                  {commitLoading ? 'Searching…' : `${commitEntries.length} commit${commitEntries.length === 1 ? '' : 's'} match “${commitLiveQuery}”`}
+                  <span className="ml-2 opacity-70">· click a commit to open it in History</span>
                 </div>
                 {commitEntries.map((entry, idx) => (
                   <div
@@ -288,16 +311,7 @@ export function InvestigatePage() {
                         <span className="font-medium text-text-secondary">{entry.author.name}</span>
                         <span>·</span>
                         <span>{formatDate(entry.author.date)}</span>
-                        {entry.refs.length > 0 && (
-                          <>
-                            <span>·</span>
-                            <div className="flex items-center gap-1 flex-wrap">
-                              {entry.refs.slice(0, 3).map((ref, i) => (
-                                <span key={i} className="badge badge-renamed">{ref.replace(/^tag:\s*/, '')}</span>
-                              ))}
-                            </div>
-                          </>
-                        )}
+                        <RefBadges refs={entry.refs} size={7} hash={entry.hash} className="flex-wrap" />
                       </div>
                     </div>
                     <code className="text-xs font-mono text-text-tertiary flex-shrink-0">{shortHash(entry.hash)}</code>
@@ -309,18 +323,100 @@ export function InvestigatePage() {
         </>
       )}
 
+      {/* ================= Files tab — live file-name search ================= */}
+      {tab === 'files' && (
+        <>
+          <div className="flex items-center gap-2 p-3 border-b border-border-default bg-bg-tertiary">
+            <Search size={14} className="text-text-tertiary flex-shrink-0" />
+            <input
+              type="text"
+              className="flex-1 text-sm font-mono"
+              placeholder="Find tracked files by name — live (e.g. util, .tsx, config)"
+              value={fileQuery}
+              autoFocus
+              onChange={(e) => setFileQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && fileResults[0]) openFileHistory(fileResults[0]); }}
+            />
+            <span className="text-2xs text-text-tertiary flex-shrink-0">
+              {fileQuery.trim() ? `${fileResults.length}${fileResults.length === 200 ? '+' : ''} of ${trackedFiles.length} tracked files` : `${trackedFiles.length} tracked files`}
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {!fileQuery.trim() ? (
+              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
+                <FileText size={32} className="mb-2 opacity-50" />
+                <div className="text-sm">Type a file name or part of a path</div>
+                <div className="text-xs mt-1">Click a result: History · <FileText size={9} className="inline" />: open in Changes</div>
+              </div>
+            ) : fileResults.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
+                <FileText size={32} className="mb-2 opacity-50" />
+                <div className="text-sm">No tracked file matches “{fileQuery}”</div>
+              </div>
+            ) : (
+              fileResults.map((f) => {
+                const base = f.slice(f.lastIndexOf('/') + 1);
+                return (
+                  <div
+                    key={f}
+                    className="group flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-border-subtle hover:bg-bg-hover text-xs"
+                    title={`${f} — click: file history`}
+                    onClick={() => openFileHistory(f)}
+                  >
+                    <FileText size={12} className="text-text-tertiary flex-shrink-0" />
+                    <span className="font-mono truncate flex-1 min-w-0">
+                      {f.slice(0, f.length - base.length)}
+                      <span className="text-text-primary font-medium">{base}</span>
+                    </span>
+                    <button
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                      title="Open in Changes"
+                      onClick={(e) => { e.stopPropagation(); openInChanges(f); }}
+                    >
+                      <FolderOpen size={11} />
+                    </button>
+                    <button
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                      title="File history"
+                      onClick={(e) => { e.stopPropagation(); openFileHistory(f); }}
+                    >
+                      <History size={11} />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+
       {/* ================= File history tab ================= */}
       {tab === 'history' && (
         <>
           <div className="flex items-center gap-2 p-3 border-b border-border-default bg-bg-tertiary">
-            <input
-              type="text"
-              className="flex-1 text-sm mono"
-              placeholder="path/to/file.txt"
-              value={filePath}
-              onChange={(e) => setFilePath(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleInvestigate()}
-            />
+            <div className="relative flex-1">
+              <input
+                type="text"
+                className="w-full text-sm mono"
+                placeholder="path/to/file.txt — type to pick from tracked files"
+                value={histQuery}
+                onChange={(e) => { setHistQuery(e.target.value); setFilePath(e.target.value); }}
+                onKeyDown={(e) => e.key === 'Enter' && handleInvestigate()}
+              />
+              {histPathHelper.length > 0 && histQuery.trim() !== filePath && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 max-h-64 overflow-y-auto">
+                  {histPathHelper.map((f) => (
+                    <div
+                      key={f}
+                      className="px-2 py-1 text-xs font-mono hover:bg-bg-hover cursor-pointer truncate"
+                      onClick={() => { setFilePath(f); setHistQuery(f); }}
+                    >
+                      {f}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <label className="flex items-center gap-1 text-xs cursor-pointer text-text-secondary">
               <input
                 type="checkbox"
@@ -351,7 +447,7 @@ export function InvestigatePage() {
                 <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
                   <FileText size={32} className="mb-2 opacity-50" />
                   <div className="text-sm">No file investigated</div>
-                  <div className="text-xs mt-1">Enter a file path to see its history</div>
+                  <div className="text-xs mt-1">Enter a file path (or pick one from the Files tab)</div>
                 </div>
               ) : entries.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
@@ -375,16 +471,7 @@ export function InvestigatePage() {
                         <span className="font-medium text-text-secondary">{entry.author.name}</span>
                         <span>·</span>
                         <span>{formatDate(entry.author.date)}</span>
-                        {entry.refs.length > 0 && (
-                          <>
-                            <span>·</span>
-                            <div className="flex items-center gap-1 flex-wrap">
-                              {entry.refs.slice(0, 3).map((ref, i) => (
-                                <span key={i} className="badge badge-renamed">{ref.replace(/^tag:\s*/, '')}</span>
-                              ))}
-                            </div>
-                          </>
-                        )}
+                        <RefBadges refs={entry.refs} size={7} hash={entry.hash} className="flex-wrap" />
                       </div>
                     </div>
                     <code className="text-xs font-mono text-text-tertiary flex-shrink-0">
@@ -484,6 +571,15 @@ export function InvestigatePage() {
               onChange={(e) => setGrepPattern(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleGrep()}
             />
+            <input
+              type="text"
+              className="w-44 text-xs mono"
+              placeholder="path filter (e.g. src/*.ts)"
+              value={grepPathspec}
+              onChange={(e) => setGrepPathspec(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleGrep()}
+              title="Optional pathspec — narrow the search to matching paths only"
+            />
             <label className="flex items-center gap-1 text-xs cursor-pointer text-text-secondary" title="-i">
               <input type="checkbox" checked={grepIgnoreCase} onChange={(e) => setGrepIgnoreCase(e.target.checked)} />
               Ignore case
@@ -518,6 +614,13 @@ export function InvestigatePage() {
                 <div className="text-sm">No content search yet</div>
                 <div className="text-xs mt-1">git grep across the working tree — enter a pattern above</div>
               </div>
+            ) : grepError ? (
+              <div className="p-6">
+                <div className="border border-status-deleted/40 rounded bg-status-deleted/10 p-3">
+                  <div className="text-2xs uppercase text-status-deleted mb-1">Grep error</div>
+                  <code className="font-mono text-xs text-status-deleted break-all">{grepError}</code>
+                </div>
+              </div>
             ) : grepMatches.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
                 <Search size={32} className="mb-2 opacity-50" />
@@ -527,39 +630,68 @@ export function InvestigatePage() {
               <>
                 <div className="px-3 py-1.5 text-2xs text-text-tertiary border-b border-border-default bg-bg-secondary">
                   {grepMatches.length} match{grepMatches.length === 1 ? '' : 'es'} in{' '}
-                  {new Set(grepMatches.map((m) => m.file)).size} file
-                  {new Set(grepMatches.map((m) => m.file)).size === 1 ? '' : 's'}
+                  {grepGroups.length} file{grepGroups.length === 1 ? '' : 's'}
+                  {grepPathspec.trim() && <> · path: <code className="font-mono">{grepPathspec}</code></>}
                 </div>
-                {grepMatches.map((m, i) => (
-                  <div
-                    key={`${m.file}:${m.line}:${i}`}
-                    className="group flex items-start gap-2 px-3 py-1 border-b border-border-subtle hover:bg-bg-hover text-xs cursor-pointer"
-                    title={`${m.file}:${m.line} — click to show the file in Changes`}
-                    onClick={() => {
-                      useSelectionStore.getState().selectFile(m.file);
-                      navigate('/changes');
-                    }}
-                  >
-                    <button
-                      className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 flex-shrink-0 mt-0.5"
-                      title="Copy file:line reference"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigator.clipboard.writeText(`${m.file}:${m.line}`);
-                        toast.success('Reference copied');
-                      }}
-                    >
-                      <Copy size={10} />
-                    </button>
-                    <code className="font-mono text-accent flex-shrink-0 truncate max-w-50" title={m.file}>
-                      {m.file}
-                    </code>
-                    <code className="font-mono text-text-tertiary flex-shrink-0">{m.line}</code>
-                    <pre className="font-mono whitespace-pre-wrap break-all text-text-primary flex-1 min-w-0">
-                      {m.text}
-                    </pre>
-                  </div>
-                ))}
+                {grepGroups.map(([file, matches]) => {
+                  const collapsed = collapsedFiles.has(file);
+                  return (
+                    <div key={file}>
+                      <div
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-secondary border-b border-border-subtle cursor-pointer hover:bg-bg-hover"
+                        onClick={() => setCollapsedFiles((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(file)) next.delete(file); else next.add(file);
+                          return next;
+                        })}
+                        title={collapsed ? 'Expand matches' : 'Collapse matches'}
+                      >
+                        {collapsed ? <ChevronRight size={11} className="text-text-tertiary" /> : <ChevronDown size={11} className="text-text-tertiary" />}
+                        <FileText size={11} className="text-text-tertiary flex-shrink-0" />
+                        <code className="font-mono text-xs text-text-primary truncate flex-1 min-w-0">{file}</code>
+                        <span className="text-2xs text-text-tertiary flex-shrink-0">{matches.length}</span>
+                        <button
+                          className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                          title="File history"
+                          onClick={(e) => { e.stopPropagation(); openFileHistory(file); }}
+                        >
+                          <History size={11} />
+                        </button>
+                      </div>
+                      {!collapsed && matches.map((m, i) => (
+                        <div
+                          key={`${m.file}:${m.line}:${i}`}
+                          className="group flex items-start gap-2 pl-6 pr-3 py-1 border-b border-border-subtle hover:bg-bg-hover text-xs cursor-pointer"
+                          title={`${m.file}:${m.line} — click to show the file in Changes`}
+                          onClick={() => {
+                            useSelectionStore.getState().selectFile(m.file);
+                            navigate('/changes');
+                          }}
+                        >
+                          <button
+                            className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 flex-shrink-0 mt-0.5"
+                            title="Copy file:line reference"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(`${m.file}:${m.line}`);
+                              toast.success('Reference copied');
+                            }}
+                          >
+                            <Copy size={10} />
+                          </button>
+                          <code className="font-mono text-text-tertiary flex-shrink-0 w-10 text-right">{m.line}</code>
+                          <pre className="font-mono whitespace-pre-wrap break-all text-text-primary flex-1 min-w-0">
+                            {highlight(m.text, grepPattern, grepIgnoreCase).map((seg, j) =>
+                              seg.hit
+                                ? <mark key={j} className="bg-status-added/30 text-text-primary rounded-sm px-0.5">{seg.seg}</mark>
+                                : <span key={j}>{seg.seg}</span>
+                            )}
+                          </pre>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </>
             )}
           </div>

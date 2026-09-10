@@ -232,7 +232,7 @@ export async function fetch(
 
 export async function fetchAll(repoPath: string, prune = false): Promise<void> {
   const git = getGit(repoPath);
-  const args: string[] = ['fetch', '--all'];
+  const args: string[] = ['fetch', '--all', '--tags'];
   if (prune) args.push('--prune');
   await git.raw(args);
 }
@@ -999,12 +999,29 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
     return [];
   }
 
+  // MERGE commits: `git show <merge>` prints a COMBINED diff which lists NO
+  // files for a clean merge — the History panel showed "Files (0)" for every
+  // merge commit (octopus merges too). SmartGit shows the changes the merge
+  // introduced relative to its FIRST parent — the union of everything the
+  // merged branches brought in (plus conflict resolutions). Detect merges via
+  // `rev-list --parents` and diff `<merge>^1..<merge>` for them.
+  let parentCount = 1;
+  try {
+    const parentsOut = await git.raw(['rev-list', '--parents', '-n', '1', hash]);
+    parentCount = parentsOut.trim().split(/\s+/).length - 1;
+  } catch { /* default to non-merge handling */ }
+  const isMerge = parentCount > 1;
+
   // Get file list with status. Wrap in try/catch as defense-in-depth — even
   // with the preflight check, a race condition (commit gc'd between the check
   // and the show) would otherwise throw.
+  // `-c core.quotePath=false` keeps non-ASCII filenames readable (raw UTF-8
+  // instead of C-escaped octal) so path matching + clicking work.
   let raw: string;
   try {
-    raw = await git.raw(['show', '--no-color', '--name-status', '--format=', hash]);
+    raw = isMerge
+      ? await git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--name-status', `${hash}^1`, hash])
+      : await git.raw(['-c', 'core.quotePath=false', 'show', '--no-color', '--name-status', '--format=', hash]);
   } catch {
     return [];
   }
@@ -1026,7 +1043,9 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
     let deletions = 0;
     let binary = false;
     try {
-      const numstat = await git.raw(['show', '--numstat', '--format=', hash, '--', pathStr]);
+      const numstat = isMerge
+        ? await git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--numstat', `${hash}^1`, hash, '--', pathStr])
+        : await git.raw(['-c', 'core.quotePath=false', 'show', '--numstat', '--format=', hash, '--', pathStr]);
       const numLine = numstat.split('\n').find((l) => l.includes(pathStr));
       if (numLine) {
         const parts2 = numLine.split('\t');
@@ -1049,6 +1068,91 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
     });
   }
   return result;
+}
+
+/**
+ * Nested commits of a MERGE commit — everything the merge brought in that was
+ * not reachable from its first parent (`git log <merge>^1..<merge>`), the
+ * merge itself included. For an octopus merge this lists commits from ALL
+ * merged branches. Empty for regular (non-merge) commits.
+ */
+export async function mergeNestedCommits(repoPath: string, hash: string): Promise<LogEntry[]> {
+  const git = getGit(repoPath);
+  if (!(await commitExists(repoPath, hash))) return [];
+
+  let parentCount = 1;
+  try {
+    const parentsOut = await git.raw(['rev-list', '--parents', '-n', '1', hash]);
+    parentCount = parentsOut.trim().split(/\s+/).length - 1;
+  } catch { return []; }
+  if (parentCount <= 1) return [];
+
+  // Same pretty format + parser as log() so the UI can reuse LogEntry rows.
+  const fieldSep = '%x00';
+  const commitSep = '%x1e';
+  const pretty = [
+    '%H', '%h', '%P', '%p',
+    '%an', '%ae', '%aI',
+    '%cn', '%ce', '%cI',
+    '%s', '%b', '%D',
+  ].join(fieldSep);
+  try {
+    const out = await git.raw([
+      'log', `${hash}^1..${hash}`, '-n', '200',
+      `--pretty=format:${pretty}${commitSep}`, '--date=iso-strict', '--decorate=full',
+    ]);
+    return parseRawLog(out);
+  } catch {
+    return [];
+  }
+}
+
+/** Annotated-tag metadata for tags pointing AT a commit (SmartGit shows the
+ *  tag message in the commit description). Lightweight tags carry only a name. */
+export interface TagAtCommit {
+  name: string;
+  annotated: boolean;
+  tagger?: string;
+  date?: string;
+  message?: string;
+}
+
+export async function tagsAt(repoPath: string, hash: string): Promise<TagAtCommit[]> {
+  const git = getGit(repoPath);
+  // NOTE: for-each-ref does NOT support %x09 hex escapes (that's a log
+  // pretty-format feature) — use a literal separator that cannot appear
+  // inside refnames or tag messages.
+  const SEP = ' @#@ ';
+  try {
+    const fmt = `%(refname:short)${SEP}%(objecttype)${SEP}%(taggername)${SEP}%(creatordate:iso-strict)${SEP}%(subject)`;
+    const raw = await git.raw(['for-each-ref', '--points-at', hash, `--format=${fmt}`, 'refs/tags/']);
+    return raw.split('\n').filter(Boolean).map((line) => {
+      const [name, type, tagger, date, ...subject] = line.split(SEP);
+      return {
+        name: (name || '').trim(),
+        annotated: (type || '').trim() === 'tag',
+        tagger: tagger || undefined,
+        date: date || undefined,
+        message: subject.join(SEP) || undefined,
+      };
+    }).filter((t) => t.name);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * All tracked files (git ls-files) — used by the Search tool's Files tab for
+ * name-based file lookup without knowing exact paths.
+ */
+export async function trackedFiles(repoPath: string): Promise<string[]> {
+  const git = getGit(repoPath);
+  try {
+    const raw = await git.raw(['-c', 'core.quotePath=false', 'ls-files', '-z']);
+    return raw.split('\u0000').filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 export async function stashList(repoPath: string): Promise<StashEntry[]> {
@@ -2633,7 +2737,8 @@ export async function listDirectories(repoPath: string, maxDepth = 1024): Promis
 export async function grep(
   repoPath: string,
   pattern: string,
-  options: string[] = []
+  options: string[] = [],
+  pathspec?: string
 ): Promise<string> {
   const git = getGit(repoPath);
   // git grep exits with code 1 when there are NO matches — simple-git treats
@@ -2643,7 +2748,10 @@ export async function grep(
     // `-e <pattern>` separates the pattern from pathspecs — passing the pattern
     // after `--` makes git treat it as a PATHSPEC (broken/empty results), and a
     // pattern starting with '-' would be parsed as an option.
-    return await git.raw(['grep', ...options, '-e', pattern]);
+    // Optional trailing pathspec (glob like "src/*.ts") narrows the search.
+    const args = ['grep', ...options, '-e', pattern];
+    if (pathspec && pathspec.trim()) args.push('--', pathspec.trim());
+    return await git.raw(args);
   } catch (e) {
     const msg = String(e);
     // Exit code 1 = no matches found (not an actual error)

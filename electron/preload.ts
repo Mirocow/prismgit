@@ -33,6 +33,9 @@ const api = {
       ipcRenderer.invoke('git:log', repoPath, options),
     findCommit: (repoPath: string, query: string) => ipcRenderer.invoke('git:findCommit', repoPath, query),
     commitFiles: (repoPath: string, hash: string) => ipcRenderer.invoke('git:commitFiles', repoPath, hash),
+    mergeNestedCommits: (repoPath: string, hash: string) => ipcRenderer.invoke('git:mergeNestedCommits', repoPath, hash),
+    tagsAt: (repoPath: string, hash: string) => ipcRenderer.invoke('git:tagsAt', repoPath, hash),
+    trackedFiles: (repoPath: string) => ipcRenderer.invoke('git:trackedFiles', repoPath),
     diffCommit: (repoPath: string, hash: string, parentHash?: string) =>
       ipcRenderer.invoke('git:diffCommit', repoPath, hash, parentHash),
     commitExists: (repoPath: string, hash: string) =>
@@ -106,7 +109,7 @@ const api = {
     revParseArgs: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:revParseArgs', repoPath, args),
     raw: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:raw', repoPath, args),
     // New: full git CLI surface coverage
-    grep: (repoPath: string, pattern: string, options?: string[]) => ipcRenderer.invoke('git:grep', repoPath, pattern, options),
+    grep: (repoPath: string, pattern: string, options?: string[], pathspec?: string) => ipcRenderer.invoke('git:grep', repoPath, pattern, options, pathspec),
     applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => ipcRenderer.invoke('git:applyPatch', repoPath, patch, options),
     show: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:show', repoPath, args),
     showBuffer: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:showBuffer', repoPath, args),
