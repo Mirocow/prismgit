@@ -49,24 +49,37 @@ export function WelcomeScreen({
 
   return (
     <div className="h-full overflow-y-auto bg-bg-primary">
-      {/* Hero section with gradient backdrop */}
+      {/* Hero section with gradient backdrop — fades smoothly into the page background */}
       <div className="relative overflow-hidden">
-        {/* Decorative gradient background */}
+        {/* Decorative gradient background — masked to fade out at the bottom
+            so it doesn't bleed into the repository list below. */}
         <div
-          className="absolute inset-0 opacity-[0.08]"
+          className="absolute inset-0 opacity-[0.08] pointer-events-none"
           style={{
             background:
               'radial-gradient(circle at 25% 30%, var(--accent) 0%, transparent 50%), radial-gradient(circle at 75% 70%, var(--accent-purple) 0%, transparent 50%)',
+            // Smooth fade: full at top → transparent at bottom 80%
+            maskImage: 'linear-gradient(to bottom, black 0%, black 50%, transparent 85%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 50%, transparent 85%)',
           }}
         />
+        {/* Grid pattern — same fade so it blends into the page background */}
         <div
-          className="absolute inset-0 opacity-30"
+          className="absolute inset-0 opacity-30 pointer-events-none"
           style={{
             backgroundImage:
               'linear-gradient(var(--border-subtle) 1px, transparent 1px), linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px)',
             backgroundSize: '32px 32px',
-            maskImage: 'radial-gradient(ellipse at center, black 30%, transparent 70%)',
-            WebkitMaskImage: 'radial-gradient(ellipse at center, black 30%, transparent 70%)',
+            maskImage: 'radial-gradient(ellipse at center top, black 20%, transparent 70%)',
+            WebkitMaskImage: 'radial-gradient(ellipse at center top, black 20%, transparent 70%)',
+          }}
+        />
+        {/* Smooth color transition strip at the bottom of the hero —
+            blends the gradient area into the solid page background. */}
+        <div
+          className="absolute bottom-0 left-0 right-0 h-24 pointer-events-none"
+          style={{
+            background: 'linear-gradient(to bottom, transparent, var(--bg-primary))',
           }}
         />
 
