@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Loader } from './icons';
+import { X, Loader, Settings as SettingsIcon } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
@@ -108,7 +108,19 @@ export function RepoSettingsDialog({ onClose }: { onClose: () => void }) {
           <span className="text-sm font-semibold">Repository Settings</span>
           <span className="text-xs text-text-tertiary ml-2 truncate">{repo.name}</span>
           <div className="flex-1" />
-          <button onClick={onClose} className="p-1 rounded hover:bg-surface-hover"><X size={14} /></button>
+          {/* Open Project Settings (global application preferences) */}
+          <button
+            onClick={() => {
+              onClose();
+              window.location.hash = '#/settings';
+            }}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-text-secondary hover:text-accent hover:bg-surface-hover rounded transition-colors"
+            title="Open Project Settings (global application preferences)"
+          >
+            <SettingsIcon size={12} />
+            Project Settings
+          </button>
+          <button onClick={onClose} className="p-1 rounded hover:bg-surface-hover ml-1"><X size={14} /></button>
         </div>
 
         <div className="flex border-b border-border overflow-x-auto">

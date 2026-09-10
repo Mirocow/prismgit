@@ -112,7 +112,7 @@ export function SettingsPage() {
             <SettingsIcon size={20} className="text-accent" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-text-primary tracking-tight">Settings</h1>
+            <h1 className="text-xl font-bold text-text-primary tracking-tight">Project Settings</h1>
             <p className="text-xs text-text-tertiary">Configure appearance, Git, and integrations</p>
           </div>
         </div>
