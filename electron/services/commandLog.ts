@@ -1,5 +1,6 @@
 import * as childProcess from 'child_process';
 import { createRequire } from 'module';
+import * as path from 'path';
 import type { CommandLogEntry } from '../types/command-log-api.js';
 
 /**
@@ -38,7 +39,10 @@ let onEntryCb: ((entry: CommandLogEntry) => void) | null = null;
 // simple-git and our own compiled spawn helpers resolve through, so patching
 // its `spawn` property intercepts every git spawn in the app, in production
 // (CJS main bundle) and in tests alike.
-const require_ = createRequire(process.cwd() + '/prismgit.cjs');
+//
+// Use __dirname as the base for createRequire so it works in production
+// (packaged app) where process.cwd() may be outside the app bundle.
+const require_ = createRequire(path.join(__dirname, 'prismgit.cjs'));
 const cpModule = require_('child_process') as typeof childProcess;
 
 /** Redact credentials embedded in URLs: scheme://user:pass@host → scheme://***@host */
