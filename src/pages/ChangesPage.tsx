@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X, Sparkles } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X, Sparkles } from '../components/icons';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { LazyFileList } from '../components/LazyFileList';
@@ -209,6 +209,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [draggedFile, setDraggedFile] = useState<string | null>(null);
   const [journal, setJournal] = useState<LogEntry[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
+  // Journal panel collapsed state — when true, only the header bar is shown
+  const [journalCollapsed, setJournalCollapsed] = useState(false);
   const [showSplitView, setShowSplitView] = useState(true);
   const { width: leftWidth, setWidth: setLeftWidth, handleResize: handleLeftResize } = useResizableWidth(500, 250, 800);
   const { width: treeWidth, setWidth: setTreeWidth, handleResize: handleTreeResize } = useResizableWidth(210, 140, 380);
@@ -1452,12 +1454,22 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           </div>
 
           {/* Journal panel (bottom) — shows recent commits like SmartGit */}
-          <div className="flex-shrink-0" style={{ height: journalHeight }}>
-            <ResizableSplitter direction="vertical" onResize={(d) => handleJournalResize(-d)} />
+          <div className="flex-shrink-0" style={{ height: journalCollapsed ? 24 : journalHeight }}>
+            {!journalCollapsed && (
+              <ResizableSplitter direction="vertical" onResize={(d) => handleJournalResize(-d)} />
+            )}
             <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
-              <span className="text-2xs font-semibold uppercase text-text-secondary">Journal</span>
+              <button
+                className="flex items-center gap-1 text-2xs font-semibold uppercase text-text-secondary hover:text-text-primary transition-colors"
+                onClick={() => setJournalCollapsed(!journalCollapsed)}
+                title={journalCollapsed ? 'Expand Journal' : 'Collapse Journal'}
+              >
+                {journalCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                Journal
+              </button>
               <span className="text-2xs text-text-tertiary">{journal.length} commits</span>
             </div>
+            {!journalCollapsed && (
             <div className="overflow-y-auto" style={{ height: 'calc(100% - 24px)' }}>
               {journalLoading ? (
                 <div className="px-2 py-2 text-xs text-text-tertiary flex items-center gap-2">
@@ -1523,6 +1535,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                 })()
               )}
             </div>
+            )}
           </div>
 
           {/* Commit editor — resizable with markdown preview */}
