@@ -744,13 +744,21 @@ export function HistoryPage() {
         case 'create-tag': handleCreateTag(entry); break;
         case 'create-branch': handleCreateBranchAt(entry); break;
         case 'open-in-diff': {
+          // SmartGit Manual: "Open in Diff tool" — compare the commit's changes
+          // (commit^ vs commit) so the Diff tool shows exactly what this commit
+          // changed, NOT the working tree state vs the commit.
           useSelectionStore.getState().selectCommit(entry.hash);
           useSelectionStore.getState().selectFile('.');
+          useSelectionStore.getState().setDiffRequest({
+            baseRef: `${entry.hash}^`,
+            compareRef: entry.hash,
+            filePath: '.',
+          });
           window.location.hash = '#/diff';
           break;
         }
         case 'compare-wt': {
-          // Open in Diff tool with all files
+          // Compare with Working Tree — shows commit vs current working tree
           useSelectionStore.getState().selectCommit(entry.hash);
           useSelectionStore.getState().selectFile('.');
           window.location.hash = '#/diff';
@@ -1476,8 +1484,15 @@ export function HistoryPage() {
                               path: f.path,
                               mode: 'history' as const,
                               onOpenDiff: () => {
+                                // Compare what THIS COMMIT changed for this file:
+                                // baseRef = commit^ (parent), compareRef = commit
                                 useSelectionStore.getState().selectFile(f.path);
                                 useSelectionStore.getState().selectCommit(selected.hash);
+                                useSelectionStore.getState().setDiffRequest({
+                                  baseRef: `${selected.hash}^`,
+                                  compareRef: selected.hash,
+                                  filePath: f.path,
+                                });
                                 window.location.hash = '#/diff';
                               },
                             };
@@ -1508,8 +1523,15 @@ export function HistoryPage() {
                               path: f.path,
                               mode: 'history' as const,
                               onOpenDiff: () => {
+                                // Compare what THIS COMMIT changed for this file:
+                                // baseRef = commit^ (parent), compareRef = commit
                                 useSelectionStore.getState().selectFile(f.path);
                                 useSelectionStore.getState().selectCommit(selected.hash);
+                                useSelectionStore.getState().setDiffRequest({
+                                  baseRef: `${selected.hash}^`,
+                                  compareRef: selected.hash,
+                                  filePath: f.path,
+                                });
                                 window.location.hash = '#/diff';
                               },
                             };
