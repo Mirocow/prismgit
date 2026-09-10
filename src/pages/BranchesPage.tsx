@@ -318,39 +318,67 @@ export function BranchesPage() {
     e.preventDefault();
     e.stopPropagation();
     const items: ContextMenuItem[] = [];
+
     if (b.remote) {
-      items.push({ label: 'Checkout (create local tracking branch)', clickId: 'checkout-remote' });
-      items.push({ label: 'Create local branch from...', clickId: 'create-local' });
-      items.push({ label: 'Compare with current branch...', clickId: 'compare' });
+      // === REMOTE BRANCH CONTEXT MENU ===
+      items.push({ label: 'Check Out (create local tracking branch)...', clickId: 'checkout-remote' });
       items.push({ type: 'separator' });
       items.push({ label: 'Merge into current', clickId: 'merge' });
       items.push({ type: 'separator' });
       items.push({ label: 'Open in Browser', clickId: 'browser' });
       items.push({ label: 'Delete remote branch', clickId: 'delete-remote' });
-    } else if (b.current) {
-      // Current branch: SmartGit parity — rename works on HEAD (git branch -m), push too
-      items.push({ label: 'Push to origin', clickId: 'push' });
-      items.push({ label: 'Rename...', clickId: 'rename' });
-      items.push({ type: 'separator' });
-      items.push({ label: 'Open in Browser', clickId: 'browser' });
     } else {
-      items.push({ label: 'Checkout', clickId: 'checkout' });
-      items.push({ label: 'Compare with current branch...', clickId: 'compare' });
+      // === LOCAL BRANCH CONTEXT MENU (matches SmartGit ideal) ===
+
+      // Group 1: Checkout / Merge / Rebase
+      if (!b.current) {
+        items.push({ label: 'Check Out...', clickId: 'checkout' });
+        items.push({ label: 'Merge...', clickId: 'merge' });
+        items.push({ label: 'Rebase...', clickId: 'rebase' });
+        items.push({ label: 'Fast-Forward Merge', clickId: 'ff-merge' });
+        items.push({ type: 'separator' });
+      }
+
+      // Group 2: Push
+      items.push({ label: 'Push', clickId: 'push' });
+      items.push({ label: 'Push To...', clickId: 'push-to' });
       items.push({ type: 'separator' });
-      items.push({ label: 'Merge into current', clickId: 'merge' });
-      items.push({ label: 'Rebase onto this branch', clickId: 'rebase' });
+
+      // Group 3: Log / Reset
+      items.push({ label: 'Log', clickId: 'log' });
+      if (!b.current) {
+        items.push({ label: 'Reset...', clickId: 'reset' });
+        items.push({ label: 'Reset Advanced...', clickId: 'reset-advanced' });
+      }
       items.push({ type: 'separator' });
-      items.push({ label: 'Push to origin', clickId: 'push' });
+
+      // Group 4: Rename / Delete
       items.push({ label: 'Rename...', clickId: 'rename' });
-      items.push({ label: 'Delete', clickId: 'delete' });
+      if (!b.current) {
+        items.push({ label: 'Delete...', clickId: 'delete' });
+      }
+      items.push({ type: 'separator' });
+
+      // Group 5: Tracking
+      if (b.tracking) {
+        items.push({ label: `Tracking: ${b.tracking}`, clickId: '_noop', enabled: false });
+        items.push({ label: 'Stop Tracking...', clickId: 'stop-tracking' });
+      } else {
+        items.push({ label: 'Set Tracked Branch...', clickId: 'set-tracking' });
+      }
+      items.push({ type: 'separator' });
+
+      // Group 6: Copy
+      items.push({ label: 'Copy', clickId: 'copy' });
     }
+
     if (items.length > 0) {
       showContextMenu(items, async (action) => {
+        // === Checkout ===
         if (action === 'checkout') handleCheckout(b);
-        else if (action === 'compare') handleCompare(b);
+
+        // === Checkout remote (create local tracking branch) ===
         else if (action === 'checkout-remote') {
-          // Create local tracking branch from remote: git checkout -b <local> --track <remote>
-          // Local name = part after first slash (e.g. origin/main → main)
           const localName = b.name.replace(/^[^/]+\//, '');
           if (!(await confirmDialog({
             title: `Checkout remote branch '${b.name}'`,
@@ -359,18 +387,154 @@ export function BranchesPage() {
           }))) return;
           api.git.checkout(repo.path, b.name, { track: true }).then(() => {
             toast.success(`Checked out '${localName}' (tracking ${b.name})`);
-            load();
-            refreshStatus(repo.path);
+            load(); refreshStatus(repo.path);
           }).catch((e) => toast.error('Checkout failed', String(e)));
         }
+
+        // === Merge ===
         else if (action === 'merge') handleMerge(b.name);
-        else if (action === 'rebase') api.git.rebase(repo.path, b.name).then(() => { toast.success('Rebase started'); refreshStatus(repo.path); }).catch((e) => toast.error('Rebase failed', String(e)));
+
+        // === Rebase ===
+        else if (action === 'rebase') {
+          if (!(await confirmDialog({ title: `Rebase onto '${b.name}'`, message: `This rebases your current branch onto '${b.name}'.`, confirmLabel: 'Rebase' }))) return;
+          useOperationLogStore.getState().logOperation(
+            `Rebase onto ${b.name}`, repo.path, `git rebase ${b.name}`,
+            () => api.git.rebase(repo.path, b.name)
+          ).then(() => { toast.success('Rebase complete'); refreshStatus(repo.path); })
+           .catch((e) => toast.error('Rebase failed', String(e)));
+        }
+
+        // === Fast-Forward Merge ===
+        else if (action === 'ff-merge') {
+          useOperationLogStore.getState().logOperation(
+            `Fast-Forward Merge ${b.name}`, repo.path, `git merge --ff-only ${b.name}`,
+            () => api.git.merge(repo.path, b.name, { ffOnly: true })
+          ).then(async (result) => {
+            if (result.fastForward) toast.success(`Fast-forwarded to ${b.name}`);
+            else toast.info(`${b.name} is not ahead of current — no fast-forward possible`);
+            await load(); await refreshStatus(repo.path);
+          }).catch((e) => toast.error('Fast-forward failed', String(e)));
+        }
+
+        // === Push ===
         else if (action === 'push') handlePushBranch(b);
+
+        // === Push To... (choose remote) ===
+        else if (action === 'push-to') {
+          const remoteName = b.tracking ? b.tracking.split('/')[0] : 'origin';
+          const branchName = b.name;
+          if (!(await confirmDialog({
+            title: `Push '${branchName}' to '${remoteName}'`,
+            message: `This runs: git push ${remoteName} ${branchName}${!b.tracking ? ' (sets upstream with -u)' : ''}`,
+            confirmLabel: 'Push',
+          }))) return;
+          useOperationLogStore.getState().logOperation(
+            `Push ${branchName} to ${remoteName}`, repo.path,
+            `git push ${remoteName} ${branchName}`,
+            () => api.git.push(repo.path, remoteName, branchName, !b.tracking)
+          ).then(() => { toast.success(`Pushed ${branchName} to ${remoteName}`); refreshStatus(repo.path); })
+           .catch((e) => toast.error('Push failed', String(e)));
+        }
+
+        // === Log (show this branch's history in History page) ===
+        else if (action === 'log') {
+          useSelectionStore.getState().selectBranch(b.name);
+          window.location.hash = '#/history';
+        }
+
+        // === Reset (reset current HEAD to this branch's commit) ===
+        else if (action === 'reset') {
+          if (!(await confirmDialog({
+            title: `Reset to '${b.name}'`,
+            message: `This will reset your current HEAD to match '${b.name}'.\n\nChoose reset mode in the next step.`,
+            confirmLabel: 'Reset...',
+          }))) return;
+          // Reset hard to this branch's last commit
+          const lastHash = b.lastCommit?.hash;
+          if (!lastHash) { toast.warning('Cannot determine commit hash'); return; }
+          if (!(await confirmDialog({
+            title: `Reset --hard to ${b.name}`,
+            message: `WARNING: This discards ALL uncommitted changes and moves HEAD to ${lastHash.substring(0, 7)}.\n\nThis cannot be undone.`,
+            confirmLabel: 'Reset --hard',
+          }))) return;
+          useOperationLogStore.getState().logOperation(
+            `Reset to ${b.name}`, repo.path, `git reset --hard ${lastHash}`,
+            () => api.git.reset(repo.path, 'hard', lastHash)
+          ).then(() => { toast.success(`Reset to ${b.name}`); refreshStatus(repo.path); })
+           .catch((e) => toast.error('Reset failed', String(e)));
+        }
+
+        // === Reset Advanced (soft/mixed options) ===
+        else if (action === 'reset-advanced') {
+          const lastHash = b.lastCommit?.hash;
+          if (!lastHash) { toast.warning('Cannot determine commit hash'); return; }
+          // Use a simple prompt for now — a full dialog would be better
+          const mode = prompt(`Reset to ${b.name} (${lastHash.substring(0, 7)})\n\nEnter reset mode:\n  soft  — keep changes staged\n  mixed — keep changes unstaged (default)\n  hard  — discard all changes`, 'mixed');
+          if (!mode || !['soft', 'mixed', 'hard', 'keep'].includes(mode)) return;
+          useOperationLogStore.getState().logOperation(
+            `Reset --${mode} to ${b.name}`, repo.path, `git reset --${mode} ${lastHash}`,
+            () => api.git.reset(repo.path, mode as 'soft' | 'mixed' | 'hard' | 'keep', lastHash)
+          ).then(() => { toast.success(`Reset --${mode} to ${b.name}`); refreshStatus(repo.path); })
+           .catch((e) => toast.error('Reset failed', String(e)));
+        }
+
+        // === Rename ===
         else if (action === 'rename') setRenameTarget({ kind: 'branch', oldName: b.name });
+
+        // === Delete ===
         else if (action === 'delete') handleDelete(b);
-        else if (action === 'create-local') { const name = b.name.replace(/^[^/]+\//, ''); setNewBranchName(name); setNewBranchStart(b.name); setNewBranchCheckout(true); setShowNewDialog(true); }
+
+        // === Set Tracked Branch ===
+        else if (action === 'set-tracking') {
+          // List remote branches for user to pick
+          const remoteBranches = branches.filter(br => br.remote).map(br => br.name);
+          const tracking = prompt(`Set tracked branch for '${b.name}'\n\nAvailable remote branches:\n${remoteBranches.slice(0, 20).join('\n')}\n\nEnter remote branch name:`, b.tracking || `origin/${b.name}`);
+          if (!tracking) return;
+          useOperationLogStore.getState().logOperation(
+            `Set tracking ${b.name} → ${tracking}`, repo.path,
+            `git branch --set-upstream-to=${tracking} ${b.name}`,
+            () => api.git.raw(repo.path, ['branch', '--set-upstream-to', tracking, b.name])
+          ).then(() => { toast.success(`Tracking set to ${tracking}`); load(); })
+           .catch((e) => toast.error('Failed to set tracking', String(e)));
+        }
+
+        // === Stop Tracking ===
+        else if (action === 'stop-tracking') {
+          if (!(await confirmDialog({
+            title: `Stop tracking for '${b.name}'`,
+            message: `This removes the upstream tracking reference for '${b.name}'. The branch itself is not affected.`,
+            confirmLabel: 'Stop Tracking',
+          }))) return;
+          useOperationLogStore.getState().logOperation(
+            `Stop tracking ${b.name}`, repo.path,
+            `git branch --unset-upstream ${b.name}`,
+            () => api.git.raw(repo.path, ['branch', '--unset-upstream', b.name])
+          ).then(() => { toast.success(`Stopped tracking for ${b.name}`); load(); })
+           .catch((e) => toast.error('Failed to stop tracking', String(e)));
+        }
+
+        // === Copy branch name ===
+        else if (action === 'copy') {
+          navigator.clipboard.writeText(b.name).then(() => toast.success(`Copied '${b.name}'`));
+        }
+
+        // === Compare ===
+        else if (action === 'compare') handleCompare(b);
+
+        // === Browser ===
         else if (action === 'browser') handleOpenInBrowser(b);
+
+        // === Delete remote ===
         else if (action === 'delete-remote') handleDeleteRemote(b);
+
+        // === Create local from remote ===
+        else if (action === 'create-local') {
+          const name = b.name.replace(/^[^/]+\//, '');
+          setNewBranchName(name);
+          setNewBranchStart(b.name);
+          setNewBranchCheckout(true);
+          setShowNewDialog(true);
+        }
       });
     }
   };
