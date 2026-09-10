@@ -8,6 +8,7 @@ import { LazyFileList } from '../components/LazyFileList';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { RepoStateBanner } from '../components/RepoStateBanner';
+import { ConflictList } from '../components/ConflictList';
 import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, type LLMProvider } from '../lib/aiCommitMessages';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
@@ -1641,74 +1642,23 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <span style={{ width: 92 }}></span>
             </div>
 
-            {/* Conflicts — SmartGit/GitKraken-style inline resolution actions:
-                Take ours / Take theirs / Take both / Mark resolved + Open solver.
-                When all conflicts are resolved, a "commit now" prompt appears. */}
+            {/* Conflicts — scalable ConflictList handles dozens of files:
+                filter, group-by-dir, mass Take All Ours/Theirs, collapse, virtualized scroll. */}
             {status?.conflicted && status.conflicted.length > 0 && (
-              <div className="border-b border-status-conflict/30 bg-status-conflict/5">
-                {/* Conflict header with count + "all resolved → commit" hint */}
-                <div className="flex items-center gap-2 px-2 py-1 text-2xs font-bold uppercase text-status-conflict bg-status-conflict/10 border-b border-status-conflict/20">
-                  <AlertCircle size={10} />
-                  Conflicts ({status.conflicted.length})
-                  <span className="normal-case font-normal text-text-tertiary ml-2">
-                    Resolve each file, then {status.isMerging ? 'Commit' : status.isRebasing ? 'Continue the rebase' : status.isCherryPicking ? 'Continue the cherry-pick' : 'Commit'} to finish the {status.isMerging ? 'merge' : status.isRebasing ? 'rebase' : status.isCherryPicking ? 'cherry-pick' : status.isReverting ? 'revert' : 'operation'}.
-                  </span>
-                </div>
-                {status.conflicted.map((filePath) => (
-                  <div
-                    key={filePath}
-                    className="group flex items-center gap-2 px-2 py-1 cursor-pointer text-xs hover:bg-bg-hover border-l-2 border-status-conflict"
-                    onClick={() => onResolveConflict && onResolveConflict(filePath)}
-                  >
-                    <span className="font-bold w-4 text-center text-status-conflict">U</span>
-                    <span className="flex-1 truncate font-mono whitespace-nowrap">{filePath}</span>
-                    <span style={{ width: 74 }}></span>
-                    <span className="text-text-tertiary italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>{t('changes.conflict')}</span>
-                    {!compressFilePaths && (
-                      <span className="truncate whitespace-nowrap" style={{ width: colWidths.dir }}></span>
-                    )}
-                    {/* Inline resolution actions — visible on hover (SmartGit/GitKraken pattern).
-                        Each calls the same git commands as the menu actions. */}
-                    <span className="flex justify-end items-center gap-0.5 flex-shrink-0 overflow-hidden" style={{ width: 220 }}>
-                      {onResolveConflictAction && (
-                        <>
-                          <button
-                            className="text-2xs px-1.5 py-0.5 rounded border border-status-added/30 bg-status-added/10 text-status-added hover:bg-status-added/20 transition-colors"
-                            title="Take ours (git checkout --ours)"
-                            onClick={(e) => { e.stopPropagation(); onResolveConflictAction(filePath, 'ours'); }}
-                          >
-                            Ours
-                          </button>
-                          <button
-                            className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/30 bg-status-modified/10 text-status-modified hover:bg-status-modified/20 transition-colors"
-                            title="Take theirs (git checkout --theirs)"
-                            onClick={(e) => { e.stopPropagation(); onResolveConflictAction(filePath, 'theirs'); }}
-                          >
-                            Theirs
-                          </button>
-                          <button
-                            className="text-2xs px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover transition-colors"
-                            title="Take both (concatenate ours + theirs)"
-                            onClick={(e) => { e.stopPropagation(); onResolveConflictAction(filePath, 'both'); }}
-                          >
-                            Both
-                          </button>
-                          <button
-                            className="text-2xs px-1.5 py-0.5 rounded border border-status-success/30 bg-status-success/10 text-status-success hover:bg-status-success/20 transition-colors"
-                            title="Mark as resolved (git add)"
-                            onClick={(e) => { e.stopPropagation(); onResolveConflictAction(filePath, 'resolved'); }}
-                          >
-                            ✓
-                          </button>
-                        </>
-                      )}
-                      <button className="btn btn-primary text-2xs !py-0.5 !px-2" onClick={(e) => { e.stopPropagation(); onResolveConflict && onResolveConflict(filePath); }}>
-                        {t('changes.resolve')}
-                      </button>
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <ConflictList
+                conflicts={status.conflicted}
+                finishAction={status.isMerging ? t('changes.commit') : status.isRebasing ? 'Continue the rebase' : status.isCherryPicking ? 'Continue the cherry-pick' : t('changes.commit')}
+                finishLabel={status.isMerging ? t('changes.merge') : status.isRebasing ? 'rebase' : status.isCherryPicking ? 'cherry-pick' : status.isReverting ? 'revert' : 'operation'}
+                onResolveAction={onResolveConflictAction}
+                onOpenSolver={(file) => onResolveConflict?.(file)}
+                onResolveAll={(mode) => {
+                  // Batch: call onResolveConflictAction for each conflicted file.
+                  if (!onResolveConflictAction) return;
+                  for (const f of status.conflicted) {
+                    onResolveConflictAction(f, mode);
+                  }
+                }}
+              />
             )}
 
             {/* === SEPARATE VIEW (SmartGit 20.1): Staged / Changes / Untracked in separate lists === */}
