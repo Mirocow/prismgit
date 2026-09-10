@@ -104,7 +104,10 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   }, [onResolveConflict]);
   // Global UI state for file filtering and tree mode
   const fileViewMode = useSelectionStore((s) => s.fileViewMode);
-  const setFileViewMode = useSelectionStore((s) => s.setFileViewMode);
+  const separateStagedView = useSelectionStore((s) => s.separateStagedView);
+  const setSeparateStagedView = useSelectionStore((s) => s.setSeparateStagedView);
+  const groupByState = useSelectionStore((s) => s.groupByState);
+  const setGroupByState = useSelectionStore((s) => s.setGroupByState);
   const compressFilePaths = useSelectionStore((s) => s.compressFilePaths);
   const setCompressFilePaths = useSelectionStore((s) => s.setCompressFilePaths);
   const fileStatusFilter = useSelectionStore((s) => s.fileStatusFilter);
@@ -994,6 +997,22 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           >
             <EyeOff size={11} />
           </button>
+          {/* Separate Staged/Unstaged view toggle (SmartGit 20.1) */}
+          <button
+            className={cn('icon-btn !w-5 !h-5', separateStagedView && 'active')}
+            title={separateStagedView ? 'Combined view (all files in one list)' : 'Separate Working Tree and Index (SmartGit 20.1)'}
+            onClick={() => setSeparateStagedView(!separateStagedView)}
+          >
+            <ChevronsUpDown size={11} />
+          </button>
+          {/* Group by State toggle (SmartGit 23.1) */}
+          <button
+            className={cn('icon-btn !w-5 !h-5', groupByState && 'active')}
+            title={groupByState ? 'Ungroup files (default order)' : 'Group files by state (Modified/Added/Deleted)'}
+            onClick={() => setGroupByState(!groupByState)}
+          >
+            <ChevronsDownUp size={11} />
+          </button>
           <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={handleRefresh}>
             <RefreshCw size={11} />
           </button>
@@ -1129,6 +1148,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               </div>
             )}
 
+            {/* === SEPARATE VIEW (SmartGit 20.1): Staged / Changes / Untracked in separate lists === */}
+            {separateStagedView ? (
+              <>
             {/* Staged — green accent left border, clickable header to stage all/unstage all */}
             {stagedFiles.length > 0 && (
               <div
@@ -1192,6 +1214,52 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             <div className={untrackedFiles.length > 0 ? 'border-l-2 border-l-status-untracked/20' : ''}>
               <LazyFileList files={untrackedFiles} isStaged={false} renderRow={renderFileRow} />
             </div>
+              </>
+            ) : (
+              /* === COMBINED VIEW: all files in one list === */
+              <>
+                {/* Group by State (SmartGit 23.1): group files by their git status code */}
+                {groupByState ? (
+                  (() => {
+                    const groups: Record<string, typeof stagedFiles> = {};
+                    const allFiles = [...stagedFiles, ...unstagedFiles, ...untrackedFiles];
+                    for (const f of allFiles) {
+                      const code = (f.index as string) === '?' ? 'untracked' :
+                                   (f.index as string) === 'A' ? 'added' :
+                                   (f.index as string) === 'D' ? 'deleted' :
+                                   (f.index as string) === 'R' ? 'renamed' :
+                                   'modified';
+                      if (!groups[code]) groups[code] = [];
+                      groups[code].push(f);
+                    }
+                    const groupLabels: Record<string, { label: string; color: string; bg: string }> = {
+                      modified: { label: 'Modified', color: 'text-status-modified', bg: 'bg-status-modified/8' },
+                      added: { label: 'Added', color: 'text-status-added', bg: 'bg-status-added/8' },
+                      deleted: { label: 'Deleted', color: 'text-status-deleted', bg: 'bg-status-deleted/8' },
+                      renamed: { label: 'Renamed', color: 'text-status-renamed', bg: 'bg-status-renamed/8' },
+                      untracked: { label: 'Untracked', color: 'text-status-untracked', bg: 'bg-status-untracked/8' },
+                    };
+                    return Object.entries(groups).map(([code, files]) => {
+                      const info = groupLabels[code] || groupLabels.modified;
+                      return (
+                        <div key={code}>
+                          <div className={cn('px-2 py-1 text-2xs font-bold uppercase border-b border-border-subtle', info.color, info.bg)}>
+                            {info.label} ({files.length})
+                          </div>
+                          <LazyFileList files={files} isStaged={false} renderRow={renderFileRow} />
+                        </div>
+                      );
+                    });
+                  })()
+                ) : (
+                  <LazyFileList
+                    files={[...stagedFiles, ...unstagedFiles, ...untrackedFiles]}
+                    isStaged={false}
+                    renderRow={renderFileRow}
+                  />
+                )}
+              </>
+            )}
 
             {totalChanged === 0 && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">

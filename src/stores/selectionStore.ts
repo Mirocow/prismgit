@@ -46,6 +46,10 @@ export interface GlobalSelectionState {
   authorFilter: string | null;
   /** View mode for file lists: 'tree' | 'flat'. */
   fileViewMode: 'tree' | 'flat';
+  /** Whether staged and unstaged files should be shown in separate lists (SmartGit 20.1). */
+  separateStagedView: boolean;
+  /** Whether to group files by their git state (modified/added/deleted/untracked) — SmartGit 23.1. */
+  groupByState: boolean;
   /** View mode for commit lists: 'tree' | 'flat' (tree = grouped by branch, flat = chronological). */
   commitViewMode: 'tree' | 'flat';
   /** Whether long file paths should be compressed (chain-compression). */
@@ -93,6 +97,8 @@ export interface GlobalSelectionState {
   setPathFilter: (path: string | null) => void;
   setAuthorFilter: (author: string | null) => void;
   setFileViewMode: (mode: 'tree' | 'flat') => void;
+  setSeparateStagedView: (separate: boolean) => void;
+  setGroupByState: (group: boolean) => void;
   setCommitViewMode: (mode: 'tree' | 'flat') => void;
   setCompressFilePaths: (compress: boolean) => void;
   setFileExtensionFilter: (ext: string | null) => void;
@@ -128,6 +134,8 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   pathFilter: null,
   authorFilter: null,
   fileViewMode: 'flat',
+  separateStagedView: true,
+  groupByState: false,
   commitViewMode: 'tree',
   compressFilePaths: true,
   fileExtensionFilter: null,
@@ -161,6 +169,8 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   setPathFilter: (path) => set({ pathFilter: path }),
   setAuthorFilter: (author) => set({ authorFilter: author }),
   setFileViewMode: (mode) => set({ fileViewMode: mode }),
+  setSeparateStagedView: (separate) => set({ separateStagedView: separate }),
+  setGroupByState: (group) => set({ groupByState: group }),
   setCommitViewMode: (mode) => set({ commitViewMode: mode }),
   setCompressFilePaths: (compress) => set({ compressFilePaths: compress }),
   setFileExtensionFilter: (ext) => set({ fileExtensionFilter: ext }),
