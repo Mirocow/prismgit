@@ -167,12 +167,35 @@ export async function push(
   tags = false
 ): Promise<void> {
   const git = getGit(repoPath);
+  // No branch given: resolve the CURRENT branch and auto-publish it.
+  // `git push <remote>` alone fails with "no upstream configured" for a fresh
+  // local branch (push.default=simple) — the "cannot push my new branch" bug.
+  let refspec = branch;
+  let setUp = setUpstream;
+  if (!refspec) {
+    const cur = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    if (cur && cur !== 'HEAD' && cur !== '') {
+      refspec = cur;
+      if (!setUp) {
+        // Add -u when the branch has no upstream yet
+        try {
+          await git.raw(['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${cur}@{u}`]);
+        } catch {
+          setUp = true;
+        }
+      }
+    }
+  }
   const args: string[] = ['push'];
-  if (setUpstream) args.push('-u');
+  if (setUp) args.push('-u');
   if (force) args.push('--force-with-lease');
   if (tags) args.push('--tags');
   args.push(remote);
-  if (branch) args.push(`HEAD:${branch}`);
+  if (refspec) {
+    // Plain refspec `branch` (NOT `HEAD:branch` — that pushes whatever HEAD
+    // points at, which is wrong when the user selected a non-current branch).
+    args.push(refspec);
+  }
   await git.raw(args);
 }
 
@@ -215,10 +238,10 @@ export async function fetchAll(repoPath: string, prune = false): Promise<void> {
 
 export async function log(
   repoPath: string,
-  options: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean } = {}
+  options: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean } = {}
 ): Promise<LogEntry[]> {
   const git = getGit(repoPath);
-  const { maxCount = 500, branch, branches, file, follow = false, all = false } = options;
+  const { maxCount = 500, branch, branches, file, follow = false, all = false, grep, grepIgnoreCase = false } = options;
 
   // Use a custom pretty format with record separator \x1e between commits and \x00 between fields.
   // simple-git's built-in log() uses \n\n to split commits which breaks when body contains blank lines.
@@ -250,6 +273,13 @@ export async function log(
   if (file) {
     rawArgs.push('--', file);
     if (follow) rawArgs.splice(2, 0, '--follow');
+  }
+
+  // Commit-message search (Search tool → Commits tab). `--grep` matches the
+  // subject + body with basic regex; -i makes it case-insensitive.
+  if (grep && grep.trim()) {
+    rawArgs.push(`--grep=${grep.trim()}`);
+    if (grepIgnoreCase) rawArgs.push('-i');
   }
 
   let out: string;
@@ -1750,7 +1780,15 @@ export async function bisectReset(repoPath: string): Promise<void> {
 
 export async function bisectLog(repoPath: string): Promise<string> {
   const git = getGit(repoPath);
-  return git.raw(['bisect', 'log']);
+  try {
+    return await git.raw(['bisect', 'log']);
+  } catch (e) {
+    // Not bisecting → git exits non-zero with "We are not bisecting".
+    // The Search/Bisect UI shows this state as a friendly message, so return
+    // an empty log instead of throwing.
+    if (String(e).includes('not bisecting')) return '';
+    throw e;
+  }
 }
 
 export async function bisectStatus(
@@ -1764,7 +1802,9 @@ export async function bisectStatus(
   let rev = '';
   try {
     const git = getGit(repoPath);
-    rev = (await git.raw(['bisect', 'view'])).trim().split('\n')[0];
+    // While bisecting, HEAD is detached at the current candidate.
+    // (`git bisect view` would try to launch a GUI browser — never use it here.)
+    rev = (await git.raw(['rev-parse', 'HEAD'])).trim();
   } catch {
     /* ignore */
   }
@@ -2469,7 +2509,10 @@ export async function grep(
   // non-zero exit as an error and throws. We need to catch that and return
   // an empty string (no matches = valid result, not an error).
   try {
-    return await git.raw(['grep', ...options, '--', pattern]);
+    // `-e <pattern>` separates the pattern from pathspecs — passing the pattern
+    // after `--` makes git treat it as a PATHSPEC (broken/empty results), and a
+    // pattern starting with '-' would be parsed as an option.
+    return await git.raw(['grep', ...options, '-e', pattern]);
   } catch (e) {
     const msg = String(e);
     // Exit code 1 = no matches found (not an actual error)

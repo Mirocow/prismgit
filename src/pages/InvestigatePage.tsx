@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search, FileText, Loader, GitCommit, CornerDownRight, ExternalLink, Copy, History } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
@@ -6,7 +7,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { api, type LogEntry } from '../lib/api';
 import { cn, formatDate, shortHash } from '../lib/utils';
 
-type Tab = 'history' | 'grep' | 'revparse';
+type Tab = 'commits' | 'history' | 'grep' | 'revparse';
 
 interface GrepMatch {
   file: string;
@@ -34,7 +35,15 @@ function parseGrepOutput(raw: string): GrepMatch[] {
 export function InvestigatePage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
-  const [tab, setTab] = useState<Tab>('history');
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<Tab>('commits');
+
+  // === Commit message search tab (git log --grep) ===
+  const [commitQuery, setCommitQuery] = useState('');
+  const [commitIgnoreCase, setCommitIgnoreCase] = useState(true);
+  const [commitEntries, setCommitEntries] = useState<LogEntry[]>([]);
+  const [commitLoading, setCommitLoading] = useState(false);
+  const [commitSearched, setCommitSearched] = useState(false);
 
   // === File history tab ===
   const [filePath, setFilePath] = useState('');
@@ -59,6 +68,36 @@ export function InvestigatePage() {
   const [revError, setRevError] = useState<string | null>(null);
   const [revBusy, setRevBusy] = useState(false);
   const [currentBranch, setCurrentBranch] = useState<string | null>(null);
+
+  // Prefill the File History path from the file selected elsewhere in the app
+  // (Changes / History) — makes the tab instantly usable without typing paths.
+  useEffect(() => {
+    const sel = useSelectionStore.getState().selectedFilePath;
+    if (sel) setFilePath(sel);
+  }, []);
+
+  const handleCommitSearch = useCallback(async () => {
+    if (!commitQuery.trim()) {
+      toast.warning('Search pattern is required');
+      return;
+    }
+    setCommitLoading(true);
+    setCommitSearched(true);
+    try {
+      const result = await api.git.log(repo.path, {
+        maxCount: 200,
+        all: true,
+        grep: commitQuery,
+        grepIgnoreCase: commitIgnoreCase,
+      });
+      setCommitEntries(result);
+    } catch (e) {
+      toast.error('Commit search failed', String(e));
+      setCommitEntries([]);
+    } finally {
+      setCommitLoading(false);
+    }
+  }, [repo.path, commitQuery, commitIgnoreCase, toast]);
 
   const handleInvestigate = useCallback(async () => {
     if (!filePath.trim()) {
@@ -154,6 +193,7 @@ export function InvestigatePage() {
   };
 
   const TABS: { id: Tab; label: string; title: string }[] = [
+    { id: 'commits', label: 'Commits', title: 'Search commit messages across ALL branches (git log --grep --all)' },
     { id: 'history', label: 'File History', title: 'Commit history of a single file (with rename following)' },
     { id: 'grep', label: 'Content Search', title: 'git grep — search tracked file contents' },
     { id: 'revparse', label: 'Rev-Parse', title: 'Evaluate git rev-parse expressions (HEAD~3, main@{yesterday}, v1.0^{commit}, ...)' },
@@ -182,6 +222,92 @@ export function InvestigatePage() {
           ))}
         </div>
       </div>
+
+      {/* ================= Commit message search tab ================= */}
+      {tab === 'commits' && (
+        <>
+          <div className="flex items-center gap-2 p-3 border-b border-border-default bg-bg-tertiary">
+            <input
+              type="text"
+              className="flex-1 text-sm"
+              placeholder="Search commit messages (regex supported) — e.g. 'fix: stash', 'rebase'"
+              value={commitQuery}
+              autoFocus
+              onChange={(e) => setCommitQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCommitSearch()}
+            />
+            <label className="flex items-center gap-1 text-xs cursor-pointer text-text-secondary" title="-i">
+              <input type="checkbox" checked={commitIgnoreCase} onChange={(e) => setCommitIgnoreCase(e.target.checked)} />
+              Ignore case
+            </label>
+            <button
+              className="btn btn-primary text-xs"
+              onClick={handleCommitSearch}
+              disabled={commitLoading || !commitQuery.trim()}
+            >
+              {commitLoading ? <Loader size={12} className="spin" /> : <Search size={12} />}
+              Search
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {commitLoading ? (
+              <div className="p-8 text-center text-text-tertiary text-sm flex items-center justify-center gap-2">
+                <Loader size={14} className="spin" />
+                Searching commit messages...
+              </div>
+            ) : !commitSearched ? (
+              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
+                <GitCommit size={32} className="mb-2 opacity-50" />
+                <div className="text-sm">No commit search yet</div>
+                <div className="text-xs mt-1">Searches ALL branches — type a pattern above</div>
+              </div>
+            ) : commitEntries.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
+                <GitCommit size={32} className="mb-2 opacity-50" />
+                <div className="text-sm">No commits match “{commitQuery}”</div>
+              </div>
+            ) : (
+              <>
+                <div className="px-3 py-1.5 text-2xs text-text-tertiary border-b border-border-default bg-bg-secondary">
+                  {commitEntries.length} commit{commitEntries.length === 1 ? '' : 's'} match “{commitQuery}”
+                </div>
+                {commitEntries.map((entry, idx) => (
+                  <div
+                    key={entry.hash + idx}
+                    className="group flex items-start gap-3 px-3 py-2 cursor-pointer border-b border-border-subtle hover:bg-bg-hover"
+                    title="Click: open in History"
+                    onClick={() => {
+                      useSelectionStore.getState().selectCommit(entry.hash);
+                      navigate('/history');
+                    }}
+                  >
+                    <GitCommit size={14} className="text-text-tertiary mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-text-primary truncate">{entry.subject}</div>
+                      <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
+                        <span className="font-medium text-text-secondary">{entry.author.name}</span>
+                        <span>·</span>
+                        <span>{formatDate(entry.author.date)}</span>
+                        {entry.refs.length > 0 && (
+                          <>
+                            <span>·</span>
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {entry.refs.slice(0, 3).map((ref, i) => (
+                                <span key={i} className="badge badge-renamed">{ref.replace(/^tag:\s*/, '')}</span>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <code className="text-xs font-mono text-text-tertiary flex-shrink-0">{shortHash(entry.hash)}</code>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </>
+      )}
 
       {/* ================= File history tab ================= */}
       {tab === 'history' && (
@@ -407,13 +533,18 @@ export function InvestigatePage() {
                 {grepMatches.map((m, i) => (
                   <div
                     key={`${m.file}:${m.line}:${i}`}
-                    className="group flex items-start gap-2 px-3 py-1 border-b border-border-subtle hover:bg-bg-hover text-xs"
-                    title={`${m.file}:${m.line}`}
+                    className="group flex items-start gap-2 px-3 py-1 border-b border-border-subtle hover:bg-bg-hover text-xs cursor-pointer"
+                    title={`${m.file}:${m.line} — click to show the file in Changes`}
+                    onClick={() => {
+                      useSelectionStore.getState().selectFile(m.file);
+                      navigate('/changes');
+                    }}
                   >
                     <button
                       className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 flex-shrink-0 mt-0.5"
                       title="Copy file:line reference"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         navigator.clipboard.writeText(`${m.file}:${m.line}`);
                         toast.success('Reference copied');
                       }}

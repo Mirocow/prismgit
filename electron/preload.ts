@@ -29,7 +29,7 @@ const api = {
       ipcRenderer.invoke('git:setFetchDepth', repoPath, remote, depth),
     remoteProperties: (repoPath: string, name: string) =>
       ipcRenderer.invoke('git:remoteProperties', repoPath, name),
-    log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) =>
+    log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean }) =>
       ipcRenderer.invoke('git:log', repoPath, options),
     findCommit: (repoPath: string, query: string) => ipcRenderer.invoke('git:findCommit', repoPath, query),
     commitFiles: (repoPath: string, hash: string) => ipcRenderer.invoke('git:commitFiles', repoPath, hash),

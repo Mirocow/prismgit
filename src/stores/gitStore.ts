@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api, type StatusResult } from '../lib/api';
+import { resolveDefaultRemote } from '../lib/remotes';
 import { useOperationLogStore } from './operationLogStore';
 
 interface GitState {
@@ -68,10 +69,16 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   push: async (repoPath, remote, branch, setUpstream) => {
     const log = useOperationLogStore.getState();
-    const cmd = `git push ${remote || 'origin'} ${branch || ''} ${setUpstream ? '-u' : ''}`.trim();
+    // Never hardcode 'origin' — resolve it (origin → first remote). Fails with
+    // a clear message when the repo has no remotes at all.
+    const resolved = remote ?? (await resolveDefaultRemote(repoPath));
+    if (!resolved) {
+      throw new Error('No remotes configured — add one on the Remotes page');
+    }
+    const cmd = `git push ${resolved} ${branch || ''} ${setUpstream ? '-u' : ''}`.trim();
     const opId = log.startOp('Push', repoPath, cmd);
     try {
-      await api.git.push(repoPath, remote, branch, setUpstream);
+      await api.git.push(repoPath, resolved, branch, setUpstream);
       await get().refreshStatus(repoPath);
       log.finishOp(opId, 'Pushed successfully');
     } catch (e) {

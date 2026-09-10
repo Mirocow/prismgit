@@ -1,19 +1,23 @@
 import { useState, useEffect, useCallback } from 'react';
-import { GitPullRequest, Plus, RefreshCw, ExternalLink, Loader, X } from '../components/icons';
+import { GitPullRequest, Plus, RefreshCw, ExternalLink, Loader, X, CloudDownload, ArrowDown } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useGitStore } from '../stores/gitStore';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type GithubPullRequest } from '../lib/api';
+import { resolveDefaultRemote } from '../lib/remotes';
 import { cn, formatDate } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 export function PullRequestsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { authenticated, user } = useAuthStore();
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();
   const [prs, setPRs] = useState<GithubPullRequest[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState<'fetch' | 'pull' | null>(null);
   const [state, setState] = useState<'open' | 'closed' | 'all'>('open');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeKey(showCreate, () => setShowCreate(false));
@@ -100,6 +104,56 @@ export function PullRequestsPage() {
 
   const isGitHubRepo = repoInfo.provider === 'github' && repoInfo.owner && repoInfo.repo;
 
+  // Request fresh data from the remote server — plain git operations, they work
+  // regardless of GitHub auth (this is what the tool was missing entirely).
+  const handleFetchAll = async () => {
+    setSyncing('fetch');
+    try {
+      await api.git.fetchAll(repo.path, true);
+      await refreshStatus(repo.path);
+      toast.success('Fetched from all remotes (with prune)');
+    } catch (e) {
+      toast.error('Fetch failed', String(e));
+    } finally {
+      setSyncing(null);
+    }
+  };
+
+  const handlePull = async () => {
+    setSyncing('pull');
+    try {
+      const remote = (await resolveDefaultRemote(repo.path)) || 'origin';
+      await api.git.pull(repo.path, remote, undefined, false, false);
+      await refreshStatus(repo.path);
+      toast.success(`Pulled from ${remote}`);
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes('CONFLICT') || msg.includes('conflict')) {
+        toast.warning('Pull resulted in conflicts', 'Resolve them in the Changes tool');
+        refreshStatus(repo.path);
+      } else {
+        toast.error('Pull failed', msg);
+      }
+    } finally {
+      setSyncing(null);
+    }
+  };
+
+  // Shared header buttons — Fetch/Pull belong to the PR tool too: reviewing
+  // PRs starts with getting the latest remote state into the local repo.
+  const syncButtons = (
+    <>
+      <button className="btn btn-secondary text-xs" onClick={handleFetchAll} disabled={syncing !== null} title="Fetch from ALL remotes with prune">
+        {syncing === 'fetch' ? <Loader size={12} className="animate-spin" /> : <CloudDownload size={12} />}
+        Fetch
+      </button>
+      <button className="btn btn-secondary text-xs" onClick={handlePull} disabled={syncing !== null} title="Pull the current branch from its remote">
+        {syncing === 'pull' ? <Loader size={12} className="animate-spin" /> : <ArrowDown size={12} />}
+        Pull
+      </button>
+    </>
+  );
+
   if (!authenticated) {
     return (
       <div className="flex flex-col flex-1 overflow-hidden">
@@ -126,11 +180,13 @@ export function PullRequestsPage() {
             <GitPullRequest size={14} />
             <span className="text-sm font-medium">Pull Requests</span>
           </div>
+          {syncButtons}
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary">
           <GitPullRequest size={32} className="mb-2 opacity-50" />
           <div className="text-sm">Not a GitHub repository</div>
           <div className="text-xs mt-1">Pull requests are only available for GitHub repositories</div>
+          <div className="text-xs mt-1">Fetch / Pull still work — they are plain git operations</div>
         </div>
       </div>
     );
@@ -145,6 +201,7 @@ export function PullRequestsPage() {
           <span className="text-2xs text-text-tertiary">{repoInfo.owner}/{repoInfo.repo}</span>
         </div>
         <div className="flex items-center gap-2">
+          {syncButtons}
           <div className="flex bg-bg-tertiary rounded">
             {(['open', 'closed', 'all'] as const).map(s => (
               <button

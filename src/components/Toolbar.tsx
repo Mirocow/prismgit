@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { api, type BranchInfo } from '../lib/api';
+import { api, type BranchInfo, type RemoteInfo } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
@@ -467,7 +467,9 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
 
 /**
  * Push dropdown — button + small chevron that opens a menu with:
- *   - Push to: <branch> (dropdown of local branches)
+ *   - Push to: <remote> (dropdown of ALL configured remotes, not just origin)
+ *   - Push branch: <branch> (dropdown of local branches)
+ *   - [✓] Set upstream (-u) — auto-enabled for fresh local branches
  *   - [✓] Force push (--force-with-lease)
  *   - Push tags
  */
@@ -476,39 +478,61 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
   const toast = useToastStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const [open, setOpen] = useState(false);
+  const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
+  const [defaultRemote, setDefaultRemote] = useState('origin');
+  const [selectedRemote, setSelectedRemote] = useState('origin');
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [selectedBranch, setSelectedBranch] = useState('');
+  const [setUpstream, setSetUpstream] = useState(false);
   const [force, setForce] = useState(false);
   const [pushTags, setPushTags] = useState(false);
 
+  // Load on mount too — the one-click Push button needs a valid default remote.
   useEffect(() => {
-    if (!open || !currentRepo) return;
+    if (!currentRepo) return;
+    api.git.remotes(currentRepo.path).then(rs => {
+      setRemotes(rs);
+      const def = rs.find(r => r.name === 'origin')?.name || rs[0]?.name || '';
+      setDefaultRemote(def);
+      setSelectedRemote(def);
+    }).catch(() => {});
+  }, [currentRepo]);
+
+  useEffect(() => {
+    if (!currentRepo) return;
     api.git.branches(currentRepo.path).then(brs => {
       setBranches(brs.filter(b => !b.remote));
       // Default to the globally selected branch (from Branches page) when it
-      // exists locally, otherwise the current branch
+      // exists locally, otherwise the current branch. Auto -u when the chosen
+      // branch has no upstream yet.
       const globallySelected = useSelectionStore.getState().selectedBranch;
-      const sel = globallySelected && brs.some(b => b.name === globallySelected && !b.remote)
-        ? globallySelected
-        : brs.find(b => b.current)?.name || '';
-      setSelectedBranch(sel);
+      const chosen = globallySelected && brs.some(b => b.name === globallySelected && !b.remote)
+        ? brs.find(b => b.name === globallySelected)
+        : brs.find(b => b.current);
+      setSelectedBranch(chosen?.name || '');
+      setSetUpstream(!!chosen && !chosen.tracking);
     }).catch(() => {});
-  }, [open, currentRepo]);
+  }, [currentRepo, open]);
 
   const doPush = async (branch?: string) => {
     if (!currentRepo) return;
     const b = branch || selectedBranch;
-    const cmd = `git push origin ${b || ''} ${force ? '--force' : ''} ${pushTags ? '--tags' : ''}`.trim();
+    if (!selectedRemote) {
+      toast.warning('No remotes configured', 'Add a remote on the Remotes page first');
+      setOpen(false);
+      return;
+    }
+    const cmd = `git push ${selectedRemote} ${b || ''} ${setUpstream ? '-u' : ''} ${force ? '--force-with-lease' : ''} ${pushTags ? '--tags' : ''}`.trim();
     try {
       await useOperationLogStore.getState().logOperation(
-        `Push ${b || 'current'}${force ? ' (force)' : ''}${pushTags ? ' +tags' : ''}`,
+        `Push ${b || 'current'} → ${selectedRemote}${force ? ' (force)' : ''}${pushTags ? ' +tags' : ''}`,
         currentRepo.path, cmd,
         async () => {
-          await api.git.push(currentRepo.path, 'origin', b || undefined, false, force, pushTags);
+          await api.git.push(currentRepo.path, selectedRemote, b || undefined, setUpstream, force, pushTags);
           await refreshStatus(currentRepo.path);
         }
       );
-      toast.success(`Pushed ${b || 'current'}${force ? ' (force)' : ''}${pushTags ? ' + tags' : ''}`);
+      toast.success(`Pushed ${b || 'current'} → ${selectedRemote}${force ? ' (force)' : ''}${pushTags ? ' + tags' : ''}`);
     } catch (e) {
       toast.error('Push failed', String(e));
     }
@@ -519,69 +543,102 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
 
   return (
     <div className="relative">
-      <div className="flex items-center">
-        <button
-          className="flex items-center gap-1.5 px-3 h-8 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
-          style={{ color: '#86b300' }}
-          onClick={() => doPush()}
-          disabled={disabled}
-          title="Push current branch to origin"
-        >
-          <ArrowUp size={14} />
-          <span className="hidden md:inline">Push</span>
-        </button>
-        <button
-          className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
-          onClick={() => setOpen(!open)}
-          disabled={disabled}
-          title="Push options — select branch, force push, tags"
-        >
-          <ChevronDown size={12} />
-        </button>
-      </div>
+      <button
+        className="flex items-center gap-1.5 px-3 h-8 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
+        style={{ color: '#86b300' }}
+        onClick={() => doPush()}
+        disabled={disabled || remotes.length === 0}
+        title={remotes.length === 0 ? 'No remotes configured — add one on the Remotes page' : `Push current branch to ${defaultRemote}`}
+      >
+        <ArrowUp size={14} />
+        <span className="hidden md:inline">Push</span>
+      </button>
+      <button
+        className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
+        onClick={() => setOpen(!open)}
+        disabled={disabled}
+        title="Push options — select remote, branch, force push, tags"
+      >
+        <ChevronDown size={12} />
+      </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded-md shadow-lg z-50 min-w-64">
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
-              Push to origin
+              Push
             </div>
-            <div className="p-2">
-              <label className="text-2xs text-text-tertiary block mb-1">Branch</label>
-              <select
-                className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
-                value={selectedBranch}
-                onChange={(e) => setSelectedBranch(e.target.value)}
-              >
-                {branches.map(b => (
-                  <option key={b.name} value={b.name}>
-                    {b.name}{b.current ? ' (current)' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="px-3 py-1">
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-                <span className="text-status-deleted">Force push (--force-with-lease)</span>
-              </label>
-            </div>
-            <div className="px-3 py-1">
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input type="checkbox" checked={pushTags} onChange={(e) => setPushTags(e.target.checked)} />
-                <span>Push tags</span>
-              </label>
-            </div>
-            <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
-              <button
-                className="btn btn-primary text-xs flex-1"
-                onClick={() => doPush()}
-                disabled={!selectedBranch}
-              >
-                <ArrowUp size={12} /> Push{force ? ' (force)' : ''}
-              </button>
-              <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>Cancel</button>
-            </div>
+            {remotes.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-text-tertiary">
+                No remotes configured.
+                <div className="mt-1">Add one on the <b>Remotes</b> page to push.</div>
+              </div>
+            ) : (
+              <>
+                <div className="p-2 space-y-2">
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">Remote</label>
+                    <select
+                      className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                      value={selectedRemote}
+                      onChange={(e) => setSelectedRemote(e.target.value)}
+                    >
+                      {remotes.map(r => (
+                        <option key={r.name} value={r.name}>
+                          {r.name}{r.name === defaultRemote && remotes.length > 1 ? ' (default)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">Branch</label>
+                    <select
+                      className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                      value={selectedBranch}
+                      onChange={(e) => {
+                        setSelectedBranch(e.target.value);
+                        const b = branches.find(x => x.name === e.target.value);
+                        setSetUpstream(!!b && !b.tracking);
+                      }}
+                    >
+                      {branches.map(b => (
+                        <option key={b.name} value={b.name}>
+                          {b.name}{b.current ? ' (current)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="px-3 py-1">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer" title="git push -u — publish a new branch and set its upstream">
+                    <input type="checkbox" checked={setUpstream} onChange={(e) => setSetUpstream(e.target.checked)} />
+                    <span>Set upstream (-u)</span>
+                  </label>
+                </div>
+                <div className="px-3 py-1">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+                    <span className="text-status-deleted">Force push (--force-with-lease)</span>
+                  </label>
+                </div>
+                <div className="px-3 py-1">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={pushTags} onChange={(e) => setPushTags(e.target.checked)} />
+                    <span>Push tags</span>
+                  </label>
+                </div>
+                <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
+                  <button
+                    className="btn btn-primary text-xs flex-1"
+                    onClick={() => doPush()}
+                    disabled={!selectedBranch}
+                  >
+                    <ArrowUp size={12} /> Push to {selectedRemote}
+                  </button>
+                  <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>Cancel</button>
+                </div>
+              </>
+            )}
           </div>
         </>
       )}

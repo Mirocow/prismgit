@@ -21,6 +21,7 @@ import {
   SetDepthDialog, FetchMoreDialog, RemotePropertiesDialog, type ResetMode,
 } from '../components/BranchDialogs';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
+import { resolveDefaultRemote } from '../lib/remotes';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function BranchesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
@@ -258,8 +259,13 @@ export function BranchesPage() {
 
   const handlePushBranch = async (branch: BranchInfo) => {
     try {
-      await api.git.push(repo.path, 'origin', branch.name, !branch.tracking);
-      toast.success(`Pushed '${branch.name}'`);
+      // Prefer the branch's own tracking remote; never hardcode 'origin' —
+      // resolve it (origin → first configured remote).
+      const remote = (branch.tracking ? branch.tracking.split('/')[0] : '')
+        || (await resolveDefaultRemote(repo.path))
+        || 'origin';
+      await api.git.push(repo.path, remote, branch.name, !branch.tracking);
+      toast.success(`Pushed '${branch.name}' → ${remote}`);
       await load();
       await refreshStatus(repo.path);
     } catch (e) { toast.error('Push failed', String(e)); }
@@ -1190,10 +1196,28 @@ export function BranchesPage() {
   /** SmartGit-style remote node: 'origin (2) — http://...' with fetch/configure actions. */
   const renderRemoteGroup = (remoteName: string, items: BranchInfo[], groupKey: string) => {
     const url = remotesMap[remoteName]?.refs.fetch ?? '';
+    // A configured remote with NO fetched branches still renders one hint row —
+    // otherwise it looks like the remote is missing entirely. While a filter is
+    // active, missing branches just mean "nothing matches", so no hint then.
+    const EMPTY_HINT = '__empty-remote__';
+    const rows: BranchInfo[] = items.length > 0 ? items : (search.trim()
+      ? []
+      : [{ name: EMPTY_HINT, remote: true, current: false, tracking: null, hash: '', hashAbbrev: '', subject: '', author: { name: '', email: '', date: '', timestamp: 0 }, committer: { name: '', email: '', date: '', timestamp: 0 }, date: '' } as unknown as BranchInfo]);
+    const rowRenderer = (b: BranchInfo) =>
+      b.name === EMPTY_HINT ? (
+        <div
+          key={`${groupKey}-empty-hint`}
+          className="flex items-center gap-2 px-3 py-1.5 text-2xs text-text-tertiary border-b border-border-subtle"
+        >
+          <span className="w-3 flex-shrink-0" />
+          No branches fetched yet — hover the header and press
+          <CloudDownload size={10} /> Fetch
+        </div>
+      ) : renderBranchRow(b);
     return renderGroup(
       remoteName,
       items.length,
-      items,
+      rows,
       groupKey,
       <>
         {url && (
@@ -1228,6 +1252,7 @@ export function BranchesPage() {
         )}
       </>,
       (e) => showRemoteContextMenu(e, remoteName),
+      rowRenderer,
     );
   };
 
@@ -1333,11 +1358,15 @@ export function BranchesPage() {
             {/* Local branches — header right-click: Add Branch... (F7) */}
             {renderGroup('Local Branches', localBranches.length, localBranches, 'local', undefined, showLocalHeaderContextMenu)}
 
-            {/* Remote groups — SmartGit-style remote nodes with URL + management */}
-            {Object.entries(remoteGroups).map(([remoteName, remoteBranches]) =>
-              renderRemoteGroup(remoteName, remoteBranches, `remote-${remoteName}`)
+            {/* Remote groups — one per CONFIGURED remote (not just remotes that
+                happen to have fetched branches): a freshly added remote shows
+                up here immediately, with a Fetch hint when it has no branches yet. */}
+            {Object.keys(remotesMap).length > 0 && (
+              Object.keys(remotesMap).map((remoteName) =>
+                renderRemoteGroup(remoteName, remoteGroups[remoteName] ?? [], `remote-${remoteName}`)
+              )
             )}
-            {Object.keys(remoteGroups).length === 0 && (
+            {Object.keys(remotesMap).length === 0 && (
               <div className="flex items-center gap-2 px-3 py-2 text-2xs text-text-tertiary border-b border-border-subtle">
                 No remotes configured.
                 <button

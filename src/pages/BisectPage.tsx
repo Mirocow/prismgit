@@ -114,7 +114,6 @@ export function BisectPage() {
   };
 
   const bisecting = bisect.state === 'bisecting';
-
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
@@ -128,7 +127,10 @@ export function BisectPage() {
           <button className="icon-btn" title="Refresh" onClick={load}>
             <RefreshCw size={13} />
           </button>
-          <button className="btn btn-secondary text-xs" onClick={handleShowLog} disabled={!bisecting}>
+          {/* View Log works even when idle: git returns "We are not bisecting"
+              and the service turns it into an empty log — the dialog then
+              explains how to start a session instead of doing nothing. */}
+          <button className="btn btn-secondary text-xs" onClick={handleShowLog}>
             <FileText size={12} />
             View Log
           </button>
@@ -280,10 +282,12 @@ export function BisectPage() {
           <div className="panel w-[560px] max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium px-4 pt-4">Bisect Log</h3>
             <div className="px-4 py-2 text-2xs text-text-tertiary">
-              Replay a session later with: git bisect replay &lt;file&gt;
+              {logText
+                ? 'Replay a session later with: git bisect replay <file>'
+                : 'Not bisecting right now — start a session below and the log will appear here.'}
             </div>
             <pre className="flex-1 overflow-auto mx-4 mb-3 text-2xs font-mono bg-bg-tertiary p-3 rounded whitespace-pre-wrap text-text-secondary">
-              {logText || '(empty)'}
+              {logText || '(no bisect log — not bisecting)'}
             </pre>
             <div className="flex justify-end px-4 pb-3">
               <button className="btn btn-secondary text-xs" onClick={() => setShowLog(false)}>Close</button>

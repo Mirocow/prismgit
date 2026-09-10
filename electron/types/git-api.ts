@@ -232,7 +232,7 @@ export interface GitApi {
   setFetchDepth: (repoPath: string, remote?: string, depth?: number) => Promise<void>;
   /** Read real remote properties (URLs, HEAD branch, tracking branches, config). */
   remoteProperties: (repoPath: string, name: string) => Promise<RemoteProperties>;
-  log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) => Promise<LogEntry[]>;
+  log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean }) => Promise<LogEntry[]>;
   /** Resolve a commit by full/abbreviated hash (prefix search) — null when not found. */
   findCommit: (repoPath: string, query: string) => Promise<LogEntry | null>;
   branches: (repoPath: string) => Promise<BranchInfo[]>;
