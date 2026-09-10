@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { api, type BranchInfo } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
+import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -393,10 +394,17 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
   const doPush = async (branch?: string) => {
     if (!currentRepo) return;
     const b = branch || selectedBranch;
+    const cmd = `git push origin ${b || ''} ${force ? '--force' : ''} ${pushTags ? '--tags' : ''}`.trim();
     try {
-      await api.git.push(currentRepo.path, 'origin', b || undefined, false, force, pushTags);
+      await useOperationLogStore.getState().logOperation(
+        `Push ${b || 'current'}${force ? ' (force)' : ''}${pushTags ? ' +tags' : ''}`,
+        currentRepo.path, cmd,
+        async () => {
+          await api.git.push(currentRepo.path, 'origin', b || undefined, false, force, pushTags);
+          await refreshStatus(currentRepo.path);
+        }
+      );
       toast.success(`Pushed ${b || 'current'}${force ? ' (force)' : ''}${pushTags ? ' + tags' : ''}`);
-      refreshStatus(currentRepo.path);
     } catch (e) {
       toast.error('Push failed', String(e));
     }
@@ -520,9 +528,16 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
       // Read pull strategy from settings — merge or rebase
       // If dropdown has explicit rebase checkbox, use that. Otherwise use settings default.
       const shouldRebase = useRebase || (settings.pullStrategy === 'rebase');
-      await api.git.pull(currentRepo.path, remote, branch, shouldRebase, noFF);
+      const cmd = `git pull ${remote} ${branch} ${shouldRebase ? '--rebase' : ''} ${noFF ? '--no-ff' : ''}`.trim();
+      await useOperationLogStore.getState().logOperation(
+        `Pull from ${selectedBranch}${shouldRebase ? ' (rebase)' : ' (merge)'}`,
+        currentRepo.path, cmd,
+        async () => {
+          await api.git.pull(currentRepo.path, remote, branch, shouldRebase, noFF);
+          await refreshStatus(currentRepo.path);
+        }
+      );
       toast.success(`Pulled from ${selectedBranch}${shouldRebase ? ' (rebase)' : ' (merge)'}`);
-      refreshStatus(currentRepo.path);
     } catch (e) {
       // Don't crash — show error, let user resolve conflicts via ConflictSolver
       const msg = String(e);
@@ -633,17 +648,29 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
 
   const handlePush = async () => {
     if (!currentRepo) return;
-    try { await push(currentRepo.path); toast.success('Pushed successfully'); }
-    catch (e) { toast.error('Push failed', String(e)); }
+    try {
+      await useOperationLogStore.getState().logOperation(
+        'Push', currentRepo.path, 'git push',
+        () => push(currentRepo.path)
+      );
+      toast.success('Pushed successfully');
+    } catch (e) { toast.error('Push failed', String(e)); }
   };
   const handlePull = async () => {
     if (!currentRepo) return;
     try {
       // Use settings strategy: merge or rebase
       const shouldRebase = settings.pullStrategy === 'rebase';
-      await api.git.pull(currentRepo.path, 'origin', undefined, shouldRebase, false);
+      const cmd = shouldRebase ? 'git pull --rebase origin' : 'git pull origin';
+      await useOperationLogStore.getState().logOperation(
+        shouldRebase ? 'Pull (Rebase)' : 'Pull (Merge)',
+        currentRepo.path, cmd,
+        async () => {
+          await api.git.pull(currentRepo.path, 'origin', undefined, shouldRebase, false);
+          await refreshStatus(currentRepo.path);
+        }
+      );
       toast.success(`Pulled ${shouldRebase ? '(rebase)' : '(merge)'}`);
-      refreshStatus(currentRepo.path);
     } catch (e) {
       const msg = String(e);
       if (msg.includes('CONFLICT') || msg.includes('conflict')) {
@@ -730,16 +757,25 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
             return (
               <div key={key} className="flex items-center">
                 <LabeledButton icon={Plus} label="Stage" iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
-                <LabeledButton icon={Minus} label="Unstage" iconColor={COLOR_ORANGE} onClick={() => currentRepo && api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])} disabled={disabled} title="Unstage all changes" />
+                <LabeledButton icon={Minus} label="Unstage" iconColor={COLOR_ORANGE} onClick={() => {
+                  if (!currentRepo) return;
+                  useOperationLogStore.getState().logOperation(
+                    'Unstage All', currentRepo.path, 'git reset HEAD -- .',
+                    () => api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])
+                  ).then(() => refreshStatus(currentRepo.path))
+                   .catch((e) => toast.error('Unstage failed', String(e)));
+                }} disabled={disabled} title="Unstage all changes" />
                 <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
                   if (!currentRepo || !confirm('Discard ALL uncommitted changes?\n\nThis will permanently discard all staged and unstaged changes. This cannot be undone.')) return;
-                  // checkout -- . restores tracked files; clean -fd also removes untracked ones
-                  // (otherwise "Discard all" left untracked files behind and the tree stayed dirty)
-                  api.git.raw(currentRepo.path, ['checkout', '--', '.'])
-                    .then(() => api.git.raw(currentRepo.path, ['clean', '-fd']))
-                    .then(() => {
-                      toast.success('Changes discarded'); refreshStatus(currentRepo.path);
-                    }).catch((e) => toast.error('Discard failed', String(e)));
+                  useOperationLogStore.getState().logOperation(
+                    'Discard All', currentRepo.path, 'git checkout -- . && git clean -fd',
+                    async () => {
+                      await api.git.raw(currentRepo.path, ['checkout', '--', '.']);
+                      await api.git.raw(currentRepo.path, ['clean', '-fd']);
+                      await refreshStatus(currentRepo.path);
+                    }
+                  ).then(() => toast.success('Changes discarded'))
+                   .catch((e) => toast.error('Discard failed', String(e)));
                 }} disabled={disabled} title="Discard all changes" />
                 <Divider />
               </div>
@@ -749,7 +785,10 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
               <div key={key} className="flex items-center">
                 <LabeledButton icon={CloudDownload} label="Stash" iconColor={COLOR_PURPLE} onClick={() => {
                   if (!currentRepo) return;
-                  api.git.stashPush(currentRepo.path, undefined, true).then(() => {
+                  useOperationLogStore.getState().logOperation(
+                    'Stash', currentRepo.path, 'git stash push -u',
+                    () => api.git.stashPush(currentRepo.path, undefined, true)
+                  ).then(() => {
                     toast.success('Stash saved'); refreshStatus(currentRepo.path);
                   }).catch((e) => toast.error('Stash failed', String(e)));
                 }} disabled={disabled} title="Save stash" />
@@ -757,8 +796,10 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                   if (!currentRepo) return;
                   api.git.stashList(currentRepo.path).then(stashes => {
                     if (stashes.length === 0) { toast.info('No stashes'); return; }
-                    // Pop = apply + drop (the button previously only applied, stash never left the list)
-                    api.git.stashPop(currentRepo.path, 0).then(() => {
+                    useOperationLogStore.getState().logOperation(
+                      'Stash Pop', currentRepo.path, 'git stash pop stash@{0}',
+                      () => api.git.stashPop(currentRepo.path, 0)
+                    ).then(() => {
                       toast.success('Stash popped'); refreshStatus(currentRepo.path);
                     }).catch((e) => toast.error('Pop failed', String(e)));
                   });

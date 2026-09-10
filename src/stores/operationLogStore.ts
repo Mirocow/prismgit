@@ -56,6 +56,16 @@ interface OperationLogState {
   failOp: (id: string, error: string) => void;
   /** Clear all operations from the log. */
   clearLog: () => void;
+  /**
+   * Wrap any async function with automatic logging. This is the recommended
+   * way to call git operations — it logs start, success, and failure
+   * automatically, so callers don't need to manually call startOp/finishOp.
+   *
+   * Example:
+   *   const result = await logOperation('Push', repo.path, 'git push origin main',
+   *     () => api.git.push(repo.path, 'origin', 'main'));
+   */
+  logOperation: <T>(action: string, repoPath: string, command: string, fn: () => Promise<T>) => Promise<T>;
 }
 
 let idCounter = 0;
@@ -126,4 +136,18 @@ export const useOperationLogStore = create<OperationLogState>((set, get) => ({
   },
 
   clearLog: () => set({ ops: [], runningIds: new Set() }),
+
+  logOperation: async (action, repoPath, command, fn) => {
+    const { startOp, finishOp, failOp } = get();
+    const opId = startOp(action, repoPath, command);
+    try {
+      const result = await fn();
+      finishOp(opId, result !== undefined ? String(result).substring(0, 200) : undefined);
+      return result;
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      failOp(opId, errMsg);
+      throw e;
+    }
+  },
 }));

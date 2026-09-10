@@ -9,6 +9,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useOperationLogStore } from '../stores/operationLogStore';
 import { api, type BranchInfo, type RemoteInfo } from '../lib/api';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { cn, formatDate, shortHash } from '../lib/utils';
@@ -59,7 +60,10 @@ export function BranchesPage() {
   const handleCheckout = async (branch: BranchInfo) => {
     if (branch.current) return;
     try {
-      await api.git.checkout(repo.path, branch.name);
+      await useOperationLogStore.getState().logOperation(
+        'Check Out Branch', repo.path, `git checkout ${branch.name}`,
+        () => api.git.checkout(repo.path, branch.name)
+      );
       toast.success(`Checked out ${branch.name}`);
       await load();
       await refreshStatus(repo.path);
