@@ -625,8 +625,8 @@ export function BranchesPage() {
             <span>· {formatDate(b.lastCommit.date)}</span>
           </div>
         )}
-        {/* Hover actions */}
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
+        {/* Hover actions — always faintly visible, brighten on hover */}
+        <div className="flex items-center gap-0.5 opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0">
           {!b.remote && (
             <>
               {!b.current && (

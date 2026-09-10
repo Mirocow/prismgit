@@ -469,6 +469,26 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className="text-status-added font-medium">+{addedLines}</span>
           <span className="text-status-deleted font-medium">-{removedLines}</span>
+          {diff.hunks.length > 1 && (
+            <>
+              <div className="w-px h-4 bg-border-default mx-1" />
+              <span className="text-2xs text-text-tertiary">
+                {collapsedHunks.size > 0
+                  ? `${diff.hunks.length - collapsedHunks.size}/${diff.hunks.length} hunks`
+                  : `${diff.hunks.length} hunks`}
+              </span>
+              <button
+                className="icon-btn !w-5 !h-5"
+                title="Collapse all hunks"
+                onClick={() => {
+                  const all = new Set(diff.hunks.map((_, i) => i));
+                  setCollapsedHunks(collapsedHunks.size === diff.hunks.length ? new Set() : all);
+                }}
+              >
+                {collapsedHunks.size === diff.hunks.length ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              </button>
+            </>
+          )}
           <div className="w-px h-4 bg-border-default mx-1" />
           <select
             className="text-2xs bg-bg-tertiary border border-border-default rounded px-1.5 py-0.5"

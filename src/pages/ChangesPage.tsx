@@ -14,6 +14,7 @@ import { RefBadges } from '../lib/refBadge';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
+import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
@@ -1126,29 +1127,69 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               </div>
             )}
 
-            {/* Staged — all files rendered, but lazy-loaded via IntersectionObserver */}
+            {/* Staged — green accent left border, clickable header to stage all/unstage all */}
             {stagedFiles.length > 0 && (
-              <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
-                Staged ({stagedFiles.length})
+              <div
+                className="px-2 py-1 bg-status-added/8 text-2xs font-bold uppercase text-status-added border-b border-status-added/20 border-l-2 border-l-status-added/40 flex items-center justify-between cursor-pointer hover:bg-status-added/12 transition-colors"
+                onClick={() => {
+                  // Click on header = unstage all
+                  if (repo) {
+                    useOperationLogStore.getState().logOperation(
+                      'Unstage All', repo.path, 'git reset HEAD -- .',
+                      () => api.git.raw(repo.path, ['reset', 'HEAD', '--', '.'])
+                    ).then(() => refreshStatus(repo.path))
+                     .catch((e: unknown) => toast.error('Unstage failed', String(e)));
+                  }
+                }}
+                title="Click to unstage all"
+              >
+                <span>Staged ({stagedFiles.length})</span>
+                <span className="text-text-tertiary normal-case font-normal">click to unstage all</span>
               </div>
             )}
-            <LazyFileList files={stagedFiles} isStaged={true} renderRow={renderFileRow} />
+            <div className={stagedFiles.length > 0 ? 'border-l-2 border-l-status-added/20' : ''}>
+              <LazyFileList files={stagedFiles} isStaged={true} renderRow={renderFileRow} />
+            </div>
 
-            {/* Unstaged */}
+            {/* Unstaged — orange accent */}
             {unstagedFiles.length > 0 && (
-              <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
-                Changes ({unstagedFiles.length})
+              <div
+                className="px-2 py-1 bg-status-modified/8 text-2xs font-bold uppercase text-status-modified border-b border-status-modified/20 border-l-2 border-l-status-modified/40 flex items-center justify-between cursor-pointer hover:bg-status-modified/12 transition-colors"
+                onClick={() => {
+                  // Click on header = stage all unstaged
+                  if (repo) {
+                    useGitStore.getState().stageAll(repo.path);
+                  }
+                }}
+                title="Click to stage all"
+              >
+                <span>Changes ({unstagedFiles.length})</span>
+                <span className="text-text-tertiary normal-case font-normal">click to stage all</span>
               </div>
             )}
-            <LazyFileList files={unstagedFiles} isStaged={false} renderRow={renderFileRow} />
+            <div className={unstagedFiles.length > 0 ? 'border-l-2 border-l-status-modified/20' : ''}>
+              <LazyFileList files={unstagedFiles} isStaged={false} renderRow={renderFileRow} />
+            </div>
 
-            {/* Untracked */}
+            {/* Untracked — cyan accent */}
             {untrackedFiles.length > 0 && (
-              <div className="px-2 py-0.5 bg-bg-tertiary text-2xs font-semibold uppercase text-text-secondary border-b border-border-subtle">
-                Untracked ({untrackedFiles.length})
+              <div
+                className="px-2 py-1 bg-status-untracked/8 text-2xs font-bold uppercase text-status-untracked border-b border-status-untracked/20 border-l-2 border-l-status-untracked/40 flex items-center justify-between cursor-pointer hover:bg-status-untracked/12 transition-colors"
+                onClick={() => {
+                  // Click on header = stage all untracked
+                  if (repo) {
+                    useGitStore.getState().stageAll(repo.path);
+                  }
+                }}
+                title="Click to stage all untracked"
+              >
+                <span>Untracked ({untrackedFiles.length})</span>
+                <span className="text-text-tertiary normal-case font-normal">click to stage all</span>
               </div>
             )}
-            <LazyFileList files={untrackedFiles} isStaged={false} renderRow={renderFileRow} />
+            <div className={untrackedFiles.length > 0 ? 'border-l-2 border-l-status-untracked/20' : ''}>
+              <LazyFileList files={untrackedFiles} isStaged={false} renderRow={renderFileRow} />
+            </div>
 
             {totalChanged === 0 && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">
