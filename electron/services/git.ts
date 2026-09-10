@@ -29,7 +29,10 @@ function getGit(repoPath: string): SimpleGit {
     git = simpleGit({
       baseDir: repoPath,
       binary: 'git',
-      maxConcurrentProcesses: 4,
+      // Limit concurrent git processes to reduce memory spikes.
+      // 2 is enough for most workflows (e.g. status + log in parallel).
+      // Higher values (4+) spawn more child processes = more RAM.
+      maxConcurrentProcesses: 2,
       trimmed: false,
     });
     gitCache.set(repoPath, git);

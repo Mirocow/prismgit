@@ -334,7 +334,11 @@ export default function App() {
   }, []);
 
   // File watcher: start/stop when repo changes + auto-refresh on changes
-  // Use a ref to track in-flight refresh and debounce to avoid loops
+  // Use a ref to track in-flight refresh and debounce to avoid loops.
+  // The debounce is 2s (not 1s) to reduce git status spawn frequency —
+  // each status call spawns a git process which uses ~20-50MB of RAM.
+  // At 1s debounce, saving files rapidly can spawn 5+ status processes
+  // in quick succession. At 2s, they coalesce into 1.
   const refreshInFlight = useRef(false);
   const lastRefreshTime = useRef(0);
 
@@ -344,9 +348,9 @@ export default function App() {
     const cleanup = api.watcher.onChanged((data) => {
       // Skip if a refresh is already in-flight
       if (refreshInFlight.current) return;
-      // Debounce: at least 1 second between watcher-triggered refreshes
+      // Debounce: at least 2 seconds between watcher-triggered refreshes
       const now = Date.now();
-      if (now - lastRefreshTime.current < 1000) return;
+      if (now - lastRefreshTime.current < 2000) return;
       lastRefreshTime.current = now;
       refreshInFlight.current = true;
       refreshStatus(currentRepo.path).finally(() => {

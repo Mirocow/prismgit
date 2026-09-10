@@ -113,9 +113,11 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     if (cur) {
       // Stop watcher (no-op if not running)
       api.watcher.stop(cur.path).catch(() => { /* ignore */ });
-      // Clear git cache via raw command (cheap, just frees SimpleGit instances)
-      try { api.git.raw(cur.path, ['--version']).catch(() => {}); } catch { /* ignore */ }
     }
+    // Clear all state — the git cache in the main process will be
+    // invalidated when the next repo is opened (getGit creates a new
+    // SimpleGit instance per repo path, and old ones are GC'd when
+    // no longer referenced).
     set({ currentRepo: null, currentMetadata: null });
     // Clear global selections too — they were specific to this repo
     // (import here would create a cycle, so we use a window event)

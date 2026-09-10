@@ -103,7 +103,10 @@ export function HistoryPage() {
   const loadHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const logOpts: { maxCount: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = { maxCount: 500 };
+      // Load 200 commits by default (was 500). 200 covers most active repos
+      // and uses ~60% less memory for the graph + filter computation.
+      // The user can scroll down to trigger lazy loading for more.
+      const logOpts: { maxCount: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = { maxCount: 200 };
       // Multi-branch selection takes precedence over single branch filter
       if (selectedBranches.size > 0) {
         logOpts.branches = Array.from(selectedBranches);
