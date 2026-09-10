@@ -1019,9 +1019,10 @@ export function BranchesPage() {
         }}
         onContextMenu={(e) => showBranchContextMenu(e, b)}
       >
-        {/* Current branch indicator */}
-        <span className="w-3 flex-shrink-0">
-          {b.current && <span className="text-text-primary">▶</span>}
+        {/* Current branch indicator — ">" marks the checked-out branch (HEAD).
+            Reserved width keeps all rows aligned even when the marker is absent. */}
+        <span className="w-3 flex-shrink-0 text-accent font-bold" title={b.current ? 'Current branch (HEAD)' : undefined}>
+          {b.current && <span aria-label="current branch">{'>'}</span>}
         </span>
         <GitBranch size={12} className={b.current ? 'text-accent' : 'text-text-tertiary'} flex-shrink-0 />
         {/* Name */}

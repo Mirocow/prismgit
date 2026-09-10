@@ -84,7 +84,7 @@ test.describe('Branches workflow', () => {
 
       await screenshot(ctx.page, 'branches-after-checkout-develop');
 
-      // The current branch indicator (▶) should now be on develop
+      // The current branch indicator (>) should now be on develop
       // Verify via the status bar or the toolbar header
       const headIndicator = ctx.page.locator('text=develop').first();
       await expect(headIndicator).toBeVisible();

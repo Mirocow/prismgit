@@ -1134,6 +1134,44 @@ export function HistoryPage() {
             >
               Recent
             </button>
+            {/* "Current only" — quick toggle that filters history to just the
+                checked-out branch. Highlights which branch HEAD points at.
+                Toggles off when the multi-select already covers current. */}
+            {(() => {
+              const currentBranch = branches.find(b => b.current);
+              if (!currentBranch) return null;
+              // Active when ONLY the current branch is selected — either via
+              // multi-select (selectedBranches) or via single-branch filter
+              // (branchFilter). Both routes produce the same visible result.
+              const active =
+                (selectedBranches.size === 1 && selectedBranches.has(currentBranch.name)) ||
+                (selectedBranches.size === 0 && branchFilter === currentBranch.name);
+              return (
+                <button
+                  data-testid="history-current-only-btn"
+                  className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-0.5',
+                    active
+                      ? 'border-accent bg-accent-muted text-accent'
+                      : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
+                  onClick={() => {
+                    if (active) {
+                      clearBranches();
+                      setBranchFilter('all');
+                    } else {
+                      // Use multi-select so the chip appears in the header
+                      // AND the branch picker checkbox stays in sync.
+                      clearBranches();
+                      toggleBranch(currentBranch.name);
+                      setBranchFilter('all');
+                    }
+                  }}
+                  title={`Show only commits on the current branch (${currentBranch.name})`}
+                >
+                  <span className="text-accent font-bold">{'>'}</span>
+                  Current
+                </button>
+              );
+            })()}
             {/* SmartGit Log groups — Stashes and Recyclable Commits */}
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1',
@@ -1152,34 +1190,28 @@ export function HistoryPage() {
               <RotateCcw size={9} /> Recyclable{recyclable.length > 0 ? ` (${recyclable.length})` : ''}
             </button>
           </div>
-          <button className={cn('icon-btn !w-5 !h-5', showGraph && 'active')}
-            title="Toggle graph" onClick={() => setShowGraph(!showGraph)}>
-            <GitBranch size={11} />
-          </button>
-          <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={loadHistory}>
-            <RefreshCw size={11} />
-          </button>
-        </div>
-      </div>
-
-      {/* Extended filters panel */}
-      {showFilters && (
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border-default bg-bg-secondary text-2xs">
-          {/* Multi-branch picker */}
+          {/* Always-visible branch filter pill — opens the same multi-select
+              dropdown as the extended filter panel, but without needing to
+              expand "More filters" first. Shows the current selection state
+              and exposes checkboxes for both local AND remote branches. */}
           <div className="relative">
             <button
-              className={cn('text-xs px-2 py-0.5 border rounded flex items-center gap-1',
+              data-testid="history-branch-picker-btn"
+              className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1',
                 selectedBranches.size > 0
                   ? 'border-accent bg-accent-muted text-accent'
-                  : 'border-border-default bg-bg-tertiary text-text-secondary')}
+                  : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
               onClick={() => setShowBranchPicker(!showBranchPicker)}
+              title="Filter history by branch — check local or remote branches to show only their commits"
             >
               <GitBranch size={10} />
-              Branches: {selectedBranches.size > 0 ? `${selectedBranches.size} selected` : (branchFilter === 'all' ? 'All' : branchFilter)}
+              {selectedBranches.size > 0
+                ? `${selectedBranches.size} branch${selectedBranches.size === 1 ? '' : 'es'}`
+                : (branchFilter === 'all' ? 'All branches' : branchFilter)}
               <ChevronDown size={9} />
             </button>
             {showBranchPicker && (
-              <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 max-h-72 overflow-y-auto min-w-64">
+              <div data-testid="history-branch-picker-dropdown" className="absolute top-full right-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 max-h-80 overflow-y-auto min-w-72">
                 {/* All branches option — clears selection */}
                 <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs border-b border-border-subtle">
                   <input
@@ -1194,7 +1226,7 @@ export function HistoryPage() {
                   <span className="font-medium">All branches</span>
                 </label>
                 {branches.filter(b => !b.remote).length > 0 && (
-                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Local</div>
+                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary sticky top-0">Local</div>
                 )}
                 {branches.filter(b => !b.remote).map(b => (
                   <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
@@ -1203,16 +1235,16 @@ export function HistoryPage() {
                       checked={selectedBranches.has(b.name)}
                       onChange={() => {
                         toggleBranch(b.name);
-                        // Reset single-branch filter when using multi-select
                         if (selectedBranches.size > 0 || !selectedBranches.has(b.name)) setBranchFilter('all');
                       }}
                     />
-                    <span className={cn('truncate', b.current && 'text-accent font-medium')}>{b.name}</span>
+                    <span className={cn('text-accent font-bold flex-shrink-0', !b.current && 'invisible')} aria-hidden={!b.current} title={b.current ? 'Current branch (HEAD)' : undefined}>{'>'}</span>
+                    <span className={cn('truncate flex-1', b.current && 'text-accent font-medium')}>{b.name}</span>
                     {b.current && <span className="text-2xs text-text-tertiary ml-auto">HEAD</span>}
                   </label>
                 ))}
                 {branches.filter(b => b.remote).length > 0 && (
-                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Remote</div>
+                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary sticky top-0">Remote</div>
                 )}
                 {branches.filter(b => b.remote).map(b => (
                   <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
@@ -1224,10 +1256,10 @@ export function HistoryPage() {
                         if (selectedBranches.size > 0 || !selectedBranches.has(b.name)) setBranchFilter('all');
                       }}
                     />
-                    <span className="truncate">{b.name}</span>
+                    <span className="truncate flex-1">{b.name}</span>
                   </label>
                 ))}
-                <div className="px-3 py-1 border-t border-border-subtle flex items-center justify-between">
+                <div className="px-3 py-1 border-t border-border-subtle flex items-center justify-between sticky bottom-0 bg-bg-elevated">
                   <button className="text-2xs text-accent"
                     onClick={() => {
                       clearBranches();
@@ -1243,6 +1275,33 @@ export function HistoryPage() {
               </div>
             )}
           </div>
+          <button className={cn('icon-btn !w-5 !h-5', showGraph && 'active')}
+            title="Toggle graph" onClick={() => setShowGraph(!showGraph)}>
+            <GitBranch size={11} />
+          </button>
+          <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={loadHistory}>
+            <RefreshCw size={11} />
+          </button>
+        </div>
+      </div>
+
+      {/* Extended filters panel */}
+      {showFilters && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border-default bg-bg-secondary text-2xs">
+          {/* Branch filter lives in the always-visible header now — show a
+              hint chip here that scrolls attention back to the header pill. */}
+          <button
+            className="text-xs px-2 py-0.5 border rounded flex items-center gap-1 border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover"
+            onClick={() => {
+              setShowFilters(false);
+              setShowBranchPicker(true);
+            }}
+            title="Branch filter is in the top bar — click to open it"
+          >
+            <GitBranch size={10} />
+            Branches: {selectedBranches.size > 0 ? `${selectedBranches.size} selected` : (branchFilter === 'all' ? 'All' : branchFilter)}
+            <ChevronDown size={9} />
+          </button>
           <label className="flex items-center gap-1">
             <span className="text-text-tertiary">Author:</span>
             <input type="text" value={authorFilter} placeholder="name or email"
@@ -1502,7 +1561,7 @@ export function HistoryPage() {
                     onClick={() => { setSelectedIdx(realIdx); selectCommit(entry.hash); }}
                     onContextMenu={(e) => showCommitContextMenu(e, entry, realIdx)}
                   >
-                    {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
+                    {isHEAD && <span className="text-2xs text-accent font-bold flex-shrink-0" style={{ width: 8 }} title="Current branch (HEAD)">{'>'}</span>}
                     {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
 
                     {/* Decorations: tags first, then HEAD/branches/remotes — parsed

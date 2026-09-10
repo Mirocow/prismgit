@@ -272,7 +272,7 @@ export function AnnotatePage() {
                         }}
                         title="Click to select · Right-click for more actions"
                       >
-                        {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
+                        {isHEAD && <span className="text-2xs text-accent font-bold flex-shrink-0" style={{ width: 8 }} title="Current branch (HEAD)">{'>'}</span>}
                         {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
                         {fileCount !== undefined && fileCount > 0 && (
                           <span className="text-2xs px-1 py-0 rounded bg-accent-muted text-accent flex-shrink-0" style={{ minWidth: 20, textAlign: 'center' }}>
