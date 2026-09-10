@@ -10,6 +10,7 @@ import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } fr
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { useContextMenu } from '../lib/useContextMenu';
 import { buildFileMenu, runFileAction, getIndexFlagsAsync, type IndexFlags } from '../lib/fileContextMenu';
+import { RefBadges } from '../lib/refBadge';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
@@ -1197,6 +1198,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                       >
                         {initials}
                       </span>
+                      {/* Decorations (tags / HEAD / branches) — were missing here
+                          entirely: the journal showed no tags at all. */}
+                      <RefBadges refs={entry.refs} max={3} />
                       {/* Message */}
                       <span className="flex-1 truncate text-text-primary">{entry.subject}</span>
                       {/* Hash — clickable */}

@@ -24,6 +24,7 @@ import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGr
 import { createAncestryResolver } from '../lib/graphAncestry';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
+import { RefBadges } from '../lib/refBadge';
 import { useLazyList } from '../lib/useLazyList';
 import { cn, copyToClipboard, shortHash } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
@@ -960,24 +961,9 @@ export function HistoryPage() {
                     {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
                     {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
 
-                    {entry.refs.length > 0 && (
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        {entry.refs.slice(0, 3).map((ref, i) => {
-                          const isTag = ref.startsWith('tag:');
-                          const isRemote = ref.includes('/');
-                          const label = ref.replace(/^tag:\s*/, '').replace('HEAD -> ', '');
-                          return (
-                            <span key={i} className={cn('text-2xs px-1.5 py-0.5 rounded border',
-                              isTag ? 'border-tag-border bg-tag-bg text-tag-text' :
-                              isHEAD ? 'border-accent bg-accent-muted text-accent' :
-                              isRemote ? 'border-status-renamed/30 bg-status-renamed/10 text-status-renamed' :
-                              'border-status-added/30 bg-status-added/10 text-status-added')}>
-                              {isTag && <TagIcon size={8} className="inline mr-0.5" />}{label}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
+                    {/* Decorations: tags first, then HEAD/branches/remotes — parsed
+                        from BOTH short and --decorate=full shapes (see refBadge). */}
+                    <RefBadges refs={entry.refs} max={3} />
 
                     <span className={cn('flex-1 truncate text-xs', isSelected ? 'font-semibold text-text-primary' : 'font-medium text-text-primary')}>{entry.subject}</span>
 
@@ -1012,26 +998,8 @@ export function HistoryPage() {
           {selected ? (
             <div className="p-3">
               <div className="text-sm font-medium text-text-primary mb-2">{selected.subject}</div>
-              {/* Tags and branch refs on this commit */}
-              {selected.refs.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1 mb-3">
-                  {selected.refs.map((ref, i) => {
-                    const isTag = ref.startsWith('tag:') || ref.startsWith('refs/tags/');
-                    const isHEAD = ref.includes('HEAD');
-                    const isRemote = ref.includes('/') && !ref.startsWith('tag:');
-                    const label = ref.replace(/^tag:\s*/, '').replace(/^refs\/tags\//, '').replace(/^refs\/heads\//, '').replace(/^refs\/remotes\//, '').replace('HEAD -> ', '');
-                    return (
-                      <span key={i} className={cn('text-2xs px-1.5 py-0.5 rounded border',
-                        isTag ? 'border-tag-border bg-tag-bg text-tag-text' :
-                        isHEAD ? 'border-accent bg-accent-muted text-accent' :
-                        isRemote ? 'border-status-renamed/30 bg-status-renamed/10 text-status-renamed' :
-                        'border-status-added/30 bg-status-added/10 text-status-added')}>
-                        {isTag && <TagIcon size={8} className="inline mr-0.5" />}{label}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
+              {/* Tags and branch refs on this commit (shared badge renderer) */}
+              <RefBadges refs={selected.refs} className="mb-3" />
               <div className="flex items-center gap-2 mb-3">
                 <CommitHashLink hash={selected.hash} />
                 <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>
