@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api, type SubmoduleInfo } from '../lib/api';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function SubmodulesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -75,7 +76,12 @@ export function SubmodulesPage() {
   };
 
   const handleDeinit = async (name: string) => {
-    if (!confirm(`Deinit submodule '${name}'?\n\nThe submodule working tree will be removed (the entry stays in .gitmodules). You can re-init it later.`)) return;
+    if (!(await confirmDialog({
+      title: `Deinit submodule '${name}'`,
+      message: 'The submodule working tree will be removed (the entry stays in .gitmodules). You can re-init it later.',
+      confirmLabel: 'Deinit',
+      danger: true,
+    }))) return;
     setBusy(name);
     try {
       await api.git.submoduleDeinit(repo.path, name, false);

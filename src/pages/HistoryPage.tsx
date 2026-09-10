@@ -31,6 +31,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 const ROW_HEIGHT = 28;
 const LANE_WIDTH = 20;
 const GRAPH_PAD = 6;
@@ -320,7 +321,11 @@ export function HistoryPage() {
   }, [selectedIdx, repo.path, filtered]);
 
   const handleCherryPick = async (entry: LogEntry) => {
-    if (!confirm(`Cherry-pick ${shortHash(entry.hash)}?\n\nThis will apply the changes from this commit onto your current branch.\n\nCommit: "${entry.subject}"`)) return;
+    if (!(await confirmDialog({
+      title: `Cherry-pick ${shortHash(entry.hash)}`,
+      message: `Apply the changes from this commit onto your current branch?\n\nCommit: "${entry.subject}"`,
+      confirmLabel: 'Cherry-pick',
+    }))) return;
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) toast.warning(`${result.conflicts.length} conflicts`);
@@ -334,7 +339,11 @@ export function HistoryPage() {
   useEscapeKey(!!compareDiff, () => setCompareDiff(null));
 
   const handleRevert = async (entry: LogEntry) => {
-    if (!confirm(`Revert ${shortHash(entry.hash)}?\n\nThis will create a NEW commit that undoes the changes from this commit.\n\nOriginal commit: "${entry.subject}"`)) return;
+    if (!(await confirmDialog({
+      title: `Revert ${shortHash(entry.hash)}`,
+      message: `Create a NEW commit that undoes the changes from this commit?\n\nOriginal commit: "${entry.subject}"`,
+      confirmLabel: 'Revert',
+    }))) return;
     try {
       const result = await api.git.revert(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) toast.warning(`${result.conflicts.length} conflicts`);
@@ -344,7 +353,14 @@ export function HistoryPage() {
   };
 
   const handleReset = async (hash: string, mode: 'soft' | 'mixed' | 'hard' | 'keep') => {
-    if (!confirm(`Reset to ${shortHash(hash)} (${mode})?\n${mode === 'hard' ? 'WARNING: All uncommitted changes will be lost!' : ''}`)) return;
+    if (!(await confirmDialog({
+      title: `Reset to ${shortHash(hash)} (${mode})`,
+      message: mode === 'hard'
+        ? 'WARNING: all uncommitted changes will be lost!'
+        : `Move the current branch to ${shortHash(hash)} using a ${mode} reset.`,
+      confirmLabel: 'Reset',
+      danger: mode === 'hard',
+    }))) return;
     try {
       await api.git.reset(repo.path, mode, hash);
       toast.success(`Reset ${mode} to ${shortHash(hash)}`);
@@ -353,7 +369,11 @@ export function HistoryPage() {
   };
 
   const handleRebase = async (hash: string) => {
-    if (!confirm(`Rebase current branch onto ${shortHash(hash)}?\n\nThis will replay your current branch's commits on top of this commit. May cause conflicts.`)) return;
+    if (!(await confirmDialog({
+      title: 'Rebase current branch',
+      message: `Replay your current branch's commits on top of ${shortHash(hash)}?\nMay cause conflicts.`,
+      confirmLabel: 'Rebase',
+    }))) return;
     try {
       await api.git.rebase(repo.path, hash);
       toast.success('Rebase started');
@@ -372,7 +392,11 @@ export function HistoryPage() {
   // Start an interactive rebase stopped at this commit ('edit') — the user then
   // splits the commit by staging parts and continuing via the Rebase panel.
   const handleStartSplitCommit = async (entry: LogEntry) => {
-    if (!confirm(`Split ${shortHash(entry.hash)}?\n\nThis starts an interactive rebase stopped at this commit ('edit').\nThen: reset parts of the commit, stage pieces, commit repeatedly, and press Continue in the Rebase panel.`)) return;
+    if (!(await confirmDialog({
+      title: `Split ${shortHash(entry.hash)}`,
+      message: "This starts an interactive rebase stopped at this commit ('edit').\nThen: reset parts of the commit, stage pieces, commit repeatedly, and press Continue in the Rebase panel.",
+      confirmLabel: 'Split',
+    }))) return;
     try {
       const res = await api.git.splitCommit(repo.path, entry.hash);
       if (res.started) {
@@ -419,7 +443,11 @@ export function HistoryPage() {
   };
 
   const handleCheckout = async (hash: string) => {
-    if (!confirm(`Checkout ${shortHash(hash)}?\n\nThis will put you in detached HEAD state. You won't be on any branch.`)) return;
+    if (!(await confirmDialog({
+      title: `Checkout ${shortHash(hash)}`,
+      message: "This puts you in detached HEAD state — you won't be on any branch.",
+      confirmLabel: 'Checkout',
+    }))) return;
     try {
       await api.git.checkout(repo.path, hash);
       toast.success(`Checked out ${shortHash(hash)}`);

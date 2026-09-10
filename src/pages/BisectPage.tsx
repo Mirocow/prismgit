@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 interface BisectState {
   state: 'bisecting' | 'none';
   remaining?: number;
@@ -89,8 +90,13 @@ export function BisectPage() {
       toast.info('Skipped — moving to next candidate');
     });
 
-  const handleReset = () => {
-    if (!confirm('Reset bisect?\n\nThis ends the bisect session and returns HEAD to the original branch.')) return;
+  const handleReset = async () => {
+    if (!(await confirmDialog({
+      title: 'Reset bisect',
+      message: 'This ends the bisect session and returns HEAD to the original branch.',
+      confirmLabel: 'Reset',
+      danger: true,
+    }))) return;
     run('reset', async () => {
       await api.git.bisectReset(repo.path);
       toast.success('Bisect reset');

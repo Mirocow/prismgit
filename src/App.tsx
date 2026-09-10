@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { Toolbar, GitToolbar } from './components/Toolbar';
 import { StatusBar } from './components/StatusBar';
 import { ToastContainer } from './components/ToastContainer';
+import { ConfirmDialogHost } from './components/ConfirmDialog';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { CloneModal } from './components/CloneModal';
 import { InitModal } from './components/InitModal';
@@ -412,6 +413,7 @@ export default function App() {
           onToggleCommandLog={() => setShowCommandLog(s => !s)}
         />
         <ToastContainer />
+        <ConfirmDialogHost />
         <DragDropHandler />
         <CloneModal open={showClone} onClose={() => setShowClone(false)} />
         <InitModal open={showInit} onClose={() => setShowInit(false)} />
@@ -489,6 +491,7 @@ export default function App() {
         onToggleCommandLog={() => setShowCommandLog(s => !s)}
       />
       <ToastContainer />
+      <ConfirmDialogHost />
       <DragDropHandler />
       <CloneModal open={showClone} onClose={() => setShowClone(false)} />
       <InitModal open={showInit} onClose={() => setShowInit(false)} />

@@ -6,6 +6,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type GitConfigEntry } from '../lib/api';
 import { cn } from '../lib/utils';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 
 export function SettingsPage() {
   const { settings, theme, setSetting, toggleTheme } = useSettingsStore();
@@ -57,7 +58,12 @@ export function SettingsPage() {
 
   const handleConfigUnset = async (key: string) => {
     if (!currentRepo) return;
-    if (!confirm(`Remove '${key}' from ${configScope} config?`)) return;
+    if (!(await confirmDialog({
+      title: 'Remove config entry',
+      message: `Remove '${key}' from ${configScope} config?`,
+      confirmLabel: 'Remove',
+      danger: true,
+    }))) return;
     try {
       await api.git.configUnset(currentRepo.path, key, configScope);
       toast.success(`Removed ${key}`);

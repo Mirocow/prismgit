@@ -8,6 +8,7 @@ import { CommitHashLink } from '../components/StatusBar';
 import { api, type TagInfo } from '../lib/api';
 import { shortHash } from '../lib/utils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function TagsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
@@ -90,7 +91,12 @@ export function TagsPage() {
   };
 
   const handleDelete = async (tag: TagInfo) => {
-    if (!confirm(`Delete tag '${tag.name}'?\n\nThis will permanently remove the tag reference. The tagged commit will not be affected.`)) return;
+    if (!(await confirmDialog({
+      title: `Delete tag '${tag.name}'`,
+      message: 'This permanently removes the tag reference. The tagged commit is not affected.',
+      confirmLabel: 'Delete',
+      danger: true,
+    }))) return;
     try {
       await api.git.deleteTag(repo.path, tag.name);
       toast.success(`Tag '${tag.name}' deleted`);

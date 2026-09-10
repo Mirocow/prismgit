@@ -11,6 +11,7 @@ import { CommitHashLink } from '../components/StatusBar';
 import { cn } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function StashesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -54,7 +55,11 @@ export function StashesPage() {
   };
 
   const handlePop = async (stash: StashEntry) => {
-    if (!confirm(`Pop stash@{${stash.index}}?\n\nThis will apply the stashed changes to your working tree and remove the stash.\n\nStash message: "${stash.message}"`)) return;
+    if (!(await confirmDialog({
+      title: `Pop stash@{${stash.index}}`,
+      message: `Apply the stashed changes to your working tree and remove the stash?\n\nStash message: "${stash.message}"`,
+      confirmLabel: 'Pop',
+    }))) return;
     try {
       await api.git.stashPop(repo.path, stash.index);
       toast.success(`Stash@{${stash.index}} popped`);
@@ -76,7 +81,12 @@ export function StashesPage() {
   };
 
   const handleDrop = async (stash: StashEntry) => {
-    if (!confirm(`Drop stash@{${stash.index}}?\n\nThis will permanently delete the stash.\n\nStash message: "${stash.message}"`)) return;
+    if (!(await confirmDialog({
+      title: `Drop stash@{${stash.index}}`,
+      message: `This permanently deletes the stash.\n\nStash message: "${stash.message}"`,
+      confirmLabel: 'Drop',
+      danger: true,
+    }))) return;
     try {
       await api.git.stashDrop(repo.path, stash.index);
       toast.success(`Stash@{${stash.index}} dropped`);
@@ -89,9 +99,13 @@ export function StashesPage() {
   // Create a new branch from the stash's base commit and apply the stash there.
   // Useful when the stash no longer applies cleanly onto the current branch.
   const handleStashBranch = async (stash: StashEntry) => {
-    const branchName = prompt(
-      `Create a branch from stash@{${stash.index}} and apply it there:\n\n"${stash.message}"\n\nBranch name:`
-    );
+    const branchName = await promptDialog({
+      title: `Create branch from stash@{${stash.index}}`,
+      message: `A new branch is created from the stash's base commit and the stash is applied there.\n\nStash message: "${stash.message}"`,
+      confirmLabel: 'Create branch',
+      input: { placeholder: 'branch name' },
+      validate: (v) => (!v ? 'Enter the branch name' : /\s/.test(v) ? 'Branch name cannot contain spaces' : null),
+    });
     if (!branchName || !branchName.trim()) return;
     try {
       await api.git.stashBranch(repo.path, branchName.trim(), stash.index);

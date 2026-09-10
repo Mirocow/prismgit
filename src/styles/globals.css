@@ -937,3 +937,37 @@ kbd {
     scroll-behavior: auto !important;
   }
 }
+
+/* ===========================================================================
+ * UX Polish: Keyboard focus visibility
+ * ===========================================================================
+ *
+ * Mouse users should not see focus outlines (noisy), but keyboard users MUST
+ * see where they are — otherwise Tab navigation is unusable. :focus-visible
+ * only matches keyboard-initiated focus, giving both groups what they need.
+ */
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+/* Rows / tree items (divs with onClick) opt in via the .focusable class. */
+.focusable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The generic outline above would double up with the browser ring on the
+   panel-style inputs; keep those smooth instead. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline-offset: 0;
+}

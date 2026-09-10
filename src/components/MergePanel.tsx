@@ -4,6 +4,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
+import { confirmDialog, promptDialog } from './ConfirmDialog';
 
 interface MergeState {
   inProgress: boolean;
@@ -140,7 +141,12 @@ export function MergePanel({
   };
 
   const handleAbort = async () => {
-    if (!confirm('Abort merge? All changes will be lost.')) return;
+    if (!(await confirmDialog({
+      title: 'Abort merge',
+      message: 'Abort the current merge? All merge changes will be lost.',
+      confirmLabel: 'Abort merge',
+      danger: true,
+    }))) return;
     setLoading(true);
     try {
       await api.git.abortMerge(repo.path);

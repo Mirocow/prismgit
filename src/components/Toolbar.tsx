@@ -10,6 +10,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useToolbarStore, DEFAULT_TOOLBAR_GROUPS, type ToolbarGroups, type ToolbarGroupKey } from '../stores/toolbarStore';
 import { useToastStore } from '../stores/toastStore';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
+import { confirmDialog, promptDialog } from './ConfirmDialog';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -765,8 +766,13 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                   ).then(() => refreshStatus(currentRepo.path))
                    .catch((e) => toast.error('Unstage failed', String(e)));
                 }} disabled={disabled} title="Unstage all changes" />
-                <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
-                  if (!currentRepo || !confirm('Discard ALL uncommitted changes?\n\nThis will permanently discard all staged and unstaged changes. This cannot be undone.')) return;
+                <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={async () => {
+                  if (!currentRepo || !(await confirmDialog({
+                    title: 'Discard ALL uncommitted changes',
+                    message: 'This permanently discards all staged and unstaged changes. This cannot be undone.',
+                    confirmLabel: 'Discard all',
+                    danger: true,
+                  }))) return;
                   useOperationLogStore.getState().logOperation(
                     'Discard All', currentRepo.path, 'git checkout -- . && git clean -fd',
                     async () => {

@@ -9,6 +9,7 @@ import { cn } from '../lib/utils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { RenameDialog } from '../components/RemoteDialogs';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function RemotesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -71,7 +72,12 @@ export function RemotesPage() {
   };
 
   const handleRemove = async (remote: RemoteInfo) => {
-    if (!confirm(`Remove remote '${remote.name}'?\n\nThis only removes the remote configuration — the local branches and data stay untouched.`)) return;
+    if (!(await confirmDialog({
+      title: `Remove remote '${remote.name}'`,
+      message: 'This only removes the remote configuration — the local branches and data stay untouched.',
+      confirmLabel: 'Remove',
+      danger: true,
+    }))) return;
     setBusy(remote.name);
     try {
       await api.git.removeRemote(repo.path, remote.name);

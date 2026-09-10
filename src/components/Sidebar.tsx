@@ -7,6 +7,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useGitStore } from '../stores/gitStore';
 import { ResizableSplitter, useResizableWidth } from './ResizableSplitter';
 import { cn } from '../lib/utils';
+import { confirmDialog, promptDialog } from './ConfirmDialog';
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -66,9 +67,14 @@ export function Sidebar() {
               <button
                 className="icon-btn no-drag flex-shrink-0 hover:!text-status-deleted !w-7 !h-7"
                 title="Close repository (release memory, stop watcher, clear selections)"
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.preventDefault(); e.stopPropagation();
-                  if (confirm(`Close repository '${currentRepo.name}'?\n\nThis will:\n• Stop file-system watcher\n• Clear git cache\n• Clear all selections\n• Free memory`)) {
+                  if (await confirmDialog({
+                    title: `Close repository '${currentRepo.name}'`,
+                    message: 'This stops the file-system watcher, clears the git cache and all selections, and frees memory.',
+                    confirmLabel: 'Close',
+                    danger: true,
+                  })) {
                     useRepositoryStore.getState().closeRepository();
                   }
                 }}

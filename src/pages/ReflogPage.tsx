@@ -6,6 +6,7 @@ import { api, type ReflogEntry } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 
 const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
 
@@ -34,7 +35,12 @@ export function ReflogPage() {
   }, [load]);
 
   const handleDelete = async (entry: ReflogEntry) => {
-    if (!confirm(`Delete reflog entry ${entry.selector}?`)) return;
+    if (!(await confirmDialog({
+      title: 'Delete reflog entry',
+      message: `Delete reflog entry ${entry.selector}? The commit itself is not removed — it just becomes unreachable.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    }))) return;
     try {
       await api.git.reflogDelete(repo.path, entry.index, ref);
       toast.success('Reflog entry deleted');

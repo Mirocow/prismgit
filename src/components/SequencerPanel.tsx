@@ -4,6 +4,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
+import { confirmDialog, promptDialog } from './ConfirmDialog';
 
 interface SequencerPanelProps {
   kind: 'cherry-pick' | 'revert';
@@ -52,7 +53,12 @@ export function SequencerPanel({ kind, repoPath, onClose }: SequencerPanelProps)
   };
 
   const handleAbort = async () => {
-    if (!confirm(`Abort the ${kind}?\n\nThe repository returns to its state before the ${kind} started.`)) return;
+    if (!(await confirmDialog({
+      title: `Abort ${kind}`,
+      message: `The repository returns to its state before the ${kind} started.`,
+      confirmLabel: 'Abort',
+      danger: true,
+    }))) return;
     setBusy('abort');
     try {
       if (kind === 'cherry-pick') await api.git.cherryPickAbort(repoPath);

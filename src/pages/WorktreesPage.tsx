@@ -6,6 +6,7 @@ import { api, type WorktreeInfo } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function WorktreesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
@@ -61,7 +62,12 @@ export function WorktreesPage() {
   };
 
   const handleRemove = async (wt: WorktreeInfo) => {
-    if (!confirm(`Remove worktree at ${wt.path}?`)) return;
+    if (!(await confirmDialog({
+      title: 'Remove worktree',
+      message: `Remove the worktree at\n${wt.path}?\n\nThe branch is kept — only this working-copy folder is unlinked.`,
+      confirmLabel: 'Remove',
+      danger: true,
+    }))) return;
     setBusy(wt.path);
     try {
       await api.git.worktreeRemove(repo.path, wt.path, false);
@@ -69,7 +75,12 @@ export function WorktreesPage() {
       await load();
     } catch (e) {
       // Try with force if normal remove fails
-      if (confirm('Force remove?')) {
+      if (await confirmDialog({
+        title: 'Force remove worktree',
+        message: 'The worktree could not be removed cleanly — it may contain uncommitted changes.\nForce remove anyway?',
+        confirmLabel: 'Force remove',
+        danger: true,
+      })) {
         try {
           await api.git.worktreeRemove(repo.path, wt.path, true);
           toast.success('Worktree force-removed');
@@ -104,8 +115,14 @@ export function WorktreesPage() {
   // Move a linked worktree to a new location (git worktree move).
   // Does not touch the branch or the files inside — just relocates the directory.
   const handleMove = async (wt: WorktreeInfo) => {
-    const target = prompt(`Move worktree to a new location:\n\nCurrent: ${wt.path}\nNew path:`);
-    if (!target || !target.trim() || target.trim() === wt.path) return;
+    const target = await promptDialog({
+      title: 'Move worktree',
+      message: `Move the worktree to a new location.\nCurrent location:\n${wt.path}`,
+      confirmLabel: 'Move',
+      input: { initialValue: wt.path, placeholder: '/new/path' },
+      validate: (v) => (!v ? 'Enter the new path' : null),
+    });
+    if (!target || target === wt.path) return;
     setBusy(wt.path);
     try {
       await api.git.worktreeMove(repo.path, wt.path, target.trim());

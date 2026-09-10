@@ -7,6 +7,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type ReflogEntry } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 
 export function JournalPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
@@ -49,7 +50,11 @@ export function JournalPage() {
   }, [entries, filter]);
 
   const handleCherryPick = async (entry: ReflogEntry) => {
-    if (!confirm(`Cherry-pick ${shortHash(entry.hash)}?\n\nThis will apply the changes from this commit onto your current branch.\n\nCommit: "${entry.message.substring(0, 80)}"`)) return;
+    if (!(await confirmDialog({
+      title: `Cherry-pick ${shortHash(entry.hash)}`,
+      message: `Apply the changes from this commit onto your current branch?\n\nCommit: "${entry.message.substring(0, 80)}"`,
+      confirmLabel: 'Cherry-pick',
+    }))) return;
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) {
@@ -64,7 +69,12 @@ export function JournalPage() {
   };
 
   const handleResetToHere = async (entry: ReflogEntry) => {
-    if (!confirm(`Reset HEAD to ${shortHash(entry.hash)} (hard)?\n\nAll uncommitted changes will be lost!`)) return;
+    if (!(await confirmDialog({
+      title: `Reset HEAD to ${shortHash(entry.hash)} (hard)`,
+      message: 'All uncommitted changes will be lost!',
+      confirmLabel: 'Reset',
+      danger: true,
+    }))) return;
     try {
       await api.git.reset(repo.path, 'hard', entry.hash);
       toast.success(`Reset to ${shortHash(entry.hash)}`);

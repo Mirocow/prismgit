@@ -53,6 +53,9 @@ export function DiffPage() {
   // File list for multi-file diff (when filePath === '.')
   const [changedFiles, setChangedFiles] = useState<CommitFile[]>([]);
   const [selectedFileInList, setSelectedFileInList] = useState<string | null>(null);
+  // Filter box above the file list — with 200+ changed files, scrolling to
+  // find one path is not something a human should do.
+  const [fileListFilter, setFileListFilter] = useState('');
   // Width of the file-list sidebar — splitter lets the user resize it.
   // Bug fix: previously the file list was a fixed `w-56` with no splitter, so
   // users couldn't widen it for long paths. Now we use useResizableWidth.
@@ -229,6 +232,13 @@ export function DiffPage() {
   // The file the toolbar actions (Blame) and the header bar refer to.
   const blameTarget = selectedFileInList || filePath;
 
+  // Filtered view of the changed-file list (case-insensitive substring).
+  const visibleFiles = useMemo(() => {
+    const q = fileListFilter.trim().toLowerCase();
+    if (!q) return changedFiles;
+    return changedFiles.filter((f) => f.path.toLowerCase().includes(q));
+  }, [changedFiles, fileListFilter]);
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header with comparison controls */}
@@ -354,9 +364,23 @@ export function DiffPage() {
               style={{ width: fileListWidth }}
             >
               <div className="px-2 py-1.5 text-2xs font-bold uppercase tracking-wider text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary">
-                Changed Files ({changedFiles.length})
+                Changed Files ({visibleFiles.length}{visibleFiles.length !== changedFiles.length ? ` of ${changedFiles.length}` : ''})
               </div>
-              {changedFiles.slice(0, 200).map((f, i) => (
+              {changedFiles.length > 5 && (
+                <div className="px-2 py-1 border-b border-border-subtle">
+                  <input
+                    type="text"
+                    className="w-full text-2xs px-1.5 py-0.5 bg-bg-primary border border-border-default rounded"
+                    placeholder="Filter files..."
+                    value={fileListFilter}
+                    onChange={(e) => setFileListFilter(e.target.value)}
+                  />
+                </div>
+              )}
+              {visibleFiles.length === 0 && changedFiles.length > 0 && (
+                <div className="px-2 py-2 text-2xs text-text-tertiary">No files match '{fileListFilter.trim()}'</div>
+              )}
+              {visibleFiles.slice(0, 200).map((f, i) => (
                 <div
                   key={i}
                   className={cn(

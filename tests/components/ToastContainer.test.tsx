@@ -58,3 +58,21 @@ describe('ToastContainer', () => {
     expect(screen.queryByText('Dismissible')).not.toBeInTheDocument();
   });
 });
+
+describe('toast error detail humanization', () => {
+  beforeEach(() => {
+    useToastStore.setState({ toasts: [] });
+  });
+
+  it('strips repeated "Error:" prefixes and stack frames', () => {
+    useToastStore.getState().error('Push failed', 'Error: Error: push rejected\n    at IpcMain (electron/js2c)');
+    const toast = useToastStore.getState().toasts[0];
+    expect(toast.detail).toBe('Push rejected');
+  });
+
+  it('leaves plain multi-line git output readable', () => {
+    const detail = 'To http://x/y.git\n ! [rejected] main -> main (fetch first)';
+    useToastStore.getState().error('Push failed', detail);
+    expect(useToastStore.getState().toasts[0].detail).toBe(detail);
+  });
+});

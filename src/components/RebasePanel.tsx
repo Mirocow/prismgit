@@ -4,6 +4,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
+import { confirmDialog, promptDialog } from './ConfirmDialog';
 
 interface RebaseState {
   inProgress: boolean;
@@ -59,7 +60,12 @@ export function RebasePanel({ onClose }: { onClose: () => void }) {
   };
 
   const handleAbort = async () => {
-    if (!confirm('Abort rebase? All changes will be lost.')) return;
+    if (!(await confirmDialog({
+      title: 'Abort rebase',
+      message: 'Abort the current rebase? All changes will be lost.',
+      confirmLabel: 'Abort rebase',
+      danger: true,
+    }))) return;
     setLoading(true);
     try {
       await api.git.rebase(repo.path, '', { abort: true });

@@ -17,6 +17,7 @@ import { cn, formatDate, shortHash } from '../lib/utils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { RenameDialog, RemoteConfigDialog } from '../components/RemoteDialogs';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function BranchesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { refreshStatus } = useGitStore();
@@ -84,7 +85,12 @@ export function BranchesPage() {
   };
 
   const handleDelete = async (branch: BranchInfo) => {
-    if (!confirm(`Delete branch '${branch.name}'?\n\nThis will remove the local branch reference. Use force-delete if the branch is not fully merged.`)) return;
+    if (!(await confirmDialog({
+      title: `Delete branch '${branch.name}'`,
+      message: 'This removes the local branch reference. If the branch is not fully merged, use force-delete.',
+      confirmLabel: 'Delete',
+      danger: true,
+    }))) return;
     try {
       await api.git.deleteBranch(repo.path, branch.name, false, branch.remote);
       toast.success(`Deleted '${branch.name}'`);
@@ -94,7 +100,12 @@ export function BranchesPage() {
 
   const handleDeleteRemote = async (branch: BranchInfo) => {
     const remoteBranch = branch.name.replace(/^[^/]+\//, '');
-    if (!confirm(`Delete remote branch '${branch.name}'?\n\nThis will run 'git push origin --delete' and permanently remove the branch from the remote repository.`)) return;
+    if (!(await confirmDialog({
+      title: `Delete remote branch '${branch.name}'`,
+      message: "This runs 'git push origin --delete' and permanently removes the branch from the remote repository.",
+      confirmLabel: 'Delete',
+      danger: true,
+    }))) return;
     try {
       await api.git.deleteBranch(repo.path, remoteBranch, true, true);
       toast.success(`Deleted remote '${remoteBranch}'`);
@@ -150,7 +161,12 @@ export function BranchesPage() {
   };
 
   const handleRemoveRemote = async (name: string) => {
-    if (!confirm(`Remove remote '${name}'?\n\nThis only removes the remote configuration — local branches and data stay untouched.`)) return;
+    if (!(await confirmDialog({
+      title: `Remove remote '${name}'`,
+      message: 'This only removes the remote configuration — local branches and data stay untouched.',
+      confirmLabel: 'Remove',
+      danger: true,
+    }))) return;
     setRemoteBusy(name);
     try {
       await api.git.removeRemote(repo.path, name);
@@ -329,14 +345,18 @@ export function BranchesPage() {
       items.push({ label: 'Delete', clickId: 'delete' });
     }
     if (items.length > 0) {
-      showContextMenu(items, (action) => {
+      showContextMenu(items, async (action) => {
         if (action === 'checkout') handleCheckout(b);
         else if (action === 'compare') handleCompare(b);
         else if (action === 'checkout-remote') {
           // Create local tracking branch from remote: git checkout -b <local> --track <remote>
           // Local name = part after first slash (e.g. origin/main → main)
           const localName = b.name.replace(/^[^/]+\//, '');
-          if (!confirm(`Checkout remote branch '${b.name}'?\n\nThis will create local branch '${localName}' tracking the remote.`)) return;
+          if (!(await confirmDialog({
+            title: `Checkout remote branch '${b.name}'`,
+            message: `This creates a local branch '${localName}' tracking '${b.name}' and switches to it.`,
+            confirmLabel: 'Checkout',
+          }))) return;
           api.git.checkout(repo.path, b.name, { track: true }).then(() => {
             toast.success(`Checked out '${localName}' (tracking ${b.name})`);
             load();

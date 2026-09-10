@@ -16,6 +16,7 @@ import {
 import { cn, formatDate, shortHash } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 type Severity = 'info' | 'suggestion' | 'warning' | 'critical';
 
 const SEVERITY_COLORS: Record<Severity, string> = {
@@ -92,7 +93,12 @@ export function ReviewsPage() {
   };
 
   const handleDelete = async (commitHash: string, commentId: string) => {
-    if (!confirm('Delete this comment?')) return;
+    if (!(await confirmDialog({
+      title: 'Delete comment',
+      message: 'Delete this review comment? This cannot be undone.',
+      confirmLabel: 'Delete',
+      danger: true,
+    }))) return;
     try {
       await deleteReviewComment(repo.path, commitHash, commentId);
       toast.success('Comment deleted');

@@ -17,6 +17,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 interface ChangesPageProps {
   onResolveConflict?: (file: string) => void;
 }
@@ -423,7 +424,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   };
 
   const handleRestoreFile = async (file: string) => {
-    if (!confirm(`Restore '${file}' to last commit? Local changes will be lost.`)) return;
+    if (!(await confirmDialog({
+      title: 'Restore file',
+      message: `Restore '${file}' to the last commit?\nLocal changes will be lost.`,
+      confirmLabel: 'Restore',
+      danger: true,
+    }))) return;
     try {
       await api.git.restore(repo.path, [file]);
       toast.success('File restored');
@@ -457,9 +463,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   // Restore a file from an arbitrary ref (git checkout <ref> -- <file>) — e.g. recover
   // an older version from another branch or commit without leaving the current branch.
   const handleCheckoutFileFromRef = async (file: string) => {
-    const ref = prompt(
-      `Restore '${file}' from a ref:\n\nEnter a ref (commit hash, branch, tag, HEAD~1, ...).\nThe working tree copy will be overwritten with that version.`
-    );
+    const ref = await promptDialog({
+      title: `Restore '${file}' from a ref`,
+      message: 'Enter a ref (commit hash, branch, tag, HEAD~1, …). The working tree copy will be overwritten with that version.',
+      confirmLabel: 'Restore',
+      input: { placeholder: 'HEAD~1' },
+    });
     if (!ref || !ref.trim()) return;
     try {
       await api.git.checkoutFile(repo.path, file, ref.trim());
@@ -526,7 +535,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   };
 
   const handleDeleteFile = async (file: string) => {
-    if (!confirm(`Delete '${file}'? This cannot be undone.`)) return;
+    if (!(await confirmDialog({
+      title: 'Delete file',
+      message: `Delete '${file}'? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    }))) return;
     try {
       await api.git.raw(repo.path, ['rm', '-f', '--', file]);
       toast.success('File deleted');
@@ -838,7 +852,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             else if (action === 'unstage') handleUnstageFile(file.path);
             else if (action === 'restore') handleRestoreFile(file.path);
             else if (action === 'discard-staged') {
-              if (!confirm(`Discard staged changes for '${file.path}'?\nThis will unstage AND restore the file to HEAD.`)) return;
+              if (!(await confirmDialog({
+                title: 'Discard staged changes',
+                message: `Discard staged changes for '${file.path}'?\nThis will unstage AND restore the file to HEAD.`,
+                confirmLabel: 'Discard',
+                danger: true,
+              }))) return;
               api.git.raw(repo.path, ['reset', 'HEAD', '--', file.path]).then(() =>
                 api.git.restore(repo.path, [file.path])
               ).then(() => {
