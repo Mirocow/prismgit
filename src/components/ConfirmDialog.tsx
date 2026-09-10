@@ -140,7 +140,7 @@ export function ConfirmDialogHost() {
     // z-[60] — above page modals (z-50), confirmations can be triggered from
     // inside another dialog (e.g. Settings rows).
     <div
-      className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-[60]"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-[60]"
       onMouseDown={() => finish(req.input ? null : false)}
     >
       <div

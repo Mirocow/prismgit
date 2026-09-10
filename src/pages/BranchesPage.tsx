@@ -1417,7 +1417,7 @@ export function BranchesPage() {
 
       {/* New branch dialog */}
       {showNewDialog && (
-        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowNewDialog(false)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowNewDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-4 flex items-center gap-2">
               <GitBranch size={16} /> New Branch
@@ -1532,7 +1532,7 @@ export function BranchesPage() {
 
       {/* New stash dialog (Stashes section header menu) */}
       {showStashDialog && (
-        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowStashDialog(false)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowStashDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-4 flex items-center gap-2">
               <Package size={16} /> Stash Changes
@@ -1592,7 +1592,7 @@ export function BranchesPage() {
 
       {/* Compare branches dialog */}
       {compareBranch && (
-        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setCompareBranch(null)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setCompareBranch(null)}>
           <div className="panel w-[640px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
               <div>

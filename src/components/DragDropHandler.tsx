@@ -195,8 +195,9 @@ export function DragDropHandler() {
           className="fixed inset-0 z-[200] flex items-center justify-center pointer-events-none"
           style={{
             backgroundColor: 'var(--accent-muted)',
-            backdropFilter: 'blur(4px)',
-            WebkitBackdropFilter: 'blur(4px)',
+            // No backdropFilter here: the app renders on CPU (hardware
+            // acceleration disabled), and a per-frame full-screen CPU blur
+            // makes drag-over feel laggy. The tinted overlay alone is enough.
             border: '3px dashed var(--accent)',
             borderRadius: '12px',
             margin: '8px',
@@ -224,7 +225,7 @@ export function DragDropHandler() {
       {/* Processing overlay */}
       {processing && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center"
-          style={{ backgroundColor: 'var(--overlay-bg)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
+          style={{ backgroundColor: 'var(--overlay-bg)' }}
         >
           <div className="flex flex-col items-center gap-3 bg-bg-elevated rounded-xl p-8 shadow-lg border border-border-default">
             <Loader size={32} className="spin text-accent" />

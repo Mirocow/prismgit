@@ -312,7 +312,7 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={onClose}>
       <div
         className="panel w-full max-w-6xl h-[80vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}

@@ -104,7 +104,12 @@ describe('selectionStore', () => {
     set = useSelectionStore.getState().fileStatusFilterSet;
     expect(set.has('staged')).toBe(false);
     useSelectionStore.getState().clearFileStatusFilterSet();
-    expect(useSelectionStore.getState().fileStatusFilterSet.size).toBe(0);
+    // clearFileStatusFilterSet now resets to MADS default (Modified, Added, Deleted, Staged)
+    expect(useSelectionStore.getState().fileStatusFilterSet.size).toBe(4);
+    expect(useSelectionStore.getState().fileStatusFilterSet.has('modified')).toBe(true);
+    expect(useSelectionStore.getState().fileStatusFilterSet.has('added')).toBe(true);
+    expect(useSelectionStore.getState().fileStatusFilterSet.has('deleted')).toBe(true);
+    expect(useSelectionStore.getState().fileStatusFilterSet.has('staged')).toBe(true);
   });
 
   it('file scope, sort, regex flag, dir tree visibility', () => {

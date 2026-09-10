@@ -135,7 +135,7 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
   }, [action, selected, repo.path, branches, toast, onClose, meta.title]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={onClose}>
       <div className="panel w-full max-w-lg flex flex-col max-h-[70vh]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center px-4 py-3 border-b border-border">
           <span className="text-sm font-semibold">{meta.title}…</span>

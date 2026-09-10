@@ -327,7 +327,7 @@ export function WorktreesPage() {
 
       {showAdd && (
         <div
-          className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
           onClick={() => setShowAdd(false)}
         >
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>

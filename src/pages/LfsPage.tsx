@@ -307,7 +307,7 @@ export function LfsPage() {
       </div>
 
       {showTrack && (
-        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowTrack(false)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowTrack(false)}>
           <div className="panel w-96 p-4" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-4">Track LFS Pattern</h3>
             <input

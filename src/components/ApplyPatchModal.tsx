@@ -93,7 +93,7 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
 
   return (
     <div
-      className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50 animate-fade-in"
       onClick={onClose}
     >
       <div className="panel w-[640px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>

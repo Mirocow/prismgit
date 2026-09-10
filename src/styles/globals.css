@@ -339,16 +339,24 @@ input:focus, textarea:focus, select:focus {
   flex-shrink: 0;
 }
 
+/* NOTE: --overlay-backdrop is intentionally `none`.
+ * The app runs with hardware acceleration disabled (EGL driver bug fix in
+ * electron/main.ts), so Chromium composites on the CPU. A backdrop-filter
+ * blur forces a full-window Gaussian blur on the CPU for EVERY composited
+ * frame — dialog overlays with `animate-fade-in` recompute it each frame of
+ * the animation, which users felt as "dialogs open very slowly". Only the
+ * darkening (var(--overlay-bg)) remains; re-enable the blur ONLY if GPU
+ * acceleration is ever restored. */
 :root {
   --author-text: #ffffff;
   --overlay-bg: rgba(0, 0, 0, 0.30);
-  --overlay-backdrop: blur(2px);
+  --overlay-backdrop: none;
 }
 
 .dark {
   --author-text: #ffffff;
   --overlay-bg: rgba(0, 0, 0, 0.55);
-  --overlay-backdrop: blur(2px);
+  --overlay-backdrop: none;
 }
 
 .icon-btn {
@@ -828,8 +836,9 @@ kbd {
   align-items: center;
   justify-content: center;
   background-color: var(--overlay-bg, rgba(0, 0, 0, 0.4));
-  backdrop-filter: var(--overlay-backdrop, blur(2px));
-  -webkit-backdrop-filter: var(--overlay-backdrop, blur(2px));
+  /* No backdrop blur — see the --overlay-backdrop note above (CPU rendering). */
+  backdrop-filter: var(--overlay-backdrop, none);
+  -webkit-backdrop-filter: var(--overlay-backdrop, none);
 }
 
 .shortcut-overlay-panel {
