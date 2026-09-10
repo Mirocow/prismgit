@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X, Sparkles } from '../components/icons';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { LazyFileList } from '../components/LazyFileList';
@@ -17,10 +17,32 @@ import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore } from '../stores/toastStore';
+import { generateCommitMessage, applyAIPlaceholder, detectAIPlaceholder, type LLMProvider } from '../lib/aiCommitMessages';
+import type { AppSettings } from '../../electron/types/settings-api';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+
+/** Build an LLMProvider from settings, or null if not configured. */
+function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvider | null {
+  if (!settings?.aiProvider) return null;
+  const type = settings.aiProvider as LLMProvider['type'];
+  const id = settings.aiProvider;
+  const url = settings.aiUrl || '';
+  const model = settings.aiModel || '';
+  if (!model) return null;
+  return {
+    id,
+    name: id,
+    type,
+    url,
+    apiKey: settings.aiApiKey,
+    model,
+  };
+}
+
 interface ChangesPageProps {
   onResolveConflict?: (file: string) => void;
 }
@@ -89,6 +111,7 @@ function SortableHeader({
 export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { status, lastRefresh, refreshStatus, stageFiles, stageAll, commit, push, pull } = useGitStore();
+  const settings = useSettingsStore((s) => s.settings);
   const toast = useToastStore();
 
   // Listen for conflict resolution requests from GitToolbar
@@ -525,11 +548,37 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       return;
     }
     try {
+      // SmartGit Manual: AI Commit Messages — @ai placeholder → replace with AI-generated
+      // message; WIP (entire message) → "WIP: <ai message>"
+      let finalMsg = commitMsg.trim();
+      const placeholder = detectAIPlaceholder(finalMsg);
+      if (placeholder && settings?.aiCommitMessagesEnabled) {
+        const provider = buildAIProvider(settings);
+        if (provider) {
+          try {
+            setAiGenerating(true);
+            const diffText = await buildDiffForAI();
+            const aiMessage = await generateCommitMessage({
+              diff: diffText,
+              provider,
+              recentMessages: journal.slice(0, 5).map(j => j.subject),
+            });
+            finalMsg = applyAIPlaceholder(finalMsg, aiMessage, placeholder);
+            setCommitMsg(finalMsg);
+            toast.success('AI message generated', 'Review and commit');
+          } catch (e) {
+            toast.warning('AI generation failed — keeping placeholder', String(e));
+            return;
+          } finally {
+            setAiGenerating(false);
+          }
+        }
+      }
       // If commitAll is checked, stage everything first (git add .)
       if (commitAll) {
         await stageAll(repo.path);
       }
-      const hash = await commit(repo.path, commitMsg, amend);
+      const hash = await commit(repo.path, finalMsg, amend);
       toast.success('Commit created', `Hash: ${hash.substring(0, 7)}`);
       setCommitMsg('');
       setAmend(false);
@@ -538,6 +587,57 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     } catch (e) {
       toast.error('Commit failed', String(e));
     }
+  };
+
+  // AI Commit Messages helper — builds an LLMProvider from settings
+  const [aiGenerating, setAiGenerating] = useState(false);
+
+  const handleAIGenerate = async () => {
+    if (!settings?.aiCommitMessagesEnabled) {
+      toast.warning('AI integration is disabled', 'Enable it in Settings → AI Commit Messages');
+      return;
+    }
+    const provider = buildAIProvider(settings);
+    if (!provider) {
+      toast.warning('No AI provider configured', 'Set provider in Settings');
+      return;
+    }
+    setAiGenerating(true);
+    try {
+      const diffText = await buildDiffForAI();
+      if (!diffText.trim()) {
+        toast.info('No changes to generate a commit message for');
+        return;
+      }
+      const aiMessage = await generateCommitMessage({
+        diff: diffText,
+        provider,
+        recentMessages: journal.slice(0, 5).map(j => j.subject),
+      });
+      setCommitMsg(aiMessage);
+      toast.success('AI message generated', 'Review before committing');
+    } catch (e) {
+      toast.error('AI generation failed', String(e));
+    } finally {
+      setAiGenerating(false);
+    }
+  };
+
+  // Build a diff string for AI by combining staged + unstaged changes (truncated)
+  const buildDiffForAI = async (): Promise<string> => {
+    if (!status) return '';
+    const files = [...status.staged.map(s => s.path), ...status.modified, ...status.not_added];
+    const uniqueFiles = Array.from(new Set(files)).slice(0, 10); // Cap at 10 files
+    const diffs: string[] = [];
+    for (const f of uniqueFiles) {
+      try {
+        const result = await api.git.diff(repo.path, f);
+        // Truncate each file diff to ~4KB to avoid token overflow
+        const truncated = result.hunks.length === 0 ? '' : result.hunks.map(h => h.header + '\n' + h.lines.map(l => l.content).join('\n')).join('\n');
+        diffs.push(`--- ${f} ---\n${truncated.slice(0, 4000)}`);
+      } catch { /* skip */ }
+    }
+    return diffs.join('\n\n');
   };
 
   const handleCommitAndPush = async () => {
@@ -1403,6 +1503,21 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                 title="Toggle markdown preview"
               >
                 MD
+              </button>
+              {/* SmartGit Manual: AI Commit Messages — generate button */}
+              <button
+                className={cn(
+                  'text-2xs px-1.5 py-0.5 rounded flex items-center gap-1',
+                  settings?.aiCommitMessagesEnabled
+                    ? 'text-accent hover:bg-accent-muted'
+                    : 'text-text-tertiary cursor-not-allowed opacity-50'
+                )}
+                onClick={handleAIGenerate}
+                disabled={!settings?.aiCommitMessagesEnabled || aiGenerating}
+                title="Generate commit message with AI (configure in Settings → AI Commit Messages)"
+              >
+                <Sparkles size={10} className={aiGenerating ? 'animate-pulse' : ''} />
+                AI
               </button>
               <div className="flex-1" />
               <button
