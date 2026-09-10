@@ -61,6 +61,11 @@ export function HistoryPage() {
   const [editMsgValue, setEditMsgValue] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [authorFilter, setAuthorFilter] = useState('');
+  // Current user's git config user.name — for "Mine" quick filter
+  const [myAuthorName, setMyAuthorName] = useState('');
+  useEffect(() => {
+    api.git.configGet(repo.path, 'user.name').then(v => setMyAuthorName(v || '')).catch(() => {});
+  }, [repo.path]);
   const [pathFilter, setPathFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -667,6 +672,25 @@ export function HistoryPage() {
             title="More filters" onClick={() => setShowFilters(!showFilters)}>
             <Filter size={11} />
           </button>
+          {/* Quick-filter chips — one-click filters without expanding the panel */}
+          <div className="flex items-center gap-1">
+            <button
+              className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
+                authorFilter === myAuthorName && myAuthorName ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
+              onClick={() => setAuthorFilter(authorFilter ? '' : myAuthorName)}
+              title="Show only my commits"
+            >
+              Mine
+            </button>
+            <button
+              className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
+                search.toLowerCase() === 'merge' ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
+              onClick={() => setSearch(search.toLowerCase() === 'merge' ? '' : 'merge')}
+              title="Show only merge commits"
+            >
+              Merges
+            </button>
+          </div>
           <button className={cn('icon-btn !w-5 !h-5', showGraph && 'active')}
             title="Toggle graph" onClick={() => setShowGraph(!showGraph)}>
             <GitBranch size={11} />

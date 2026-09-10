@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, Plus, Pin, PinOff, X, Sun, Moon, Star, ChevronDown } from './icons';
+import { Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, Plus, Pin, PinOff, X, Sun, Moon, Star, ChevronDown, ChevronRight } from './icons';
 import { NAV_ITEMS, NAV_SHORTCUTS, NAV_DESCRIPTIONS, type NavItem } from './navItems';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -20,6 +20,8 @@ export function Sidebar() {
   // Live change counters for the Changes badge
   const changedCount = useGitStore((s) => s.status?.files.length ?? 0);
   const stagedCount = useGitStore((s) => s.status?.staged.length ?? 0);
+  // Collapsible nav groups — click group header to collapse/expand
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!currentRepo) {
@@ -151,10 +153,24 @@ export function Sidebar() {
         {currentRepo ? (
           Object.entries(groups).map(([groupName, items]) => (
             <div key={groupName} className="mb-3">
-              <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary" role="heading" aria-level={3}>
-                {groupName}
-              </div>
-              {items.map((item) => {
+              {true && (
+                <button
+                  className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary w-full flex items-center gap-1 hover:text-text-secondary transition-colors cursor-pointer"
+                  role="heading"
+                  aria-level={3}
+                  onClick={() => {
+                    const next = new Set(collapsedGroups);
+                    if (next.has(groupName)) next.delete(groupName);
+                    else next.add(groupName);
+                    setCollapsedGroups(next);
+                  }}
+                  title={collapsedGroups.has(groupName) ? 'Expand' : 'Collapse'}
+                >
+                  {collapsedGroups.has(groupName) ? <ChevronRight size={9} /> : <ChevronDown size={9} />}
+                  {groupName}
+                </button>
+              )}
+              {!collapsedGroups.has(groupName) && items.map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
                 // Changes item gets a live badge; others show their quick-nav key
