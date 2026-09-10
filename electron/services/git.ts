@@ -2230,6 +2230,16 @@ export async function configSet(
   await git.raw(args);
 }
 
+/**
+ * Matches the git error for a missing config file, e.g.:
+ *   fatal: unable to read config file '/etc/gitconfig': No such file or directory
+ * Common on macOS/Windows where /etc/gitconfig (or the Git for Windows system
+ * config) does not exist — reading a missing file must yield an EMPTY config,
+ * not an error (Settings → Git Config → System previously crashed the IPC
+ * handler with GitError and showed a toast for a perfectly normal situation).
+ */
+const MISSING_CONFIG_FILE_RE = /unable to read config file|no such file or directory/i;
+
 export async function configList(
   repoPath: string,
   scope?: 'system' | 'global' | 'local'
@@ -2239,7 +2249,15 @@ export async function configList(
   if (scope === 'system') args.push('--system');
   else if (scope === 'global') args.push('--global');
   else if (scope === 'local') args.push('--local');
-  const result = await git.raw(args);
+  let result: string;
+  try {
+    result = await git.raw(args);
+  } catch (err) {
+    // Missing config file (e.g. no /etc/gitconfig) → empty config, not an error.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (MISSING_CONFIG_FILE_RE.test(msg)) return [];
+    throw err;
+  }
   return result.split('\n')
     .filter(Boolean)
     .map((line) => {
@@ -2265,7 +2283,14 @@ export async function configUnset(
   else if (scope === 'global') args.push('--global');
   else if (scope === 'local') args.push('--local');
   args.push('--unset', key);
-  await git.raw(args);
+  try {
+    await git.raw(args);
+  } catch (err) {
+    // Unsetting from a missing config file is a no-op — there is nothing to unset.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (MISSING_CONFIG_FILE_RE.test(msg)) return;
+    throw err;
+  }
 }
 
 export async function findRef(

@@ -24,6 +24,10 @@ export interface PaletteDialogTriggers {
   onApplyPatch: () => void;
   onClone: () => void;
   onInit: () => void;
+  /** View → Go to Deep Link... (paste a /page?params link). */
+  onGoDeepLink: () => void;
+  /** View → Copy Deep Link (copy a link for the current selection). */
+  onCopyDeepLink: () => void;
 }
 
 interface Command {
@@ -103,6 +107,8 @@ export function CommandPalette({ open, onClose, triggers }: {
       { id: 'tool-applypatch', label: 'Apply Patch…', group: 'Tools', icon: FileText, keywords: 'patch diff import', action: triggers.onApplyPatch },
       { id: 'tool-gitflow', label: 'Git-Flow…', group: 'Tools', icon: GitMerge, keywords: 'feature release hotfix workflow', hint: 'Ctrl+Shift+G', action: triggers.onGitFlow },
       { id: 'tool-irebase', label: 'Interactive Rebase…', group: 'Tools', icon: ExternalLink, keywords: 'squash reword drop rebase', hint: 'Ctrl+Shift+R', action: triggers.onInteractiveRebase },
+      { id: 'tool-deeplink-go', label: 'Go to Deep Link…', group: 'Tools', icon: ExternalLink, keywords: 'url path link history file branch share open', hint: 'Ctrl+Shift+L', action: triggers.onGoDeepLink },
+      { id: 'tool-deeplink-copy', label: 'Copy Deep Link', group: 'Tools', icon: FileText, keywords: 'copy url link share selection file branch commit', action: triggers.onCopyDeepLink },
       // --- Repositories ------------------------------------------------------
       { id: 'repo-close', label: 'Close Repository', group: 'Repositories', icon: X, keywords: 'exit release memory', action: () => useRepositoryStore.getState().closeRepository() },
     ] : [];

@@ -142,6 +142,16 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
           accelerator: 'CmdOrCtrl+/',
           click: () => send('menu:showShortcuts'),
         },
+        { type: 'separator' },
+        {
+          label: 'Go to Deep Link...',
+          accelerator: 'CmdOrCtrl+Shift+L',
+          click: () => send('menu:goDeepLink'),
+        },
+        {
+          label: 'Copy Deep Link',
+          click: () => send('menu:copyDeepLink'),
+        },
       ],
     },
     {

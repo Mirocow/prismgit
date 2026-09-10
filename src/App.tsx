@@ -20,6 +20,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
 import { CommandLogPanel } from './components/CommandLogPanel';
 import { DragDropHandler } from './components/DragDropHandler';
+import { DeepLinkHandler } from './components/DeepLinkHandler';
 import { HelpBanner } from './components/HelpBanner';
 import { NAV_SHORTCUTS } from './components/navItems';
 import { RefActionDialog, type RefAction } from './components/RefActionDialog';
@@ -38,6 +39,13 @@ import { useBackgroundFetch } from './hooks/useBackgroundFetch';
 import { useRemotePolling } from './hooks/useRemotePolling';
 import { api } from './lib/api';
 import { loadProjectPrefs, saveProjectPrefs } from './lib/projectPrefs';
+import {
+  buildCurrentDeepLink,
+  clearPendingDeepLinkPage,
+  currentHashPath,
+  isValidDeepLinkPath,
+  takePendingDeepLinkPage,
+} from './lib/deepLinks';
 
 // Lazy-load pages for smaller initial bundle
 const ChangesPage = lazy(() => import('./pages/ChangesPage').then(m => ({ default: m.ChangesPage })));
@@ -118,6 +126,8 @@ export default function App() {
   useEffect(() => {
     const handler = () => {
       useSelectionStore.getState().clearAll();
+      // A pending deep link targets the OLD repo context — drop it
+      clearPendingDeepLinkPage();
       // Navigate back to welcome screen
       window.location.hash = '#/';
     };
@@ -656,6 +666,8 @@ export default function App() {
       if (typeof path === 'string' && requireRepo()) navigate(path);
     };
 
+    // ===== Deep links (View → Go to / Copy Deep Link) — defined below as
+    // useCallbacks so the Command Palette can trigger them too =====
     const cleanups = [
       window.smartgit.events.on('menu:openRepository', (path) => handleOpenRepo(path as string)),
       window.smartgit.events.on('menu:cloneRepository', handleClone),
@@ -737,6 +749,8 @@ export default function App() {
       window.smartgit.events.on('menu:preferences', () => handleNavigate('/settings')),
       // Query / Tools
       window.smartgit.events.on('menu:navigate', handleNavigate),
+      window.smartgit.events.on('menu:goDeepLink', () => handleGoDeepLink()),
+      window.smartgit.events.on('menu:copyDeepLink', handleCopyDeepLink),
       window.smartgit.events.on('menu:findObject', handleFind),
       window.smartgit.events.on('menu:verifyDatabase', handleVerifyDatabase),
       window.smartgit.events.on('menu:garbageCollect', handleGarbageCollect),
@@ -987,10 +1001,12 @@ export default function App() {
     if (currentRepo) {
       refreshStatus(currentRepo.path);
       setDismissRebase(false);
-      // Always navigate to Changes view when repo opens — this is the
-      // primary landing page. Even if the user was on Settings or another
-      // page, opening a repo should show Changes first.
-      navigate('/changes');
+      // A cold-start deep link (e.g. '#/history?file=X' before any repo was
+      // open) remembers its target page — land there instead of Changes.
+      const pendingPage = takePendingDeepLinkPage();
+      // Default landing page is Changes (per user request). Even if the user
+      // was on Settings or another page, opening a repo should show it first.
+      navigate(pendingPage || '/changes');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRepo?.path]);
@@ -998,6 +1014,36 @@ export default function App() {
   const showRebasePanel = currentRepo && status?.isRebasing && !dismissRebase;
 
   const handleFind = useCallback(() => setShowFind(true), []);
+
+  // ===== Deep links (View → Go to / Copy Deep Link, Command Palette) =====
+  const handleCopyDeepLink = useCallback(() => {
+    if (!useRepositoryStore.getState().currentRepo) return;
+    const link = buildCurrentDeepLink(currentHashPath());
+    const href = `${window.location.href.split('#')[0]}#${link}`;
+    navigator.clipboard.writeText(href)
+      .then(() => toast.success('Deep link copied', link))
+      .catch((e) => toast.error('Copy failed', String(e)));
+  }, [toast]);
+  const handleGoDeepLink = useCallback(async () => {
+    if (!useRepositoryStore.getState().currentRepo) return;
+    const value = await promptDialog({
+      title: 'Go to Deep Link',
+      message: 'Enter a deep-link path — page plus selection params, e.g. '
+        + '/history?file=src/App.tsx, /blame?file=README.md, /history?branch=main&author=Ivan',
+      input: {
+        initialValue: buildCurrentDeepLink(currentHashPath()),
+        placeholder: '/history?file=src/App.tsx',
+      },
+      confirmLabel: 'Go',
+    });
+    if (!value) return;
+    const path = value.trim().replace(/^#+/, '');
+    if (!isValidDeepLinkPath(path)) {
+      toast.error('Invalid deep link', 'Expected a path like /history?file=src/App.tsx');
+      return;
+    }
+    navigate(path);
+  }, [navigate, toast]);
 
   // Default route is always Changes (per user request — window style only affects chrome)
   const defaultRoute = '/changes';
@@ -1024,6 +1070,7 @@ export default function App() {
         <ToastContainer />
         <ConfirmDialogHost />
         <DragDropHandler />
+        <DeepLinkHandler />
         <CloneModal open={showClone} onClose={() => setShowClone(false)} />
         <InitModal open={showInit} onClose={() => setShowInit(false)} />
         <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
@@ -1038,6 +1085,8 @@ export default function App() {
             onApplyPatch: () => setShowApplyPatch(true),
             onClone: () => setShowClone(true),
             onInit: () => setShowInit(true),
+            onGoDeepLink: handleGoDeepLink,
+            onCopyDeepLink: handleCopyDeepLink,
           }}
         />
         <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
@@ -1109,6 +1158,7 @@ export default function App() {
       <ToastContainer />
       <ConfirmDialogHost />
       <DragDropHandler />
+      <DeepLinkHandler />
       <CloneModal open={showClone} onClose={() => setShowClone(false)} />
       <InitModal open={showInit} onClose={() => setShowInit(false)} />
       <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
@@ -1120,7 +1170,6 @@ export default function App() {
       {showIndexEditor && (
         <IndexEditorDialog filePath={indexEditorFile} onClose={() => setShowIndexEditor(false)} />
       )}
-      {showRepoSettings && <RepoSettingsDialog onClose={() => setShowRepoSettings(false)} />}
       {showRepoSettings && <RepoSettingsDialog onClose={() => setShowRepoSettings(false)} />}
       {conflictFile && (
         <ConflictSolver filePath={conflictFile} onClose={() => setConflictFile(null)} />
@@ -1136,6 +1185,8 @@ export default function App() {
           onApplyPatch: () => setShowApplyPatch(true),
           onClone: () => setShowClone(true),
           onInit: () => setShowInit(true),
+          onGoDeepLink: handleGoDeepLink,
+          onCopyDeepLink: handleCopyDeepLink,
         }}
       />
       {showRebasePanel && (
