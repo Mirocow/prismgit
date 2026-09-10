@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RotateCcw, RefreshCw, Trash, Copy, AlertCircle } from '../components/icons';
+import { RotateCcw, RefreshCw, Trash, Copy, AlertCircle, GitBranch, Plus, X } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -7,7 +7,7 @@ import { api, type RecyclableCommit } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { CommitHashLink } from '../components/StatusBar';
 import { useSelectionStore } from '../stores/selectionStore';
-import { confirmDialog } from '../components/ConfirmDialog';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 
 /**
  * Recyclable Commits — unreachable reflog commits that are eligible for GC.
@@ -18,15 +18,27 @@ import { confirmDialog } from '../components/ConfirmDialog';
  *
  * This page surfaces those commits, lets the user recover them via cherry-pick
  * or branch creation, or expire them via `git reflog expire`.
+ *
+ * UX rules:
+ *   - Every recovery action is explicit + confirmed.
+ *   - Cherry-pick surfaces real conflicts (file list + count), not just a generic
+ *     "failed" toast.
+ *   - Create branch uses a proper prompt dialog (window.prompt is blocked in some
+ *     Electron contexts) and validates the branch name.
+ *   - A warning banner shows the GC retention countdown so the user understands
+ *     what "recyclable" actually means.
  */
 export function RecyclablePage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const selectCommit = useSelectionStore((s) => s.selectCommit);
+  const selectBranch = useSelectionStore((s) => s.selectBranch);
   const [commits, setCommits] = useState<RecyclableCommit[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [busyHash, setBusyHash] = useState<string | null>(null);
+  const [conflictInfo, setConflictInfo] = useState<{ hash: string; files: string[] } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,10 +57,15 @@ export function RecyclablePage() {
   }, [load]);
 
   const handleCherryPick = async (hash: string) => {
+    setBusyHash(hash);
     try {
       const result = await api.git.cherryPick(repo.path, [hash]);
       if (result.conflicts.length > 0) {
-        toast.warning(`Cherry-pick conflicts in ${result.conflicts.length} files`, 'Resolve them on the Changes page, then press Continue');
+        setConflictInfo({ hash, files: result.conflicts });
+        toast.warning(
+          `Cherry-pick has ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'}`,
+          'Resolve the conflicts in the Changes view, then commit.',
+        );
       } else if (result.empty) {
         // "The previous cherry-pick is now empty" — the commit's changes are
         // already applied to HEAD. The repo stays in cherry-picking-state and
@@ -60,40 +77,79 @@ export function RecyclablePage() {
       } else if (result.error) {
         toast.error('Cherry-pick failed', result.error);
       } else {
-        toast.success(`Cherry-picked ${shortHash(hash)}`);
+        toast.success(`Cherry-picked ${shortHash(hash)}`, 'Commit applied to current branch.');
       }
       await refreshStatus(repo.path);
       await load();
     } catch (e) {
-      toast.error('Cherry-pick failed', String(e));
+      const msg = String(e);
+      // Detect common recoverable states
+      if (/nothing to commit|already applied/i.test(msg)) {
+        toast.info('Commit appears already applied', `Skipping ${shortHash(hash)}`);
+      } else if (/dirty index|uncommitted changes/i.test(msg)) {
+        toast.error('Cherry-pick blocked', 'Commit or stash your current changes first.');
+      } else {
+        toast.error('Cherry-pick failed', msg);
+      }
+    } finally {
+      setBusyHash(null);
     }
   };
 
   const handleCreateBranch = async (hash: string) => {
-    const name = window.prompt('Branch name for recovery:', `recover/${hash.substring(0, 8)}`);
-    if (!name) return;
+    const defaultName = `recover/${hash.substring(0, 8)}`;
+    const name = await promptDialog({
+      title: `Create branch at ${shortHash(hash)}`,
+      message: 'Branch name for recovery (this does NOT switch to the new branch):',
+      confirmLabel: 'Create branch',
+      input: { initialValue: defaultName, placeholder: 'recover/abc12345' },
+    });
+    if (!name?.trim()) return;
+    // Validate branch name (cheap client-side check)
+    const trimmed = name.trim();
+    if (/\s/.test(trimmed)) {
+      toast.error('Invalid branch name', 'Branch names cannot contain whitespace.');
+      return;
+    }
+    if (trimmed.startsWith('-') || trimmed.startsWith('/')) {
+      toast.error('Invalid branch name', 'Branch name must not start with "-" or "/".');
+      return;
+    }
+    setBusyHash(hash);
     try {
-      await api.git.createBranch(repo.path, name, hash);
-      toast.success(`Created branch '${name}' at ${shortHash(hash)}`);
+      await api.git.createBranch(repo.path, trimmed, hash);
+      toast.success(`Created branch '${trimmed}'`, `At ${shortHash(hash)} — switch to it from Branches view.`);
+      selectBranch(trimmed);
+      await load();
     } catch (e) {
-      toast.error('Create branch failed', String(e));
+      const msg = String(e);
+      if (/already exists|not a valid object|not a valid branch name/i.test(msg)) {
+        toast.error('Create branch failed', msg);
+      } else {
+        toast.error('Create branch failed', msg);
+      }
+    } finally {
+      setBusyHash(null);
     }
   };
 
   const handleExpireAll = async () => {
     if (!(await confirmDialog({
-      title: 'Expire all recyclable commits',
-      message: `This will run \`git reflog expire --expire=now --all\` and prune unreachable commits. ${commits.length} commits will be permanently lost.`,
+      title: 'Expire all recyclable commits?',
+      message: `This runs \`git reflog expire --expire=now --all\` and \`git gc --prune=now\`.\n\n${commits.length} commit${commits.length === 1 ? '' : 's'} will be permanently lost. There is NO recovery after this.`,
       confirmLabel: 'Expire all',
       danger: true,
     }))) return;
+    setBusyHash('expire-all');
     try {
       await api.git.raw(repo.path, ['reflog', 'expire', '--expire=now', '--all']);
       await api.git.raw(repo.path, ['gc', '--prune=now']);
-      toast.success('Recyclable commits expired');
+      toast.success('Recyclable commits expired', `${commits.length} commit${commits.length === 1 ? '' : 's'} pruned.`);
       await load();
     } catch (e) {
       toast.error('Expire failed', String(e));
+    } finally {
+      setBusyHash(null);
     }
   };
 
@@ -121,12 +177,23 @@ export function RecyclablePage() {
             <button
               className="btn btn-danger text-xs"
               onClick={handleExpireAll}
+              disabled={busyHash === 'expire-all'}
               title="Run git reflog expire --expire=now --all && git gc --prune=now"
             >
               <Trash size={11} /> Expire all
             </button>
           )}
         </div>
+      </div>
+
+      {/* Info banner — explain what "recyclable" means + retention */}
+      <div className="px-3 py-1.5 border-b border-border-subtle bg-bg-tertiary flex items-center gap-2">
+        <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+        <span className="text-2xs text-text-secondary">
+          <strong>Recyclable commits</strong> are unreachable from any branch or tag.
+          They will be <strong>garbage-collected after 90 days</strong> (default reflog retention).
+          Recover them by creating a branch or cherry-picking onto the current branch.
+        </span>
       </div>
 
       <div className="px-3 py-1.5 border-b border-border-subtle bg-bg-tertiary">
@@ -138,6 +205,33 @@ export function RecyclablePage() {
           onChange={e => setSearch(e.target.value)}
         />
       </div>
+
+      {/* Conflict info panel — shows files when cherry-pick had conflicts */}
+      {conflictInfo && (
+        <div className="border-b border-status-warning/40 bg-status-warning/10 px-3 py-2">
+          <div className="flex items-center justify-between">
+            <span className="text-2xs font-semibold text-status-warning flex items-center gap-1">
+              <AlertCircle size={12} />
+              {conflictInfo.files.length} conflict{conflictInfo.files.length === 1 ? '' : 's'} from cherry-pick of {shortHash(conflictInfo.hash)}
+            </span>
+            <button
+              className="icon-btn !w-4 !h-4"
+              title="Dismiss"
+              onClick={() => setConflictInfo(null)}
+            >
+              <X size={10} />
+            </button>
+          </div>
+          <div className="mt-1 max-h-32 overflow-y-auto">
+            {conflictInfo.files.map(f => (
+              <div key={f} className="text-2xs font-mono text-text-secondary truncate" title={f}>{f}</div>
+            ))}
+          </div>
+          <div className="mt-1 text-2xs text-text-tertiary">
+            Resolve in the Changes view, then commit to complete the cherry-pick.
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
@@ -152,50 +246,58 @@ export function RecyclablePage() {
           </div>
         ) : (
           <>
-            <div className="px-3 py-1.5 text-2xs text-text-tertiary bg-bg-tertiary border-b border-border-subtle">
-              Unreachable commits will be garbage-collected after 90 days (default). Recover them by creating a branch or cherry-picking.
-            </div>
-            {filtered.map((c, i) => (
-              <div
-                key={c.hash}
-                className={cn(
-                  'flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer group',
-                  i % 2 === 0 ? '' : 'bg-bg-tertiary/30'
-                )}
-                onClick={() => selectCommit(c.hash)}
-              >
-                <span className="text-text-tertiary group-hover:text-accent">●</span>
-                <CommitHashLink hash={c.hash} short className="font-mono text-accent shrink-0" />
-                <span className="flex-1 truncate" title={c.subject}>{c.subject}</span>
-                <span className="text-2xs text-text-tertiary font-mono shrink-0" title={c.source}>{c.source}</span>
-                <span className="text-2xs text-text-tertiary shrink-0">{formatDate(c.date)}</span>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    className="icon-btn !w-5 !h-5"
-                    title="Create branch at this commit"
-                    onClick={(e) => { e.stopPropagation(); handleCreateBranch(c.hash); }}
-                  >
-                    <span className="text-2xs">⎇</span>
-                  </button>
-                  <button
-                    className="icon-btn !w-5 !h-5"
-                    title="Cherry-pick this commit"
-                    onClick={(e) => { e.stopPropagation(); handleCherryPick(c.hash); }}
-                  >
-                    <span className="text-2xs">+</span>
-                  </button>
-                  <button
-                    className="icon-btn !w-5 !h-5"
-                    title="Copy hash"
-                    onClick={(e) => { e.stopPropagation(); copyToClipboard(c.hash); toast.success('Copied'); }}
-                  >
-                    <Copy size={10} />
-                  </button>
+            {filtered.map((c, i) => {
+              const isBusy = busyHash === c.hash;
+              return (
+                <div
+                  key={c.hash}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer group',
+                    i % 2 === 0 ? '' : 'bg-bg-tertiary/30',
+                    isBusy && 'opacity-50'
+                  )}
+                  onClick={() => selectCommit(c.hash)}
+                >
+                  <span className="text-text-tertiary group-hover:text-accent">●</span>
+                  <CommitHashLink hash={c.hash} short className="font-mono text-accent shrink-0" />
+                  <span className="flex-1 truncate" title={c.subject}>{c.subject}</span>
+                  <span className="text-2xs text-text-tertiary font-mono shrink-0" title={c.source}>{c.source}</span>
+                  <span className="text-2xs text-text-tertiary shrink-0">{formatDate(c.date)}</span>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      className="icon-btn !w-5 !h-5 !text-accent hover:!bg-accent-muted"
+                      title="Create branch at this commit  (no checkout)"
+                      disabled={isBusy}
+                      onClick={(e) => { e.stopPropagation(); handleCreateBranch(c.hash); }}
+                    >
+                      <GitBranch size={11} />
+                    </button>
+                    <button
+                      className="icon-btn !w-5 !h-5 !text-status-added hover:!bg-status-added/15"
+                      title="Cherry-pick onto current branch"
+                      disabled={isBusy}
+                      onClick={(e) => { e.stopPropagation(); handleCherryPick(c.hash); }}
+                    >
+                      <Plus size={11} />
+                    </button>
+                    <button
+                      className="icon-btn !w-5 !h-5"
+                      title="Copy hash"
+                      onClick={(e) => { e.stopPropagation(); copyToClipboard(c.hash); toast.success('Copied'); }}
+                    >
+                      <Copy size={10} />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </>
         )}
+      </div>
+
+      {/* Footer hint */}
+      <div className="px-3 py-1 border-t border-border-default bg-bg-tertiary text-2xs text-text-tertiary">
+        Hover a row · <GitBranch size={9} className="inline" /> Create branch (recover) · <Plus size={9} className="inline" /> Cherry-pick onto current · Click row = view commit
       </div>
     </div>
   );

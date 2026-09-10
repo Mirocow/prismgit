@@ -207,7 +207,10 @@ export function RebasePanel({ onClose }: { onClose: () => void }) {
         ) : (
           <>
             <div className="text-xs text-text-secondary mb-3">
-              Rebase current branch onto another branch or commit.
+              Rebase current branch onto another branch or commit.<br />
+              <span className="text-2xs text-text-tertiary">
+                Any commits not preserved by the rebase become Recyclable (recoverable for 90 days, then permanently GC'd).
+              </span>
             </div>
             <div className="flex items-center gap-2 mb-3">
               <input

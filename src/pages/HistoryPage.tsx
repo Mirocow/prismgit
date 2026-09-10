@@ -61,6 +61,12 @@ export function HistoryPage() {
   // (not from any local branch). Used to draw them with a dashed/hollow style
   // in the graph, like VS Code does for incoming commits.
   const [incomingHashes, setIncomingHashes] = useState<Set<string>>(new Set());
+  // Recyclable commits — unreachable reflog commits eligible for GC.
+  // Surfaced in the History graph as a recovery hint (warning badge +
+  // tinted row) so the user understands which commits would be lost on
+  // the next `git gc`. The `recyclable` array (declared below alongside
+  // `stashes`) holds the full list — we derive the hash Set + count from
+  // it via useMemo to avoid duplicate state.
   const [loading, setLoading] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [search, setSearch] = useState('');
@@ -128,6 +134,12 @@ export function HistoryPage() {
   // manual: "Recyclable Commits checkbox").
   const [stashes, setStashes] = useState<StashEntry[]>([]);
   const [recyclable, setRecyclable] = useState<RecyclableCommit[]>([]);
+  // Derived helpers for inline graph badges — kept in sync with `recyclable`
+  // and `stashes` arrays above. We do NOT keep separate state for these to
+  // avoid double-bookkeeping (the source-of-truth is the array).
+  const recyclableHashes = useMemo(() => new Set(recyclable.map(r => r.hash)), [recyclable]);
+  const recyclableCount = recyclable.length;
+  const stashHashes = useMemo(() => new Set(stashes.map(s => s.hash)), [stashes]);
   const [showStashes, setShowStashes] = useState(true);
   const [showRecyclable, setShowRecyclable] = useState(false);
   const [cpBusyHash, setCpBusyHash] = useState<string | null>(null);
@@ -1053,6 +1065,17 @@ export function HistoryPage() {
               </span>
             );
           })()}
+          {/* Recyclable count badge — warns how many reflog-only commits would be
+              lost on the next `git gc`. Clicking jumps to the Recyclable page. */}
+          {recyclableCount > 0 && (
+            <a
+              href="#/recyclable"
+              className="text-2xs px-1.5 py-0.5 rounded border border-status-warning/50 bg-status-warning/10 text-status-warning font-medium flex items-center gap-0.5 hover:bg-status-warning/20 transition-colors"
+              title={`${recyclableCount} recyclable commit(s) — unreachable from any branch/tag and will be garbage-collected after 90 days. Click to review.`}
+            >
+              ♺ {recyclableCount} recyclable
+            </a>
+          )}
           {(authorFilter || dateFrom || dateTo || pathFilter || useRegex) && (
             <span className="text-2xs text-accent flex items-center gap-1" title="Active filters">
               <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />filtered
@@ -1556,7 +1579,10 @@ export function HistoryPage() {
                     className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
                       isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
                       // Incoming (remote-only) commits get a subtle tinted background
-                      incomingHashes.has(entry.hash) && !isSelected && 'bg-blue-50/30 dark:bg-blue-950/10')}
+                      incomingHashes.has(entry.hash) && !isSelected && 'bg-blue-50/30 dark:bg-blue-950/10',
+                      // Recyclable (unreachable) commits get a warning tint — they are
+                      // NOT lost yet (still in reflog) but would be GC'd after 90 days.
+                      recyclableHashes.has(entry.hash) && !isSelected && 'bg-amber-50/40 dark:bg-amber-950/15')}
                     style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 4 }}
                     onClick={() => { setSelectedIdx(realIdx); selectCommit(entry.hash); }}
                     onContextMenu={(e) => showCommitContextMenu(e, entry, realIdx)}
@@ -1581,6 +1607,19 @@ export function HistoryPage() {
                           </span>
                         )}
                       </span>
+                    )}
+
+                    {/* Recyclable badge — commit is unreachable from any ref.
+                        Recoverable via the Recyclable page (cherry-pick / branch). */}
+                    {recyclableHashes.has(entry.hash) && (
+                      <a
+                        href="#/recyclable"
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex-shrink-0 text-2xs px-1.5 py-0.5 rounded border border-status-warning/50 bg-status-warning/10 text-status-warning font-medium flex items-center gap-0.5 hover:bg-status-warning/20 transition-colors"
+                        title="Recyclable — this commit is unreachable from any branch/tag and will be garbage-collected after 90 days. Click to recover it."
+                      >
+                        ♺ recyclable
+                      </a>
                     )}
 
                     {/* GitHub Actions CI badge (SmartGit "My History" CI integrations) */}

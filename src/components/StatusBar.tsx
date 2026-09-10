@@ -128,12 +128,14 @@ export function StatusBar({
   return (
     <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
       <div className="flex items-center gap-3">
-        {/* HEAD indicator — always visible, shows where you are */}
+        {/* HEAD indicator — always visible, shows where you are.
+            Bright accent background + ">" makes the current branch
+            unmistakable from across the screen. */}
         {status?.current && headHash && (
-          <span className="flex items-center gap-1.5" title="Current HEAD">
-            <span className="text-accent font-semibold tracking-wide">HEAD</span>
-            <span className="text-text-tertiary">→</span>
-            <span className="text-text-primary font-medium">{status.current}</span>
+          <span className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-accent-muted border border-accent/40" title="Current HEAD — you are on this branch">
+            <span className="text-accent font-bold">{'>'}</span>
+            <span className="text-accent font-semibold">{status.current}</span>
+            <span className="text-text-tertiary">·</span>
             <CommitHashLink hash={headHash} />
           </span>
         )}

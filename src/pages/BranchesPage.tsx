@@ -34,11 +34,17 @@ export function BranchesPage() {
   // (and other HEAD-movers) would DISCARD the pick, so they are blocked until
   // the user finishes it on the Changes page (Continue / Skip / Abort).
   const cherryPicking = !!status?.isCherryPicking;
+  // All sequencer states (merge / rebase / cherry-pick / revert) block
+  // branch-switching operations — git would refuse anyway, and switching
+  // mid-sequence would lose the in-progress state. Bisect is allowed (it
+  // doesn't touch the working tree in a way that conflicts).
+  const sequencerInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
   const blockedByCherryPick = (): boolean => {
-    if (!cherryPicking) return false;
+    if (!sequencerInProgress) return false;
+    const state = status?.isMerging ? 'merging' : status?.isRebasing ? 'rebasing' : status?.isCherryPicking ? 'cherry-picking' : 'reverting';
     toast.error(
-      'Cherry-pick in progress',
-      'Finish it first on the Changes page (Continue or Abort) — this operation would lead to loss of the picked commit'
+      `${state.charAt(0).toUpperCase() + state.slice(1)} in progress`,
+      `Finish it first on the Changes page (Continue / Skip / Abort) — this operation would lead to loss of the in-progress state.`
     );
     return true;
   };
@@ -126,18 +132,52 @@ export function BranchesPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleCheckout = async (branch: BranchInfo) => {
+  const handleCheckout = async (branch: BranchInfo, opts?: { autoStash?: boolean }) => {
     if (branch.current) return;
     if (blockedByCherryPick()) return;
+    const autoStash = opts?.autoStash ?? false;
     try {
       await useOperationLogStore.getState().logOperation(
-        'Check Out Branch', repo.path, `git checkout ${branch.name}`,
-        () => api.git.checkout(repo.path, branch.name)
+        'Check Out Branch', repo.path,
+        `git checkout ${branch.name}${autoStash ? '  (with auto-stash)' : ''}`,
+        async () => {
+          if (autoStash) {
+            // Stash dirty work, checkout, then pop — never lose uncommitted changes.
+            try { await api.git.raw(repo.path, ['stash', 'push', '-u', '-m', `auto-stash before checkout ${branch.name}`]); }
+            catch { /* nothing to stash — proceed */ }
+            try {
+              await api.git.checkout(repo.path, branch.name);
+            } finally {
+              try { await api.git.raw(repo.path, ['stash', 'pop']); }
+              catch { /* pop errors are surfaced separately */ }
+            }
+          } else {
+            await api.git.checkout(repo.path, branch.name);
+          }
+        }
       );
       toast.success(`Checked out ${branch.name}`);
       await load();
       await refreshStatus(repo.path);
-    } catch (e) { toast.error('Checkout failed', String(e)); }
+    } catch (e) {
+      const msg = String(e);
+      // Detect "Your local changes would be overwritten" — offer auto-stash recovery.
+      if (/would be overwritten|overwritten by checkout|local changes to the following files/i.test(msg)) {
+        const ok = await confirmDialog({
+          title: `Checkout blocked by uncommitted changes`,
+          message: `Some local changes would be overwritten by switching to '${branch.name}'.\n\nStash them now, switch, then pop the stash on the new branch?`,
+          confirmLabel: 'Stash & checkout',
+          cancelLabel: 'Cancel',
+          danger: false,
+        });
+        if (ok) {
+          // Retry with auto-stash. If it still fails, show the error.
+          return handleCheckout(branch, { autoStash: true });
+        }
+        return; // user cancelled — keep current branch
+      }
+      toast.error('Checkout failed', msg);
+    }
   };
 
   const handleCreate = async () => {
@@ -154,9 +194,11 @@ export function BranchesPage() {
   };
 
   const handleDelete = async (branch: BranchInfo) => {
+    // First attempt: non-force. If git refuses (not fully merged), offer force
+    // — but warn that unmerged commits become Recyclable (recoverable 90 days).
     if (!(await confirmDialog({
       title: `Delete branch '${branch.name}'`,
-      message: 'This removes the local branch reference. If the branch is not fully merged, use force-delete.',
+      message: 'This removes the local branch reference.\n\nIf the branch is not fully merged into its upstream, its unique commits become Recyclable — recoverable for 90 days via the Recyclable page, then permanently garbage-collected.',
       confirmLabel: 'Delete',
       danger: true,
     }))) return;
@@ -164,7 +206,26 @@ export function BranchesPage() {
       await api.git.deleteBranch(repo.path, branch.name, false, branch.remote);
       toast.success(`Deleted '${branch.name}'`);
       await load();
-    } catch (e) { toast.error('Delete failed', String(e)); }
+    } catch (e) {
+      const msg = String(e);
+      if (/not fully merged|branch.*not merged/i.test(msg)) {
+        const ok = await confirmDialog({
+          title: `Force-delete unmerged branch '${branch.name}'?`,
+          message: 'This branch has commits not present in any other branch.\n\nForce-deleting makes those commits Recyclable — recoverable for 90 days via the Recyclable page, then permanently lost.',
+          confirmLabel: 'Force delete',
+          cancelLabel: 'Cancel',
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await api.git.deleteBranch(repo.path, branch.name, true, branch.remote);
+          toast.success(`Force-deleted '${branch.name}'`, 'Unique commits are now Recyclable — recover for 90 days.');
+          await load();
+        } catch (e2) { toast.error('Force delete failed', String(e2)); }
+      } else {
+        toast.error('Delete failed', msg);
+      }
+    }
   };
 
   const handleDeleteRemote = async (branch: BranchInfo) => {
@@ -1007,28 +1068,64 @@ export function BranchesPage() {
           setDraggedBranch(null);
         }}
         onClick={(e) => {
-          // Ctrl/Cmd-click: select branch in global store (no checkout) — propagates to History filter
+          // Ctrl/Cmd-click: select branch in global store ONLY (no checkout)
           if (e.ctrlKey || e.metaKey) {
             useSelectionStore.getState().selectBranch(b.name);
             toast.info(`Selected branch '${b.name}' — visible in History filter`);
             return;
           }
-          // Plain click: select in global store AND navigate to History to see this branch's log
+          // Plain click: SELECT ONLY — never checkout.
+          // Checkout must be an explicit action (Checkout button, context-menu,
+          // or double-click). Selecting a branch just sets it as the active
+          // branch for History filtering / merge / rebase targeting.
           useSelectionStore.getState().selectBranch(b.name);
+        }}
+        onDoubleClick={(e) => {
+          // Double-click is the explicit "checkout this branch" gesture.
+          // (Mirrors IDE file trees where single-click selects, double-click opens.)
+          if (b.remote) {
+            // For remote branches: confirm + create tracking local branch.
+            const localName = b.name.replace(/^[^/]+\//, '');
+            confirmDialog({
+              title: `Checkout remote branch '${b.name}'`,
+              message: `This creates a local branch '${localName}' tracking '${b.name}' and switches to it.`,
+              confirmLabel: 'Checkout',
+            }).then((ok) => {
+              if (!ok) return;
+              api.git.checkout(repo.path, b.name, { track: true })
+                .then(() => { toast.success(`Checked out '${localName}'`); load(); refreshStatus(repo.path); })
+                .catch((err) => toast.error('Checkout failed', String(err)));
+            });
+            return;
+          }
           if (!b.current) handleCheckout(b);
         }}
         onContextMenu={(e) => showBranchContextMenu(e, b)}
       >
         {/* Current branch indicator — ">" marks the checked-out branch (HEAD).
-            Reserved width keeps all rows aligned even when the marker is absent. */}
-        <span className="w-3 flex-shrink-0 text-accent font-bold" title={b.current ? 'Current branch (HEAD)' : undefined}>
-          {b.current && <span aria-label="current branch">{'>'}</span>}
+            Bright accent background + bold ">" + "HEAD" label so the user
+            can always see at a glance which branch they are on. */}
+        <span
+          className={cn(
+            'flex-shrink-0 flex items-center justify-center font-bold rounded-sm',
+            b.current
+              ? 'w-5 h-5 bg-accent text-text-inverse text-xs'
+              : 'w-5 h-5 text-text-tertiary/30 text-xs'
+          )}
+          title={b.current ? `Current branch (HEAD) — you are on '${b.name}'` : 'Not current'}
+        >
+          {b.current ? '>' : ''}
         </span>
         <GitBranch size={12} className={b.current ? 'text-accent' : 'text-text-tertiary'} flex-shrink-0 />
         {/* Name */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="truncate font-medium text-text-primary">{b.name}</span>
+            <span className={cn('truncate', b.current ? 'font-bold text-accent' : 'font-medium text-text-primary')}>{b.name}</span>
+            {b.current && (
+              <span className="text-2xs px-1 py-0.5 rounded bg-accent text-text-inverse font-semibold uppercase tracking-wide">
+                HEAD
+              </span>
+            )}
             {b.tracking && <span className="text-2xs text-text-tertiary">→ {b.tracking}</span>}
             {/* SmartGit: show cherry-picking state explicitly on the branch —
                 the pick is not committed yet, so the branch is effectively
@@ -1062,10 +1159,21 @@ export function BranchesPage() {
             <span>· {formatDate(b.lastCommit.date)}</span>
           </div>
         )}
-        {/* Hover actions — always faintly visible, brighten on hover */}
+        {/* Hover actions — always faintly visible, brighten on hover.
+            Checkout is the primary action (leftmost, accent color) — it is
+            NEVER auto-fired by clicking the row itself. */}
         <div className="flex items-center gap-0.5 opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0">
           {!b.remote && (
             <>
+              {!b.current && (
+                <button
+                  className="icon-btn !w-5 !h-5 !text-accent hover:!bg-accent-muted"
+                  title="Check out this branch  (or double-click the row)"
+                  onClick={(e) => { e.stopPropagation(); handleCheckout(b); }}
+                >
+                  <Check size={11} />
+                </button>
+              )}
               {!b.current && (
                 <button className="icon-btn !w-5 !h-5" title="Merge into current"
                   onClick={(e) => { e.stopPropagation(); handleMerge(b.name); }}>
@@ -1092,6 +1200,26 @@ export function BranchesPage() {
           )}
           {b.remote && (
             <>
+              <button
+                className="icon-btn !w-5 !h-5 !text-accent hover:!bg-accent-muted"
+                title="Check out as new local branch  (or double-click the row)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const localName = b.name.replace(/^[^/]+\//, '');
+                  confirmDialog({
+                    title: `Checkout remote branch '${b.name}'`,
+                    message: `This creates a local branch '${localName}' tracking '${b.name}' and switches to it.`,
+                    confirmLabel: 'Checkout',
+                  }).then((ok) => {
+                    if (!ok) return;
+                    api.git.checkout(repo.path, b.name, { track: true })
+                      .then(() => { toast.success(`Checked out '${localName}'`); load(); refreshStatus(repo.path); })
+                      .catch((err) => toast.error('Checkout failed', String(err)));
+                  });
+                }}
+              >
+                <Check size={11} />
+              </button>
               <button className="icon-btn !w-5 !h-5" title="Merge into current"
                 onClick={(e) => { e.stopPropagation(); handleMerge(b.name); }}>
                 <GitMerge size={11} />
@@ -1465,7 +1593,7 @@ export function BranchesPage() {
 
       {/* Info bar at bottom */}
       <div className="px-3 py-1 border-t border-border-default bg-bg-tertiary text-2xs text-text-tertiary">
-        Tip: Drag a branch onto another to merge · Right-click for more actions
+        Tip: Click = select  ·  Double-click = checkout  ·  Drag onto another branch to merge  ·  Right-click for full menu
       </div>
 
       {/* New branch dialog */}

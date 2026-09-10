@@ -49,10 +49,10 @@ function DialogShell({ title, subtitle, children, buttons, onClose, width = 440 
 }
 
 const RESET_MODES: { mode: ResetMode; label: string; description: string }[] = [
-  { mode: 'soft', label: 'Soft', description: 'Keep all local changes staged (index untouched).' },
-  { mode: 'mixed', label: 'Mixed', description: 'Keep changes in the working tree, unstage everything.' },
-  { mode: 'hard', label: 'Hard', description: 'Discard ALL uncommitted changes. Cannot be undone.' },
-  { mode: 'keep', label: 'Keep', description: 'Reset HEAD + index, but keep local file modifications.' },
+  { mode: 'soft', label: 'Soft', description: 'Keep all local changes staged (index untouched). Commits removed from the branch tip remain recoverable via reflog for 90 days.' },
+  { mode: 'mixed', label: 'Mixed', description: 'Keep changes in the working tree, unstage everything. Removed commits remain recoverable via reflog for 90 days.' },
+  { mode: 'hard', label: 'Hard', description: 'Discard ALL uncommitted changes AND lose commits past the target. Cannot be undone (commits become Recyclable — recoverable for 90 days).' },
+  { mode: 'keep', label: 'Keep', description: 'Reset HEAD + index, but keep local file modifications. Removed commits remain recoverable via reflog for 90 days.' },
 ];
 
 export function ResetDialog({
