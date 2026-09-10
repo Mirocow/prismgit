@@ -144,7 +144,8 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   compressFilePaths: true,
   fileExtensionFilter: null,
   fileStatusFilter: 'all',
-  fileStatusFilterSet: new Set(),
+  // MADS active by default: Modified, Added, Deleted, Staged
+  fileStatusFilterSet: new Set(['modified', 'added', 'deleted', 'staged'] as Array<'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed'>),
   fileScope: 'all',
   fileScopeDir: null,
   fileSort: { key: 'name', dir: 1 },
@@ -189,7 +190,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
     else next.add(status);
     set({ fileStatusFilterSet: next });
   },
-  clearFileStatusFilterSet: () => set({ fileStatusFilterSet: new Set() }),
+  clearFileStatusFilterSet: () => set({ fileStatusFilterSet: new Set(['modified', 'added', 'deleted', 'staged'] as Array<'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed'>) }),
   setFileScope: (scope) => set({ fileScope: scope }),
   setFileScopeDir: (dir) => set({ fileScopeDir: dir }),
   setFileSort: (sort) => set({ fileSort: sort }),
@@ -202,7 +203,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
     commitViewMode: prefs.commitViewMode ?? 'tree',
     compressFilePaths: prefs.compressFilePaths ?? true,
     fileStatusFilter: prefs.fileStatusFilter ?? 'all',
-    fileStatusFilterSet: new Set(prefs.fileStatusFilterSet ?? []),
+    fileStatusFilterSet: new Set(prefs.fileStatusFilterSet ?? ['modified', 'added', 'deleted', 'staged']),
     fileSort: prefs.fileSort ?? { key: 'name', dir: 1 },
     fileFilterRegex: prefs.fileFilterRegex ?? false,
     dirTreeVisible: prefs.dirTreeVisible ?? true,

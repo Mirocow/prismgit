@@ -1161,10 +1161,10 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-56">
                 <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs border-b border-border-subtle">
                   <input type="checkbox"
-                    checked={fileStatusFilterSet.size === 0}
+                    checked={fileStatusFilterSet.size === 4 && fileStatusFilterSet.has('modified') && fileStatusFilterSet.has('added') && fileStatusFilterSet.has('deleted') && fileStatusFilterSet.has('staged')}
                     onChange={() => clearFileStatusFilterSet()}
                   />
-                  <span className="font-medium">All statuses</span>
+                  <span className="font-medium">Default (MADS)</span>
                 </label>
                 {([
                   { id: 'staged', label: 'Staged' },
