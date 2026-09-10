@@ -985,6 +985,26 @@ export function HistoryPage() {
           {selected ? (
             <div className="p-3">
               <div className="text-sm font-medium text-text-primary mb-2">{selected.subject}</div>
+              {/* Tags and branch refs on this commit */}
+              {selected.refs.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 mb-3">
+                  {selected.refs.map((ref, i) => {
+                    const isTag = ref.startsWith('tag:') || ref.startsWith('refs/tags/');
+                    const isHEAD = ref.includes('HEAD');
+                    const isRemote = ref.includes('/') && !ref.startsWith('tag:');
+                    const label = ref.replace(/^tag:\s*/, '').replace(/^refs\/tags\//, '').replace(/^refs\/heads\//, '').replace(/^refs\/remotes\//, '').replace('HEAD -> ', '');
+                    return (
+                      <span key={i} className={cn('text-2xs px-1.5 py-0.5 rounded border',
+                        isTag ? 'border-tag-border bg-tag-bg text-tag-text' :
+                        isHEAD ? 'border-accent bg-accent-muted text-accent' :
+                        isRemote ? 'border-status-renamed/30 bg-status-renamed/10 text-status-renamed' :
+                        'border-status-added/30 bg-status-added/10 text-status-added')}>
+                        {isTag && <TagIcon size={8} className="inline mr-0.5" />}{label}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
               <div className="flex items-center gap-2 mb-3">
                 <CommitHashLink hash={selected.hash} />
                 <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>

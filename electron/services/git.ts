@@ -220,7 +220,7 @@ export async function log(
     '%s', '%b', '%D',
   ].join(fieldSep);
 
-  const rawArgs = ['log', `-${maxCount}`, `--pretty=format:${pretty}${commitSep}`, '--date=iso-strict'];
+  const rawArgs = ['log', `-${maxCount}`, `--pretty=format:${pretty}${commitSep}`, '--date=iso-strict', '--decorate=full'];
 
   // Multi-branch mode: pass explicit refs to git log.
   // `git log ref1 ref2 ref3` shows the union of all commits reachable from any of these refs,
@@ -2136,9 +2136,20 @@ export async function grep(
   options: string[] = []
 ): Promise<string> {
   const git = getGit(repoPath);
-  // simple-git's grep() returns a GrepResult object; we just want the raw text output.
-  // Use raw() to get the raw git grep output as a string.
-  return await git.raw(['grep', ...options, '--', pattern]);
+  // git grep exits with code 1 when there are NO matches — simple-git treats
+  // non-zero exit as an error and throws. We need to catch that and return
+  // an empty string (no matches = valid result, not an error).
+  try {
+    return await git.raw(['grep', ...options, '--', pattern]);
+  } catch (e) {
+    const msg = String(e);
+    // Exit code 1 = no matches found (not an actual error)
+    if (msg.includes('exit code 1') || msg.includes('nothing found')) {
+      return '';
+    }
+    // Real error (bad regex, bad options, etc.) — re-throw
+    throw e;
+  }
 }
 
 /**
