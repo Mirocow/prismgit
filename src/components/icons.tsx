@@ -362,6 +362,24 @@ export const GitMerge = (p: IconProps) => (
   </Icon>
 );
 
+export const Scissors = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="6" cy="6" r="3" />
+    <path d="M8.12 8.12 12 12" />
+    <path d="M20 4 8.12 15.88" />
+    <circle cx="6" cy="18" r="3" />
+    <path d="M14.8 14.8 20 20" />
+  </Icon>
+);
+
+export const Layers = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+    <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" />
+    <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" />
+  </Icon>
+);
+
 export const ArrowRight = (p: IconProps) => (
   <Icon {...p}>
     <line x1="5" y1="12" x2="19" y2="12" />

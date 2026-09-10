@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, RefreshCw, AlertCircle, Loader, ChevronUp, ChevronDown, GitCommit, CornerDownRight } from './icons';
+import { X, RefreshCw, AlertCircle, Loader, ChevronUp, ChevronDown, GitCommit, CornerDownRight, GitMerge, Scissors, Layers } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
@@ -51,6 +51,13 @@ export function InteractiveRebaseDialog({
   const [executing, setExecuting] = useState(false);
   const [editingMessage, setEditingMessage] = useState<number | null>(null);
   const [newMessage, setNewMessage] = useState('');
+  // SmartGit Manual: drag-and-drop reorder state
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null);
+  // SmartGit Manual: Auto-Squash mode — squash adjacent commits with same subject
+  const [autoSquashMode, setAutoSquashMode] = useState(false);
+  // SmartGit Manual: Coalesce mode — drag one commit onto another to merge them
+  const [coalesceMode, setCoalesceMode] = useState(false);
 
   const loadCommits = useCallback(async () => {
     setLoading(true);
@@ -92,6 +99,104 @@ export function InteractiveRebaseDialog({
     const next = [...todos];
     [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
     setTodos(next);
+  };
+
+  // SmartGit Manual: drag-and-drop reorder — move dragged item to drop position
+  const handleDragStart = (idx: number) => (e: React.DragEvent) => {
+    setDraggedIdx(idx);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(idx));
+  };
+
+  const handleDragOver = (idx: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (draggedIdx !== null && draggedIdx !== idx) {
+      setDropTargetIdx(idx);
+    }
+  };
+
+  const handleDragLeave = () => () => {
+    // Don't clear immediately — let next dragenter overwrite
+  };
+
+  const handleDrop = (idx: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === idx) {
+      setDraggedIdx(null);
+      setDropTargetIdx(null);
+      return;
+    }
+    if (coalesceMode) {
+      // SmartGit Manual: Coalesce — combine two commits into one
+      // Mark the dropped-on commit's action to 'squash' (merges with previous = dropped commit)
+      const older = Math.min(draggedIdx, idx);
+      const newer = Math.max(draggedIdx, idx);
+      const next = [...todos];
+      // Move newer right after older, mark as squash
+      const [moved] = next.splice(newer, 1);
+      next.splice(older + 1, 0, { ...moved, action: 'squash' });
+      setTodos(next);
+      toast.info(`Coalescing "${moved.subject.substring(0, 30)}" into "${next[older].subject.substring(0, 30)}"`);
+    } else {
+      // Plain reorder
+      const next = [...todos];
+      const [moved] = next.splice(draggedIdx, 1);
+      next.splice(idx, 0, moved);
+      setTodos(next);
+    }
+    setDraggedIdx(null);
+    setDropTargetIdx(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIdx(null);
+    setDropTargetIdx(null);
+  };
+
+  // SmartGit Manual: Auto-Squash button — squash adjacent commits with same subject
+  // (mimics `git rebase --autosquash` for fixup!/squash! commits, applied to
+  // all commits with matching subjects in the visible window)
+  const handleAutoSquash = () => {
+    const next: RebaseTodoItem[] = [];
+    let changes = 0;
+    for (let i = 0; i < todos.length; i++) {
+      const cur = todos[i];
+      // Look at later commits with the same subject — mark them as fixup
+      if (cur.action === 'pick') {
+        next.push(cur);
+        // Find following commits with same subject
+        for (let j = i + 1; j < todos.length; j++) {
+          if (todos[j].subject === cur.subject && todos[j].action === 'pick') {
+            // Mark as fixup — will be merged into cur
+            next.push({ ...todos[j], action: 'fixup' });
+            changes++;
+            // Skip — already consumed
+            todos.splice(j, 1);
+            j--;
+          } else if (todos[j].action !== 'drop') {
+            break;
+          }
+        }
+      } else {
+        next.push(cur);
+      }
+    }
+    if (changes > 0) {
+      setTodos(next);
+      toast.success(`Auto-squashed ${changes} commit${changes > 1 ? 's' : ''}`, 'Adjacent commits with same subject are now fixup');
+    } else {
+      toast.info('No adjacent commits with same subject to auto-squash');
+    }
+  };
+
+  // SmartGit Manual: Split commit — mark a commit as 'edit' so rebase pauses there
+  // (then user can split it manually using the Split dialog or git reset HEAD~)
+  const handleSplitCommit = (idx: number) => {
+    const next = [...todos];
+    next[idx] = { ...next[idx], action: 'edit' };
+    setTodos(next);
+    toast.info(`Marked "${next[idx].subject.substring(0, 30)}" for split`, 'Rebase will pause here. Use "Split off Files" after pause.');
   };
 
   const setAction = (idx: number, action: RebaseAction) => {
@@ -190,6 +295,32 @@ export function InteractiveRebaseDialog({
           <span className="text-text-tertiary ml-auto">{todos.length} commits</span>
         </div>
 
+        {/* SmartGit Manual: Toolbar — Auto-Squash, Coalesce mode, drag hint */}
+        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border-subtle bg-bg-secondary text-2xs">
+          <button
+            className={cn('px-1.5 py-0.5 rounded flex items-center gap-1',
+              autoSquashMode ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
+            onClick={() => { handleAutoSquash(); setAutoSquashMode(!autoSquashMode); }}
+            title="Squash adjacent commits with same subject (mimics git rebase --autosquash)"
+          >
+            <Layers size={10} /> Auto-Squash
+          </button>
+          <button
+            className={cn('px-1.5 py-0.5 rounded flex items-center gap-1',
+              coalesceMode ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
+            onClick={() => {
+              setCoalesceMode(!coalesceMode);
+              toast.info(coalesceMode ? 'Coalesce mode OFF' : 'Coalesce mode ON — drag one commit onto another to merge them');
+            }}
+            title="Toggle Coalesce mode: drag one commit onto another to merge them"
+          >
+            <GitMerge size={10} /> Coalesce
+          </button>
+          <span className="text-text-tertiary ml-auto">
+            {coalesceMode ? 'Drop one commit onto another to combine' : 'Drag rows to reorder'}
+          </span>
+        </div>
+
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="p-8 text-center text-text-tertiary text-sm flex items-center justify-center gap-2">
@@ -200,11 +331,26 @@ export function InteractiveRebaseDialog({
             todos.map((item, idx) => (
               <div
                 key={item.hash}
+                draggable
+                onDragStart={handleDragStart(idx)}
+                onDragOver={handleDragOver(idx)}
+                onDragLeave={handleDragLeave()}
+                onDrop={handleDrop(idx)}
+                onDragEnd={handleDragEnd}
                 className={cn(
-                  'group flex items-start gap-2 px-3 py-2 border-b border-border-subtle',
-                  item.action === 'drop' && 'opacity-50'
+                  'group flex items-start gap-2 px-3 py-2 border-b border-border-subtle transition-colors',
+                  item.action === 'drop' && 'opacity-50',
+                  draggedIdx === idx && 'opacity-50',
+                  dropTargetIdx === idx && (coalesceMode ? 'bg-accent-muted border-l-2 border-l-accent' : 'border-t-2 border-t-accent'),
+                  coalesceMode && 'cursor-copy',
+                  !coalesceMode && 'cursor-grab active:cursor-grabbing'
                 )}
               >
+                {/* Drag handle — visual cue that rows are draggable */}
+                <div className="text-text-tertiary text-xs flex-shrink-0 mt-1 select-none" title="Drag to reorder">
+                  ⋮⋮
+                </div>
+
                 {/* Action dropdown */}
                 <select
                   className="text-xs mono w-20 py-0.5 px-1"
@@ -273,6 +419,14 @@ export function InteractiveRebaseDialog({
                           <CornerDownRight size={11} />
                         </button>
                       )}
+                      {/* SmartGit Manual: Split commit — marks as 'edit' for pause */}
+                      <button
+                        className="icon-btn !w-6 !h-6 opacity-0 group-hover:opacity-100"
+                        title="Split commit (marks as 'edit' — rebase pauses here)"
+                        onClick={() => handleSplitCommit(idx)}
+                      >
+                        <Scissors size={11} />
+                      </button>
                       <button
                         className="icon-btn !w-6 !h-6 opacity-0 group-hover:opacity-100"
                         title="Move up"
