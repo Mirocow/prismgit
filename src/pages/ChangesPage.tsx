@@ -927,7 +927,33 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           >
             .*
           </button>
-          {/* Multi-select status filter — dropdown with checkboxes */}
+          {/* Multi-select status filter — SmartGit-style icon toolbar buttons + dropdown */}
+          <div className="flex items-center gap-0.5">
+            {/* Quick toggle buttons — SmartGit uses small icon buttons above the table */}
+            {([
+              { id: 'modified', label: 'M', title: 'Show Modified files', color: 'text-status-modified' },
+              { id: 'added', label: 'A', title: 'Show Added files', color: 'text-status-added' },
+              { id: 'deleted', label: 'D', title: 'Show Deleted files', color: 'text-status-deleted' },
+              { id: 'untracked', label: 'U', title: 'Show Untracked files', color: 'text-status-untracked' },
+              { id: 'staged', label: 'S', title: 'Show Staged files', color: 'text-status-added' },
+              { id: 'unstaged', label: 'U2', title: 'Show Unstaged files', color: 'text-status-modified' },
+            ] as const).map(opt => (
+              <button
+                key={opt.id}
+                className={cn(
+                  'text-2xs w-5 h-5 rounded flex items-center justify-center font-mono font-bold transition-colors',
+                  fileStatusFilterSet.has(opt.id)
+                    ? 'bg-accent-muted text-accent'
+                    : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'
+                )}
+                title={opt.title}
+                onClick={() => toggleFileStatusFilter(opt.id)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {/* Dropdown for more options */}
           <div className="relative">
             <button
               className={cn('text-2xs px-2 py-0.5 border rounded flex items-center gap-1',
@@ -1109,7 +1135,15 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         {/* Left: File list + Journal + Commit editor */}
         <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: leftWidth }}>
           {/* File list with table header */}
-          <div className="flex-1 overflow-y-auto">
+          {/* SmartGit background color highlighting: light red = committable files hidden,
+              light yellow = name-filtered, gray = unchanged files shown by name match */}
+          <div className={cn(
+            'flex-1 overflow-y-auto transition-colors',
+            // Light red: committable files (untracked/modified) are being hidden by state filter
+            (fileStatusFilterSet.size > 0 && !fileStatusFilterSet.has('untracked') && !fileStatusFilterSet.has('modified')) ? 'bg-red-50 dark:bg-red-950/10' : '',
+            // Light yellow: files are being name-filtered
+            (fileFilter.trim().length > 0) ? 'bg-yellow-50 dark:bg-yellow-950/10' : '',
+          )}>
             {/* Table header — click a column to sort (SmartGit-style) */}
             <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary sticky top-0 z-10">
               <span className="w-4"></span>
