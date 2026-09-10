@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Check, Trash, Plus, Star, RefreshCw, Loader, ExternalLink, GitBranch, Tag as TagIcon, FileText, Eye, EyeOff, KeyRound } from './icons';
+import { X, Check, Trash, Plus, Star, RefreshCw, Loader, ExternalLink, GitBranch, Tag as TagIcon, FileText, Eye, EyeOff, KeyRound, Settings as SettingsIcon } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api, type RepositoryMetadata, type RemoteInfo } from '../lib/api';
@@ -8,6 +8,7 @@ import { cn, formatDate, shortHash } from '../lib/utils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
 import { getAllRemoteAuth, setRemoteAuth } from '../lib/remoteAuth';
+import { RepoSettingsDialog } from './RepoSettingsDialog';
 
 interface RepoInfoDialogProps {
   open: boolean;
@@ -24,6 +25,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
   const [color, setColor] = useState('');
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [showRepoSettings, setShowRepoSettings] = useState(false);
 
   // === Remotes & Authorization (ALL remotes of this repository) ===
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
@@ -208,6 +210,14 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
             )}
           </div>
           <div className="flex items-center gap-1">
+            <button
+              className="btn btn-secondary text-xs flex items-center gap-1"
+              title="Repository Settings: User, Fetch & Pull, Push, Signing, Encoding, Tag-Grouping"
+              onClick={() => setShowRepoSettings(true)}
+            >
+              <SettingsIcon size={12} />
+              Repository Settings
+            </button>
             <button
               className="icon-btn"
               title="Refresh stats from Git"
@@ -511,6 +521,11 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
           </button>
         </div>
       </div>
+
+      {/* Repository Settings dialog (User, Fetch & Pull, Push, Signing, Encoding, Tag-Grouping) */}
+      {showRepoSettings && (
+        <RepoSettingsDialog onClose={() => setShowRepoSettings(false)} />
+      )}
     </div>
   );
 }
