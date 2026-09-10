@@ -51,6 +51,10 @@ export interface ProjectPrefs {
   commitHeight?: number;
   /** Width of the Diff page file-list sidebar. */
   diffFileListWidth?: number;
+
+  // --- Sidebar favorites ---
+  /** Navigation paths the user pinned to the Favorites section (e.g. ['/changes', '/history']). */
+  favoriteTools?: string[];
 }
 
 export function loadProjectPrefs(repoPath: string): ProjectPrefs {

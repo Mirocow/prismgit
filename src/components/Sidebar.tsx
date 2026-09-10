@@ -19,6 +19,7 @@ import {
 import type { RemoteCheckSummary } from '../lib/api';
 import { api } from '../lib/api';
 import { useToastStore } from '../stores/toastStore';
+import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 
 /**
  * Drag-and-drop payload for the repository tree. Chromium lowercases custom
@@ -98,6 +99,26 @@ export function Sidebar() {
   const stagedCount = useGitStore((s) => s.status?.staged.length ?? 0);
   // Collapsible nav groups — click group header to collapse/expand
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  // Favorites — user-pinned tools shown at the top of the navigation
+  const [favoriteTools, setFavoriteTools] = useState<string[]>([]);
+
+  // Load favorite tools from project prefs when repo opens
+  useEffect(() => {
+    if (currentRepo) {
+      const prefs = loadProjectPrefs(currentRepo.path);
+      setFavoriteTools(prefs.favoriteTools || []);
+    }
+  }, [currentRepo?.path]);
+
+  const toggleFavorite = useCallback((path: string) => {
+    setFavoriteTools(prev => {
+      const next = prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path];
+      if (currentRepo) {
+        saveProjectPrefs(currentRepo.path, { favoriteTools: next });
+      }
+      return next;
+    });
+  }, [currentRepo]);
 
   // Repository tree DnD state. dragPayload is mirrored in a ref because
   // dataTransfer.getData() is unavailable during dragover in Chromium.
@@ -567,7 +588,62 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-2 scrollbar-thin" role="navigation" aria-label="Main navigation">
         {currentRepo ? (
-          Object.entries(groups_).map(([groupName, items]) => (
+          <>
+          {/* Favorites section — user-pinned tools at the top */}
+          {favoriteTools.length > 0 && (
+            <div className="mb-3">
+              <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary flex items-center gap-1">
+                <Star size={9} className="text-status-modified fill-current" />
+                Favorites
+              </div>
+              {favoriteTools.map(path => {
+                const item = NAV_ITEMS.find(n => n.path === path);
+                if (!item) return null;
+                const Icon = item.icon;
+                const isActive = location.pathname === item.path;
+                const showBadge = item.path === '/changes' && changedCount > 0;
+                const shortcut = NAV_SHORTCUTS[item.path];
+                return (
+                  <button
+                    key={`fav-${item.path}`}
+                    className={cn(
+                      'group w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors cursor-pointer',
+                      isActive
+                        ? 'bg-accent-muted text-accent font-medium border-l-2 border-accent'
+                        : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary border-l-2 border-transparent'
+                    )}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate(item.path); }}
+                    title={NAV_DESCRIPTIONS[item.path] || item.label}
+                  >
+                    <Icon size={15} />
+                    <span>{item.label}</span>
+                    {showBadge ? (
+                      <span
+                        className={cn(
+                          'ml-auto text-2xs font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center',
+                          stagedCount > 0 ? 'badge badge-added' : 'bg-accent-muted text-accent'
+                        )}
+                      >
+                        {changedCount}
+                      </span>
+                    ) : shortcut ? (
+                      <kbd className="ml-auto text-2xs text-text-tertiary border border-border-subtle rounded px-1 opacity-60">{shortcut}</kbd>
+                    ) : null}
+                    <button
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 !p-0 transition-opacity"
+                      title="Remove from Favorites"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.path); }}
+                    >
+                      <Star size={10} className="text-status-modified fill-current" />
+                    </button>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Regular navigation groups */}
+          {Object.entries(groups_).map(([groupName, items]) => (
             <div key={groupName} className="mb-3">
               {true && (
                 <button
@@ -592,11 +668,12 @@ export function Sidebar() {
                 // Changes item gets a live badge; others show their quick-nav key
                 const showBadge = item.path === '/changes' && changedCount > 0;
                 const shortcut = NAV_SHORTCUTS[item.path];
+                const isFavorite = favoriteTools.includes(item.path);
                 return (
                   <button
                     key={item.path}
                     className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors cursor-pointer',
+                      'group w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors cursor-pointer',
                       isActive
                         ? 'bg-accent-muted text-accent font-medium border-l-2 border-accent'
                         : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary border-l-2 border-transparent'
@@ -621,11 +698,25 @@ export function Sidebar() {
                     ) : shortcut ? (
                       <kbd className="ml-auto text-2xs text-text-tertiary border border-border-subtle rounded px-1 opacity-60">{shortcut}</kbd>
                     ) : null}
+                    {/* Favorite toggle star — appears on hover */}
+                    <button
+                      className={cn(
+                        'icon-btn !w-4 !h-4 !p-0 transition-opacity',
+                        isFavorite
+                          ? 'opacity-100'
+                          : 'opacity-0 group-hover:opacity-100'
+                      )}
+                      title={isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.path); }}
+                    >
+                      <Star size={10} className={cn(isFavorite ? 'text-status-modified fill-current' : 'text-text-tertiary')} />
+                    </button>
                   </button>
                 );
               })}
             </div>
-          ))
+          ))}
+          </>
         ) : (
           <div className="px-3 py-4 text-xs text-text-tertiary text-center">
             Open a repository to access Git operations
