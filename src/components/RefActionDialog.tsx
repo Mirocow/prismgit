@@ -1,0 +1,201 @@
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { X, Search, Loader } from './icons';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useToastStore } from '../stores/toastStore';
+import { api, type BranchInfo } from '../lib/api';
+import { cn, shortHash } from '../lib/utils';
+
+export type RefAction =
+  | 'checkout'
+  | 'merge'
+  | 'rebase'
+  | 'cherry-pick'
+  | 'revert'
+  | 'delete-branch';
+
+const ACTION_META: Record<RefAction, { title: string; targetLabel: string; confirmLabel: string; branchOnly?: boolean; localOnly?: boolean }> = {
+  checkout: { title: 'Check Out', targetLabel: 'Branch or commit to check out', confirmLabel: 'Check Out' },
+  merge: { title: 'Merge', targetLabel: 'Branch/commit to merge INTO the current branch', confirmLabel: 'Merge' },
+  rebase: { title: 'Rebase', targetLabel: 'Branch/commit to rebase the current branch ONTO', confirmLabel: 'Rebase' },
+  'cherry-pick': { title: 'Cherry-Pick', targetLabel: 'Commit to cherry-pick into the current branch', confirmLabel: 'Cherry-Pick' },
+  revert: { title: 'Revert', targetLabel: 'Commit to revert (creates a revert commit)', confirmLabel: 'Revert' },
+  'delete-branch': { title: 'Delete Branch', targetLabel: 'Branch to delete', confirmLabel: 'Delete', branchOnly: true },
+};
+
+/**
+ * SmartGit-style dialog behind the Branch menu commands (Check Out…, Merge…,
+ * Rebase…, Cherry-Pick…, Revert…): pick a branch from a searchable list or
+ * type a commit hash/SHA prefix, preview, and run the REAL git operation.
+ */
+export function RefActionDialog({ action, onClose }: { action: RefAction; onClose: () => void }) {
+  const repo = useRepositoryStore((s) => s.currentRepo)!;
+  const toast = useToastStore();
+  const meta = ACTION_META[action];
+
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [current, setCurrent] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<{ subject: string; author: string } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [bs, cur] = await Promise.all([
+          api.git.branches(repo.path),
+          api.git.currentBranch(repo.path),
+        ]);
+        setBranches(bs);
+        setCurrent(cur);
+        // Sensible default: for checkout pick another branch, for merge/rebase pick main/master
+        const preferred =
+          action === 'checkout'
+            ? bs.find((b) => !b.current && !b.remote)?.name
+            : bs.find((b) => /^(main|master|develop)$/.test(b.name) && !b.current)?.name;
+        if (preferred) setSelected(preferred);
+      } catch (e) {
+        toast.error('Failed to load branches', String(e));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo.path]);
+
+  // Preview the target commit (single log pass over candidates)
+  useEffect(() => {
+    if (!selected) { setPreview(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const entry = await api.git.findCommit(repo.path, selected);
+        if (!cancelled) setPreview(entry ? { subject: entry.subject, author: entry.author.name } : null);
+      } catch { if (!cancelled) setPreview(null); }
+    })();
+    return () => { cancelled = true; };
+  }, [repo.path, selected]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let list = branches;
+    if (action === 'checkout') list = list; // remote branches can be checked out too (creates local tracking)
+    if (meta.branchOnly) list = list.filter((b) => !b.remote);
+    if (!q) return list.slice(0, 200);
+    return list.filter((b) => b.name.toLowerCase().includes(q)).slice(0, 200);
+  }, [branches, query, action, meta.branchOnly]);
+
+  const run = useCallback(async () => {
+    const target = selected?.trim();
+    if (!target) return;
+    setBusy(true);
+    try {
+      switch (action) {
+        case 'checkout': {
+          const isRemote = branches.some((b) => b.remote && b.name === target);
+          await api.git.checkout(repo.path, target, { track: isRemote });
+          toast.success(`Checked out ${target}`);
+          break;
+        }
+        case 'merge': {
+          await api.git.merge(repo.path, target);
+          toast.success(`Merged ${target}`);
+          break;
+        }
+        case 'rebase': {
+          await api.git.rebase(repo.path, target);
+          toast.success(`Rebased onto ${target}`);
+          break;
+        }
+        case 'cherry-pick': {
+          await api.git.cherryPick(repo.path, [target]);
+          toast.success(`Cherry-picked ${shortHash(target)}`);
+          break;
+        }
+        case 'revert': {
+          await api.git.revert(repo.path, [target]);
+          toast.success(`Reverted ${shortHash(target)}`);
+          break;
+        }
+        case 'delete-branch': {
+          await api.git.deleteBranch(repo.path, target);
+          toast.success(`Deleted branch ${target}`);
+          break;
+        }
+      }
+      onClose();
+    } catch (e) {
+      toast.error(`${meta.title} failed`, String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [action, selected, repo.path, branches, toast, onClose, meta.title]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+      <div className="panel w-full max-w-lg flex flex-col max-h-[70vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center px-4 py-3 border-b border-border">
+          <span className="text-sm font-semibold">{meta.title}…</span>
+          <div className="flex-1" />
+          <button onClick={onClose} className="p-1 rounded hover:bg-surface-hover"><X size={14} /></button>
+        </div>
+        <div className="px-4 pt-3 pb-1 text-xs text-text-secondary">
+          {meta.targetLabel}
+          {current && <span className="text-text-tertiary"> — current branch: <b>{current}</b></span>}
+        </div>
+        <div className="px-4 pb-2">
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setSelected(e.target.value.trim() || selected); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && selected) run(); }}
+              placeholder="branch name or commit hash…"
+              className="w-full pl-8 pr-3 py-2 text-xs mono bg-surface border border-border rounded focus:outline-none focus:border-accent"
+            />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-[120px]">
+          {filtered.map((b) => (
+            <button
+              key={b.name}
+              onClick={() => { setSelected(b.name); setQuery(b.name); }}
+              className={cn(
+                'w-full text-left px-3 py-1.5 rounded text-xs flex items-center gap-2 hover:bg-surface-hover',
+                selected === b.name && 'bg-accent/15 text-accent'
+              )}
+            >
+              <span className="truncate flex-1 mono">{b.name}</span>
+              {b.current && <span className="text-2xs px-1 rounded bg-green-500/20 text-green-500">HEAD</span>}
+              {typeof b.ahead === 'number' && typeof b.behind === 'number' && (b.ahead || b.behind) && (
+                <span className="text-2xs text-text-tertiary">{b.ahead > 0 ? `↑${b.ahead}` : ''}{b.behind > 0 ? `↓${b.behind}` : ''}</span>
+              )}
+            </button>
+          ))}
+          {filtered.length === 0 && query && (
+            <div className="px-3 py-4 text-xs text-text-tertiary">
+              No matching branch — press Enter to use “{query}” as commit hash
+            </div>
+          )}
+        </div>
+        {preview && (
+          <div className="px-4 py-2 border-t border-border text-xs">
+            <span className="mono text-accent">{shortHash(selected ?? '')}</span>{' '}
+            <span className="text-text-primary">{preview.subject}</span>{' '}
+            <span className="text-text-tertiary">— {preview.author}</span>
+          </div>
+        )}
+        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+          <button className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover" onClick={onClose}>Cancel</button>
+          <button
+            className="px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded hover:opacity-90 disabled:opacity-40 flex items-center gap-1"
+            disabled={!selected || busy}
+            onClick={run}
+          >
+            {busy && <Loader size={12} className="animate-spin" />}
+            {meta.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

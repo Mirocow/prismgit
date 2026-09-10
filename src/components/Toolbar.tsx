@@ -9,6 +9,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToolbarStore, DEFAULT_TOOLBAR_GROUPS, type ToolbarGroups, type ToolbarGroupKey } from '../stores/toolbarStore';
 import { useToastStore } from '../stores/toastStore';
+import { confirmDialog } from './ConfirmDialog';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
@@ -825,16 +826,24 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                    .catch((e) => toast.error('Unstage failed', String(e)));
                 }} disabled={disabled} title="Unstage all changes" />
                 <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
-                  if (!currentRepo || !confirm('Discard ALL uncommitted changes?\n\nThis will permanently discard all staged and unstaged changes. This cannot be undone.')) return;
-                  useOperationLogStore.getState().logOperation(
-                    'Discard All', currentRepo.path, 'git checkout -- . && git clean -fd',
-                    async () => {
-                      await api.git.raw(currentRepo.path, ['checkout', '--', '.']);
-                      await api.git.raw(currentRepo.path, ['clean', '-fd']);
-                      await refreshStatus(currentRepo.path);
-                    }
-                  ).then(() => toast.success('Changes discarded'))
-                   .catch((e) => toast.error('Discard failed', String(e)));
+                  if (!currentRepo) return;
+                  void confirmDialog({
+                    title: 'Discard ALL uncommitted changes?',
+                    message: 'This will permanently discard all staged and unstaged changes.\nThis cannot be undone.',
+                    confirmLabel: 'Discard All',
+                    danger: true,
+                  }).then((ok) => {
+                    if (!ok) return;
+                    useOperationLogStore.getState().logOperation(
+                      'Discard All', currentRepo.path, 'git checkout -- . && git clean -fd',
+                      async () => {
+                        await api.git.raw(currentRepo.path, ['checkout', '--', '.']);
+                        await api.git.raw(currentRepo.path, ['clean', '-fd']);
+                        await refreshStatus(currentRepo.path);
+                      }
+                    ).then(() => toast.success('Changes discarded'))
+                     .catch((e) => toast.error('Discard failed', String(e)));
+                  });
                 }} disabled={disabled} title="Discard all changes" />
                 <Divider />
               </div>

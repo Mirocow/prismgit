@@ -144,6 +144,64 @@ export async function logout(): Promise<void> {
   store.delete('github');
 }
 
+/** CI status of a commit (GitHub Actions etc. — SmartGit Standard Window "My History" badges). */
+export interface CommitCheckStatus {
+  sha: string;
+  /** overall conclusion, e.g. success | failure | neutral | skipped | undefined while running */
+  conclusion?: string;
+  status: string;
+  totalChecks: number;
+}
+
+/**
+ * Fetch check-run summaries for a batch of commits (max ~25 per call to stay
+ * within the API rate limits and keep latency acceptable).
+ */
+export async function getCheckRuns(
+  owner: string,
+  repo: string,
+  shas: string[]
+): Promise<Record<string, CommitCheckStatus>> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  const batch = shas.slice(0, 25);
+  const results: Record<string, CommitCheckStatus> = {};
+  for (const sha of batch) {
+    try {
+      const json = await httpsJson<{
+        total_count?: number;
+        check_runs?: { status: string; conclusion?: string }[];
+      }>(`https://api.github.com/repos/${owner}/${repo}/commits/${sha}/check-runs?per_page=100`, {
+        token,
+      });
+      const runs = json.check_runs ?? [];
+      // Aggregate: any failure => failure; else any running => running; else success/neutral
+      let conclusion: string | undefined;
+      if (runs.some((r) => r.conclusion === 'failure' || r.conclusion === 'timed_out' || r.conclusion === 'action_required')) {
+        conclusion = 'failure';
+      } else if (runs.some((r) => r.status !== 'completed')) {
+        conclusion = 'running';
+      } else if (runs.length > 0) {
+        conclusion = 'success';
+      }
+      results[sha] = {
+        sha,
+        status: runs.length > 0 ? 'completed' : 'none',
+        conclusion,
+        totalChecks: json.total_count ?? runs.length,
+      };
+    } catch (e) {
+      if (/404/.test(String(e))) {
+        // No checks for this commit (or private API mismatch) — mark as none
+        results[sha] = { sha, status: 'none', totalChecks: 0 };
+      } else {
+        throw e;
+      }
+    }
+  }
+  return results;
+}
+
 export function getStoredAuthState(): { authenticated: boolean; user?: GithubUser } {
   const s = getAuthState();
   return {

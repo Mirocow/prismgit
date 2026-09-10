@@ -1,4 +1,4 @@
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, FolderTree, RotateCcw, FileText, Search, CloudDownload, Filter, Recycle } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, FolderTree, RotateCcw, FileText, Search, CloudDownload, Filter, Recycle, StickyNote, GitMerge } from './icons';
 
 /**
  * Single source of truth for the app navigation.
@@ -61,8 +61,12 @@ export const NAV_ITEMS: NavItem[] = [
     description: 'Saved stashes. Click a stash to view its diff (compared to its parent, not HEAD). Apply, pop, or drop.' },
   { path: '/submodules', label: 'Submodules', icon: Package, group: 'Refs',
     description: 'Manage git submodules: init, update, sync. View submodule status and commit hashes.' },
+  { path: '/subtrees', label: 'Subtrees', icon: GitMerge, group: 'Refs',
+    description: 'Integrate other repositories into subfolders (subtree add/pull/push/split). An alternative to submodules.' },
   { path: '/lfs', label: 'Git LFS', icon: Package, group: 'Refs',
-    description: 'Large File Storage management. Track patterns, pull/push LFS objects, view tracked files with sizes.' },
+    description: 'Large File Storage management. Track patterns, pull/push LFS objects, manage file locks, view tracked files with sizes.' },
+  { path: '/notes', label: 'Notes', icon: StickyNote, group: 'Refs',
+    description: 'Git notes: attach metadata to commits without rewriting history. Categories via smartgit-notes config. Sync notes refs with remotes.' },
 ];
 
 /**

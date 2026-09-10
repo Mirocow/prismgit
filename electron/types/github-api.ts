@@ -54,6 +54,15 @@ export interface GithubApi {
     body?: string;
   }) => Promise<GithubPullRequest>;
   listPullRequests: (owner: string, repo: string, state?: 'open' | 'closed' | 'all') => Promise<GithubPullRequest[]>;
+  getCheckRuns: (owner: string, repo: string, shas: string[]) => Promise<Record<string, CommitCheckStatus>>;
   logout: () => Promise<void>;
   getAuthState: () => Promise<{ authenticated: boolean; user?: GithubUser }>;
+}
+
+/** CI check-run summary for one commit (SmartGit "My History" CI badges). */
+export interface CommitCheckStatus {
+  sha: string;
+  conclusion?: string;
+  status: string;
+  totalChecks: number;
 }

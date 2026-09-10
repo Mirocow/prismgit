@@ -20,12 +20,19 @@ import type {
   DirNode,
   RecyclableCommit,
   LfsLock,
+  LfsLockInfo,
   BidirectionalBlameResult,
+  NoteCategory,
+  CommitNote,
+  SubtreeInfo,
+  UnreachableCommit,
+  BugtraqConfig,
 } from '../../electron/types/git-api';
 import type {
   GithubUser,
   GithubRepository,
   GithubPullRequest,
+  CommitCheckStatus,
 } from '../../electron/types/github-api';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata } from '../../electron/types/settings-api';
 
@@ -51,10 +58,17 @@ export type {
   DirNode,
   RecyclableCommit,
   LfsLock,
+  LfsLockInfo,
   BidirectionalBlameResult,
+  NoteCategory,
+  CommitNote,
+  SubtreeInfo,
+  UnreachableCommit,
+  BugtraqConfig,
   GithubUser,
   GithubRepository,
   GithubPullRequest,
+  CommitCheckStatus,
   AppSettings,
   RepositoryEntry,
   RepositoryMetadata,

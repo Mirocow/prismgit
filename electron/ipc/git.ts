@@ -259,84 +259,107 @@ export function registerGitIpc(): void {
     gitService.unstageLines(p, f, ranges)
   );
 
-  // ============================================================
-  // SmartGit Manual extended features
-  // ============================================================
+  // ===== Git Notes (SmartGit Notes feature) =====
+  ipcMain.handle('git:noteCategories', (_e, p: string) => gitService.noteCategories(p));
+  ipcMain.handle('git:notesList', (_e, p: string, ref: string, maxCount?: number) =>
+    gitService.notesList(p, ref, maxCount ?? 500)
+  );
+  ipcMain.handle('git:notesShow', (_e, p: string, ref: string, c: string) => gitService.notesShow(p, ref, c));
+  ipcMain.handle('git:notesAdd', (_e, p: string, ref: string, c: string, m: string, force?: boolean) =>
+    gitService.notesAdd(p, ref, c, m, force ?? false)
+  );
+  ipcMain.handle('git:notesRemove', (_e, p: string, ref: string, c: string) => gitService.notesRemove(p, ref, c));
 
+  // ===== Subtrees (Remote | Subtree) =====
+  ipcMain.handle('git:subtrees', (_e, p: string) => gitService.subtrees(p));
+  ipcMain.handle('git:subtreeAdd', (_e, p: string, opts: { name: string; path: string; remote: string; branch: string; squash?: boolean; remoteUrl?: string }) =>
+    gitService.subtreeAdd(p, opts)
+  );
+  ipcMain.handle('git:subtreePull', (_e, p: string, n: string) => gitService.subtreePull(p, n));
+  ipcMain.handle('git:subtreePush', (_e, p: string, n: string) => gitService.subtreePush(p, n));
+  ipcMain.handle('git:subtreeSplit', (_e, p: string, n: string, opts?: { rejoin?: boolean; annotate?: string }) =>
+    gitService.subtreeSplit(p, n, opts)
+  );
+  ipcMain.handle('git:subtreeRemove', (_e, p: string, n: string) => gitService.subtreeRemove(p, n));
+
+  // ===== LFS locks =====
+  ipcMain.handle('git:lfsLocks', (_e, p: string, local?: boolean) => gitService.lfsLocks(p, local ?? false));
+  ipcMain.handle('git:lfsLock', (_e, p: string, f: string) => gitService.lfsLock(p, f));
+  ipcMain.handle('git:lfsUnlock', (_e, p: string, f: string, force?: boolean) =>
+    gitService.lfsUnlock(p, f, force ?? false)
+  );
+
+  // ===== Format Patch =====
+  ipcMain.handle('git:formatPatch', (_e, p: string, opts: { outputDir: string; commit?: string; from?: string; to?: string }) =>
+    gitService.formatPatch(p, opts)
+  );
+
+  // ===== Edit commit author =====
+  ipcMain.handle('git:editCommitAuthor', (_e, p: string, h: string, n: string, e2: string) =>
+    gitService.editCommitAuthor(p, h, n, e2)
+  );
+
+  // ===== Verify Database / GC / Recyclable commits =====
+  ipcMain.handle('git:verifyDatabase', (_e, p: string) => gitService.verifyDatabase(p));
+  ipcMain.handle('git:garbageCollect', (_e, p: string, aggressive?: boolean) =>
+    gitService.garbageCollect(p, aggressive ?? false)
+  );
+  ipcMain.handle('git:unreachableCommits', (_e, p: string) => gitService.unreachableCommits(p));
+
+  // ===== Bugtraq =====
+  ipcMain.handle('git:bugtraqConfig', (_e, p: string) => gitService.bugtraqConfig(p));
+
+  // ===== Index Editor helpers =====
+  ipcMain.handle('git:setIndexContent', (_e, p: string, f: string, c: string) =>
+    gitService.setIndexContent(p, f, c)
+  );
+  ipcMain.handle('git:showFile', (_e, p: string, ref: string, f: string) => gitService.showFile(p, ref, f));
+
+
+  // ===== SmartGit Manual — Power User batch (merged) =====
   // Recyclable commits
   ipcMain.handle('git:recyclableCommits', (_e, p: string) => gitService.recyclableCommits(p));
-
-  // Subtree operations
-  ipcMain.handle('git:subtreeAdd', (_e, p: string, prefix: string, url: string, branch: string, squash?: boolean) =>
-    gitService.subtreeAdd(p, prefix, url, branch, squash)
-  );
-  ipcMain.handle('git:subtreePull', (_e, p: string, prefix: string, url: string, branch: string, squash?: boolean) =>
-    gitService.subtreePull(p, prefix, url, branch, squash)
-  );
-  ipcMain.handle('git:subtreePush', (_e, p: string, prefix: string, remote: string, branch: string, squash?: boolean) =>
-    gitService.subtreePush(p, prefix, remote, branch, squash)
-  );
-  ipcMain.handle('git:subtreeSplit', (_e, p: string, prefix: string, branch?: string, rejoin?: boolean) =>
-    gitService.subtreeSplit(p, prefix, branch, rejoin)
-  );
-
   // LFS Locks
   ipcMain.handle('git:lfsListLocks', (_e, p: string, r?: string) => gitService.lfsListLocks(p, r));
-  ipcMain.handle('git:lfsLock', (_e, p: string, f: string, r?: string) => gitService.lfsLock(p, f, r));
-  ipcMain.handle('git:lfsUnlock', (_e, p: string, f: string, r?: string) => gitService.lfsUnlock(p, f, r));
-
-  // Git Notes
-  ipcMain.handle('git:notesList', (_e, p: string, r?: string) => gitService.notesList(p, r));
   ipcMain.handle('git:noteShow', (_e, p: string, c: string, r?: string) => gitService.noteShow(p, c, r));
   ipcMain.handle('git:noteAdd', (_e, p: string, c: string, content: string, r?: string, f?: boolean) =>
     gitService.noteAdd(p, c, content, r, f)
   );
   ipcMain.handle('git:noteRemove', (_e, p: string, c: string, r?: string) => gitService.noteRemove(p, c, r));
-
   // Force compare
   ipcMain.handle('git:forceCompare', (_e, p: string, f: string, o?: { staged?: boolean; ref?: string }) =>
     gitService.forceCompare(p, f, o)
   );
-
   // EOL-only change detection
   ipcMain.handle('git:isEolOnlyChange', (_e, p: string, f: string) => gitService.isEolOnlyChange(p, f));
-
   // Push to Gerrit
   ipcMain.handle('git:pushToGerrit', (_e, p: string, b?: string, r?: string, o?: { draft?: boolean; reviewers?: string[]; topic?: string }) =>
     gitService.pushToGerrit(p, b, r, o)
   );
-
   // Partial clone
   ipcMain.handle('git:clonePartial', (_e, u: string, t: string, f?: 'blob:none' | 'tree:0' | 'blob:limit=1m', o?: { depth?: number; branch?: string; recursive?: boolean }) =>
     gitService.clonePartial(u, t, f || 'blob:none', o)
   );
-
   // Credential helper
   ipcMain.handle('git:setupCredentialHelper', (_e, p: string) => gitService.setupCredentialHelper(p));
-
   // Bidirectional blame
   ipcMain.handle('git:blameBidirectional', (_e, p: string, f: string, r?: string) =>
     gitService.blameBidirectional(p, f, r)
   );
-
   // Pickaxe search
   ipcMain.handle('git:pickaxeSearch', (_e, p: string, f: string, s: string, o?: { regex?: boolean; ignoreCase?: boolean }) =>
     gitService.pickaxeSearch(p, f, s, o)
   );
-
   // Detect renames
   ipcMain.handle('git:detectRenames', (_e, p: string, o?: { threshold?: number; ref?: string }) =>
     gitService.detectRenames(p, o)
   );
-
   // Is commit pushed
   ipcMain.handle('git:isCommitPushed', (_e, p: string, h: string) => gitService.isCommitPushed(p, h));
-
   // Squash commits
   ipcMain.handle('git:squashCommits', (_e, p: string, fromHash: string, toHash: string, m?: string) =>
     gitService.squashCommits(p, fromHash, toHash, m)
   );
-
   // Coalesce commits
   ipcMain.handle('git:coalesceCommits', (_e, p: string, firstHash: string, secondHash: string) =>
     gitService.coalesceCommits(p, firstHash, secondHash)

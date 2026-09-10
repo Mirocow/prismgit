@@ -72,3 +72,12 @@ export function saveProjectPrefs(repoPath: string, prefs: Partial<ProjectPrefs>)
     /* ignore — private mode / quota */
   }
 }
+
+/** Remove all saved UI preferences for a repository (Window | Reset Perspective). */
+export function clearProjectPrefs(repoPath: string): void {
+  try {
+    localStorage.removeItem(PREFIX + repoPath);
+  } catch {
+    /* localStorage unavailable */
+  }
+}

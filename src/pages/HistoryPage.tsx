@@ -23,6 +23,9 @@ import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
+import { linkifyCommitMessage } from '../lib/bugtraq';
+import { StickyNote } from '../components/icons';
+import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { RefBadges } from '../lib/refBadge';
 import { useLazyList } from '../lib/useLazyList';
@@ -31,6 +34,7 @@ import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
+import { useAuthStore } from '../stores/authStore';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
@@ -87,6 +91,15 @@ export function HistoryPage() {
   const [hashHit, setHashHit] = useState<LogEntry | null>(null);
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
   const showContextMenu = useContextMenu();
+
+  // ===== SmartGit integrations =====
+  // Bugtraq: issue-tracker links in commit messages (.gitbugtraq / [bugtraq])
+  const [bugtraq, setBugtraq] = useState<BugtraqConfig | null>(null);
+  useEffect(() => {
+    api.git.bugtraqConfig(repo.path).then(setBugtraq).catch(() => setBugtraq(null));
+  }, [repo.path]);
+
+
   const scrollRef = useRef<HTMLDivElement>(null);
   // Global selection — selecting a commit here propagates to Tags, Annotate, etc.
   const selectCommit = useSelectionStore((s) => s.selectCommit);
@@ -338,6 +351,50 @@ export function HistoryPage() {
       .finally(() => setLoadingFiles(false));
   }, [selectedIdx, repo.path, filtered]);
 
+  // GitHub Actions CI badges (Standard Window "My History" feature) — only for
+  // GitHub repos with an authenticated user; batched per visible commits.
+  const authUser = useAuthStore((s) => s.user);
+  const [ciStatus, setCiStatus] = useState<Record<string, CommitCheckStatus>>({});
+  const ciLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!authUser) return;
+    // repo identity — resolve once
+    let cancelled = false;
+    let ownerRepo: { owner: string; repo: string } | null = null;
+    api.git.extractRepoInfo(repo.path).then((info) => {
+      if (cancelled) return;
+      const m = info.webUrl?.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
+      if (m) ownerRepo = { owner: m[1], repo: m[2] };
+    }).catch(() => {}).finally(() => {
+      if (cancelled || !ownerRepo) return;
+      // (Re)load CI status when the visible page of commits changes (debounced)
+      if (ciLoadTimer.current) clearTimeout(ciLoadTimer.current);
+      ciLoadTimer.current = setTimeout(async () => {
+        const shas = filtered.slice(0, 25).map((c) => c.hash);
+        if (shas.length === 0) return;
+        try {
+          const res = await api.github.getCheckRuns(ownerRepo!.owner, ownerRepo!.repo, shas);
+          if (!cancelled) setCiStatus((prev) => ({ ...prev, ...res }));
+        } catch { /* CI badges degrade silently */ }
+      }, 800);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo.path, authUser, filtered.length]);
+
+  // Git Notes badge for the selected commit
+  const [selectedNote, setSelectedNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (selectedIdx === null || selectedIdx < 0) { setSelectedNote(null); return; }
+    const sel = filtered[selectedIdx];
+    if (!sel) { setSelectedNote(null); return; }
+    let cancelled = false;
+    api.git.notesShow(repo.path, 'commits', sel.hash)
+      .then((n) => { if (!cancelled) setSelectedNote(n && n.trim() ? n.trim() : null); })
+      .catch(() => { if (!cancelled) setSelectedNote(null); });
+    return () => { cancelled = true; };
+  }, [selectedIdx, filtered, repo.path]);
+
   const handleCherryPick = async (entry: LogEntry) => {
     if (!(await confirmDialog({
       title: `Cherry-pick ${shortHash(entry.hash)}`,
@@ -490,6 +547,57 @@ export function HistoryPage() {
     } catch (e) { toast.error('Failed', String(e)); }
   };
 
+  const handleEditAuthor = async (entry: LogEntry) => {
+    const value = await promptDialog({
+      title: 'Edit Commit Author',
+      message: `Author of ${shortHash(entry.hash)} — current: ${entry.author.name} <${entry.author.email}>`,
+      input: { initialValue: `${entry.author.name} <${entry.author.email}>` },
+    });
+    if (!value) return;
+    const m = value.match(/^([^<]+)<([^>]+)>\s*$/);
+    if (!m) { toast.error('Invalid format', 'Use: Name <email>'); return; }
+    try {
+      await api.git.editCommitAuthor(repo.path, entry.hash, m[1].trim(), m[2].trim());
+      toast.success('Author updated');
+      await loadHistory();
+    } catch (e) { toast.error('Edit author failed', String(e)); }
+  };
+
+  const handleAddNote = async (entry: LogEntry) => {
+    const existing = await api.git.notesShow(repo.path, 'commits', entry.hash).catch(() => null);
+    const message = await promptDialog({
+      title: existing ? 'Edit Note' : 'Add Note',
+      message: `Git note on ${shortHash(entry.hash)} (category commits)`,
+      input: { initialValue: existing ?? '' },
+    });
+    if (message === null) return;
+    if (message.trim() === '') {
+      if (existing) {
+        try { await api.git.notesRemove(repo.path, 'commits', entry.hash); toast.success('Note removed'); }
+        catch (e) { toast.error('Remove note failed', String(e)); }
+      }
+      return;
+    }
+    try {
+      await api.git.notesAdd(repo.path, 'commits', entry.hash, message.trim(), true);
+      toast.success('Note saved');
+      await loadHistory();
+    } catch (e) { toast.error('Save note failed', String(e)); }
+  };
+
+  const handleFormatPatch = async (entry: LogEntry) => {
+    const outDir = await promptDialog({
+      title: 'Format Patch',
+      message: `Write a .patch file for ${shortHash(entry.hash)} to`,
+      input: { initialValue: `${repo.path}/patches` },
+    });
+    if (!outDir) return;
+    try {
+      const files = await api.git.formatPatch(repo.path, { outputDir: outDir, commit: entry.hash });
+      await confirmDialog({ title: 'Format Patch', message: `Written:\n${files.join('\n')}`, confirmLabel: 'Close', hideCancel: true });
+    } catch (e) { toast.error('Format patch failed', String(e)); }
+  };
+
   const handleOpenInBrowser = async () => {
     if (selectedIdx === null) return;
     const selected = filtered[selectedIdx];
@@ -538,6 +646,10 @@ export function HistoryPage() {
       { label: 'Copy Commit Message', clickId: 'copy-msg' },
       { type: 'separator' },
       { label: 'Edit Commit Message...', clickId: 'edit-msg' },
+      { label: 'Edit Commit Author...', clickId: 'edit-author' },
+      { type: 'separator' },
+      { label: 'Add Note...', clickId: 'add-note' },
+      { label: 'Format Patch...', clickId: 'format-patch' },
       { label: 'Open in Browser', clickId: 'browser' },
     ];
     showContextMenu(items, (action) => {
@@ -569,6 +681,9 @@ export function HistoryPage() {
         case 'copy-full': copyToClipboard(entry.hash); toast.success('Copied'); break;
         case 'copy-msg': copyToClipboard(entry.subject); toast.success('Copied'); break;
         case 'edit-msg': handleEditMessage(entry); break;
+        case 'edit-author': handleEditAuthor(entry); break;
+        case 'add-note': handleAddNote(entry); break;
+        case 'format-patch': handleFormatPatch(entry); break;
         case 'browser': handleOpenInBrowser(); break;
         case 'show-commit-diff': handleShowCommitDiff(entry); break;
         case 'split-off': handleOpenSplitOff(entry); break;
@@ -581,14 +696,6 @@ export function HistoryPage() {
   };
 
   // Git Notes — SmartGit Manual: Notes with custom categories
-  const handleAddNote = async (entry: LogEntry) => {
-    const content = window.prompt(`Add a Git Note for ${shortHash(entry.hash)}:`, '');
-    if (!content?.trim()) return;
-    try {
-      await api.git.noteAdd(repo.path, entry.hash, content.trim());
-      toast.success('Note added');
-    } catch (e) { toast.error('Failed to add note', String(e)); }
-  };
 
   const handleShowNote = async (entry: LogEntry) => {
     try {
@@ -1034,7 +1141,36 @@ export function HistoryPage() {
                         from BOTH short and --decorate=full shapes (see refBadge). */}
                     <RefBadges refs={entry.refs} max={3} hash={entry.hash} onChanged={loadHistory} />
 
-                    <span className={cn('flex-1 truncate text-xs', isSelected ? 'font-semibold text-text-primary' : 'font-medium text-text-primary')}>{entry.subject}</span>
+                    {/* GitHub Actions CI badge (SmartGit "My History" CI integrations) */}
+                    {ciStatus[entry.hash]?.conclusion && (
+                      <span
+                        className="flex-shrink-0 text-2xs"
+                        title={`CI: ${ciStatus[entry.hash].conclusion} (${ciStatus[entry.hash].totalChecks} checks)`}
+                      >
+                        {ciStatus[entry.hash].conclusion === 'success' && <span className="text-green-500">●</span>}
+                        {ciStatus[entry.hash].conclusion === 'failure' && <span className="text-red-500">●</span>}
+                        {ciStatus[entry.hash].conclusion === 'running' && <span className="text-yellow-500 animate-pulse">●</span>}
+                      </span>
+                    )}
+
+                    <span className={cn('flex-1 truncate text-xs', isSelected ? 'font-semibold text-text-primary' : 'font-medium text-text-primary')}>
+                      {bugtraq
+                        ? linkifyCommitMessage(entry.subject, bugtraq).map((seg, i) =>
+                            seg.url ? (
+                              <a
+                                key={i}
+                                href={seg.url}
+                                className="text-accent hover:underline"
+                                onClick={(e) => { e.stopPropagation(); api.app.openExternal(seg.url!); }}
+                              >
+                                {seg.text}
+                              </a>
+                            ) : (
+                              <span key={i}>{seg.text}</span>
+                            )
+                          )
+                        : entry.subject}
+                    </span>
 
                     {/* Hash — clicking ANY commit hash opens History focused on
                         that commit (same as PARENTS links); copy lives in the
@@ -1067,7 +1203,25 @@ export function HistoryPage() {
         <div className="bg-bg-secondary overflow-y-auto flex-shrink-0" style={{ width: detailWidth }}>
           {selected ? (
             <div className="p-3">
-              <div className="text-sm font-medium text-text-primary mb-2">{selected.subject}</div>
+              <div className="text-sm font-medium text-text-primary mb-2">
+                {bugtraq
+                  ? linkifyCommitMessage(selected.subject, bugtraq).map((seg, i) =>
+                      seg.url ? (
+                        <a key={i} href={seg.url} className="text-accent hover:underline" onClick={(e) => { e.preventDefault(); api.app.openExternal(seg.url!); }}>
+                          {seg.text}
+                        </a>
+                      ) : (
+                        <span key={i}>{seg.text}</span>
+                      )
+                    )
+                  : selected.subject}
+              </div>
+              {selectedNote && (
+                <div className="mb-2 px-2 py-1.5 rounded bg-amber-500/10 border border-amber-500/30 flex items-start gap-1.5">
+                  <StickyNote size={12} className="text-amber-500 mt-0.5 shrink-0" />
+                  <pre className="text-2xs whitespace-pre-wrap flex-1 text-text-secondary">{selectedNote}</pre>
+                </div>
+              )}
               {/* Tags and branch refs on this commit (shared badge renderer) */}
               <RefBadges refs={selected.refs} className="mb-3" hash={selected.hash} onChanged={loadHistory} />
               <div className="flex items-center gap-2 mb-3">

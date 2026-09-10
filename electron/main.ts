@@ -3,6 +3,7 @@ import * as path from 'path';
 import { registerGitIpc } from './ipc/git.js';
 import { registerFsIpc } from './ipc/fs.js';
 import { registerGithubIpc } from './ipc/github.js';
+import { registerAiIpc } from './ipc/ai.js';
 import { registerWindowIpc } from './ipc/window.js';
 import { registerSettingsIpc } from './ipc/settings.js';
 import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
@@ -154,6 +155,7 @@ app.whenReady().then(() => {
   registerGitIpc();
   registerFsIpc();
   registerGithubIpc();
+  registerAiIpc();
   registerWindowIpc();
   registerSettingsIpc();
   registerWatcherIpc();

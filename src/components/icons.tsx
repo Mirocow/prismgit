@@ -362,6 +362,57 @@ export const GitMerge = (p: IconProps) => (
   </Icon>
 );
 
+export const ArrowRight = (p: IconProps) => (
+  <Icon {...p}>
+    <line x1="5" y1="12" x2="19" y2="12" />
+    <polyline points="12 5 19 12 12 19" />
+  </Icon>
+);
+
+export const ArrowLeft = (p: IconProps) => (
+  <Icon {...p}>
+    <line x1="19" y1="12" x2="5" y2="12" />
+    <polyline points="12 19 5 12 12 5" />
+  </Icon>
+);
+
+export const Save = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+    <polyline points="17 21 17 13 7 13 7 21" />
+    <polyline points="7 3 7 8 15 8" />
+  </Icon>
+);
+
+export const StickyNote = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 9V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10l6-6V9z" />
+    <path d="M15 21v-6h6" />
+  </Icon>
+);
+
+export const CloudUpload = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+    <path d="M12 12v9" />
+    <path d="m16 16-4-4-4 4" />
+  </Icon>
+);
+
+export const SplitSquareHorizontal = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <line x1="12" y1="3" x2="12" y2="21" />
+  </Icon>
+);
+
+export const Lock = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </Icon>
+);
+
 export const CornerDownRight = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="15 10 20 15 15 20" />
@@ -478,12 +529,6 @@ export const Recycle = (p: IconProps) => (
   </Icon>
 );
 
-export const Lock = (p: IconProps) => (
-  <Icon {...p}>
-    <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
-    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-  </Icon>
-);
 
 export const Unlock = (p: IconProps) => (
   <Icon {...p}>

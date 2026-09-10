@@ -192,20 +192,59 @@ const api = {
     unstageLines: (repoPath: string, file: string, ranges: { start: number; end: number }[]) =>
       ipcRenderer.invoke('git:unstageLines', repoPath, file, ranges),
 
-    // SmartGit Manual extended features
+    // ===== Git Notes (SmartGit Notes feature) =====
+    noteCategories: (repoPath: string) => ipcRenderer.invoke('git:noteCategories', repoPath),
+    notesList: (repoPath: string, notesRef: string, maxCount?: number) =>
+      ipcRenderer.invoke('git:notesList', repoPath, notesRef, maxCount),
+    notesShow: (repoPath: string, notesRef: string, commit: string) =>
+      ipcRenderer.invoke('git:notesShow', repoPath, notesRef, commit),
+    notesAdd: (repoPath: string, notesRef: string, commit: string, message: string, force?: boolean) =>
+      ipcRenderer.invoke('git:notesAdd', repoPath, notesRef, commit, message, force),
+    notesRemove: (repoPath: string, notesRef: string, commit: string) =>
+      ipcRenderer.invoke('git:notesRemove', repoPath, notesRef, commit),
+
+    // ===== Subtrees (Remote | Subtree) =====
+    subtrees: (repoPath: string) => ipcRenderer.invoke('git:subtrees', repoPath),
+    subtreeAdd: (repoPath: string, opts: { name: string; path: string; remote: string; branch: string; squash?: boolean; remoteUrl?: string }) =>
+      ipcRenderer.invoke('git:subtreeAdd', repoPath, opts),
+    subtreePull: (repoPath: string, name: string) => ipcRenderer.invoke('git:subtreePull', repoPath, name),
+    subtreePush: (repoPath: string, name: string) => ipcRenderer.invoke('git:subtreePush', repoPath, name),
+    subtreeSplit: (repoPath: string, name: string, opts?: { rejoin?: boolean; annotate?: string }) =>
+      ipcRenderer.invoke('git:subtreeSplit', repoPath, name, opts),
+    subtreeRemove: (repoPath: string, name: string) => ipcRenderer.invoke('git:subtreeRemove', repoPath, name),
+
+    // ===== LFS file locks =====
+    lfsLocks: (repoPath: string, local?: boolean) => ipcRenderer.invoke('git:lfsLocks', repoPath, local),
+    lfsLock: (repoPath: string, file: string) => ipcRenderer.invoke('git:lfsLock', repoPath, file),
+    lfsUnlock: (repoPath: string, file: string, force?: boolean) =>
+      ipcRenderer.invoke('git:lfsUnlock', repoPath, file, force),
+
+    // ===== Format Patch =====
+    formatPatch: (repoPath: string, opts: { outputDir: string; commit?: string; from?: string; to?: string }) =>
+      ipcRenderer.invoke('git:formatPatch', repoPath, opts),
+
+    // ===== Edit commit author =====
+    editCommitAuthor: (repoPath: string, hash: string, name: string, email: string) =>
+      ipcRenderer.invoke('git:editCommitAuthor', repoPath, hash, name, email),
+
+    // ===== Verify Database / GC / Recyclable =====
+    verifyDatabase: (repoPath: string) => ipcRenderer.invoke('git:verifyDatabase', repoPath),
+    garbageCollect: (repoPath: string, aggressive?: boolean) =>
+      ipcRenderer.invoke('git:garbageCollect', repoPath, aggressive),
+    unreachableCommits: (repoPath: string) => ipcRenderer.invoke('git:unreachableCommits', repoPath),
+
+    // ===== Bugtraq =====
+    bugtraqConfig: (repoPath: string) => ipcRenderer.invoke('git:bugtraqConfig', repoPath),
+
+    // ===== Index Editor helpers =====
+    setIndexContent: (repoPath: string, file: string, content: string) =>
+      ipcRenderer.invoke('git:setIndexContent', repoPath, file, content),
+    showFile: (repoPath: string, ref: string, file: string) =>
+      ipcRenderer.invoke('git:showFile', repoPath, ref, file),
+
+    // ===== SmartGit Manual — Power User batch (merged) =====
     recyclableCommits: (repoPath: string) => ipcRenderer.invoke('git:recyclableCommits', repoPath),
-    subtreeAdd: (repoPath: string, prefix: string, url: string, branch: string, squash?: boolean) =>
-      ipcRenderer.invoke('git:subtreeAdd', repoPath, prefix, url, branch, squash),
-    subtreePull: (repoPath: string, prefix: string, url: string, branch: string, squash?: boolean) =>
-      ipcRenderer.invoke('git:subtreePull', repoPath, prefix, url, branch, squash),
-    subtreePush: (repoPath: string, prefix: string, remote: string, branch: string, squash?: boolean) =>
-      ipcRenderer.invoke('git:subtreePush', repoPath, prefix, remote, branch, squash),
-    subtreeSplit: (repoPath: string, prefix: string, branch?: string, rejoin?: boolean) =>
-      ipcRenderer.invoke('git:subtreeSplit', repoPath, prefix, branch, rejoin),
     lfsListLocks: (repoPath: string, remote?: string) => ipcRenderer.invoke('git:lfsListLocks', repoPath, remote),
-    lfsLock: (repoPath: string, file: string, remote?: string) => ipcRenderer.invoke('git:lfsLock', repoPath, file, remote),
-    lfsUnlock: (repoPath: string, file: string, remote?: string) => ipcRenderer.invoke('git:lfsUnlock', repoPath, file, remote),
-    notesList: (repoPath: string, ref?: string) => ipcRenderer.invoke('git:notesList', repoPath, ref),
     noteShow: (repoPath: string, commit: string, ref?: string) => ipcRenderer.invoke('git:noteShow', repoPath, commit, ref),
     noteAdd: (repoPath: string, commit: string, content: string, ref?: string, force?: boolean) =>
       ipcRenderer.invoke('git:noteAdd', repoPath, commit, content, ref, force),
@@ -242,6 +281,8 @@ const api = {
       ipcRenderer.invoke('github:createPullRequest', owner, repo, data),
     listPullRequests: (owner: string, repo: string, state?: 'open' | 'closed' | 'all') =>
       ipcRenderer.invoke('github:listPullRequests', owner, repo, state),
+    getCheckRuns: (owner: string, repo: string, shas: string[]) =>
+      ipcRenderer.invoke('github:getCheckRuns', owner, repo, shas),
     logout: () => ipcRenderer.invoke('github:logout'),
     getAuthState: () => ipcRenderer.invoke('github:getAuthState'),
   } as GithubApi,
@@ -252,8 +293,10 @@ const api = {
     openRepositoryPicker: () => ipcRenderer.invoke('dialog:openRepository'),
     showSaveDialog: (opts: Electron.SaveDialogOptions) => ipcRenderer.invoke('dialog:showSaveDialog', opts),
     readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
+    writeFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
     pathBasename: (filePath: string) => ipcRenderer.invoke('fs:pathBasename', filePath),
     pathDirname: (filePath: string) => ipcRenderer.invoke('fs:pathDirname', filePath),
+    openTerminal: (dirPath: string) => ipcRenderer.invoke('fs:openTerminal', dirPath),
   } as FsApi,
 
   // Settings
@@ -326,6 +369,12 @@ const api = {
   // Clipboard
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
+  },
+
+  // AI integration (SmartGit 25 AI Assisted Commenting)
+  ai: {
+    generateCommitMessage: (cfg: { url: string; apiKey?: string; model: string; maxDiffSize?: number; prompt?: string }, diff: string, hint?: string) =>
+      ipcRenderer.invoke('ai:generateCommitMessage', cfg, diff, hint),
   },
 
   // Menu events (one-way from main to renderer)

@@ -640,6 +640,33 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     return diffs.join('\n\n');
   };
 
+  // SmartGit "Local | Stash Selection..." — the app menu dispatches this event
+  // after navigating to Changes; stash exactly the files selected in the table.
+  useEffect(() => {
+    const handler = async () => {
+      if (selectedFiles.size === 0) {
+        toast.warning('No files selected', 'Select files in the table first, then Local | Stash Selection');
+        return;
+      }
+      const msg = await promptDialog({
+        title: 'Stash Selection',
+        message: `Stash ${selectedFiles.size} selected file(s)`,
+        input: { initialValue: 'Selected files' },
+      });
+      if (!msg) return;
+      try {
+        await api.git.stashPush(repo.path, msg, true, false, Array.from(selectedFiles));
+        toast.success(`Stashed ${selectedFiles.size} file(s)`);
+        setSelectedFiles(new Set());
+        refreshStatus(repo.path);
+      } catch (e) {
+        toast.error('Stash failed', String(e));
+      }
+    };
+    window.addEventListener('smartgit:stash-selection', handler);
+    return () => window.removeEventListener('smartgit:stash-selection', handler);
+  }, [selectedFiles, repo.path, refreshStatus, toast]);
+
   const handleCommitAndPush = async () => {
     await handleCommit();
     try {

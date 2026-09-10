@@ -47,6 +47,8 @@ export interface ConfirmDialogOptions {
   danger?: boolean;
   /** When set, the dialog shows a single-line text input (prompt mode). */
   input?: ConfirmDialogInput;
+  /** Hide the Cancel button — turns the dialog into a plain message box. */
+  hideCancel?: boolean;
   /** Prompt mode only: return an error string to block confirming. */
   validate?: (value: string) => string | null;
 }
@@ -176,12 +178,14 @@ export function ConfirmDialogHost() {
           </div>
         </div>
         <div className="flex justify-end gap-2 px-4 py-3">
-          <button
-            className="btn btn-secondary text-xs"
-            onClick={() => finish(req.input ? null : false)}
-          >
-            {req.cancelLabel ?? 'Cancel'}
-          </button>
+          {!req.hideCancel && (
+            <button
+              className="btn btn-secondary text-xs"
+              onClick={() => finish(req.input ? null : false)}
+            >
+              {req.cancelLabel ?? 'Cancel'}
+            </button>
+          )}
           <button
             ref={confirmBtnRef}
             className={req.danger ? 'btn btn-danger text-xs' : 'btn btn-primary text-xs'}

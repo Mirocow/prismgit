@@ -20,6 +20,15 @@ import type {
   BlameResult,
   GitConfigEntry,
   DirNode,
+  NoteCategory,
+  CommitNote,
+  SubtreeInfo,
+  LfsLock,
+  LfsLockInfo,
+  RecyclableCommit,
+  BidirectionalBlameResult,
+  UnreachableCommit,
+  BugtraqConfig,
 } from '../types/git-api.js';
 
 const gitCache = new Map<string, SimpleGit>();
@@ -2589,6 +2598,530 @@ export async function deleteFile(repoPath: string, file: string): Promise<void> 
   invalidateCache(repoPath);
 }
 
+// =====================================================================
+// Git Notes (SmartGit Notes feature: add/remove notes on commits,
+// categories via [smartgit-notes "<id>"] config sections)
+// =====================================================================
+
+/** List note categories: default "commits" plus configured smartgit-notes sections. */
+export async function noteCategories(repoPath: string): Promise<NoteCategory[]> {
+  const git = getGit(repoPath);
+  const categories = new Map<string, NoteCategory>();
+  // Default category — always offered (git creates refs/notes/commits on first add)
+  categories.set('commits', { id: 'Notes', ref: 'commits' });
+  // Configured categories: smartgit.notes.<id>.ref / .color / .graphmessageregex
+  try {
+    // NOTE: --null must precede --get-regexp
+    const out = await git.raw(['config', '--null', '--get-regexp', '^smartgit\\.notes\\.']);
+    const entries = parseNullSeparatedConfig(out);
+    for (const [key, value] of Object.entries(entries)) {
+      const m = key.match(/^smartgit\.notes\.([^.]+)\.(ref|color|graphmessageregex)$/);
+      if (!m) continue;
+      const id = m[1];
+      const cat = categories.get(id) || { id, ref: id };
+      if (m[2] === 'ref') { cat.ref = value.trim(); cat.id = id; }
+      else if (m[2] === 'color') cat.color = value.trim();
+      else if (m[2] === 'graphmessageregex') cat.graphRegex = value.trim();
+      categories.set(id, cat);
+    }
+  } catch { /* no configured categories */ }
+  // Auto-detect existing note refs (refs/notes/*) — SmartGit shows them as categories too
+  try {
+    const refsOut = await git.raw(['for-each-ref', '--format=%(refname)', 'refs/notes/']);
+    for (const refname of refsOut.split('\n').map((l) => l.trim()).filter(Boolean)) {
+      const ref = refname.replace(/^refs\/notes\//, '');
+      if (ref && !categories.has(ref)) categories.set(ref, { id: ref, ref });
+    }
+  } catch { /* ignore */ }
+  return Array.from(categories.values());
+}
+
+/** List all notes in a category: [{ commit, note }]. Single git log pass (%N shows notes). */
+export async function notesList(
+  repoPath: string,
+  notesRef: string,
+  maxCount = 500
+): Promise<CommitNote[]> {
+  const git = getGit(repoPath);
+  // %N — display the notes of the commit for the given --notes ref.
+  const out = await git.raw([
+    'log', `--notes=${notesRef}`, '--all',
+    `--max-count=${maxCount}`,
+    '--format=%H%x01%N%x02',
+  ]);
+  const result: CommitNote[] = [];
+  const re = /([0-9a-f]{40})\x01([\s\S]*?)\x02/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(out)) !== null) {
+    const note = m[2].replace(/^\n+/, '').replace(/\s+$/, '');
+    if (note) result.push({ commit: m[1], note });
+  }
+  return result;
+}
+
+/** Show the note of a single commit (null when the commit has no note). */
+export async function notesShow(
+  repoPath: string,
+  notesRef: string,
+  commit: string
+): Promise<string | null> {
+  const git = getGit(repoPath);
+  try {
+    return await git.raw(['notes', `--ref=${notesRef}`, 'show', commit]);
+  } catch {
+    return null;
+  }
+}
+
+/** Add (or overwrite with force) a note on a commit. */
+export async function notesAdd(
+  repoPath: string,
+  notesRef: string,
+  commit: string,
+  message: string,
+  force = false
+): Promise<void> {
+  const git = getGit(repoPath);
+  const args = ['notes', `--ref=${notesRef}`, 'add'];
+  if (force) args.push('--force');
+  args.push('-m', message, commit);
+  await git.raw(args);
+  invalidateCache(repoPath);
+}
+
+/** Remove the note from a commit (throws if the commit has no note in this category). */
+export async function notesRemove(
+  repoPath: string,
+  notesRef: string,
+  commit: string
+): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['notes', `--ref=${notesRef}`, 'remove', commit]);
+  invalidateCache(repoPath);
+}
+
+// =====================================================================
+// Subtrees (SmartGit Remote | Subtree: Add / Pull / Push / Split / Reset)
+// Configuration persisted in subtree.<name>.* config keys.
+// =====================================================================
+
+function subtreeConfigKey(name: string, key: string): string {
+  return `subtree.${name}.${key}`;
+}
+
+/** List configured subtrees. */
+export async function subtrees(repoPath: string): Promise<SubtreeInfo[]> {
+  const git = getGit(repoPath);
+  const info = new Map<string, Partial<SubtreeInfo>>();
+  try {
+    const out = await git.raw(['config', '--null', '--get-regexp', '^subtree\\.']);
+    const entries = parseNullSeparatedConfig(out);
+    for (const [key, value] of Object.entries(entries)) {
+      const m = key.match(/^subtree\.([^.]+)\.(path|remote|branch|squash)$/);
+      if (!m) continue;
+      const name = m[1];
+      const t = info.get(name) || { name };
+      if (m[2] === 'path') t.path = value;
+      else if (m[2] === 'remote') t.remote = value;
+      else if (m[2] === 'branch') t.branch = value;
+      else if (m[2] === 'squash') t.squash = value === 'true' || value === '1';
+      info.set(name, t);
+    }
+  } catch { /* none configured */ }
+  return Array.from(info.values())
+    .filter((t) => t.path && t.remote && t.branch)
+    .map((t) => ({ name: t.name!, path: t.path!, remote: t.remote!, branch: t.branch!, squash: !!t.squash }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function requireSubtree(repoPath: string, name: string): Promise<SubtreeInfo> {
+  const all = await subtrees(repoPath);
+  const t = all.find((x) => x.name === name);
+  if (!t) throw new Error(`Subtree "${name}" is not configured`);
+  return t;
+}
+
+/** Verify git-subtree is available (it is a git contrib command). */
+async function assertSubtreeAvailable(git: SimpleGit): Promise<void> {
+  try {
+    await git.raw(['subtree', '-h']);
+  } catch (e) {
+    const msg = String(e);
+    if (/is not a git command|unknown option/i.test(msg)) {
+      throw new Error(
+        'git-subtree is not available in your Git installation. Install git-full / git-subtree package.'
+      );
+    }
+  }
+}
+
+/** Add a subtree: fetch remote, `git subtree add --prefix=<path> <remote>/<branch> [--squash]`, persist config. */
+export async function subtreeAdd(
+  repoPath: string,
+  opts: { name: string; path: string; remote: string; branch: string; squash?: boolean; remoteUrl?: string }
+): Promise<void> {
+  const git = getGit(repoPath);
+  await assertSubtreeAvailable(git);
+  const prefix = opts.path.replace(/^\/+|\/+$/g, '');
+  if (!prefix) throw new Error('Subtree path must not be empty');
+  const absPrefix = path.resolve(repoPath, prefix);
+  if (!absPrefix.startsWith(path.resolve(repoPath))) throw new Error('Subtree path escapes the repository');
+  if (fs.existsSync(absPrefix) && fs.readdirSync(absPrefix).length > 0) {
+    throw new Error(`Directory "${prefix}" already exists and is not empty`);
+  }
+  // Register or verify the remote, then fetch it so <remote>/<branch> exists
+  const remotes = await git.getRemotes(false);
+  const exists = remotes.some((r) => r.name === opts.remote);
+  if (!exists) {
+    if (!opts.remoteUrl) throw new Error(`Remote "${opts.remote}" does not exist — provide a URL to create it`);
+    await addRemote(repoPath, opts.remote, opts.remoteUrl);
+  }
+  await git.raw(['fetch', opts.remote]);
+  const squashArgs = opts.squash ? ['--squash'] : [];
+  await git.raw(['subtree', 'add', `--prefix=${prefix}`, `${opts.remote}/${opts.branch}`, ...squashArgs]);
+  // Persist configuration
+  await git.raw(['config', subtreeConfigKey(opts.name, 'path'), prefix]);
+  await git.raw(['config', subtreeConfigKey(opts.name, 'remote'), opts.remote]);
+  await git.raw(['config', subtreeConfigKey(opts.name, 'branch'), opts.branch]);
+  await git.raw(['config', subtreeConfigKey(opts.name, 'squash'), String(!!opts.squash)]);
+  invalidateCache(repoPath);
+}
+
+/** Fetch and merge new upstream changes into the subtree (git subtree pull). */
+export async function subtreePull(repoPath: string, name: string): Promise<void> {
+  const git = getGit(repoPath);
+  await assertSubtreeAvailable(git);
+  const t = await requireSubtree(repoPath, name);
+  await git.raw(['fetch', t.remote]);
+  const squashArgs = t.squash ? ['--squash'] : [];
+  await git.raw(['subtree', 'pull', `--prefix=${t.path}`, t.remote, t.branch, ...squashArgs]);
+  invalidateCache(repoPath);
+}
+
+/** Split local subtree changes back out and push them to the subtree remote (git subtree push). */
+export async function subtreePush(repoPath: string, name: string): Promise<void> {
+  const git = getGit(repoPath);
+  await assertSubtreeAvailable(git);
+  const t = await requireSubtree(repoPath, name);
+  await git.raw(['subtree', 'push', `--prefix=${t.path}`, t.remote, t.branch]);
+}
+
+/** Extract subtree commits into a local branch (git subtree split) for review/push. */
+export async function subtreeSplit(
+  repoPath: string,
+  name: string,
+  opts?: { rejoin?: boolean; annotate?: string }
+): Promise<string> {
+  const git = getGit(repoPath);
+  await assertSubtreeAvailable(git);
+  const t = await requireSubtree(repoPath, name);
+  const branch = `subtree/${t.name}`;
+  const buildArgs = (rejoin: boolean) => {
+    const args = ['subtree', 'split', `--prefix=${t.path}`, `--branch=${branch}`];
+    if (rejoin) args.push('--rejoin');
+    if (opts?.annotate) args.push(`--annotate=${opts.annotate}`);
+    return args;
+  };
+  try {
+    await git.raw(buildArgs(!!opts?.rejoin));
+  } catch (e) {
+    // Known git-subtree regression: --rejoin can fail with
+    // "refusing to merge unrelated histories". Retry without --rejoin —
+    // the split itself still succeeds (only the history-reuse optimization is lost).
+    if (opts?.rejoin && /unrelated histories/i.test(String(e))) {
+      await git.raw(buildArgs(false));
+    } else {
+      throw e;
+    }
+  }
+  invalidateCache(repoPath);
+  return branch;
+}
+
+/** Remove the subtree configuration (does NOT touch the working tree content). */
+export async function subtreeRemove(repoPath: string, name: string): Promise<void> {
+  const git = getGit(repoPath);
+  await requireSubtree(repoPath, name);
+  for (const key of ['path', 'remote', 'branch', 'squash']) {
+    try {
+      await git.raw(['config', '--unset', subtreeConfigKey(name, key)]);
+    } catch { /* already unset */ }
+  }
+}
+
+// =====================================================================
+// LFS file locks (SmartGit Local | LFS | Lock / Unlock)
+// =====================================================================
+
+/** List LFS locks. local=true reads only local locks (no server round-trip). */
+export async function lfsLocks(repoPath: string, local = false): Promise<LfsLockInfo[]> {
+  const git = getGit(repoPath);
+  const args = ['lfs', 'locks'];
+  if (local) args.push('--local');
+  try {
+    const out = await git.raw(args);
+    const locks: LfsLockInfo[] = [];
+    for (const line of out.split('\n').filter((l) => l.trim())) {
+      // Format: ID <tab> Path <tab> Owner (JSON output may vary between versions)
+      let parsed: { id?: unknown; path?: unknown; owner?: { name?: unknown } } | null = null;
+      try { parsed = JSON.parse(line); } catch { /* plain text format */ }
+      if (parsed && typeof parsed.path === 'string') {
+        locks.push({
+          id: String(parsed.id ?? ''),
+          path: parsed.path,
+          owner: parsed.owner && typeof parsed.owner.name === 'string' ? parsed.owner.name : undefined,
+        });
+        continue;
+      }
+      const m = line.match(/(\S+)\s+(.+?)(?:\s+(?:by\s+)?(\S+))?$/);
+      if (m) locks.push({ id: m[1], path: m[2], owner: m[3] });
+    }
+    return locks;
+  } catch (e) {
+    // Locks need LFS + server support; surface a clear error to the caller
+    throw new Error(`Failed to list LFS locks: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/** Lock a file on the LFS server for exclusive editing. */
+export async function lfsLock(repoPath: string, file: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['lfs', 'lock', file]);
+}
+
+/** Unlock a file; force removes a lock owned by someone else (requires permissions). */
+export async function lfsUnlock(repoPath: string, file: string, force = false): Promise<void> {
+  const git = getGit(repoPath);
+  const args = ['lfs', 'unlock'];
+  if (force) args.push('--force');
+  args.push(file);
+  await git.raw(args);
+}
+
+// =====================================================================
+// Format Patch (git format-patch) — SmartGit legacy "Format Patch" tool
+// =====================================================================
+
+/** Write patch files for a commit (or commit range) into outputDir; returns created file paths. */
+export async function formatPatch(
+  repoPath: string,
+  opts: { outputDir: string; commit?: string; from?: string; to?: string }
+): Promise<string[]> {
+  const git = getGit(repoPath);
+  fs.mkdirSync(opts.outputDir, { recursive: true });
+  const args = ['format-patch', '-o', opts.outputDir, '--no-numbered'];
+  if (opts.from && opts.to) {
+    args.push(`${opts.from}..${opts.to}`);
+  } else if (opts.commit) {
+    args.push('-1', opts.commit);
+  } else {
+    throw new Error('formatPatch requires a commit or a from..to range');
+  }
+  const out = await git.raw(args);
+  return out.split('\n').map((l) => l.trim()).filter(Boolean);
+}
+
+// =====================================================================
+// Edit commit author (SmartGit "Edit Author")
+// =====================================================================
+
+/** Change the author of a commit (HEAD via amend, older commits via filter-branch env-filter). */
+export async function editCommitAuthor(
+  repoPath: string,
+  hash: string,
+  name: string,
+  email: string
+): Promise<void> {
+  const git = getGit(repoPath);
+  if (hash === 'HEAD' || hash === (await revParse(repoPath, 'HEAD'))) {
+    // --allow-empty keeps author-only edits working when HEAD happens to be an empty commit
+    await git.raw(['commit', '--amend', '--no-edit', '--allow-empty', '--author', `${name} <${email}>`]);
+    return;
+  }
+  const esc = (s: string) => s.replace(/'/g, `'\\''`);
+  await git.raw([
+    'filter-branch', '-f', '--env-filter',
+    `if [ "$GIT_COMMIT" = "${hash}" ]; then ` +
+    `export GIT_AUTHOR_NAME='${esc(name)}'; ` +
+    `export GIT_AUTHOR_EMAIL='${esc(email)}'; fi`,
+    `${hash}^..HEAD`,
+  ]);
+  invalidateCache(repoPath);
+}
+
+// =====================================================================
+// Verify Database / Garbage Collect (SmartGit Query menu)
+// =====================================================================
+
+/** Run `git fsck --full` and return its combined output (report includes warnings/errors). */
+export async function verifyDatabase(repoPath: string): Promise<string> {
+  const git = getGit(repoPath);
+  try {
+    return await git.raw(['fsck', '--full']);
+  } catch (e) {
+    // fsck exits non-zero when problems are found — the stdout/stderr IS the report
+    const msg = e instanceof Error ? e.message : String(e);
+    return msg;
+  }
+}
+
+/** Run `git gc` and return a short stat summary (git count-objects -vH). */
+export async function garbageCollect(repoPath: string, aggressive = false): Promise<string> {
+  const git = getGit(repoPath);
+  const args = ['gc', '--quiet'];
+  if (aggressive) args.push('--aggressive');
+  await git.raw(args);
+  invalidateCache(repoPath);
+  return git.raw(['count-objects', '-vH']);
+}
+
+/** List commits unreachable from any ref (SmartGit "Recyclable Commits"). */
+export async function unreachableCommits(repoPath: string): Promise<UnreachableCommit[]> {
+  const git = getGit(repoPath);
+  let out = '';
+  try {
+    out = await git.raw(['fsck', '--unreachable', '--no-reflogs', '--no-progress']);
+  } catch (e) {
+    // fsck may exit non-zero while still printing unreachable objects on stdout
+    out = e instanceof Error ? (e as { message?: string }).message ?? '' : String(e);
+  }
+  const shas: string[] = [];
+  for (const line of out.split('\n')) {
+    const m = line.match(/^unreachable commit ([0-9a-f]{40})/);
+    if (m) shas.push(m[1]);
+  }
+  if (shas.length === 0) return [];
+  const result: UnreachableCommit[] = [];
+  // Enrich with log metadata in chunks (avoid oversized command lines)
+  for (let i = 0; i < shas.length; i += 200) {
+    const chunk = shas.slice(i, i + 200);
+    let logOut = '';
+    try {
+      logOut = await git.raw([
+        'log', '--no-walk', '--date=iso-strict',
+        '--format=%H%x01%h%x01%an%x01%aI%x01%at%x01%s%x02',
+        ...chunk,
+      ]);
+    } catch { continue; }
+    const re = /([0-9a-f]{40})\x01([^\x01]*)\x01([^\x01]*)\x01([^\x01]*)\x01(\d+)\x01([\s\S]*?)\x02/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(logOut)) !== null) {
+      result.push({
+        hash: m[1],
+        hashAbbrev: m[2],
+        author: m[3],
+        date: m[4],
+        timestamp: Number(m[5]) * 1000,
+        subject: m[6],
+      });
+    }
+  }
+  return result;
+}
+
+// =====================================================================
+// Bugtraq issue-tracker configuration (.gitbugtraq / [bugtraq] section)
+// =====================================================================
+
+function parseNullSeparatedConfig(out: string): Record<string, string> {
+  // git config --null output: entries separated by NUL; inside an entry the key
+  // and the value are separated by LF ("key\nvalue\0").
+  const entries: Record<string, string> = {};
+  for (const record of out.split('\0')) {
+    if (!record) continue;
+    const nl = record.indexOf('\n');
+    if (nl < 0) {
+      entries[record.toLowerCase()] = '';
+      continue;
+    }
+    entries[record.slice(0, nl).toLowerCase()] = record.slice(nl + 1);
+  }
+  return entries;
+}
+
+function bugtraqFromEntries(entries: Record<string, string>): BugtraqConfig | null {
+  // keys look like: bugtraq.<id>.url / .logregex / .loglinkregex / .logfilterregex / .projects
+  const ids = new Set<string>();
+  for (const key of Object.keys(entries)) {
+    const m = key.match(/^bugtraq\.([^.]+)\./);
+    if (m) ids.add(m[1]);
+  }
+  // Also support a plain [bugtraq] section without id (keys: bugtraq.url etc.)
+  if (entries['bugtraq.url']) {
+    return {
+      url: entries['bugtraq.url'],
+      logregex: entries['bugtraq.logregex'] ?? entries['bugtraq.loglinkregex'] ?? '',
+      loglinkregex: entries['bugtraq.loglinkregex'],
+      logfilterregex: entries['bugtraq.logfilterregex'],
+      projects: entries['bugtraq.projects']?.split(',').map((p) => p.trim()).filter(Boolean),
+    };
+  }
+  // Prefer an entry whose id matches a project prefix, otherwise the first id
+  for (const id of ids) {
+    const url = entries[`bugtraq.${id}.url`];
+    if (!url) continue;
+    return {
+      url,
+      logregex: entries[`bugtraq.${id}.logregex`] ?? entries[`bugtraq.${id}.loglinkregex`] ?? '',
+      loglinkregex: entries[`bugtraq.${id}.loglinkregex`],
+      logfilterregex: entries[`bugtraq.${id}.logfilterregex`],
+      projects: entries[`bugtraq.${id}.projects`]?.split(',').map((p) => p.trim()).filter(Boolean),
+    };
+  }
+  return null;
+}
+
+/** Read the Bugtraq configuration: .gitbugtraq file first, then any config scope. */
+export async function bugtraqConfig(repoPath: string): Promise<BugtraqConfig | null> {
+  const git = getGit(repoPath);
+  const bugtraqFile = path.join(repoPath, '.gitbugtraq');
+  if (fs.existsSync(bugtraqFile)) {
+    try {
+      const out = await git.raw(['config', '--null', '--file', '.gitbugtraq', '--list']);
+      const cfg = bugtraqFromEntries(parseNullSeparatedConfig(out));
+      if (cfg) return cfg;
+    } catch { /* fall through to config */ }
+  }
+  try {
+    const out = await git.raw(['config', '--null', '--list']);
+    return bugtraqFromEntries(parseNullSeparatedConfig(out));
+  } catch {
+    return null;
+  }
+}
+
+// =====================================================================
+// Index Editor helpers: write the Index content of a file directly
+// =====================================================================
+
+/** Overwrite the Index entry of `file` with the given text content (SmartGit Index Editor "save"). */
+export async function setIndexContent(repoPath: string, file: string, content: string): Promise<void> {
+  const git = getGit(repoPath);
+  assertInsideRepo(repoPath, file);
+  const tmpFile = path.join(repoPath, '.git', 'prismgit-index-editor-tmp');
+  fs.writeFileSync(tmpFile, content, 'utf8');
+  try {
+    const sha = (await git.raw(['hash-object', '-w', tmpFile])).trim();
+    // Mode: preserve the existing mode when the file is in the index, otherwise 100644
+    let mode = '100644';
+    try {
+      const ls = await git.raw(['ls-files', '-s', '--', file]);
+      const m = ls.match(/^(\d{6}) /);
+      if (m) mode = m[1];
+    } catch { /* default */ }
+    await git.raw(['update-index', '--cacheinfo', `${mode},${sha},${file}`]);
+  } finally {
+    fs.rmSync(tmpFile, { force: true });
+  }
+  invalidateCache(repoPath);
+}
+
+/** Show the file content at a given ref (`git show <ref>:<file>`). */
+export async function showFile(repoPath: string, ref: string, file: string): Promise<string> {
+  const git = getGit(repoPath);
+  return git.raw(['show', `${ref}:${file}`]);
+}
+
 // ============================================================
 // SmartGit Manual features — extended backend
 // ============================================================
@@ -2623,20 +3156,8 @@ export async function autoStash<T>(repoPath: string, fn: () => Promise<T>): Prom
 }
 
 /**
- * Recyclable commits — unreachable reflog commits eligible for GC.
- * Returns commits found in .git/logs that are NOT reachable from any ref.
- * Uses `git fsck --unreachable --no-reflogs` filtered to commits.
+ * Recyclable commits — unreachable reflog commits eligible for GC (see types/git-api).
  */
-export interface RecyclableCommit {
-  hash: string;
-  hashAbbrev: string;
-  subject: string;
-  date: string;
-  timestamp: number;
-  /** Source: which reflog or fsck discovered it. */
-  source: string;
-}
-
 export async function recyclableCommits(repoPath: string): Promise<RecyclableCommit[]> {
   const git = getGit(repoPath);
   // Strategy: list all reflog hashes (HEAD + branches), then filter out those reachable from refs.
@@ -2679,71 +3200,6 @@ export async function recyclableCommits(repoPath: string): Promise<RecyclableCom
   }
 }
 
-/** Subtree operations (git subtree) */
-export async function subtreeAdd(
-  repoPath: string,
-  prefix: string,
-  url: string,
-  branch: string,
-  squash = false
-): Promise<string> {
-  const git = getGit(repoPath);
-  const args = ['subtree', 'add', '--prefix=' + prefix, url];
-  if (branch) args.push(branch);
-  if (squash) args.push('--squash');
-  return git.raw(args);
-}
-
-export async function subtreePull(
-  repoPath: string,
-  prefix: string,
-  url: string,
-  branch: string,
-  squash = false
-): Promise<string> {
-  const git = getGit(repoPath);
-  const args = ['subtree', 'pull', '--prefix=' + prefix, url];
-  if (branch) args.push(branch);
-  if (squash) args.push('--squash');
-  return git.raw(args);
-}
-
-export async function subtreePush(
-  repoPath: string,
-  prefix: string,
-  remote: string,
-  branch: string,
-  squash = false
-): Promise<string> {
-  const git = getGit(repoPath);
-  const args = ['subtree', 'push', '--prefix=' + prefix, remote];
-  if (branch) args.push(branch);
-  if (squash) args.push('--squash');
-  return git.raw(args);
-}
-
-export async function subtreeSplit(
-  repoPath: string,
-  prefix: string,
-  branch?: string,
-  rejoin = false
-): Promise<string> {
-  const git = getGit(repoPath);
-  const args = ['subtree', 'split', '--prefix=' + prefix];
-  if (branch) args.push('--branch=' + branch);
-  if (rejoin) args.push('--rejoin');
-  return git.raw(args);
-}
-
-/** LFS Lock support */
-export interface LfsLock {
-  id: string;
-  path: string;
-  owner: { name: string };
-  lockedAt: string;
-  createdAt: string;
-}
-
 export async function lfsListLocks(repoPath: string, remote = 'origin'): Promise<LfsLock[]> {
   const git = getGit(repoPath);
   try {
@@ -2760,33 +3216,6 @@ export async function lfsListLocks(repoPath: string, remote = 'origin'): Promise
     }));
   } catch {
     return [];
-  }
-}
-
-export async function lfsLock(repoPath: string, file: string, remote = 'origin'): Promise<void> {
-  const git = getGit(repoPath);
-  await git.raw(['lfs', 'lock', '--remote=' + remote, file]);
-}
-
-export async function lfsUnlock(repoPath: string, file: string, remote = 'origin'): Promise<void> {
-  const git = getGit(repoPath);
-  await git.raw(['lfs', 'unlock', '--remote=' + remote, file]);
-}
-
-/** Git Notes — list notes for a commit */
-export interface NoteEntry {
-  ref: string;
-  content: string;
-}
-
-export async function notesList(repoPath: string, ref = 'refs/notes/commits'): Promise<boolean> {
-  // Returns true if the notes ref exists
-  const git = getGit(repoPath);
-  try {
-    await git.raw(['rev-parse', '--verify', ref]);
-    return true;
-  } catch {
-    return false;
   }
 }
 
@@ -2899,16 +3328,8 @@ export async function setupCredentialHelper(repoPath: string): Promise<void> {
 }
 
 /**
- * Bidirectional blame: show BOTH past and future commits for a given line.
- * Returns the past commit (regular git blame) AND list of future commits
- * that touched this line.
+ * Bidirectional blame: past blame + future commits per line (see types/git-api).
  */
-export interface BidirectionalBlameResult {
-  past: BlameResult;
-  /** For each line: list of future commit hashes (after the blame commit) that modified it. */
-  futureLines: { lineNumber: number; commits: { hash: string; subject: string; date: string }[] }[];
-}
-
 export async function blameBidirectional(
   repoPath: string,
   file: string,
@@ -3115,5 +3536,4 @@ export function groupTags(tags: TagInfo[], pattern: RegExp = /^v?(\d+\.\d+)/): T
   }
   return result;
 }
-
 export { invalidateCache };

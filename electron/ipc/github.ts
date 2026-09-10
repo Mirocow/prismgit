@@ -19,6 +19,9 @@ export function registerGithubIpc(): void {
   ipcMain.handle('github:listPullRequests', (_e, owner: string, repo: string, state?: 'open' | 'closed' | 'all') =>
     github.listPullRequests(owner, repo, state)
   );
+  ipcMain.handle('github:getCheckRuns', (_e, owner: string, repo: string, shas: string[]) =>
+    github.getCheckRuns(owner, repo, shas)
+  );
   ipcMain.handle('github:logout', () => github.logout());
   ipcMain.handle('github:getAuthState', () => github.getStoredAuthState());
 }

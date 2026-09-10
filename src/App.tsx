@@ -22,6 +22,11 @@ import { CommandLogPanel } from './components/CommandLogPanel';
 import { DragDropHandler } from './components/DragDropHandler';
 import { HelpBanner } from './components/HelpBanner';
 import { NAV_SHORTCUTS } from './components/navItems';
+import { RefActionDialog, type RefAction } from './components/RefActionDialog';
+import { IndexEditorDialog } from './components/IndexEditorDialog';
+import { RepoSettingsDialog } from './components/RepoSettingsDialog';
+import { promptDialog, confirmDialog } from './components/ConfirmDialog';
+import { clearProjectPrefs } from './lib/projectPrefs';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSettingsStore } from './stores/settingsStore';
@@ -52,7 +57,11 @@ const SubmodulesPage = lazy(() => import('./pages/SubmodulesPage').then(m => ({ 
 const WorktreesPage = lazy(() => import('./pages/WorktreesPage').then(m => ({ default: m.WorktreesPage })));
 const ReflogPage = lazy(() => import('./pages/ReflogPage').then(m => ({ default: m.ReflogPage })));
 const RecyclablePage = lazy(() => import('./pages/RecyclablePage').then(m => ({ default: m.RecyclablePage })));
+const RemotesPage = lazy(() => import('./pages/RemotesPage').then(m => ({ default: m.RemotesPage })));
+const BisectPage = lazy(() => import('./pages/BisectPage').then(m => ({ default: m.BisectPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const NotesPage = lazy(() => import('./pages/NotesPage').then(m => ({ default: m.NotesPage })));
+const SubtreesPage = lazy(() => import('./pages/SubtreesPage').then(m => ({ default: m.SubtreesPage })));
 
 function PageLoader() {
   return (
@@ -86,6 +95,11 @@ export default function App() {
   const [dismissRebase, setDismissRebase] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showCommandLog, setShowCommandLog] = useState(false);
+  const [refAction, setRefAction] = useState<RefAction | null>(null);
+  const [indexEditorFile, setIndexEditorFile] = useState<string | null | undefined>(undefined);
+  const [showIndexEditor, setShowIndexEditor] = useState(false);
+  const [showRepoSettings, setShowRepoSettings] = useState(false);
+  const [gitFlowType, setGitFlowType] = useState<'feature' | 'release' | 'hotfix' | undefined>(undefined);
 
   // SmartGit-style background "Poll or Fetch" for remotes marked in Configure remote properties
   useBackgroundFetch();
@@ -192,6 +206,437 @@ export default function App() {
     const handleShowShortcuts = () => setShowShortcuts(true);
     const handleToggleCommandLog = () => setShowCommandLog(s => !s);
 
+    // ===== SmartGit-style command helpers =====
+    const requireRepo = () => useRepositoryStore.getState().currentRepo;
+    const selectedFile = () => useSelectionStore.getState().selectedFilePath;
+    const warnNoFile = () => toast.warning('No file selected', 'Select a file in Changes first');
+    const infoBox = (title: string, message: string) =>
+      confirmDialog({ title, message: message.slice(0, 3000), confirmLabel: 'Close', hideCancel: true });
+
+    const handleCheckout = () => setRefAction('checkout');
+    const handleMerge = () => setRefAction('merge');
+    const handleRebase = () => setRefAction('rebase');
+    const handleCherryPick = () => setRefAction('cherry-pick');
+    const handleRevert = () => setRefAction('revert');
+
+    const handleAddTag = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const name = await promptDialog({
+        title: 'Add Tag',
+        message: 'Tag name (created at the commit selected in History, or HEAD)',
+        input: { placeholder: 'v1.0.0' },
+      });
+      if (!name) return;
+      const target = useSelectionStore.getState().selectedCommitHash;
+      try {
+        await api.git.createTag(repo.path, name, undefined, target || undefined);
+        toast.success(`Tag ${name} created${target ? ` at ${target.slice(0, 7)}` : ''}`);
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Add tag failed', String(e)); }
+    };
+
+    const handleSetTracked = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const branch = await api.git.currentBranch(repo.path).catch(() => null);
+      if (!branch) { toast.warning('No local branch checked out'); return; }
+      const remoteBranch = await promptDialog({
+        title: 'Set Tracked Branch',
+        message: `Remote branch that "${branch}" should track`,
+        input: { placeholder: 'origin/main' },
+      });
+      if (!remoteBranch) return;
+      try {
+        await api.git.raw(repo.path, ['branch', '--set-upstream-to', remoteBranch, branch]);
+        toast.success(`${branch} now tracks ${remoteBranch}`);
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Set tracked branch failed', String(e)); }
+    };
+
+    const handleStopTracking = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const branch = await api.git.currentBranch(repo.path).catch(() => null);
+      if (!branch) return;
+      try {
+        await api.git.raw(repo.path, ['branch', '--unset-upstream', branch]);
+        toast.success(`${branch} no longer tracks a remote branch`);
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Stop tracking failed', String(e)); }
+    };
+
+    // ===== Bisect =====
+    const bisect = async (op: 'start' | 'bad' | 'good' | 'skip' | 'reset' | 'log') => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const g = useGitStore.getState();
+      const refresh = () => g.refreshStatus(repo.path).catch(() => {});
+      try {
+        switch (op) {
+          case 'start':
+            await api.git.bisectStart(repo.path);
+            await api.git.bisectBad(repo.path, 'HEAD');
+            toast.info('Bisect started', 'HEAD marked as bad — now mark a good commit (Branch | Bisect)');
+            break;
+          case 'bad': await api.git.bisectBad(repo.path); toast.success('HEAD marked as bad'); break;
+          case 'good': await api.git.bisectGood(repo.path); toast.success('HEAD marked as good'); break;
+          case 'skip': await api.git.bisectSkip(repo.path); toast.success('Commit skipped'); break;
+          case 'reset': await api.git.bisectReset(repo.path); toast.success('Bisect finished'); break;
+          case 'log': {
+            const logText = await api.git.bisectLog(repo.path);
+            await infoBox('Bisect Log', logText);
+            break;
+          }
+        }
+        refresh();
+      } catch (e) { toast.error('Bisect failed', String(e)); }
+    };
+
+    // ===== Local operations =====
+    const handleStage = async () => {
+      const repo = requireRepo();
+      const f = selectedFile();
+      if (!repo) return;
+      if (!f) { warnNoFile(); return; }
+      try { await api.git.add(repo.path, [f]); toast.success(`Staged ${f}`); useGitStore.getState().refreshStatus(repo.path); }
+      catch (e) { toast.error('Stage failed', String(e)); }
+    };
+    const handleUnstage = async () => {
+      const repo = requireRepo();
+      const f = selectedFile();
+      if (!repo) return;
+      if (!f) { warnNoFile(); return; }
+      try { await api.git.resetFile(repo.path, f); toast.success(`Unstaged ${f}`); useGitStore.getState().refreshStatus(repo.path); }
+      catch (e) { toast.error('Unstage failed', String(e)); }
+    };
+    const handleStageAll = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      try { await useGitStore.getState().stageAll(repo.path); toast.success('All changes staged'); }
+      catch (e) { toast.error('Stage failed', String(e)); }
+    };
+    const handleDiscard = async () => {
+      const repo = requireRepo();
+      const f = selectedFile();
+      if (!repo) return;
+      if (!f) { warnNoFile(); return; }
+      const ok = await confirmDialog({
+        title: 'Discard changes',
+        message: `Discard ALL changes of "\u200b${f}" in the Working Tree?\nThis cannot be undone.`,
+        confirmLabel: 'Discard',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        await api.git.restore(repo.path, [f]);
+        toast.success(`Discarded changes in ${f}`);
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Discard failed', String(e)); }
+    };
+    const handleEditLastCommitMessage = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      try {
+        const entries = await api.git.log(repo.path, { maxCount: 1 });
+        const current = entries[0]?.message ?? '';
+        const message = await promptDialog({
+          title: 'Edit Last Commit Message',
+          message: 'New commit message for HEAD',
+          input: { initialValue: current },
+        });
+        if (!message || message === current) return;
+        await api.git.editCommitMessage(repo.path, 'HEAD', message);
+        toast.success('Commit message updated');
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Edit message failed', String(e)); }
+    };
+    const handleEditCommitAuthor = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const value = await promptDialog({
+        title: 'Edit Commit Author',
+        message: 'Author of the commit selected in History (or HEAD): Name <email>',
+        input: { placeholder: 'Ada Lovelace <ada@example.com>' },
+      });
+      if (!value) return;
+      const m = value.match(/^([^<]+)<([^>]+)>\s*$/);
+      if (!m) { toast.error('Invalid format', 'Use: Name <email>'); return; }
+      const target = useSelectionStore.getState().selectedCommitHash || 'HEAD';
+      try {
+        await api.git.editCommitAuthor(repo.path, target, m[1].trim(), m[2].trim());
+        toast.success(`Author of ${target === 'HEAD' ? 'HEAD' : target.slice(0, 7)} changed to ${m[1].trim()}`);
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Edit author failed', String(e)); }
+    };
+    const handleUndoLastCommit = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const ok = await confirmDialog({
+        title: 'Undo Last Commit',
+        message: 'Move the last commit\u2019s changes back into the Index? The commit itself will be removed (soft reset).',
+        confirmLabel: 'Undo Commit',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        await api.git.reset(repo.path, 'soft', 'HEAD~1');
+        toast.success('Last commit undone — changes are back in the Index');
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Undo commit failed', String(e)); }
+    };
+    const handleStashSelection = () => {
+      window.location.hash = '#/changes';
+      // ChangesPage listens and stashes its selected files
+      setTimeout(() => window.dispatchEvent(new CustomEvent('smartgit:stash-selection')), 60);
+    };
+    const handleApplyStash = () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      window.location.hash = '#/stashes';
+      toast.info('Select a stash and click Apply');
+    };
+
+    const handleIgnore = async () => {
+      const repo = requireRepo();
+      const f = selectedFile();
+      if (!repo) return;
+      if (!f) { warnNoFile(); return; }
+      try { await api.git.ignore(repo.path, [f]); toast.success(`${f} added to .gitignore`); useGitStore.getState().refreshStatus(repo.path); }
+      catch (e) { toast.error('Ignore failed', String(e)); }
+    };
+    const handleEditIgnoreFile = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      try { await api.git.editIgnoreFile(repo.path, 'local'); toast.success('.gitignore opened in the default editor'); }
+      catch (e) { toast.error('Failed to open .gitignore', String(e)); }
+    };
+    const handleIndexFlag = async (flag: 'assume-unchanged' | 'skip-worktree') => {
+      const repo = requireRepo();
+      const f = selectedFile();
+      if (!repo) return;
+      if (!f) { warnNoFile(); return; }
+      try {
+        const flags = await api.git.getIndexFlags(repo.path, f);
+        const current = flag === 'assume-unchanged' ? flags.assumeUnchanged : flags.skipWorktree;
+        await api.git.setIndexFlag(repo.path, f, flag, !current);
+        toast.success(`${f}: ${flag} ${!current ? 'ON' : 'OFF'}`);
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Toggle failed', String(e)); }
+    };
+    const handleMoveRename = async () => {
+      const repo = requireRepo();
+      const f = selectedFile();
+      if (!repo) return;
+      if (!f) { warnNoFile(); return; }
+      const target = await promptDialog({
+        title: 'Move or Rename',
+        message: 'New path for the file (git mv — the rename is staged)',
+        input: { initialValue: f },
+      });
+      if (!target || target === f) return;
+      try {
+        await api.git.moveFile(repo.path, f, target);
+        toast.success(`${f} → ${target}`);
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Move/rename failed', String(e)); }
+    };
+    const handleDeleteFile = async () => {
+      const repo = requireRepo();
+      const f = selectedFile();
+      if (!repo) return;
+      if (!f) { warnNoFile(); return; }
+      const ok = await confirmDialog({
+        title: 'Delete file',
+        message: `Delete "${f}" from the Working Tree AND the repository?\nThis cannot be undone.`,
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!ok) return;
+      try { await api.git.deleteFile(repo.path, f); toast.success(`${f} deleted`); useGitStore.getState().refreshStatus(repo.path); }
+      catch (e) { toast.error('Delete failed', String(e)); }
+    };
+    const handleRemoveFile = async () => {
+      const repo = requireRepo();
+      const f = selectedFile();
+      if (!repo) return;
+      if (!f) { warnNoFile(); return; }
+      try {
+        await api.git.raw(repo.path, ['rm', '--cached', '--', f]);
+        toast.success(`${f} removed from the repository (kept in Working Tree)`);
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Remove failed', String(e)); }
+    };
+
+    // ===== Resolve submenu =====
+    const resolveConflict = async (mode: 'ours' | 'theirs' | 'resolved') => {
+      const repo = requireRepo();
+      const f = selectedFile();
+      if (!repo) return;
+      if (!f) { warnNoFile(); return; }
+      try {
+        if (mode !== 'resolved') {
+          await api.git.raw(repo.path, ['checkout', `--${mode}`, '--', f]);
+        }
+        await api.git.add(repo.path, [f]);
+        toast.success(`${f}: ${mode === 'resolved' ? 'marked resolved' : `took ${mode}`}`);
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Resolve failed', String(e)); }
+    };
+    const handleConflictSolver = () => {
+      const f = selectedFile();
+      if (!f) { warnNoFile(); return; }
+      setConflictFile(f);
+    };
+
+    // ===== LFS =====
+    const lfsOp = async (op: 'install' | 'lock' | 'unlock') => {
+      const repo = requireRepo();
+      if (!repo) return;
+      try {
+        if (op === 'install') {
+          await api.git.lfsInstall(repo.path);
+          toast.success('Git LFS installed for this repository');
+        } else {
+          const f = selectedFile();
+          if (!f) { warnNoFile(); return; }
+          if (op === 'lock') { await api.git.lfsLock(repo.path, f); toast.success(`Locked ${f}`); }
+          else { await api.git.lfsUnlock(repo.path, f); toast.success(`Unlocked ${f}`); }
+        }
+      } catch (e) { toast.error('LFS operation failed', String(e)); }
+    };
+    const handleLfsTrack = () => {
+      window.location.hash = '#/lfs';
+      toast.info('Use the Track button on the LFS page');
+    };
+
+    // ===== Remote =====
+    const handlePushTo = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const remote = await promptDialog({
+        title: 'Push To...',
+        message: 'Remote to push the current branch to',
+        input: { initialValue: 'origin' },
+      });
+      if (!remote) return;
+      const branch = await api.git.currentBranch(repo.path).catch(() => null);
+      try {
+        await api.git.push(repo.path, remote, branch ?? undefined, true);
+        toast.success(`Pushed ${branch ?? ''} to ${remote}`);
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Push failed', String(e)); }
+    };
+    const handlePullOptions = () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      window.location.hash = '#/branches';
+      toast.info('Right-click the branch → Pull... for options (merge/rebase/ff-only)');
+    };
+    const handleFetchAll = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      try { await api.git.fetchAll(repo.path); toast.success('Fetched all remotes'); useGitStore.getState().refreshStatus(repo.path); }
+      catch (e) { toast.error('Fetch all failed', String(e)); }
+    };
+    const handleFetchMore = () => {
+      window.location.hash = '#/branches';
+      toast.info('Right-click a remote → Fetch More... (or Set Depth... for shallow clones)');
+    };
+
+    // ===== Query / Tools =====
+    const handleVerifyDatabase = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      try {
+        const report = await api.git.verifyDatabase(repo.path);
+        await infoBox('Verify Database (git fsck --full)', report.trim() || 'No problems found — repository is healthy.');
+      } catch (e) { toast.error('Verify failed', String(e)); }
+    };
+    const handleGarbageCollect = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      try {
+        const stats = await api.git.garbageCollect(repo.path);
+        await infoBox('Garbage Collect (git gc)', stats.trim() || 'Done.');
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('GC failed', String(e)); }
+    };
+    const handleOpenTerminal = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const ok = await api.fs.openTerminal(repo.path);
+      if (!ok) toast.error('Could not open a terminal');
+    };
+    const handleFormatPatch = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const commit = useSelectionStore.getState().selectedCommitHash;
+      const outDir = await promptDialog({
+        title: 'Format Patch',
+        message: 'Output directory for the .patch file(s)',
+        input: { initialValue: `${repo.path}/patches`, hint: 'Writes the selected commit, or HEAD when nothing is selected' },
+      });
+      if (!outDir) return;
+      try {
+        const files = await api.git.formatPatch(repo.path, { outputDir: outDir, commit: commit || 'HEAD' });
+        await infoBox('Format Patch', `Written:\n${files.join('\n')}`);
+      } catch (e) { toast.error('Format patch failed', String(e)); }
+    };
+
+    // ===== Git-Flow (dialog-driven; flow type preset through initialFlow) =====
+    const gitFlow = (flow?: string) => {
+      if (flow === 'feature' || flow === 'release' || flow === 'hotfix') setGitFlowType(flow);
+      else setGitFlowType(undefined);
+      setShowGitFlow(true);
+    };
+
+    const handleAbortSequence = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const st = useGitStore.getState().status;
+      try {
+        if (st?.isRebasing) await api.git.rebase(repo.path, 'HEAD', { abort: true });
+        else if (st?.isCherryPicking) await api.git.cherryPickAbort(repo.path);
+        else if (st?.isReverting) await api.git.revertAbort(repo.path);
+        else if (st?.isMerging) await api.git.abortMerge(repo.path);
+        else { toast.info('Nothing to abort'); return; }
+        toast.success('Operation aborted — repository restored');
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Abort failed', String(e)); }
+    };
+    const handleContinueSequence = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const st = useGitStore.getState().status;
+      try {
+        if (st?.isRebasing) await api.git.rebase(repo.path, 'HEAD', { continue: true });
+        else if (st?.isCherryPicking) await api.git.cherryPickContinue(repo.path);
+        else if (st?.isReverting) await api.git.revertContinue(repo.path);
+        else if (st?.isMerging) await api.git.continueMerge(repo.path);
+        else { toast.info('Nothing to continue'); return; }
+        toast.success('Operation continued');
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Continue failed', String(e)); }
+    };
+
+    const handleWindowStyle = (style: unknown) => {
+      if (style === 'standard' || style === 'log' || style === 'working-tree') {
+        setWindowStyle(style);
+        toast.info(`Window style: ${style}`);
+      }
+    };
+    const handleResetPerspective = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      clearProjectPrefs(repo.path);
+      useSelectionStore.getState().clearAll();
+      toast.success('Perspective reset — layout preferences cleared');
+    };
+    const handleNavigate = (path: unknown) => {
+      if (typeof path === 'string' && requireRepo()) navigate(path);
+    };
+
     const cleanups = [
       window.smartgit.events.on('menu:openRepository', (path) => handleOpenRepo(path as string)),
       window.smartgit.events.on('menu:cloneRepository', handleClone),
@@ -201,10 +646,86 @@ export default function App() {
       window.smartgit.events.on('menu:pull', handlePull),
       window.smartgit.events.on('menu:fetch', handleFetch),
       window.smartgit.events.on('menu:toggleTheme', handleToggleTheme),
-      window.smartgit.events.on('menu:gitFlow', handleGitFlow),
+      window.smartgit.events.on('menu:gitFlow', () => gitFlow()),
+      window.smartgit.events.on('menu:gitFlowStartFeature', () => gitFlow('feature')),
+      window.smartgit.events.on('menu:gitFlowFinishFeature', () => gitFlow('feature')),
+      window.smartgit.events.on('menu:gitFlowStartRelease', () => gitFlow('release')),
+      window.smartgit.events.on('menu:gitFlowFinishRelease', () => gitFlow('release')),
+      window.smartgit.events.on('menu:gitFlowStartHotfix', () => gitFlow('hotfix')),
+      window.smartgit.events.on('menu:gitFlowFinishHotfix', () => gitFlow('hotfix')),
+      window.smartgit.events.on('menu:gitFlowIntegrateDevelop', () => gitFlow('feature')),
       window.smartgit.events.on('menu:interactiveRebase', handleIRebase),
       window.smartgit.events.on('menu:showShortcuts', handleShowShortcuts),
       window.smartgit.events.on('menu:commandLog', handleToggleCommandLog),
+      // Branch menu
+      window.smartgit.events.on('menu:checkout', handleCheckout),
+      window.smartgit.events.on('menu:merge', handleMerge),
+      window.smartgit.events.on('menu:rebase', handleRebase),
+      window.smartgit.events.on('menu:cherryPick', handleCherryPick),
+      window.smartgit.events.on('menu:revert', handleRevert),
+      window.smartgit.events.on('menu:addTag', handleAddTag),
+      window.smartgit.events.on('menu:setTracked', handleSetTracked),
+      window.smartgit.events.on('menu:stopTracking', handleStopTracking),
+      window.smartgit.events.on('menu:bisectStart', () => bisect('start')),
+      window.smartgit.events.on('menu:bisectBad', () => bisect('bad')),
+      window.smartgit.events.on('menu:bisectGood', () => bisect('good')),
+      window.smartgit.events.on('menu:bisectSkip', () => bisect('skip')),
+      window.smartgit.events.on('menu:bisectReset', () => bisect('reset')),
+      window.smartgit.events.on('menu:bisectLog', () => bisect('log')),
+      window.smartgit.events.on('menu:abortSequence', handleAbortSequence),
+      window.smartgit.events.on('menu:continueSequence', handleContinueSequence),
+      // Local menu
+      window.smartgit.events.on('menu:stage', handleStage),
+      window.smartgit.events.on('menu:unstage', handleUnstage),
+      window.smartgit.events.on('menu:stageAll', handleStageAll),
+      window.smartgit.events.on('menu:discard', handleDiscard),
+      window.smartgit.events.on('menu:editLastCommitMessage', handleEditLastCommitMessage),
+      window.smartgit.events.on('menu:editCommitAuthor', handleEditCommitAuthor),
+      window.smartgit.events.on('menu:undoLastCommit', handleUndoLastCommit),
+      window.smartgit.events.on('menu:stash', handleStashSelection),
+      window.smartgit.events.on('menu:stashSelection', handleStashSelection),
+      window.smartgit.events.on('menu:applyStash', handleApplyStash),
+      window.smartgit.events.on('menu:indexEditor', () => { setShowIndexEditor(true); setIndexEditorFile(selectedFile()); }),
+      window.smartgit.events.on('menu:ignore', handleIgnore),
+      window.smartgit.events.on('menu:editIgnoreFile', handleEditIgnoreFile),
+      window.smartgit.events.on('menu:assumeUnchanged', () => handleIndexFlag('assume-unchanged')),
+      window.smartgit.events.on('menu:skipWorktree', () => handleIndexFlag('skip-worktree')),
+      window.smartgit.events.on('menu:moveRename', handleMoveRename),
+      window.smartgit.events.on('menu:deleteFile', handleDeleteFile),
+      window.smartgit.events.on('menu:removeFile', handleRemoveFile),
+      window.smartgit.events.on('menu:conflictSolver', handleConflictSolver),
+      window.smartgit.events.on('menu:resolveOurs', () => resolveConflict('ours')),
+      window.smartgit.events.on('menu:resolveTheirs', () => resolveConflict('theirs')),
+      window.smartgit.events.on('menu:markResolved', () => resolveConflict('resolved')),
+      window.smartgit.events.on('menu:lfsInstall', () => lfsOp('install')),
+      window.smartgit.events.on('menu:lfsTrack', handleLfsTrack),
+      window.smartgit.events.on('menu:lfsLock', () => lfsOp('lock')),
+      window.smartgit.events.on('menu:lfsUnlock', () => lfsOp('unlock')),
+      // Remote menu
+      window.smartgit.events.on('menu:pushTo', handlePushTo),
+      window.smartgit.events.on('menu:pullOptions', handlePullOptions),
+      window.smartgit.events.on('menu:fetchAll', handleFetchAll),
+      window.smartgit.events.on('menu:fetchMore', handleFetchMore),
+      window.smartgit.events.on('menu:remoteAdd', () => handleNavigate('/remotes')),
+      window.smartgit.events.on('menu:remoteRename', () => handleNavigate('/remotes')),
+      window.smartgit.events.on('menu:remoteDelete', () => handleNavigate('/remotes')),
+      window.smartgit.events.on('menu:remoteProperties', () => handleNavigate('/remotes')),
+      window.smartgit.events.on('menu:setDepth', handleFetchMore),
+      // Repository menu
+      window.smartgit.events.on('menu:repoSettings', () => setShowRepoSettings(true)),
+      window.smartgit.events.on('menu:editGitConfig', () => handleNavigate('/settings')),
+      window.smartgit.events.on('menu:openTerminal', handleOpenTerminal),
+      window.smartgit.events.on('menu:preferences', () => handleNavigate('/settings')),
+      // Query / Tools
+      window.smartgit.events.on('menu:navigate', handleNavigate),
+      window.smartgit.events.on('menu:findObject', handleFind),
+      window.smartgit.events.on('menu:verifyDatabase', handleVerifyDatabase),
+      window.smartgit.events.on('menu:garbageCollect', handleGarbageCollect),
+      window.smartgit.events.on('menu:applyPatch', () => setShowApplyPatch(true)),
+      window.smartgit.events.on('menu:formatPatch', handleFormatPatch),
+      // Window menu
+      window.smartgit.events.on('menu:windowStyle', handleWindowStyle),
+      window.smartgit.events.on('menu:resetPerspective', handleResetPerspective),
     ];
     return () => cleanups.forEach((fn) => fn && fn());
   }, [toast]);
@@ -502,14 +1023,14 @@ export default function App() {
               <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/diff" element={<DiffPage />} />
-              {/* Annotate removed — merged into History via file filter */}
-              <Route path="/annotate" element={<Navigate to="/history" replace />} />
+              {/* Annotate: file-history investigation (SmartGit "Log of file") */}
+              <Route path="/annotate" element={<AnnotatePage />} />
               {/* Investigate renamed to Search */}
               <Route path="/investigate" element={<Navigate to="/search" replace />} />
               <Route path="/search" element={<InvestigatePage />} />
               <Route path="/blame" element={<BlamePage />} />
-              {/* Journal removed — merged into Reflog */}
-              <Route path="/journal" element={<Navigate to="/reflog" replace />} />
+              {/* Journal: reflog-based journal of the current branch activity */}
+              <Route path="/journal" element={<JournalPage />} />
               <Route path="/gitflow" element={<GitFlowPage />} />
               <Route path="/pulls" element={<PullRequestsPage />} />
               <Route path="/reviews" element={<ReviewsPage />} />
@@ -518,9 +1039,13 @@ export default function App() {
               <Route path="/stashes" element={<StashesPage />} />
               <Route path="/tags" element={<TagsPage />} />
               <Route path="/submodules" element={<SubmodulesPage />} />
+              <Route path="/subtrees" element={<SubtreesPage />} />
               <Route path="/worktrees" element={<WorktreesPage />} />
               <Route path="/reflog" element={<ReflogPage />} />
               <Route path="/recyclable" element={<RecyclablePage />} />
+              <Route path="/remotes" element={<RemotesPage />} />
+              <Route path="/bisect" element={<BisectPage />} />
+              <Route path="/notes" element={<NotesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </Suspense>
@@ -539,10 +1064,16 @@ export default function App() {
       <CloneModal open={showClone} onClose={() => setShowClone(false)} />
       <InitModal open={showInit} onClose={() => setShowInit(false)} />
       <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
-      <GitFlowDialog open={showGitFlow} onClose={() => setShowGitFlow(false)} />
+      <GitFlowDialog open={showGitFlow} onClose={() => { setShowGitFlow(false); setGitFlowType(undefined); }} initialFlow={gitFlowType} />
       <InteractiveRebaseDialog open={showIRebase} onClose={() => setShowIRebase(false)} />
       <RepoInfoDialog open={showRepoInfo} onClose={() => setShowRepoInfo(false)} />
       <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      {refAction && <RefActionDialog action={refAction} onClose={() => setRefAction(null)} />}
+      {showIndexEditor && (
+        <IndexEditorDialog filePath={indexEditorFile} onClose={() => setShowIndexEditor(false)} />
+      )}
+      {showRepoSettings && <RepoSettingsDialog onClose={() => setShowRepoSettings(false)} />}
+      {showRepoSettings && <RepoSettingsDialog onClose={() => setShowRepoSettings(false)} />}
       {conflictFile && (
         <ConflictSolver filePath={conflictFile} onClose={() => setConflictFile(null)} />
       )}

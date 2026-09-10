@@ -27,6 +27,7 @@ export function SettingsPage() {
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
 
+
   const loadConfig = useCallback(async () => {
     if (!currentRepo) return;
     setConfigLoading(true);

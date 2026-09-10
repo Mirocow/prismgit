@@ -178,3 +178,69 @@ export function segmentMessageWithBugTraq(message: string, configs: BugTraqConfi
   }
   return segments;
 }
+
+
+// ===== Adapter for the backend bugtraqConfig() shape (app menu / History links) =====
+type BackendBugtraq = { url: string; logregex: string; loglinkregex?: string; logfilterregex?: string; projects?: string[] };
+
+function buildIssueRegex(cfg: BackendBugtraq): RegExp | null {
+  const src = (cfg.loglinkregex || cfg.logregex || '').trim();
+  if (!src) return null;
+  try {
+    return new RegExp(src, 'g');
+  } catch {
+    return null;
+  }
+}
+
+function bugIdFromMatch(cfg: BackendBugtraq, match: RegExpExecArray): string {
+  if (cfg.logregex && new RegExp(cfg.logregex).source.includes('(') && match.length > 1) {
+    return match[1] ?? match[0];
+  }
+  return match[0];
+}
+
+/**
+ * Find all issue references in a commit message and return plain-text /
+ * link segments for rendering (used with the backend git.bugtraqConfig()).
+ */
+export function linkifyCommitMessage(
+  message: string,
+  cfg: BackendBugtraq | null | undefined
+): Array<{ text: string; url?: string }> {
+  if (!cfg || !message) return [{ text: message }];
+  const re = buildIssueRegex(cfg);
+  if (!re) return [{ text: message }];
+  const segments: Array<{ text: string; url?: string }> = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let guard = 0;
+  while ((m = re.exec(message)) !== null && guard++ < 50) {
+    if (m.index > last) segments.push({ text: message.slice(last, m.index) });
+    const bugId = bugIdFromMatch(cfg, m);
+    if (cfg.url.includes('%BUGID%') || cfg.url.includes('%PROJECT%')) {
+      let id = bugId;
+      let url: string;
+      if (cfg.url.includes('%PROJECT%') && cfg.projects?.length) {
+        // If the id starts with one of the configured project prefixes, split it off
+        const prefix = cfg.projects.find((p) => id.toUpperCase().startsWith(p.toUpperCase()));
+        if (prefix) {
+          const projectId = id.slice(0, prefix.length);
+          id = id.slice(prefix.length).replace(/^[-_\s]+/, '');
+          url = cfg.url.replace('%PROJECT%', encodeURIComponent(projectId)).replace(/%BUGID%/g, encodeURIComponent(id));
+        } else {
+          url = cfg.url.replace('%PROJECT%', '').replace(/%BUGID%/g, encodeURIComponent(id));
+        }
+      } else {
+        url = cfg.url.replace(/%BUGID%/g, encodeURIComponent(id));
+      }
+      segments.push({ text: m[0], url });
+    } else {
+      segments.push({ text: m[0] });
+    }
+    last = m.index + m[0].length;
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  if (last < message.length) segments.push({ text: message.slice(last) });
+  return segments;
+}

@@ -388,26 +388,55 @@ export interface GitApi {
   // Repository directory tree (Changes view)
   listDirectories: (repoPath: string, maxDepth?: number) => Promise<DirNode[]>;
 
+  // ===== Git Notes (SmartGit Notes feature) =====
+  noteCategories: (repoPath: string) => Promise<NoteCategory[]>;
+  notesList: (repoPath: string, notesRef: string, maxCount?: number) => Promise<CommitNote[]>;
+  notesShow: (repoPath: string, notesRef: string, commit: string) => Promise<string | null>;
+  notesAdd: (repoPath: string, notesRef: string, commit: string, message: string, force?: boolean) => Promise<void>;
+  notesRemove: (repoPath: string, notesRef: string, commit: string) => Promise<void>;
+
+  // ===== Subtrees (SmartGit Remote | Subtree) =====
+  subtrees: (repoPath: string) => Promise<SubtreeInfo[]>;
+  subtreeAdd: (repoPath: string, opts: { name: string; path: string; remote: string; branch: string; squash?: boolean; remoteUrl?: string }) => Promise<void>;
+  subtreePull: (repoPath: string, name: string) => Promise<void>;
+  subtreePush: (repoPath: string, name: string) => Promise<void>;
+  subtreeSplit: (repoPath: string, name: string, opts?: { rejoin?: boolean; annotate?: string }) => Promise<string>;
+  subtreeRemove: (repoPath: string, name: string) => Promise<void>;
+
+  // ===== LFS file locks (SmartGit Local | LFS | Lock/Unlock) =====
+  lfsLocks: (repoPath: string, local?: boolean) => Promise<LfsLockInfo[]>;
+  lfsLock: (repoPath: string, file: string) => Promise<void>;
+  lfsUnlock: (repoPath: string, file: string, force?: boolean) => Promise<void>;
+
+  // ===== Format Patch (git format-patch) =====
+  formatPatch: (repoPath: string, opts: { outputDir: string; commit?: string; from?: string; to?: string }) => Promise<string[]>;
+
+  // ===== Edit commit author (SmartGit "Edit Author") =====
+  editCommitAuthor: (repoPath: string, hash: string, name: string, email: string) => Promise<void>;
+
+  // ===== Verify Database / Garbage Collect (Query menu) =====
+  verifyDatabase: (repoPath: string) => Promise<string>;
+  garbageCollect: (repoPath: string, aggressive?: boolean) => Promise<string>;
+  unreachableCommits: (repoPath: string) => Promise<UnreachableCommit[]>;
+
+  // ===== Bugtraq issue-tracker links =====
+  bugtraqConfig: (repoPath: string) => Promise<BugtraqConfig | null>;
+
+  // ===== Index Editor helpers =====
+  setIndexContent: (repoPath: string, file: string, content: string) => Promise<void>;
+  showFile: (repoPath: string, ref: string, file: string) => Promise<string>;
+
   // ============================================================
-  // SmartGit Manual extended features
+  // SmartGit Manual extended features (Power User batch)
   // ============================================================
 
   /** Recyclable commits — unreachable reflog commits eligible for GC. */
   recyclableCommits: (repoPath: string) => Promise<RecyclableCommit[]>;
 
-  /** Subtree: add (merge a remote project as a subdirectory). */
-  subtreeAdd: (repoPath: string, prefix: string, url: string, branch: string, squash?: boolean) => Promise<string>;
-  subtreePull: (repoPath: string, prefix: string, url: string, branch: string, squash?: boolean) => Promise<string>;
-  subtreePush: (repoPath: string, prefix: string, remote: string, branch: string, squash?: boolean) => Promise<string>;
-  subtreeSplit: (repoPath: string, prefix: string, branch?: string, rejoin?: boolean) => Promise<string>;
-
-  /** LFS Lock support. */
+  /** LFS Lock support (server-side list). */
   lfsListLocks: (repoPath: string, remote?: string) => Promise<LfsLock[]>;
-  lfsLock: (repoPath: string, file: string, remote?: string) => Promise<void>;
-  lfsUnlock: (repoPath: string, file: string, remote?: string) => Promise<void>;
 
-  /** Git Notes — add/show/remove notes on commits. */
-  notesList: (repoPath: string, ref?: string) => Promise<boolean>;
+  /** Git Notes — add/show/remove notes on commits (Power User batch). */
   noteShow: (repoPath: string, commit: string, ref?: string) => Promise<string>;
   noteAdd: (repoPath: string, commit: string, content: string, ref?: string, force?: boolean) => Promise<void>;
   noteRemove: (repoPath: string, commit: string, ref?: string) => Promise<void>;
@@ -455,7 +484,7 @@ export interface RecyclableCommit {
   source: string;
 }
 
-/** LFS lock entry. */
+/** LFS lock entry as reported by the LFS server (git lfs locks). */
 export interface LfsLock {
   id: string;
   path: string;
@@ -468,4 +497,64 @@ export interface LfsLock {
 export interface BidirectionalBlameResult {
   past: BlameResult;
   futureLines: { lineNumber: number; commits: { hash: string; subject: string; date: string }[] }[];
+}
+
+
+// ===== Extended SmartGit feature types =====
+
+/** One category of git notes (smartgit-notes config section or the default "commits"). */
+export interface NoteCategory {
+  /** Category id (display name), e.g. "QA". */
+  id: string;
+  /** Ref below refs/notes/, e.g. "commits" or "qa". */
+  ref: string;
+  /** Optional RRGGBB color for graph display. */
+  color?: string;
+  /** Optional regex replacing the note icon in the graph. */
+  graphRegex?: string;
+}
+
+/** A note attached to a commit. */
+export interface CommitNote {
+  commit: string;
+  note: string;
+}
+
+/** A configured subtree (persisted in subtree.<name>.* config keys). */
+export interface SubtreeInfo {
+  name: string;
+  /** Relative path inside the main repository. */
+  path: string;
+  remote: string;
+  branch: string;
+  squash: boolean;
+}
+
+/** An LFS file lock as returned by `git lfs locks --local` (PrismGit lfsLocks). */
+export interface LfsLockInfo {
+  id: string;
+  path: string;
+  owner?: string;
+}
+
+/** A commit no longer reachable from any ref (SmartGit "Recyclable Commits"). */
+export interface UnreachableCommit {
+  hash: string;
+  hashAbbrev: string;
+  subject: string;
+  author: string;
+  date: string;
+  timestamp: number;
+}
+
+/** Bugtraq issue-tracker configuration (.gitbugtraq / [bugtraq] config section). */
+export interface BugtraqConfig {
+  /** URL template with %BUGID% placeholder. */
+  url: string;
+  /** Regex with exactly one capture group matching the issue id. */
+  logregex: string;
+  loglinkregex?: string;
+  logfilterregex?: string;
+  /** Project prefixes substituted into %PROJECT%. */
+  projects?: string[];
 }
