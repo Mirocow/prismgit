@@ -1295,7 +1295,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         )}
 
         {/* Left: File list + Journal + Commit editor */}
-        <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: leftWidth }}>
+        <div className="flex flex-col overflow-hidden" style={{ width: showSplitView ? leftWidth : '100%', flexShrink: showSplitView ? 0 : 1 }}>
           {/* File list with table header */}
           {/* SmartGit background color highlighting: light red = committable files hidden,
               light yellow = name-filtered, gray = unchanged files shown by name match */}
