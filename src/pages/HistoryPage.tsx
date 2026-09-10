@@ -40,8 +40,8 @@ import { useAuthStore } from '../stores/authStore';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 const ROW_HEIGHT = 28;
-const LANE_WIDTH = 20;
-const GRAPH_PAD = 6;
+const LANE_WIDTH = 24;
+const GRAPH_PAD = 8;
 
 // Re-export for backwards compatibility (other files may import BRANCH_COLORS from here)
 export { BRANCH_COLORS };
@@ -1157,80 +1157,80 @@ export function HistoryPage() {
                     const rowY = idx * ROW_HEIGHT + wtOffset;
                     const cy = rowY + ROW_HEIGHT / 2;
                     const x = (lane: number) => lane * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_PAD;
-                    // Stroke dash array for dashed (rewired) connections — visual cue that
-                    // intermediate commits were filtered out.
+                    // Stroke dash array for dashed (rewired) connections
                     const strokeDash = (d?: boolean) => d ? '4 3' : undefined;
 
                     return (
                       <g key={`r-${idx}`}>
-                        {/* Passing lanes — vertical lines from top to bottom of row */}
+                        {/* Passing lanes — thinner, more transparent for cleaner look */}
                         {row.passing.map((p, pi) => (
                           <line key={`p-${idx}-${pi}`}
                             x1={x(p.lane)} y1={rowY}
                             x2={x(p.lane)} y2={rowY + ROW_HEIGHT}
-                            stroke={laneColor(p.color)} strokeWidth={1.5} opacity={0.6}
-                            strokeDasharray={strokeDash(p.dashed)} />
+                            stroke={laneColor(p.color)} strokeWidth={2} opacity={0.5}
+                            strokeDasharray={strokeDash(p.dashed)} strokeLinecap="round" />
                         ))}
 
                         {row.node && (
                           <>
-                            {/* Closing curves — lanes that merge INTO this node */}
+                            {/* Closing curves — smooth bezier into node */}
                             {row.node.closing.map((c, ci) => (
                               <path key={`c-${idx}-${ci}`}
                                 d={bezierPath(x(c.lane), rowY, x(row.node!.lane), cy)}
-                                stroke={laneColor(c.color)} strokeWidth={1.5} fill="none" opacity={0.6}
-                                strokeDasharray={strokeDash(c.dashed)} />
+                                stroke={laneColor(c.color)} strokeWidth={2} fill="none" opacity={0.7}
+                                strokeDasharray={strokeDash(c.dashed)} strokeLinecap="round" />
                             ))}
 
-                            {/* Incoming vertical line (top of row → node center) */}
+                            {/* Incoming vertical line (top → node center) */}
                             {row.node.hasIncoming && (
                               <line
                                 x1={x(row.node.lane)} y1={rowY}
                                 x2={x(row.node.lane)} y2={cy}
-                                stroke={laneColor(row.node.color)} strokeWidth={1.5} opacity={0.6}
-                                strokeDasharray={strokeDash(row.node.firstParentDashed)} />
+                                stroke={laneColor(row.node.color)} strokeWidth={2} opacity={0.7}
+                                strokeDasharray={strokeDash(row.node.firstParentDashed)} strokeLinecap="round" />
                             )}
 
-                            {/* Continues vertical line (node center → bottom of row) */}
+                            {/* Continues vertical line (node center → bottom) */}
                             {row.node.continues && (
                               <line
                                 x1={x(row.node.lane)} y1={cy}
                                 x2={x(row.node.lane)} y2={rowY + ROW_HEIGHT}
-                                stroke={laneColor(row.node.color)} strokeWidth={1.5} opacity={0.6}
-                                strokeDasharray={strokeDash(row.node.firstParentDashed)} />
+                                stroke={laneColor(row.node.color)} strokeWidth={2} opacity={0.7}
+                                strokeDasharray={strokeDash(row.node.firstParentDashed)} strokeLinecap="round" />
                             )}
 
-                            {/* Merge curves — lanes created for non-first parents (bottom of row) */}
+                            {/* Merge curves — smooth bezier from node to parent lane */}
                             {row.node.merges.map((m, mi) => (
                               <path key={`m-${idx}-${mi}`}
                                 d={bezierPath(x(row.node!.lane), cy, x(m.lane), rowY + ROW_HEIGHT)}
-                                stroke={laneColor(m.color)} strokeWidth={1.5} fill="none" opacity={0.6}
-                                strokeDasharray={strokeDash(m.dashed)} />
+                                stroke={laneColor(m.color)} strokeWidth={2} fill="none" opacity={0.7}
+                                strokeDasharray={strokeDash(m.dashed)} strokeLinecap="round" />
                             ))}
 
-                            {/* Node circle */}
+                            {/* Node circle — VS Code style: solid filled, colored ring */}
                             {(() => {
                               const cx = x(row.node!.lane);
                               const isSelected = selectedIdx === idx;
                               const isMerge = row.node!.isMerge;
                               const isTruncated = row.node!.truncated;
                               const isIncoming = incomingHashes.has(row.node!.entry.hash);
-                              const r = isMerge ? 5 : 4;
+                              const r = isMerge ? 6 : 5;
+                              const color = laneColor(row.node!.color);
                               return (
                                 <g>
                                   {isMerge && (
-                                    <circle cx={cx} cy={cy} r={r + 2} fill="none"
-                                      stroke={laneColor(row.node!.color)} strokeWidth={1} opacity={0.4} />
+                                    <circle cx={cx} cy={cy} r={r + 3} fill="none"
+                                      stroke={color} strokeWidth={1.5} opacity={0.3} />
                                   )}
                                   <circle cx={cx} cy={cy} r={r}
-                                    fill={isSelected ? laneColor(row.node!.color) : 'var(--graph-node-fill)'}
-                                    stroke={laneColor(row.node!.color)} strokeWidth={1.5}
+                                    fill={isSelected ? color : 'var(--graph-node-fill)'}
+                                    stroke={color} strokeWidth={2.5}
                                     strokeDasharray={isTruncated ? '2 2' : isIncoming ? '3 2' : undefined}
-                                    opacity={isIncoming ? 0.7 : 1} />
+                                    opacity={isIncoming ? 0.6 : 1} />
                                   {isIncoming && (
                                     <circle cx={cx} cy={cy} r={r + 3} fill="none"
-                                      stroke={laneColor(row.node!.color)} strokeWidth={0.8}
-                                      strokeDasharray="2 3" opacity={0.4} />
+                                      stroke={color} strokeWidth={1}
+                                      strokeDasharray="2 3" opacity={0.35} />
                                   )}
                                 </g>
                               );

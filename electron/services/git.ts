@@ -667,7 +667,14 @@ export async function log(
     '%s', '%b', '%D',
   ].join(fieldSep);
 
-  const rawArgs = ['log', `-${maxCount}`, `--pretty=format:${pretty}${commitSep}`, '--date=iso-strict', '--decorate=full'];
+  // --topo-order: stable topological ordering — parents always come after
+  // children. This is what VS Code uses for its Git Graph view, and it
+  // produces cleaner lane assignments (no "jumps" where a commit appears
+  // out of chronological order, breaking the visual flow of the graph).
+  // Without --topo-order, git uses --date-order by default which can
+  // interleave commits from different branches in a way that makes the
+  // graph look messy with unnecessary lane crossings.
+  const rawArgs = ['log', `-${maxCount}`, `--pretty=format:${pretty}${commitSep}`, '--date=iso-strict', '--decorate=full', '--topo-order'];
 
   // Multi-branch mode: pass explicit refs to git log.
   // `git log ref1 ref2 ref3` shows the union of all commits reachable from any of these refs,

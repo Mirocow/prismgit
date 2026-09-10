@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { api, type StatusResult, type PushResult } from '../lib/api';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { useOperationLogStore } from './operationLogStore';
+import { useRepositoryStore } from './repositoryStore';
 
 interface GitState {
   status: StatusResult | null;
@@ -80,6 +81,11 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const result = await api.git.push(repoPath, resolved, branch, setUpstream);
       await get().refreshStatus(repoPath);
+      // Refresh repository metadata (lastCommit, branchCount, etc.) in the sidebar
+      api.settings.refreshRepoStats(repoPath).then(() => {
+        useRepositoryStore.getState().loadMetadata();
+        useRepositoryStore.getState().checkRemotes?.([repoPath]);
+      }).catch(() => {});
       log.finishOp(opId, result?.summary ?? 'Pushed successfully');
       return result;
     } catch (e) {
@@ -95,6 +101,11 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       await api.git.pull(repoPath, remote, branch);
       await get().refreshStatus(repoPath);
+      // Refresh repository metadata in the sidebar
+      api.settings.refreshRepoStats(repoPath).then(() => {
+        useRepositoryStore.getState().loadMetadata();
+        useRepositoryStore.getState().checkRemotes?.([repoPath]);
+      }).catch(() => {});
       log.finishOp(opId, 'Pulled successfully');
     } catch (e) {
       log.failOp(opId, String(e));
@@ -109,6 +120,11 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       await api.git.fetch(repoPath, remote, prune);
       await get().refreshStatus(repoPath);
+      // Refresh repository metadata in the sidebar
+      api.settings.refreshRepoStats(repoPath).then(() => {
+        useRepositoryStore.getState().loadMetadata();
+        useRepositoryStore.getState().checkRemotes?.([repoPath]);
+      }).catch(() => {});
       log.finishOp(opId, 'Fetched successfully');
     } catch (e) {
       log.failOp(opId, String(e));
