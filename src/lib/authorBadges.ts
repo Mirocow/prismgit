@@ -51,10 +51,12 @@ export function formatTime(dateStr: string): string {
   if (isNaN(date.getTime())) return '';
   const now = new Date();
   const diff = now.getTime() - date.getTime();
+  const mins = Math.floor(diff / (1000 * 60));
+  const hours = Math.floor(diff / (1000 * 60 * 60));
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  if (days === 0) {
-    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  }
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
   if (days === 1) return 'Yesterday';
   if (days < 7) return `${days}d ago`;
   if (days < 365) return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });

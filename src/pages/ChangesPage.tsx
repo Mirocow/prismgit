@@ -1150,10 +1150,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             <LazyFileList files={untrackedFiles} isStaged={false} renderRow={renderFileRow} />
 
             {totalChanged === 0 && (
-              <div className="flex flex-col items-center justify-center py-12 text-text-tertiary">
-                <GitCommit size={28} className="mb-2 opacity-50" />
-                <div className="text-sm">Working tree clean</div>
-                <div className="text-xs mt-1">No changes to commit</div>
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">
+                <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
+                Working tree clean — no changes to commit
               </div>
             )}
           </div>

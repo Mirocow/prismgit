@@ -603,23 +603,23 @@ export function BranchesPage() {
         {/* Name */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="truncate">{b.name}</span>
+            <span className="truncate font-medium text-text-primary">{b.name}</span>
             {b.tracking && <span className="text-2xs text-text-tertiary">→ {b.tracking}</span>}
             {b.ahead !== undefined && b.ahead > 0 && (
-              <span className="text-2xs text-status-added flex items-center gap-0.5">
-                <ArrowUp size={9} />{b.ahead}
+              <span className="text-2xs px-1 py-0.5 rounded bg-status-added/15 text-status-added flex items-center gap-0.5 font-medium">
+                <ArrowUp size={8} />{b.ahead}
               </span>
             )}
             {b.behind !== undefined && b.behind > 0 && (
-              <span className="text-2xs text-status-modified flex items-center gap-0.5">
-                <ArrowDown size={9} />{b.behind}
+              <span className="text-2xs px-1 py-0.5 rounded bg-status-modified/15 text-status-modified flex items-center gap-0.5 font-medium">
+                <ArrowDown size={8} />{b.behind}
               </span>
             )}
           </div>
         </div>
         {/* Last commit info */}
         {b.lastCommit && (
-          <div className="flex items-center gap-1 text-2xs text-text-tertiary flex-shrink-0">
+          <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 flex-shrink-0">
             <code className="font-mono">{shortHash(b.lastCommit.hash)}</code>
             <span className="hidden lg:inline truncate" style={{ maxWidth: 150 }}>{b.lastCommit.message}</span>
             <span>· {formatDate(b.lastCommit.date)}</span>

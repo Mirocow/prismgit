@@ -952,11 +952,11 @@ export function HistoryPage() {
                       </div>
                     )}
 
-                    <span className={cn('flex-1 truncate text-xs', isSelected && 'font-medium')}>{entry.subject}</span>
+                    <span className={cn('flex-1 truncate text-xs', isSelected ? 'font-semibold text-text-primary' : 'font-medium text-text-primary')}>{entry.subject}</span>
 
                     <span
-                      className="text-2xs font-mono text-text-tertiary flex-shrink-0 truncate cursor-pointer hover:text-accent"
-                      style={{ width: 64 }}
+                      className="text-2xs font-mono text-text-tertiary/60 flex-shrink-0 truncate cursor-pointer hover:text-accent"
+                      style={{ width: 56 }}
                       title={`${entry.hash} — click to copy`}
                       onClick={(e) => { e.stopPropagation(); copyToClipboard(entry.hash); toast.success('Copied'); }}
                     >
