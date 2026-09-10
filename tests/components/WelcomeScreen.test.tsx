@@ -5,6 +5,9 @@ import { WelcomeScreen } from '../../src/components/WelcomeScreen';
 vi.mock('../../src/stores/repositoryStore', () => ({
   useRepositoryStore: () => ({
     openRepositoryPicker: vi.fn(),
+    repos: [],
+    metadata: {},
+    openRepository: vi.fn(),
   }),
 }));
 
@@ -24,13 +27,18 @@ describe('WelcomeScreen', () => {
     expect(screen.getByText('Open Repository')).toBeInTheDocument();
   });
 
-  it('renders Clone from GitHub button', () => {
+  it('renders Clone Repository button', () => {
     render(<WelcomeScreen />);
-    expect(screen.getByText('Clone from GitHub')).toBeInTheDocument();
+    expect(screen.getByText('Clone Repository')).toBeInTheDocument();
   });
 
-  it('shows keyboard shortcuts hint', () => {
+  it('renders New Repository button', () => {
     render(<WelcomeScreen />);
-    expect(screen.getByText(/Ctrl\+O to open/i)).toBeInTheDocument();
+    expect(screen.getByText('New Repository')).toBeInTheDocument();
+  });
+
+  it('shows drag-and-drop hint', () => {
+    render(<WelcomeScreen />);
+    expect(screen.getByText(/Drag folders onto this window/i)).toBeInTheDocument();
   });
 });

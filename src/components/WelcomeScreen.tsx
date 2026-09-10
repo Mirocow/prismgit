@@ -1,11 +1,16 @@
-import { Folder, Plus, Github, BookOpen, Star, ChevronRight, GitBranch, FileText, History } from './icons';
+import { Folder, Plus, Github, BookOpen, Star, ChevronRight, GitBranch, FileText, History, Download } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 
-export function WelcomeScreen() {
+export function WelcomeScreen({
+  onClone,
+  onInit,
+}: {
+  onClone?: () => void;
+  onInit?: () => void;
+}) {
   const openRepo = useRepositoryStore((s) => s.openRepositoryPicker);
   const { repos, metadata, openRepository } = useRepositoryStore();
-  // Show up to 5 recent repos sorted by lastOpened (if available) — favorites first.
-  // Defensive against partial mock states during tests.
+  // Show up to 5 recent repos — favorites first, stable order otherwise
   const safeRepos = Array.isArray(repos) ? repos : [];
   const safeMeta = metadata || {};
   const recentRepos = [...safeRepos]
@@ -14,7 +19,7 @@ export function WelcomeScreen() {
       const mb = safeMeta[b.path];
       if (ma?.favorite && !mb?.favorite) return -1;
       if (!ma?.favorite && mb?.favorite) return 1;
-      return (mb?.lastOpened ?? 0) - (ma?.lastOpened ?? 0);
+      return 0; // stable — keep insertion order
     })
     .slice(0, 5);
 
@@ -64,30 +69,36 @@ export function WelcomeScreen() {
             PrismGit
           </h1>
           <p className="text-sm text-text-secondary mb-8 max-w-md mx-auto leading-relaxed">
-            A modern, cross-platform Git client built on Electron + React + TypeScript.
-            Visual history with passing-lane graphs, smart merges, and a clean Ayu palette.
-            Open a repository to start managing branches, commits, and history with a
-            fast, keyboard-friendly workflow.
+            A modern, cross-platform Git client. Open a repository to start
+            managing branches, commits, and history.
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-3 max-w-sm mx-auto">
+          {/* Three primary actions: Open, Clone, New */}
+          <div className="flex flex-col sm:flex-row gap-3 max-w-lg mx-auto">
             <button className="btn btn-primary justify-center flex-1" onClick={openRepo}>
               <Folder size={16} />
               Open Repository
             </button>
             <button
               className="btn btn-secondary justify-center flex-1"
-              onClick={() => (window.location.hash = '#/clone')}
+              onClick={() => onClone && onClone()}
             >
-              <Github size={16} />
-              Clone from GitHub
+              <Download size={16} />
+              Clone Repository
+            </button>
+            <button
+              className="btn btn-secondary justify-center flex-1"
+              onClick={() => onInit && onInit()}
+            >
+              <Plus size={16} />
+              New Repository
             </button>
           </div>
 
           <div className="mt-6 flex items-center justify-center gap-2 text-xs text-text-tertiary">
             <BookOpen size={12} />
             <span>
-              Press Ctrl+O to open, Ctrl+F to find, Ctrl+Shift+T to toggle theme
+              Drag folders onto this window to open · Press Ctrl+? for shortcuts
             </span>
           </div>
         </div>

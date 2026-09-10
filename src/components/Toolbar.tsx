@@ -9,8 +9,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToolbarStore, DEFAULT_TOOLBAR_GROUPS, type ToolbarGroups, type ToolbarGroupKey } from '../stores/toolbarStore';
 import { useToastStore } from '../stores/toastStore';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
-import { confirmDialog, promptDialog } from './ConfirmDialog';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Trash, X } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -63,9 +62,11 @@ interface ToolbarProps {
   onInteractiveRebase?: () => void;
   onRepoInfo?: () => void;
   onShowShortcuts?: () => void;
+  onShowClone?: () => void;
+  onShowInit?: () => void;
 }
 
-export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts }: ToolbarProps = {}) {
+export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts, onShowClone, onShowInit }: ToolbarProps = {}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const currentMetadata = useRepositoryStore((s) => s.currentMetadata);
   const status = useGitStore((s) => s.status);
@@ -178,7 +179,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
     <header
       className="flex items-center h-10 bg-bg-tertiary border-b border-border-default flex-shrink-0 select-none titlebar-drag"
     >
-      {/* App name (left, like Ollama Code) */}
+      {/* App name + repo management buttons (left) */}
       <div className="flex items-center gap-2 px-3 flex-shrink-0">
         <div className="flex items-center gap-1.5">
           <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-purple) 100%)' }}>
@@ -192,6 +193,24 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
             <span className="text-xs text-text-secondary font-medium">{currentRepo.name}</span>
           </>
         )}
+        {/* Repo management buttons — always visible (even when no repo is open) */}
+        <div className="flex items-center gap-0.5 ml-2">
+          <IconButton
+            icon={Folder}
+            onClick={() => useRepositoryStore.getState().openRepositoryPicker()}
+            title="Open Repository (Ctrl+O)"
+          />
+          <IconButton
+            icon={Download}
+            onClick={() => onShowClone && onShowClone()}
+            title="Clone Repository"
+          />
+          <IconButton
+            icon={Plus}
+            onClick={() => onShowInit && onShowInit()}
+            title="New Repository"
+          />
+        </div>
       </div>
 
       <Divider />
@@ -766,13 +785,8 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                   ).then(() => refreshStatus(currentRepo.path))
                    .catch((e) => toast.error('Unstage failed', String(e)));
                 }} disabled={disabled} title="Unstage all changes" />
-                <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={async () => {
-                  if (!currentRepo || !(await confirmDialog({
-                    title: 'Discard ALL uncommitted changes',
-                    message: 'This permanently discards all staged and unstaged changes. This cannot be undone.',
-                    confirmLabel: 'Discard all',
-                    danger: true,
-                  }))) return;
+                <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
+                  if (!currentRepo || !confirm('Discard ALL uncommitted changes?\n\nThis will permanently discard all staged and unstaged changes. This cannot be undone.')) return;
                   useOperationLogStore.getState().logOperation(
                     'Discard All', currentRepo.path, 'git checkout -- . && git clean -fd',
                     async () => {

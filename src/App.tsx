@@ -378,10 +378,10 @@ export default function App() {
     if (currentRepo) {
       refreshStatus(currentRepo.path);
       setDismissRebase(false);
-      // Always navigate to Changes view when repo opens (default landing page)
-      if (window.location.hash === '#/' || window.location.hash === '') {
-        window.location.hash = '#/changes';
-      }
+      // Always navigate to Changes view when repo opens — this is the
+      // primary landing page. Even if the user was on Settings or another
+      // page, opening a repo should show Changes first.
+      navigate('/changes');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRepo?.path]);
@@ -396,14 +396,14 @@ export default function App() {
   if (!currentRepo) {
     return (
       <div className="flex flex-col h-screen">
-        <Toolbar onFind={handleFind} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onShowShortcuts={() => setShowShortcuts(true)} />
+        <Toolbar onFind={handleFind} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onShowShortcuts={() => setShowShortcuts(true)} onShowClone={() => setShowClone(true)} onShowInit={() => setShowInit(true)} />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex-1 overflow-hidden flex flex-col">
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route path="/settings" element={<SettingsPage />} />
-                <Route path="*" element={<WelcomeScreen />} />
+                <Route path="*" element={<WelcomeScreen onClone={() => setShowClone(true)} onInit={() => setShowInit(true)} />} />
               </Routes>
             </Suspense>
           </div>
@@ -444,6 +444,8 @@ export default function App() {
         onInteractiveRebase={() => setShowIRebase(true)}
         onRepoInfo={() => setShowRepoInfo(true)}
         onShowShortcuts={() => setShowShortcuts(true)}
+        onShowClone={() => setShowClone(true)}
+        onShowInit={() => setShowInit(true)}
       />
       <GitToolbar
         onGitFlow={() => setShowGitFlow(true)}
