@@ -132,7 +132,7 @@ export function RefBadge({ parsed, size = 8, hash, onChanged }: RefBadgeProps) {
       onClick={handleClick}
     >
       {parsed.kind === 'tag' && <TagIcon size={size} className="inline mr-0.5" />}
-      {parsed.kind === 'head' && '▸ '}
+      {parsed.kind === 'head' && '> '}
       {parsed.label}
     </span>
   );

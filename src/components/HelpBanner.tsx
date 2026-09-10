@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { NAV_DESCRIPTIONS } from './navItems';
 import { useLocation } from 'react-router-dom';
 import { X, BookOpen } from './icons';
+import { useI18n } from '../lib/i18n';
 
 /**
  * Help Banner
@@ -41,6 +42,7 @@ export function HelpBanner() {
   const location = useLocation();
   const [visible, setVisible] = useState(false);
   const path = location.pathname;
+  const { t } = useI18n();
 
   // Check if this page has a description AND hasn't been dismissed
   useEffect(() => {
@@ -71,7 +73,7 @@ export function HelpBanner() {
       <button
         className="icon-btn !w-5 !h-5 flex-shrink-0"
         onClick={handleDismiss}
-        title="Dismiss (won't show again for this page)"
+        title={t('shell.dismissBanner')}
       >
         <X size={10} />
       </button>

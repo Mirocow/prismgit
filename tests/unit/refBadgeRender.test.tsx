@@ -40,8 +40,8 @@ describe('RefBadge — crash regression', () => {
     );
     expect(screen.getByText('feature')).toBeTruthy();
     expect(screen.getByText('origin/dev')).toBeTruthy();
-    // HEAD badge renders "▸ main" as two text nodes inside one span
-    expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === '▸ main')).toBeTruthy();
+    // HEAD badge renders "> main" as two text nodes inside one span
+    expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === '> main')).toBeTruthy();
   });
 });
 

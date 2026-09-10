@@ -7,11 +7,13 @@ import { GitFlowDialog } from '../components/GitFlowDialog';
 import { listFlowBranches, type GitFlowConfig } from '../lib/gitflow';
 import { detectGitFlowConfig } from '../lib/gitflow';
 import { cn, formatDate, shortHash } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 type FlowType = 'feature' | 'release' | 'hotfix';
 type Action = 'start' | 'finish';
 
 export function GitFlowPage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const [config, setConfig] = useState<GitFlowConfig | null>(null);
@@ -34,7 +36,7 @@ export function GitFlowPage() {
       setReleases(lists.releases);
       setHotfixes(lists.hotfixes);
     } catch (e) {
-      toast.error('Failed to load Git-Flow status', String(e));
+      toast.error(t('pages.gitflowLoadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -60,14 +62,14 @@ export function GitFlowPage() {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-text-primary truncate">{branch.name}</span>
-          {branch.current && <span className="badge badge-added">CURRENT</span>}
+          {branch.current && <span className="badge badge-added">{t('pages.flowBadgeCurrent')}</span>}
           {branch.tracking && <span className="text-2xs text-text-tertiary">→ {branch.tracking}</span>}
         </div>
         {branch.lastCommit && (
           <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
             <code
               className="font-mono cursor-pointer hover:text-accent hover:underline"
-              title="Select this commit — click to view in History"
+              title={t('pages.selectCommitHint')}
               onClick={(e) => {
                 e.stopPropagation();
                 useSelectionStore.getState().selectCommit(branch.lastCommit!.hash);
@@ -85,20 +87,20 @@ export function GitFlowPage() {
         {/* Cross-tool: this flow branch becomes the global selection and opens in History */}
         <button
           className="btn btn-secondary text-2xs"
-          title={`Show log of '${branch.name}'`}
+          title={t('pages.showLogOf', { name: branch.name })}
           onClick={() => {
             useSelectionStore.getState().selectBranch(branch.name);
             window.location.hash = '#/history';
           }}
         >
-          Log
+          {t('branches.log')}
         </button>
         <button
           className="btn btn-secondary text-2xs"
           onClick={() => openDialog(flow, 'finish', branch.name.replace(config?.[`${flow}Prefix` as keyof GitFlowConfig] || '', ''))}
         >
           <GitMerge size={11} />
-          Finish
+          {t('pages.flowFinish')}
         </button>
       </div>
     </div>
@@ -109,12 +111,12 @@ export function GitFlowPage() {
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
           <GitBranch size={14} />
-          <span className="text-sm font-medium">Git-Flow</span>
+          <span className="text-sm font-medium">{t('nav.gitflow')}</span>
           {config && (
             <span className="text-2xs text-text-tertiary">
               main: <code
                       className="mono cursor-pointer hover:text-accent hover:underline"
-                      title="Select this branch — click to view in History"
+                      title={t('pages.selectBranchHint')}
                       onClick={() => {
                         useSelectionStore.getState().selectBranch(config.masterBranch);
                         window.location.hash = '#/history';
@@ -123,7 +125,7 @@ export function GitFlowPage() {
               {' · '}
               develop: <code
                       className="mono cursor-pointer hover:text-accent hover:underline"
-                      title="Select this branch — click to view in History"
+                      title={t('pages.selectBranchHint')}
                       onClick={() => {
                         useSelectionStore.getState().selectBranch(config.developBranch);
                         window.location.hash = '#/history';
@@ -133,7 +135,7 @@ export function GitFlowPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button className="icon-btn" title="Refresh" onClick={load}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={13} />
           </button>
         </div>
@@ -141,25 +143,25 @@ export function GitFlowPage() {
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+          <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
         ) : (
           <>
             {/* Features */}
             <div>
               <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default flex items-center justify-between">
                 <span className="flex items-center gap-2">
-                  <GitBranch size={11} /> Features ({features.length})
+                  <GitBranch size={11} /> {t('pages.flowFeatures', { count: features.length })}
                 </span>
                 <button
                   className="icon-btn !w-5 !h-5"
-                  title="Start feature"
+                  title={t('pages.flowStartFeature')}
                   onClick={() => openDialog('feature', 'start')}
                 >
                   <Plus size={11} />
                 </button>
               </div>
               {features.length === 0 ? (
-                <div className="px-3 py-3 text-xs text-text-tertiary">No active features</div>
+                <div className="px-3 py-3 text-xs text-text-tertiary">{t('pages.flowNoFeatures')}</div>
               ) : (
                 features.map((b) => renderBranchRow(b, 'feature'))
               )}
@@ -169,18 +171,18 @@ export function GitFlowPage() {
             <div>
               <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-y border-border-default flex items-center justify-between mt-2">
                 <span className="flex items-center gap-2">
-                  <Tag size={11} /> Releases ({releases.length})
+                  <Tag size={11} /> {t('pages.flowReleases', { count: releases.length })}
                 </span>
                 <button
                   className="icon-btn !w-5 !h-5"
-                  title="Start release"
+                  title={t('pages.flowStartRelease')}
                   onClick={() => openDialog('release', 'start')}
                 >
                   <Plus size={11} />
                 </button>
               </div>
               {releases.length === 0 ? (
-                <div className="px-3 py-3 text-xs text-text-tertiary">No active releases</div>
+                <div className="px-3 py-3 text-xs text-text-tertiary">{t('pages.flowNoReleases')}</div>
               ) : (
                 releases.map((b) => renderBranchRow(b, 'release'))
               )}
@@ -190,18 +192,18 @@ export function GitFlowPage() {
             <div>
               <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-y border-border-default flex items-center justify-between mt-2">
                 <span className="flex items-center gap-2">
-                  <AlertCircle size={11} /> Hotfixes ({hotfixes.length})
+                  <AlertCircle size={11} /> {t('pages.flowHotfixes', { count: hotfixes.length })}
                 </span>
                 <button
                   className="icon-btn !w-5 !h-5"
-                  title="Start hotfix"
+                  title={t('pages.flowStartHotfix')}
                   onClick={() => openDialog('hotfix', 'start')}
                 >
                   <Plus size={11} />
                 </button>
               </div>
               {hotfixes.length === 0 ? (
-                <div className="px-3 py-3 text-xs text-text-tertiary">No active hotfixes</div>
+                <div className="px-3 py-3 text-xs text-text-tertiary">{t('pages.flowNoHotfixes')}</div>
               ) : (
                 hotfixes.map((b) => renderBranchRow(b, 'hotfix'))
               )}
@@ -209,13 +211,13 @@ export function GitFlowPage() {
 
             {/* Info card */}
             <div className="m-3 p-3 bg-bg-tertiary rounded border border-border-default">
-              <div className="text-xs text-text-secondary mb-2 font-medium">About Git-Flow</div>
+              <div className="text-xs text-text-secondary mb-2 font-medium">{t('pages.flowAboutTitle')}</div>
               <div className="text-2xs text-text-tertiary leading-relaxed">
-                Git-Flow is a structured workflow for managing features, releases, and hotfixes.
-                Features branch off <code className="mono">develop</code> and merge back.
-                Releases branch off <code className="mono">develop</code>, merge into both
-                <code className="mono">main</code> and <code className="mono">develop</code>, and are tagged.
-                Hotfixes branch off <code className="mono">main</code> and merge back to both.
+                {t('pages.flowAbout1')} <code className="mono">develop</code> {t('pages.flowAbout2')}{' '}
+                <code className="mono">develop</code>{t('pages.flowAbout3')}{' '}
+                <code className="mono">main</code> {t('pages.flowAbout4')}{' '}
+                <code className="mono">develop</code>{t('pages.flowAbout5')}{' '}
+                <code className="mono">main</code> {t('pages.flowAbout6')}
               </div>
             </div>
           </>

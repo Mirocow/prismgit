@@ -5,6 +5,7 @@
 import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText } from './icons';
 import type { CommitFile } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 interface TreeNode {
   name: string;
@@ -126,8 +127,9 @@ export function CommitFileTree({
   onFileClick,
   onFileContextMenu,
 }: CommitFileTreeProps) {
+  const { t } = useI18n();
   if (files.length === 0) {
-    return <div className="text-2xs text-text-tertiary">No files</div>;
+    return <div className="text-2xs text-text-tertiary">{t('history.noFiles')}</div>;
   }
 
   const tree = buildTree(files);

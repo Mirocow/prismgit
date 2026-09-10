@@ -28,6 +28,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle } from './icons';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useI18n } from '../lib/i18n';
 
 export interface ConfirmDialogInput {
   /** Prefilled value. */
@@ -89,6 +90,7 @@ export function ConfirmDialogHost() {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     enqueue = (r) => {
@@ -183,7 +185,7 @@ export function ConfirmDialogHost() {
               className="btn btn-secondary text-xs"
               onClick={() => finish(req.input ? null : false)}
             >
-              {req.cancelLabel ?? 'Cancel'}
+              {req.cancelLabel ?? t('common.cancel')}
             </button>
           )}
           <button
@@ -191,7 +193,7 @@ export function ConfirmDialogHost() {
             className={req.danger ? 'btn btn-danger text-xs' : 'btn btn-primary text-xs'}
             onClick={handleConfirm}
           >
-            {req.confirmLabel ?? (req.input ? 'OK' : 'Confirm')}
+            {req.confirmLabel ?? (req.input ? t('common.ok') : t('dialog.confirm'))}
           </button>
         </div>
       </div>

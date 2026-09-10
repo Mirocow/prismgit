@@ -7,10 +7,12 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type ReflogEntry } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useContextMenu } from '../lib/useContextMenu';
 
 export function JournalPage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();
@@ -26,7 +28,7 @@ export function JournalPage() {
       const result = await api.git.reflog(repo.path, 'HEAD', 200);
       setEntries(result);
     } catch (e) {
-      toast.error('Failed to load journal', String(e));
+      toast.error(t('pages.journalLoadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -54,59 +56,59 @@ export function JournalPage() {
 
   const handleCherryPick = async (entry: ReflogEntry) => {
     if (!(await confirmDialog({
-      title: `Cherry-pick ${shortHash(entry.hash)}`,
-      message: `Apply the changes from this commit onto your current branch?\n\nCommit: "${entry.message.substring(0, 80)}"`,
-      confirmLabel: 'Cherry-pick',
+      title: t('pages.journalCherryPickTitle', { hash: shortHash(entry.hash) }),
+      message: t('pages.journalCherryPickMessage', { message: entry.message.substring(0, 80) }),
+      confirmLabel: t('pages.cherryPickButton'),
     }))) return;
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) {
-        toast.warning(`${result.conflicts.length} conflicts`, result.conflicts.join('\n'));
+        toast.warning(t('pages.conflictsCount', { count: result.conflicts.length }), result.conflicts.join('\n'));
       } else {
-        toast.success('Cherry-picked');
+        toast.success(t('pages.cherryPicked'));
       }
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Cherry-pick failed', String(e));
+      toast.error(t('pages.cherryPickFailed'), String(e));
     }
   };
 
   const handleResetToHere = async (entry: ReflogEntry) => {
     if (!(await confirmDialog({
-      title: `Reset HEAD to ${shortHash(entry.hash)} (hard)`,
-      message: 'All uncommitted changes will be lost!',
-      confirmLabel: 'Reset',
+      title: t('pages.journalResetTitle', { hash: shortHash(entry.hash) }),
+      message: t('pages.resetHardWarning'),
+      confirmLabel: t('pages.reset'),
       danger: true,
     }))) return;
     try {
       await api.git.reset(repo.path, 'hard', entry.hash);
-      toast.success(`Reset to ${shortHash(entry.hash)}`);
+      toast.success(t('pages.resetToHash', { hash: shortHash(entry.hash) }));
       await refreshStatus(repo.path);
       await load();
     } catch (e) {
-      toast.error('Reset failed', String(e));
+      toast.error(t('pages.resetFailed'), String(e));
     }
   };
 
   const FILTERS: { key: typeof filter; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'commit', label: 'Commits' },
-    { key: 'checkout', label: 'Checkouts' },
-    { key: 'merge', label: 'Merges' },
-    { key: 'rebase', label: 'Rebases' },
-    { key: 'reset', label: 'Resets' },
-    { key: 'other', label: 'Other' },
+    { key: 'all', label: t('common.all') },
+    { key: 'commit', label: t('pages.filterCommits') },
+    { key: 'checkout', label: t('pages.filterCheckouts') },
+    { key: 'merge', label: t('history.merges') },
+    { key: 'rebase', label: t('pages.filterRebases') },
+    { key: 'reset', label: t('pages.filterResets') },
+    { key: 'other', label: t('pages.filterOther') },
   ];
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Journal</span>
-          <span className="text-2xs text-text-tertiary">{filtered.length} entries</span>
+          <span className="text-sm font-medium">{t('pages.journalTitle')}</span>
+          <span className="text-2xs text-text-tertiary">{t('pages.entriesCount', { count: filtered.length })}</span>
         </div>
         <div className="flex items-center gap-2">
-          <button className="icon-btn" title="Refresh" onClick={load}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={13} />
           </button>
         </div>
@@ -131,11 +133,11 @@ export function JournalPage() {
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+          <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
             <RotateCcw size={32} className="mb-2 opacity-50" />
-            <div className="text-sm">No journal entries</div>
+            <div className="text-sm">{t('pages.noJournalEntries')}</div>
           </div>
         ) : (
           filtered.map((entry, idx) => (
@@ -149,23 +151,23 @@ export function JournalPage() {
               onContextMenu={(e) => {
                 e.preventDefault();
                 showContextMenu([
-                  { label: 'View Commit in History', clickId: 'view-commit' },
+                  { label: t('pages.menuViewCommitInHistory'), clickId: 'view-commit' },
                   { type: 'separator' },
-                  { label: 'Copy Short Hash', clickId: 'copy-short' },
-                  { label: 'Copy Full Hash', clickId: 'copy-full' },
-                  { label: 'Copy Message', clickId: 'copy-msg' },
+                  { label: t('history.copyShortHash'), clickId: 'copy-short' },
+                  { label: t('history.copyFullHash'), clickId: 'copy-full' },
+                  { label: t('pages.menuCopyMessage'), clickId: 'copy-msg' },
                   { type: 'separator' },
-                  { label: 'Cherry-pick this commit...', clickId: 'cherry-pick' },
-                  { label: 'Reset HEAD here (hard)...', clickId: 'reset-hard' },
+                  { label: t('pages.menuCherryPick'), clickId: 'cherry-pick' },
+                  { label: t('pages.menuResetHard'), clickId: 'reset-hard' },
                 ], (action) => {
                   switch (action) {
                     case 'view-commit':
                       useSelectionStore.getState().selectCommit(entry.hash);
                       window.location.hash = '#/history';
                       break;
-                    case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success('Copied'); break;
-                    case 'copy-full': copyToClipboard(entry.hash); toast.success('Copied'); break;
-                    case 'copy-msg': copyToClipboard(entry.message); toast.success('Copied'); break;
+                    case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success(t('pages.copied')); break;
+                    case 'copy-full': copyToClipboard(entry.hash); toast.success(t('pages.copied')); break;
+                    case 'copy-msg': copyToClipboard(entry.message); toast.success(t('pages.copied')); break;
                     case 'cherry-pick': handleCherryPick(entry); break;
                     case 'reset-hard': handleResetToHere(entry); break;
                   }
@@ -189,24 +191,24 @@ export function JournalPage() {
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
                 <button
                   className="icon-btn !w-5 !h-5"
-                  title="Copy hash"
+                  title={t('pages.copyHashTitle')}
                   onClick={() => {
                     copyToClipboard(entry.hash);
-                    toast.success('Hash copied');
+                    toast.success(t('pages.hashCopied'));
                   }}
                 >
                   <Copy size={10} />
                 </button>
                 <button
                   className="icon-btn !w-5 !h-5"
-                  title="Cherry-pick this commit"
+                  title={t('pages.cherryPickTitleHint')}
                   onClick={() => handleCherryPick(entry)}
                 >
                   <GitCommit size={10} />
                 </button>
                 <button
                   className="icon-btn !w-5 !h-5 hover:!text-status-deleted"
-                  title="Reset HEAD to here (hard)"
+                  title={t('pages.resetHardHere')}
                   onClick={() => handleResetToHere(entry)}
                 >
                   <RotateCcw size={10} />

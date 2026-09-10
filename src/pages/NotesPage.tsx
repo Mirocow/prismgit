@@ -6,6 +6,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type NoteCategory, type CommitNote, type LogEntry } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 
 /**
@@ -14,6 +15,7 @@ import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
  * config sections plus auto-detected refs/notes/* refs.
  */
 export function NotesPage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const selectCommit = useSelectionStore((s) => s.selectCommit);
@@ -37,7 +39,7 @@ export function NotesPage() {
       setCategories(cats);
       if (!cats.some((c) => c.ref === activeCat)) setActiveCat(cats[0]?.ref ?? 'commits');
     } catch (e) {
-      toast.error('Failed to load note categories', String(e));
+      toast.error(t('pages.notesLoadCategoriesFailed'), String(e));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo?.path]);
@@ -60,7 +62,7 @@ export function NotesPage() {
       }
       setCommitMeta(meta);
     } catch (e) {
-      toast.error('Failed to load notes', String(e));
+      toast.error(t('pages.notesLoadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -96,18 +98,18 @@ export function NotesPage() {
       const exists = notes.some((n) => n.commit === target);
       if (exists) {
         const ok = await confirmDialog({
-          title: 'Overwrite note?',
-          message: `A note already exists on ${shortHash(target)} in this category. Overwrite it?`,
-          confirmLabel: 'Overwrite',
+          title: t('pages.notesOverwriteTitle'),
+          message: t('pages.notesOverwriteMessage', { hash: shortHash(target) }),
+          confirmLabel: t('pages.overwrite'),
         });
         if (!ok) return;
       }
       await api.git.notesAdd(repo.path, activeCat, target, message, true);
       setNewNote('');
-      toast.success(`Note added to ${shortHash(target)}`);
+      toast.success(t('pages.noteAddedTo', { hash: shortHash(target) }));
       await loadNotes();
     } catch (e) {
-      toast.error('Failed to add note', String(e));
+      toast.error(t('pages.noteAddFailed'), String(e));
     } finally {
       setSaving(false);
     }
@@ -115,49 +117,49 @@ export function NotesPage() {
 
   const handleRemove = async (commit: string) => {
     const ok = await confirmDialog({
-      title: 'Remove note',
-      message: `Remove the note from commit ${shortHash(commit)}?`,
-      confirmLabel: 'Remove',
+      title: t('pages.noteRemoveTitle'),
+      message: t('pages.noteRemoveMessage', { hash: shortHash(commit) }),
+      confirmLabel: t('common.remove'),
       danger: true,
     });
     if (!ok) return;
     try {
       await api.git.notesRemove(repo.path, activeCat, commit);
-      toast.success('Note removed');
+      toast.success(t('pages.noteRemoved'));
       await loadNotes();
     } catch (e) {
-      toast.error('Failed to remove note', String(e));
+      toast.error(t('pages.noteRemoveFailed'), String(e));
     }
   };
 
   const handleSyncPush = async () => {
     const remote = await promptDialog({
-      title: 'Push notes',
-      message: 'Push this notes ref to a remote (refs/notes are NOT pushed by default)',
+      title: t('pages.notesPushTitle'),
+      message: t('pages.notesPushMessage'),
       input: { initialValue: 'origin', placeholder: 'origin' },
     });
     if (!remote) return;
     try {
       await api.git.raw(repo.path, ['push', remote, `refs/notes/${activeCat}:refs/notes/${activeCat}`]);
-      toast.success(`Notes pushed to ${remote}`);
+      toast.success(t('pages.notesPushed', { remote }));
     } catch (e) {
-      toast.error('Failed to push notes', String(e));
+      toast.error(t('pages.notesPushFailed'), String(e));
     }
   };
 
   const handleSyncFetch = async () => {
     const remote = await promptDialog({
-      title: 'Fetch notes',
-      message: 'Fetch notes refs from a remote',
+      title: t('pages.notesFetchTitle'),
+      message: t('pages.notesFetchMessage'),
       input: { initialValue: 'origin', placeholder: 'origin' },
     });
     if (!remote) return;
     try {
       await api.git.raw(repo.path, ['fetch', remote, `refs/notes/${activeCat}:refs/notes/${activeCat}`]);
-      toast.success(`Notes fetched from ${remote}`);
+      toast.success(t('pages.notesFetched', { remote }));
       await loadNotes();
     } catch (e) {
-      toast.error('Failed to fetch notes', String(e));
+      toast.error(t('pages.notesFetchFailed'), String(e));
     }
   };
 
@@ -166,7 +168,7 @@ export function NotesPage() {
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
         <StickyNote size={18} className="text-accent shrink-0" />
-        <h1 className="text-sm font-semibold">Notes</h1>
+        <h1 className="text-sm font-semibold">{t('nav.notes')}</h1>
         <div className="flex items-center gap-1 ml-2">
           {categories.map((c) => (
             <button
@@ -188,27 +190,27 @@ export function NotesPage() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filter notes…"
+          placeholder={t('pages.notesFilterPlaceholder')}
           className="w-48 px-2.5 py-1.5 text-xs bg-surface border border-border rounded focus:outline-none focus:border-accent"
         />
         <button
           onClick={handleSyncFetch}
           className="p-1.5 rounded hover:bg-surface-hover text-text-secondary hover:text-text-primary"
-          title="Fetch notes ref from remote"
+          title={t('pages.notesFetchRefTitle')}
         >
           <CloudDownload size={16} />
         </button>
         <button
           onClick={handleSyncPush}
           className="p-1.5 rounded hover:bg-surface-hover text-text-secondary hover:text-text-primary"
-          title="Push notes ref to remote (notes are not pushed by default!)"
+          title={t('pages.notesPushRefTitle')}
         >
           <CloudUpload size={16} />
         </button>
         <button
           onClick={() => { loadCategories(); loadNotes(); }}
           className="p-1.5 rounded hover:bg-surface-hover text-text-secondary hover:text-text-primary"
-          title="Refresh (F5)"
+          title={t('pages.refreshF5')}
         >
           <RefreshCw size={16} />
         </button>
@@ -219,7 +221,7 @@ export function NotesPage() {
         {/* Target commit indicator — mirrors the global commit selection */}
         <span
           className="hidden sm:flex items-center gap-1 px-2 py-1 rounded border border-border text-2xs text-text-secondary shrink-0"
-          title={targetCommit ? `New notes attach to ${shortHash(targetCommit)} — the commit selected in History/Tags/Branches` : 'No commit selected — notes will attach to HEAD'}
+          title={targetCommit ? t('pages.notesTargetHint', { hash: shortHash(targetCommit) }) : t('pages.notesNoTargetHint')}
         >
           <GitCommit size={11} className="text-text-tertiary" />
           {targetCommit ? (
@@ -229,7 +231,7 @@ export function NotesPage() {
                 selectCommit(targetCommit);
                 window.location.hash = '#/history';
               }}
-              title="View this commit in History"
+              title={t('pages.viewCommitInHistory')}
             >
               {shortHash(targetCommit)}
             </button>
@@ -243,7 +245,7 @@ export function NotesPage() {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAdd();
           }}
-          placeholder="New note text… (attached to the commit selected in History, or HEAD). Ctrl+Enter to add"
+          placeholder={t('pages.notesNewPlaceholder')}
           rows={1}
           className="flex-1 px-2.5 py-1.5 text-xs bg-surface border border-border rounded focus:outline-none focus:border-accent resize-none"
         />
@@ -253,20 +255,20 @@ export function NotesPage() {
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded hover:opacity-90 disabled:opacity-40 shrink-0"
         >
           <Plus size={14} />
-          Add Note
+          {t('pages.addNote')}
         </button>
       </div>
 
       {/* Notes list */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="flex items-center justify-center h-32 text-text-tertiary text-sm">Loading notes…</div>
+          <div className="flex items-center justify-center h-32 text-text-tertiary text-sm">{t('pages.notesLoading')}</div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-text-tertiary text-sm gap-2">
             <StickyNote size={32} className="opacity-40" />
-            <div>No notes in category “{activeCat}”</div>
+            <div>{t('pages.notesEmpty', { category: activeCat })}</div>
             <div className="text-xs opacity-70">
-              Add a note above, or configure categories via <code className="text-accent">git config smartgit.notes.&lt;id&gt;.ref</code>
+              {t('pages.notesEmptyHint')} <code className="text-accent">git config smartgit.notes.&lt;id&gt;.ref</code>
             </div>
           </div>
         ) : (
@@ -285,20 +287,20 @@ export function NotesPage() {
                         <span className="text-xs text-text-tertiary shrink-0">{formatDate(meta.author.date)}</span>
                       </>
                     ) : (
-                      <span className="text-xs text-text-tertiary flex-1">(commit details unavailable)</span>
+                      <span className="text-xs text-text-tertiary flex-1">{t('pages.commitDetailsUnavailable')}</span>
                     )}
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                       <button
-                        onClick={() => copyToClipboard(n.note).then(() => toast.success('Note copied'))}
+                        onClick={() => copyToClipboard(n.note).then(() => toast.success(t('pages.noteCopied')))}
                         className="p-1 rounded hover:bg-surface-hover text-text-tertiary hover:text-text-primary"
-                        title="Copy note"
+                        title={t('pages.copyNote')}
                       >
                         <Copy size={13} />
                       </button>
                       <button
                         onClick={() => handleRemove(n.commit)}
                         className="p-1 rounded hover:bg-surface-hover text-red-400"
-                        title="Remove note"
+                        title={t('pages.noteRemoveTitle')}
                       >
                         <Trash size={13} />
                       </button>

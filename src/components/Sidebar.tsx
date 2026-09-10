@@ -20,6 +20,7 @@ import type { RemoteCheckSummary } from '../lib/api';
 import { api } from '../lib/api';
 import { useToastStore } from '../stores/toastStore';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
+import { useI18n } from '../lib/i18n';
 
 /**
  * Drag-and-drop payload for the repository tree. Chromium lowercases custom
@@ -39,14 +40,15 @@ function timeAgo(ts: number): string {
 
 /** Badge row for one repo from its latest remote check (↓ incoming / ↑ outgoing / dirty dot). */
 function RemoteBadges({ check }: { check: RemoteCheckSummary | undefined }) {
+  const { t } = useI18n();
   if (!check) return null;
-  const remoteNames = check.remotes.join(', ') || 'remotes';
+  const remoteNames = check.remotes.join(', ') || t('shell.fallbackRemotes');
   return (
     <>
       {check.incoming > 0 && (
         <span
           className="text-2xs font-semibold text-status-added flex-shrink-0 tabular-nums"
-          title={`${check.incoming} incoming commit(s) on ${remoteNames} — pull to update`}
+          title={t('shell.incomingTooltip', { count: check.incoming, remotes: remoteNames })}
         >
           ↓{check.incoming}
         </span>
@@ -54,7 +56,7 @@ function RemoteBadges({ check }: { check: RemoteCheckSummary | undefined }) {
       {check.outgoing > 0 && (
         <span
           className="text-2xs font-semibold text-status-modified flex-shrink-0 tabular-nums"
-          title={`${check.outgoing} local commit(s) not pushed to ${remoteNames}`}
+          title={t('shell.outgoingTooltip', { count: check.outgoing, remotes: remoteNames })}
         >
           ↑{check.outgoing}
         </span>
@@ -62,11 +64,11 @@ function RemoteBadges({ check }: { check: RemoteCheckSummary | undefined }) {
       {check.dirty > 0 && (
         <span
           className="w-1.5 h-1.5 rounded-full bg-status-modified flex-shrink-0"
-          title={`${check.dirty} changed file(s) in the working tree`}
+          title={t('shell.dirtyTooltip', { count: check.dirty })}
         />
       )}
       {check.error && (
-        <span className="flex-shrink-0" title={`Remote check problem: ${check.error}`}>
+        <span className="flex-shrink-0" title={t('shell.remoteCheckProblem', { error: check.error })}>
           <AlertCircle size={10} className="text-status-deleted" />
         </span>
       )}
@@ -83,6 +85,7 @@ export function Sidebar() {
     createGroup, renameGroup, deleteGroup, moveGroup, toggleGroupExpanded, assignRepoGroup,
   } = useRepositoryStore();
   const toast = useToastStore();
+  const { t } = useI18n();
   const favoritePaths = useMemo(
     () => new Set(Object.entries(metadata).filter(([, m]) => m.favorite).map(([p]) => p)),
     [metadata]
@@ -224,12 +227,15 @@ export function Sidebar() {
       }
       if (addedCount > 0) {
         await loadRepos();
+        const addedMsg = addedCount === 1
+          ? (targetGroupId ? t('shell.repoAddedToGroup') : t('shell.repoAdded'))
+          : (targetGroupId ? t('shell.reposAddedToGroup', { count: addedCount }) : t('shell.reposAdded', { count: addedCount }));
         toast.success(
-          `Added ${addedCount} repositor${addedCount === 1 ? 'y' : 'ies'}${targetGroupId ? ' to group' : ''}`,
-          skippedCount > 0 ? `${skippedCount} folder(s) skipped (not a git repo)` : undefined
+          addedMsg,
+          skippedCount > 0 ? t('shell.foldersSkippedParen', { count: skippedCount }) : undefined
         );
       } else if (skippedCount > 0) {
-        toast.warning('No git repositories found', `${skippedCount} folder(s) dropped`);
+        toast.warning(t('shell.noGitReposFound'), t('shell.foldersDroppedParen', { count: skippedCount }));
       }
       return;
     }
@@ -267,10 +273,10 @@ export function Sidebar() {
 
   const handleCreateGroup = useCallback(async (parentId: string | null = null) => {
     const name = await promptDialog({
-      title: parentId ? 'New subgroup' : 'New group',
-      message: parentId ? 'Enter a name for the subgroup:' : 'Enter a name for the repository group:',
-      input: { placeholder: 'e.g. Work, Clients, Sandbox' },
-      confirmLabel: 'Create',
+      title: parentId ? t('shell.newSubgroup') : t('shell.newGroupTitle'),
+      message: parentId ? t('shell.subgroupPrompt') : t('shell.groupPrompt'),
+      input: { placeholder: t('shell.groupNamePlaceholder') },
+      confirmLabel: t('common.create'),
     });
     if (name == null || !name.trim()) return;
     try {
@@ -278,13 +284,13 @@ export function Sidebar() {
     } catch (e) {
       console.warn('[sidebar] create group failed:', e);
     }
-  }, [createGroup]);
+  }, [createGroup, t]);
 
   const handleRenameGroup = useCallback(async (groupId: string, currentName: string) => {
     const name = await promptDialog({
-      title: 'Rename group',
+      title: t('shell.renameGroupTitle'),
       input: { initialValue: currentName },
-      confirmLabel: 'Rename',
+      confirmLabel: t('common.rename'),
     });
     if (name == null || !name.trim()) return;
     try {
@@ -292,13 +298,13 @@ export function Sidebar() {
     } catch (e) {
       console.warn('[sidebar] rename group failed:', e);
     }
-  }, [renameGroup]);
+  }, [renameGroup, t]);
 
   const handleDeleteGroup = useCallback(async (groupId: string, groupName: string) => {
     if (!(await confirmDialog({
-      title: `Delete group '${groupName}'`,
-      message: 'Subgroups and repositories inside it are moved to the parent level — nothing is deleted from disk.',
-      confirmLabel: 'Delete',
+      title: t('shell.deleteGroupTitle', { name: groupName }),
+      message: t('shell.deleteGroupMessage'),
+      confirmLabel: t('common.delete'),
       danger: true,
     }))) return;
     try {
@@ -306,39 +312,39 @@ export function Sidebar() {
     } catch (e) {
       console.warn('[sidebar] delete group failed:', e);
     }
-  }, [deleteGroup]);
+  }, [deleteGroup, t]);
 
   const showGroupMenu = useCallback((e: React.MouseEvent, node: RepoGroupNode) => {
     e.preventDefault();
     e.stopPropagation();
     void showContextMenu([
-      { label: 'New subgroup', clickId: 'subgroup' },
-      { label: 'Rename', clickId: 'rename' },
+      { label: t('shell.newSubgroup'), clickId: 'subgroup' },
+      { label: t('common.rename'), clickId: 'rename' },
       { type: 'separator' },
-      { label: 'Delete group', clickId: 'delete' },
+      { label: t('shell.deleteGroup'), clickId: 'delete' },
     ], (clickId) => {
       if (clickId === 'subgroup') void handleCreateGroup(node.group.id);
       if (clickId === 'rename') void handleRenameGroup(node.group.id, node.group.name);
       if (clickId === 'delete') void handleDeleteGroup(node.group.id, node.group.name);
     });
-  }, [showContextMenu, handleCreateGroup, handleRenameGroup, handleDeleteGroup]);
+  }, [showContextMenu, handleCreateGroup, handleRenameGroup, handleDeleteGroup, t]);
 
   const showRepoMenu = useCallback((e: React.MouseEvent, repoPath: string, repoGroupId: string | null | undefined) => {
     e.preventDefault();
     e.stopPropagation();
     const moveTargets = flattenGroupOptions(groups, repos, repoGroupId ?? undefined);
     const items = [
-      ...moveTargets.map((t) => ({
-        label: `${'\u00A0'.repeat(t.depth * 3)}${t.isRoot ? '· ' : ''}${t.name}`,
-        clickId: `move:${t.id ?? 'root'}`,
+      ...moveTargets.map((mt) => ({
+        label: `${'\u00A0'.repeat(mt.depth * 3)}${mt.isRoot ? '· ' : ''}${mt.name}`,
+        clickId: `move:${mt.id ?? 'root'}`,
       })),
       { type: 'separator' as const },
       ...(repoGroupId
-        ? [{ label: 'Remove from group', clickId: 'ungroup' }]
+        ? [{ label: t('shell.removeFromGroup'), clickId: 'ungroup' }]
         : []),
-      { label: 'Check remotes now', clickId: 'check' },
+      { label: t('shell.checkRemotesNow'), clickId: 'check' },
       { type: 'separator' as const },
-      { label: 'Repository Settings...', clickId: 'repo-settings' },
+      { label: t('shell.repoSettingsMenu'), clickId: 'repo-settings' },
     ];
     void showContextMenu(items, (clickId) => {
       if (clickId.startsWith('move:')) {
@@ -356,7 +362,16 @@ export function Sidebar() {
         });
       }
     });
-  }, [showContextMenu, groups, repos, dropRepoIntoGroup, checkRemotes, openRepository]);
+  }, [showContextMenu, groups, repos, dropRepoIntoGroup, checkRemotes, openRepository, t]);
+
+  // In-progress sequencer state for the CURRENT repo only — shown as a small
+  // warning dot on the active repo row. Per-repo status for inactive repos
+  // would require additional backend plumbing (RemoteCheckSummary doesn't
+  // carry isMerging etc.) — left for a follow-up.
+  const status = useGitStore((s) => s.status);
+  const currentInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
+  const currentBisecting = !!status?.isBisecting;
+  const currentDetached = !!status?.detached;
 
   // ============= Tree rendering =============
 
@@ -364,6 +379,10 @@ export function Sidebar() {
     const repo = node.repo;
     const meta = metadata[repo.path];
     const isActive = currentRepo?.path === repo.path;
+    // In-progress / detached indicators only apply to the active repo.
+    const showInProgressBadge = isActive && currentInProgress;
+    const showBisectBadge = isActive && currentBisecting;
+    const showDetachedBadge = isActive && currentDetached;
     return (
       <div
         key={repo.path}
@@ -384,11 +403,36 @@ export function Sidebar() {
           borderLeft: meta?.color ? `3px solid ${meta.color}` : undefined,
         }}
         onClick={(e) => { e.stopPropagation(); openRepository(repo.path); }}
-        title={`${repo.path}${repo.groupId ? '\n(group)' : ''}`}
+        title={`${repo.path}${repo.groupId ? '\n' + t('shell.groupSuffix') : ''}`}
         data-testid={`repo-item-${repo.name}`}
       >
         {isActive ? <FolderGitOpen size={13} className="text-accent flex-shrink-0" /> : <FolderGit size={13} className="text-text-tertiary flex-shrink-0" />}
         <span className={cn('flex-1 truncate', isActive && 'text-accent font-medium')}>{repo.name}</span>
+        {/* In-progress state badge — only on the active repo, only when one
+            of the sequencer flags is true. Clicking opens Changes where the
+            SequencerPanel / MergePanel / RebasePanel banners live. */}
+        {showInProgressBadge && (
+          <a
+            href="#/changes"
+            onClick={(e) => e.stopPropagation()}
+            className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning inline-block animate-pulse"
+            title={`Working tree is in ${status?.isMerging ? 'merging' : status?.isRebasing ? 'rebasing' : status?.isCherryPicking ? 'cherry-picking' : 'reverting'} state. Click to open Changes.`}
+          />
+        )}
+        {showBisectBadge && !showInProgressBadge && (
+          <span
+            className="flex-shrink-0 text-2xs text-status-info font-semibold"
+            title="Bisect in progress — see the Bisect page"
+          >
+            bisect
+          </span>
+        )}
+        {showDetachedBadge && !showInProgressBadge && (
+          <span
+            className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning inline-block"
+            title="HEAD is detached — commits won't belong to any branch"
+          />
+        )}
         <RemoteBadges check={remoteChecks[repo.path]} />
         {meta?.favorite && (
           <Star size={10} className="text-status-modified fill-current flex-shrink-0" />
@@ -400,14 +444,14 @@ export function Sidebar() {
         )}
         <button
           className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 transition-opacity"
-          title={repo.pinned ? 'Unpin' : 'Pin'}
+          title={repo.pinned ? t('shell.unpin') : t('shell.pin')}
           onClick={(e) => { e.stopPropagation(); pinRepo(repo.path, !repo.pinned); }}
         >
           {repo.pinned ? <PinOff size={10} /> : <Pin size={10} />}
         </button>
         <button
           className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 hover:!text-status-deleted transition-opacity"
-          title="Remove from list"
+          title={t('shell.removeFromList')}
           onClick={(e) => { e.stopPropagation(); removeRepo(repo.path); }}
         >
           <X size={10} />
@@ -434,12 +478,12 @@ export function Sidebar() {
             isDropTarget && 'bg-accent-muted/40 outline outline-1 outline-accent -outline-offset-1'
           )}
           style={{ paddingLeft: `${node.depth * 14 + 4}px` }}
-          title={`${node.group.name} — ${node.repoCount} repo(s). Drag repos or groups here; double-click to rename.`}
+          title={t('shell.groupTooltip', { name: node.group.name, count: node.repoCount })}
           data-testid={`repo-group-${node.group.name}`}
         >
           <button
             className="icon-btn !w-4 !h-4 !p-0 flex-shrink-0"
-            title={isExpanded ? 'Collapse' : 'Expand'}
+            title={isExpanded ? t('shell.collapse') : t('shell.expand')}
             onClick={(e) => { e.stopPropagation(); void toggleGroupExpanded(node.group.id, !isExpanded); }}
           >
             {isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
@@ -451,7 +495,7 @@ export function Sidebar() {
           <span className="text-2xs text-text-tertiary flex-shrink-0 tabular-nums">{node.repoCount}</span>
           <button
             className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 transition-opacity"
-            title="New subgroup"
+            title={t('shell.newSubgroup')}
             onClick={(e) => { e.stopPropagation(); void handleCreateGroup(node.group.id); }}
           >
             <FolderPlus size={10} />
@@ -478,7 +522,7 @@ export function Sidebar() {
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowRepoList(!showRepoList); }}
           >
             {showRepoList ? <FolderGitOpen size={15} className="text-accent" /> : <FolderGit size={15} className="text-text-secondary" />}
-            <span className="truncate">{currentRepo ? currentRepo.name : 'Repositories'}</span>
+            <span className="truncate">{currentRepo ? currentRepo.name : t('sidebar.repositories')}</span>
             {currentRepo && metadata[currentRepo.path]?.favorite && (
               <Star size={11} className="text-status-modified fill-current" />
             )}
@@ -491,13 +535,13 @@ export function Sidebar() {
             {currentRepo && (
               <button
                 className="icon-btn no-drag flex-shrink-0 hover:!text-status-deleted !w-7 !h-7"
-                title="Close repository (release memory, stop watcher, clear selections)"
+                title={t('shell.closeRepoTooltip')}
                 onClick={async (e) => {
                   e.preventDefault(); e.stopPropagation();
                   if (await confirmDialog({
-                    title: `Close repository '${currentRepo.name}'`,
-                    message: 'This stops the file-system watcher, clears the git cache and all selections, and frees memory.',
-                    confirmLabel: 'Close',
+                    title: t('shell.closeRepoTitle', { name: currentRepo.name }),
+                    message: t('shell.closeRepoMessage'),
+                    confirmLabel: t('common.close'),
                     danger: true,
                   })) {
                     useRepositoryStore.getState().closeRepository();
@@ -509,21 +553,21 @@ export function Sidebar() {
             )}
             <button
               className="icon-btn no-drag flex-shrink-0 !w-7 !h-7"
-              title={checkingRemotes ? 'Checking remotes…' : 'Check all repositories for remote changes (fetch + incoming/outgoing)'}
+              title={checkingRemotes ? t('shell.checkingRemotes') : t('shell.checkAllRemotesFull')}
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); void checkRemotes(); }}
             >
               <RefreshCw size={13} className={cn(checkingRemotes && 'animate-spin')} />
             </button>
             <button
               className="icon-btn no-drag flex-shrink-0 !w-7 !h-7"
-              title="New repository group"
+              title={t('sidebar.newGroup')}
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleCreateGroup(null); }}
             >
               <FolderPlus size={14} />
             </button>
             <button
               className="icon-btn no-drag flex-shrink-0 !w-7 !h-7"
-              title="Open another repository..."
+              title={t('sidebar.openRepository')}
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); useRepositoryStore.getState().openRepositoryPicker(); }}
             >
               <FolderOpen size={14} />
@@ -562,7 +606,7 @@ export function Sidebar() {
                 className={cn('px-3 py-6 text-xs text-text-tertiary text-center', dragOverId === 'root' && 'bg-accent-muted/30')}
               >
                 <Folder size={20} className="mx-auto mb-2 opacity-40" />
-                No repositories yet.<br />Click <Plus size={10} className="inline" /> to add one.
+                {t('shell.noReposYet')}<br />{t('shell.clickToAddPrefix')} <Plus size={10} className="inline" /> {t('shell.clickToAddSuffix')}
               </div>
             ) : (
               <>
@@ -571,7 +615,7 @@ export function Sidebar() {
                 )}
                 {dragOverId === 'root' && (
                   <div className="px-3 py-2 text-2xs text-accent text-center bg-accent-muted/30 border-t border-dashed border-accent">
-                    Drop here to move to the root level
+                    {t('shell.dropToRoot')}
                   </div>
                 )}
               </>
@@ -586,7 +630,7 @@ export function Sidebar() {
       )}
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-2 scrollbar-thin" role="navigation" aria-label="Main navigation">
+      <nav className="flex-1 overflow-y-auto py-2 scrollbar-thin" role="navigation" aria-label={t('shell.mainNavigation')}>
         {currentRepo ? (
           <>
           {/* Favorites section — user-pinned tools at the top */}
@@ -594,7 +638,7 @@ export function Sidebar() {
             <div className="mb-3">
               <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary flex items-center gap-1">
                 <Star size={9} className="text-status-modified fill-current" />
-                Favorites
+                {t('nav.favorites')}
               </div>
               {favoriteTools.map(path => {
                 const item = NAV_ITEMS.find(n => n.path === path);
@@ -631,7 +675,7 @@ export function Sidebar() {
                     ) : null}
                     <button
                       className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 !p-0 transition-opacity"
-                      title="Remove from Favorites"
+                      title={t('shell.removeFavorite')}
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.path); }}
                     >
                       <Star size={10} className="text-status-modified fill-current" />
@@ -656,7 +700,7 @@ export function Sidebar() {
                     else next.add(groupName);
                     setCollapsedGroups(next);
                   }}
-                  title={collapsedGroups.has(groupName) ? 'Expand' : 'Collapse'}
+                  title={collapsedGroups.has(groupName) ? t('shell.expand') : t('shell.collapse')}
                 >
                   {collapsedGroups.has(groupName) ? <ChevronRight size={9} /> : <ChevronDown size={9} />}
                   {groupName}
@@ -691,7 +735,9 @@ export function Sidebar() {
                           'ml-auto text-2xs font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center',
                           stagedCount > 0 ? 'badge badge-added' : 'bg-accent-muted text-accent'
                         )}
-                        title={`${changedCount} file(s) with changes${stagedCount > 0 ? `, ${stagedCount} staged` : ''}`}
+                        title={stagedCount > 0
+                          ? t('shell.changesBadgeStaged', { count: changedCount, staged: stagedCount })
+                          : t('shell.changesBadge', { count: changedCount })}
                       >
                         {changedCount}
                       </span>
@@ -706,7 +752,7 @@ export function Sidebar() {
                           ? 'opacity-100'
                           : 'opacity-0 group-hover:opacity-100'
                       )}
-                      title={isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
+                      title={isFavorite ? t('shell.removeFavorite') : t('shell.addFavorite')}
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.path); }}
                     >
                       <Star size={10} className={cn(isFavorite ? 'text-status-modified fill-current' : 'text-text-tertiary')} />
@@ -719,7 +765,7 @@ export function Sidebar() {
           </>
         ) : (
           <div className="px-3 py-4 text-xs text-text-tertiary text-center">
-            Open a repository to access Git operations
+            {t('shell.openRepoForGit')}
           </div>
         )}
       </nav>
@@ -729,10 +775,10 @@ export function Sidebar() {
         <button
           className="w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors text-text-secondary hover:bg-bg-hover hover:text-text-primary"
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleTheme(); }}
-          title="Toggle theme (Ctrl+Shift+T)"
+          title={t('shell.toggleTheme')}
         >
           {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-          <span>{theme === 'dark' ? 'Light Theme' : 'Dark Theme'}</span>
+          <span>{theme === 'dark' ? t('sidebar.lightTheme') : t('sidebar.darkTheme')}</span>
         </button>
         <button
           className={cn(
@@ -744,7 +790,7 @@ export function Sidebar() {
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate('/settings'); }}
         >
           <SettingsIcon size={15} />
-          <span>Settings</span>
+          <span>{t('nav.settings')}</span>
         </button>
       </div>
     </aside>

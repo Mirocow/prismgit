@@ -9,6 +9,7 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { RebasePanel } from './components/RebasePanel';
 import { FindObjectDialog } from './components/FindObjectDialog';
 import { SequencerPanel } from './components/SequencerPanel';
+import { MergeInProgressPanel } from './components/MergeInProgressPanel';
 import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
 import { CommandLogPanel } from './components/CommandLogPanel';
@@ -34,6 +35,7 @@ const ApplyPatchModal = lazy(() => import('./components/ApplyPatchModal').then(m
 const IndexEditorDialog = lazy(() => import('./components/IndexEditorDialog').then(m => ({ default: m.IndexEditorDialog })));
 const RepoSettingsDialog = lazy(() => import('./components/RepoSettingsDialog').then(m => ({ default: m.RepoSettingsDialog })));
 import { promptDialog, confirmDialog } from './components/ConfirmDialog';
+import { t as i18nT, useI18nStore } from './lib/i18n';
 import { clearProjectPrefs } from './lib/projectPrefs';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
@@ -126,6 +128,13 @@ export default function App() {
   // dialog opens instantly (no first-open chunk fetch/parse penalty).
   useChunkPreload();
 
+  // Locale sync: notify the main process so the native application menu is
+  // rebuilt in the active UI language (main initializes from the OS locale).
+  const locale = useI18nStore((s) => s.locale);
+  useEffect(() => {
+    window.smartgit?.app?.setLocale?.(locale);
+  }, [locale]);
+
   useEffect(() => {
     loadRepos();
     loadMetadata();
@@ -215,6 +224,35 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [repoPath]);
+
+  // Resolve conflict — extracted as a useCallback so it can be used both
+  // from the menu event handler (inside the useEffect below) AND from the
+  // JSX (ChangesPage onResolveConflictAction prop). Without this, the handler
+  // was trapped inside the useEffect scope.
+  const resolveConflict = useCallback(async (mode: 'ours' | 'theirs' | 'both' | 'resolved', fileOverride?: string) => {
+    const repo = useRepositoryStore.getState().currentRepo;
+    const f = fileOverride ?? useSelectionStore.getState().selectedFilePath;
+    if (!repo) return;
+    if (!f) { toast.warning('No file selected', 'Select a file in Changes first'); return; }
+    try {
+      if (mode === 'both') {
+        await api.git.raw(repo.path, ['checkout', '--ours', '--', f]);
+        const theirs = await api.git.raw(repo.path, ['show', `:3:${f}`]).catch(() => '');
+        if (theirs) {
+          const fs = await import('fs');
+          const path = await import('path');
+          const fullPath = path.join(repo.path, f);
+          const current = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf-8') : '';
+          fs.writeFileSync(fullPath, current + '\n' + theirs);
+        }
+      } else if (mode !== 'resolved') {
+        await api.git.raw(repo.path, ['checkout', `--${mode}`, '--', f]);
+      }
+      await api.git.add(repo.path, [f]);
+      toast.success(`${f}: ${mode === 'resolved' ? 'marked resolved' : mode === 'both' ? 'took both' : `took ${mode}`}`);
+      useGitStore.getState().refreshStatus(repo.path);
+    } catch (e) { toast.error('Resolve failed', String(e)); }
+  }, [toast]);
 
   // Listen for menu events
   useEffect(() => {
@@ -519,21 +557,9 @@ export default function App() {
       } catch (e) { toast.error('Remove failed', String(e)); }
     };
 
-    // ===== Resolve submenu =====
-    const resolveConflict = async (mode: 'ours' | 'theirs' | 'resolved') => {
-      const repo = requireRepo();
-      const f = selectedFile();
-      if (!repo) return;
-      if (!f) { warnNoFile(); return; }
-      try {
-        if (mode !== 'resolved') {
-          await api.git.raw(repo.path, ['checkout', `--${mode}`, '--', f]);
-        }
-        await api.git.add(repo.path, [f]);
-        toast.success(`${f}: ${mode === 'resolved' ? 'marked resolved' : `took ${mode}`}`);
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Resolve failed', String(e)); }
-    };
+    // ===== Resolve submenu ===== (resolveConflict is now a useCallback
+    // declared at the component level so it can also be passed to
+    // ChangesPage as onResolveConflictAction.)
     const handleConflictSolver = () => {
       const f = selectedFile();
       if (!f) { warnNoFile(); return; }
@@ -619,6 +645,17 @@ export default function App() {
       const ok = await api.fs.openTerminal(repo.path);
       if (!ok) toast.error('Could not open a terminal');
     };
+    const handleOpenInVscode = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      try {
+        const res = await api.vscode.open(repo.path);
+        if (res.ok) toast.success(i18nT('vscode.opened'));
+        else toast.error(i18nT('vscode.openFailed'));
+      } catch (e) {
+        toast.error(i18nT('vscode.openFailed'), String(e));
+      }
+    };
     const handleFormatPatch = async () => {
       const repo = requireRepo();
       if (!repo) return;
@@ -669,6 +706,21 @@ export default function App() {
         toast.success('Operation continued');
         useGitStore.getState().refreshStatus(repo.path);
       } catch (e) { toast.error('Continue failed', String(e)); }
+    };
+    // Skip the current commit in a cherry-pick / revert / rebase sequence.
+    // Used when a commit produces an empty result (changes already applied).
+    const handleSkipSequence = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      const st = useGitStore.getState().status;
+      try {
+        if (st?.isRebasing) await api.git.rebase(repo.path, 'HEAD', { skip: true });
+        else if (st?.isCherryPicking) await api.git.cherryPickSkip(repo.path);
+        else if (st?.isReverting) await api.git.revertSkip(repo.path);
+        else { toast.info('Nothing to skip (merge has no skip)'); return; }
+        toast.info('Commit skipped — sequence continues with the next one');
+        useGitStore.getState().refreshStatus(repo.path);
+      } catch (e) { toast.error('Skip failed', String(e)); }
     };
 
     const handleWindowStyle = (style: unknown) => {
@@ -727,6 +779,7 @@ export default function App() {
       window.smartgit.events.on('menu:bisectLog', () => bisect('log')),
       window.smartgit.events.on('menu:abortSequence', handleAbortSequence),
       window.smartgit.events.on('menu:continueSequence', handleContinueSequence),
+      window.smartgit.events.on('menu:skipSequence', handleSkipSequence),
       // Local menu
       window.smartgit.events.on('menu:stage', handleStage),
       window.smartgit.events.on('menu:unstage', handleUnstage),
@@ -768,6 +821,7 @@ export default function App() {
       window.smartgit.events.on('menu:repoSettings', () => setShowRepoSettings(true)),
       window.smartgit.events.on('menu:editGitConfig', () => handleNavigate('/settings')),
       window.smartgit.events.on('menu:openTerminal', handleOpenTerminal),
+      window.smartgit.events.on('menu:openInVscode', handleOpenInVscode),
       window.smartgit.events.on('menu:preferences', () => handleNavigate('/settings')),
       // Query / Tools
       window.smartgit.events.on('menu:navigate', handleNavigate),
@@ -1017,6 +1071,14 @@ export default function App() {
   useEffect(() => {
     setDismissSequencer(false);
   }, [currentRepo?.path, status?.isCherryPicking, status?.isReverting]);
+  // Merge in progress: auto-mount a MergeInProgressPanel (the full MergePanel
+  // is a START dialog and requires a targetBranch). This surfaces
+  // Continue/Abort + conflicted-file list for merges started from terminal.
+  const [dismissMerge, setDismissMerge] = useState(false);
+  const showMergePanel = currentRepo && status?.isMerging && !dismissMerge;
+  useEffect(() => {
+    setDismissMerge(false);
+  }, [currentRepo?.path, status?.isMerging]);
 
   const handleFind = useCallback(() => setShowFind(true), []);
 
@@ -1123,7 +1185,7 @@ export default function App() {
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/" element={<Navigate to={defaultRoute} replace />} />
-              <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} />} />
+              <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} onResolveConflictAction={(f, mode) => resolveConflict(mode, f)} />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/diff" element={<DiffPage />} />
               {/* Annotate: file-history investigation (SmartGit "Log of file") */}
@@ -1193,7 +1255,27 @@ export default function App() {
       )}
       {conflictFile && (
         <Suspense fallback={null}>
-          <ConflictSolver filePath={conflictFile} onClose={() => setConflictFile(null)} />
+          <ConflictSolver
+            filePath={conflictFile}
+            onClose={() => setConflictFile(null)}
+            onResolved={async (_resolvedFile) => {
+              // Auto-advance to the next conflicted file (platypusgit pattern).
+              const repo = useRepositoryStore.getState().currentRepo;
+              if (!repo) { setConflictFile(null); return; }
+              try {
+                const st = await api.git.status(repo.path);
+                const next = st.conflicted.find((f: string) => f !== _resolvedFile);
+                if (next) {
+                  setConflictFile(next);
+                } else {
+                  setConflictFile(null);
+                  toast.success('All conflicts resolved', 'You can now Continue the merge / cherry-pick / rebase.');
+                }
+              } catch {
+                setConflictFile(null);
+              }
+            }}
+          />
         </Suspense>
       )}
       <CommandPalette
@@ -1219,6 +1301,12 @@ export default function App() {
           kind={sequencerKind}
           repoPath={currentRepo.path}
           onClose={() => setDismissSequencer(true)}
+        />
+      )}
+      {showMergePanel && (
+        <MergeInProgressPanel
+          repoPath={currentRepo.path}
+          onClose={() => setDismissMerge(true)}
         />
       )}
     </div>

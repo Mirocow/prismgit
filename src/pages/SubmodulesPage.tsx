@@ -8,7 +8,9 @@ import { api, type SubmoduleInfo } from '../lib/api';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useI18n } from '../lib/i18n';
 export function SubmodulesPage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();
@@ -27,7 +29,7 @@ export function SubmodulesPage() {
       const result = await api.git.submodules(repo.path);
       setSubmodules(result);
     } catch (e) {
-      toast.error('Failed to load submodules', String(e));
+      toast.error(t('pages.submoduleLoadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -41,10 +43,10 @@ export function SubmodulesPage() {
     setBusy(name || 'all');
     try {
       await api.git.submoduleInit(repo.path, name);
-      toast.success(`Initialized ${name || 'all submodules'}`);
+      toast.success(name ? t('pages.submoduleInitialized', { name }) : t('pages.submoduleInitializedAll'));
       await load();
     } catch (e) {
-      toast.error('Init failed', String(e));
+      toast.error(t('pages.submoduleInitFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -54,10 +56,10 @@ export function SubmodulesPage() {
     setBusy(name || 'all');
     try {
       await api.git.submoduleUpdate(repo.path, name, true);
-      toast.success(`Updated ${name || 'all submodules'}`);
+      toast.success(name ? t('pages.submoduleUpdated', { name }) : t('pages.submoduleUpdatedAll'));
       await load();
     } catch (e) {
-      toast.error('Update failed', String(e));
+      toast.error(t('pages.submoduleUpdateFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -67,10 +69,10 @@ export function SubmodulesPage() {
     setBusy(name || 'sync-all');
     try {
       await api.git.submoduleSync(repo.path, name);
-      toast.success(`Synced ${name || 'all submodules'} URLs with .gitmodules`);
+      toast.success(name ? t('pages.submoduleSynced', { name }) : t('pages.submoduleSyncedAll'));
       await load();
     } catch (e) {
-      toast.error('Sync failed', String(e));
+      toast.error(t('pages.submoduleSyncFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -78,36 +80,36 @@ export function SubmodulesPage() {
 
   const handleDeinit = async (name: string) => {
     if (!(await confirmDialog({
-      title: `Deinit submodule '${name}'`,
-      message: 'The submodule working tree will be removed (the entry stays in .gitmodules). You can re-init it later.',
-      confirmLabel: 'Deinit',
+      title: t('pages.submoduleDeinitTitle', { name }),
+      message: t('pages.submoduleDeinitMessage'),
+      confirmLabel: t('pages.deinit'),
       danger: true,
     }))) return;
     setBusy(name);
     try {
       await api.git.submoduleDeinit(repo.path, name, false);
-      toast.success(`Deinitialized '${name}'`);
+      toast.success(t('pages.submoduleDeinitialized', { name }));
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Deinit failed', String(e));
+      toast.error(t('pages.submoduleDeinitFailed'), String(e));
     } finally {
       setBusy(null);
     }
   };
 
   const handleAdd = async () => {
-    if (!addUrl.trim() || !addPath.trim()) { toast.warning('URL and path are required'); return; }
+    if (!addUrl.trim() || !addPath.trim()) { toast.warning(t('pages.submoduleFieldsRequired')); return; }
     setBusy('add');
     try {
       await api.git.submoduleAdd(repo.path, addUrl.trim(), addPath.trim(), addBranch.trim() || undefined);
-      toast.success(`Submodule '${addPath.trim()}' added`);
+      toast.success(t('pages.submoduleAdded', { name: addPath.trim() }));
       setShowAdd(false);
       setAddUrl(''); setAddPath(''); setAddBranch('');
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Add submodule failed', String(e));
+      toast.error(t('pages.submoduleAddFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -117,54 +119,54 @@ export function SubmodulesPage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Submodules</span>
-          <span className="text-2xs text-text-tertiary">{submodules.length} submodules</span>
+          <span className="text-sm font-medium">{t('nav.submodules')}</span>
+          <span className="text-2xs text-text-tertiary">{t('pages.submodulesCount', { count: submodules.length })}</span>
         </div>
         <div className="flex items-center gap-2">
-          <button className="icon-btn" title="Refresh" onClick={load}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={13} />
           </button>
           <button
             className="btn btn-secondary text-xs"
             onClick={() => handleSync()}
             disabled={submodules.length === 0}
-            title="Sync remote URLs from .gitmodules for all submodules"
+            title={t('pages.submoduleSyncAllTitle')}
           >
-            Sync All
+            {t('pages.syncAll')}
           </button>
           <button
             className="btn btn-secondary text-xs"
             onClick={() => setShowAdd(true)}
-            title="Add a new submodule from a URL"
+            title={t('pages.submoduleAddButtonTitle')}
           >
             <Plus size={12} />
-            Add Submodule
+            {t('pages.addSubmodule')}
           </button>
           <button
             className="btn btn-secondary text-xs"
             onClick={() => handleInit()}
             disabled={submodules.length === 0}
           >
-            Init All
+            {t('pages.initAll')}
           </button>
           <button
             className="btn btn-primary text-xs"
             onClick={() => handleUpdate()}
             disabled={submodules.length === 0}
           >
-            Update All
+            {t('pages.updateAll')}
           </button>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+          <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
         ) : submodules.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
             <Package size={32} className="mb-2 opacity-50" />
-            <div className="text-sm">No submodules</div>
-            <div className="text-xs mt-1">This repository has no .gitmodules file</div>
+            <div className="text-sm">{t('pages.noSubmodules')}</div>
+            <div className="text-xs mt-1">{t('pages.noSubmodulesHint')}</div>
           </div>
         ) : (
           submodules.map((s) => (
@@ -179,20 +181,20 @@ export function SubmodulesPage() {
                   {s.initialized ? (
                     s.upToDate ? (
                       <span className="badge badge-added flex items-center gap-1">
-                        <CheckCircle size={9} /> INITIALIZED
+                        <CheckCircle size={9} /> {t('pages.badgeInitialized')}
                       </span>
                     ) : (
-                      <span className="badge badge-modified">DIRTY</span>
+                      <span className="badge badge-modified">{t('pages.badgeDirty')}</span>
                     )
                   ) : (
                     <span className="badge badge-untracked flex items-center gap-1">
-                      <AlertCircle size={9} /> NOT INITIALIZED
+                      <AlertCircle size={9} /> {t('pages.badgeNotInitialized')}
                     </span>
                   )}
                 </div>
                 <div
                   className="text-xs text-text-tertiary mt-0.5 font-mono truncate cursor-pointer hover:text-accent"
-                  title="Select this submodule path — view its file history in History/Blame"
+                  title={t('pages.submodulePathHint')}
                   onClick={(e) => {
                     e.stopPropagation();
                     useSelectionStore.getState().selectFile(s.path);
@@ -209,7 +211,7 @@ export function SubmodulesPage() {
                     <GitBranch size={10} />
                     <span
                       className="cursor-pointer hover:text-accent hover:underline"
-                      title="Select this branch — click to view in History"
+                      title={t('pages.selectBranchHint')}
                       onClick={(e) => {
                         e.stopPropagation();
                         useSelectionStore.getState().selectBranch(s.branch!);
@@ -231,26 +233,26 @@ export function SubmodulesPage() {
                         className="btn btn-secondary text-xs"
                         onClick={() => handleInit(s.name)}
                       >
-                        Init
+                        {t('pages.init')}
                       </button>
                     )}
                     <button
                       className="btn btn-secondary text-xs"
                       onClick={() => handleUpdate(s.name)}
                     >
-                      Update
+                      {t('pages.update')}
                     </button>
                     <button
                       className="btn btn-secondary text-xs"
                       onClick={() => handleSync(s.name)}
-                      title="Sync URL with .gitmodules"
+                      title={t('pages.submoduleSyncTitle')}
                     >
-                      Sync
+                      {t('pages.sync')}
                     </button>
                     {s.initialized && (
                       <button
                         className="btn btn-secondary text-xs"
-                        title="Open the submodule as a repository (SmartGit: submodule navigation)"
+                        title={t('pages.submoduleOpenTitle')}
                         onClick={async () => {
                           try {
                             // Build the absolute submodule path ('/' works on all
@@ -259,20 +261,20 @@ export function SubmodulesPage() {
                             await useRepositoryStore.getState().openRepository(abs);
                             window.location.hash = '#/changes';
                           } catch (e) {
-                            toast.error('Failed to open submodule', String(e));
+                            toast.error(t('pages.submoduleOpenFailed'), String(e));
                           }
                         }}
                       >
-                        Open
+                        {t('pages.open')}
                       </button>
                     )}
                     {s.initialized && (
                       <button
                         className="btn btn-secondary text-xs hover:!text-status-deleted"
                         onClick={() => handleDeinit(s.name)}
-                        title="Remove the submodule working tree (entry stays in .gitmodules)"
+                        title={t('pages.submoduleDeinitButtonTitle')}
                       >
-                        Deinit
+                        {t('pages.deinit')}
                       </button>
                     )}
                   </>
@@ -289,10 +291,10 @@ export function SubmodulesPage() {
           onClick={() => setShowAdd(false)}
         >
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-medium mb-4">Add Submodule</h3>
+            <h3 className="text-base font-medium mb-4">{t('pages.addSubmodule')}</h3>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Repository URL</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('clone.url')}</label>
                 <input
                   type="text"
                   className="w-full text-sm font-mono"
@@ -303,7 +305,7 @@ export function SubmodulesPage() {
                 />
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Local path</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('pages.localPathLabel')}</label>
                 <input
                   type="text"
                   className="w-full text-sm font-mono"
@@ -313,11 +315,11 @@ export function SubmodulesPage() {
                 />
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Branch (optional)</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('clone.branch')}</label>
                 <input
                   type="text"
                   className="w-full text-sm"
-                  placeholder="default branch"
+                  placeholder={t('pages.defaultBranchPlaceholder')}
                   value={addBranch}
                   onChange={(e) => setAddBranch(e.target.value)}
                 />
@@ -325,11 +327,11 @@ export function SubmodulesPage() {
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>
-                Cancel
+                {t('common.cancel')}
               </button>
               <button className="btn btn-primary" onClick={handleAdd} disabled={busy === 'add'}>
                 {busy === 'add' ? <Loader size={13} className="animate-spin" /> : <Plus size={13} />}
-                Add
+                {t('common.add')}
               </button>
             </div>
           </div>

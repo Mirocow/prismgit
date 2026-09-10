@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Loader, Check, Settings as SettingsIcon, Search } from './icons';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 import type { RemoteProperties } from '../../electron/types/git-api';
 
 export type ResetMode = 'soft' | 'mixed' | 'hard' | 'keep';
@@ -48,11 +49,11 @@ function DialogShell({ title, subtitle, children, buttons, onClose, width = 440 
   );
 }
 
-const RESET_MODES: { mode: ResetMode; label: string; description: string }[] = [
-  { mode: 'soft', label: 'Soft', description: 'Keep all local changes staged (index untouched).' },
-  { mode: 'mixed', label: 'Mixed', description: 'Keep changes in the working tree, unstage everything.' },
-  { mode: 'hard', label: 'Hard', description: 'Discard ALL uncommitted changes. Cannot be undone.' },
-  { mode: 'keep', label: 'Keep', description: 'Reset HEAD + index, but keep local file modifications.' },
+const RESET_MODES: { mode: ResetMode; label: string; descKey: string }[] = [
+  { mode: 'soft', label: 'Soft', descKey: 'branches.resetSoftDesc' },
+  { mode: 'mixed', label: 'Mixed', descKey: 'branches.resetMixedDesc' },
+  { mode: 'hard', label: 'Hard', descKey: 'branches.resetHardDesc' },
+  { mode: 'keep', label: 'Keep', descKey: 'branches.resetKeepDesc' },
 ];
 
 export function ResetDialog({
@@ -74,34 +75,35 @@ export function ResetDialog({
 }) {
   const [mode, setMode] = useState<ResetMode>('mixed');
   const [ref, setRef] = useState(defaultRef);
+  const { t } = useI18n();
   useEffect(() => setRef(defaultRef), [defaultRef]);
   useEscapeKey(true, onClose);
 
   return (
     <DialogShell
-      title={advanced ? 'Reset Advanced...' : 'Reset...'}
+      title={advanced ? t('branches.resetAdvancedTitle') : t('branches.resetTitle')}
       subtitle={advanced
-        ? `Reset the current branch to an arbitrary commit.\nTarget: '${branchName}'`
-        : `Reset the current branch to '${branchName}'.\nChoose how your uncommitted work is treated:`}
+        ? t('branches.resetAdvancedSubtitle', { name: branchName })
+        : t('branches.resetSubtitle', { name: branchName })}
       onClose={onClose}
       width={480}
       buttons={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button
             className={cn('btn', mode === 'hard' ? 'btn-danger' : 'btn-primary')}
             disabled={busy || !ref.trim()}
             onClick={() => onSubmit(mode, ref.trim())}
           >
             {busy ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}
-            Reset --{mode}
+            {t('branches.resetButton', { mode })}
           </button>
         </>
       }
     >
       {advanced && (
         <div className="flex items-center gap-2 mb-3">
-          <label className="text-xs text-text-tertiary flex-shrink-0">Reset to:</label>
+          <label className="text-xs text-text-tertiary flex-shrink-0">{t('branches.resetToLabel')}</label>
           <input
             type="text"
             className="flex-1 text-sm font-mono"
@@ -109,7 +111,7 @@ export function ResetDialog({
             autoFocus
             onFocus={(e) => e.currentTarget.select()}
             onChange={(e) => setRef(e.target.value)}
-            placeholder="commit hash, branch, tag, HEAD~3 ..."
+            placeholder={t('branches.resetRefPlaceholder')}
             onKeyDown={(e) => e.key === 'Enter' && ref.trim() && onSubmit(mode, ref.trim())}
           />
         </div>
@@ -132,7 +134,7 @@ export function ResetDialog({
             />
             <span>
               <span className="font-medium">--{m.mode}</span>
-              <span className="block text-2xs text-text-tertiary">{m.description}</span>
+              <span className="block text-2xs text-text-tertiary">{t(m.descKey)}</span>
             </span>
           </label>
         ))}
@@ -159,6 +161,7 @@ export function SetTrackedDialog({
 }) {
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState(current || '');
+  const { t } = useI18n();
   useEscapeKey(true, onClose);
 
   const filtered = useMemo(
@@ -168,20 +171,20 @@ export function SetTrackedDialog({
 
   return (
     <DialogShell
-      title="Set Tracked Branch..."
-      subtitle={`Choose the upstream (remote-tracking branch) for local branch '${branchName}'.`}
+      title={t('branches.setTracked')}
+      subtitle={t('branches.setTrackedSubtitle', { name: branchName })}
       onClose={onClose}
       width={460}
       buttons={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button
             className="btn btn-primary"
             disabled={!selected || busy}
             onClick={() => onSubmit(selected)}
           >
             {busy ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}
-            Set Tracking
+            {t('branches.setTrackingButton')}
           </button>
         </>
       }
@@ -191,7 +194,7 @@ export function SetTrackedDialog({
         <input
           type="text"
           className="w-full text-sm pl-8"
-          placeholder="Filter remote branches..."
+          placeholder={t('branches.filterRemoteBranches')}
           value={filter}
           autoFocus
           onChange={(e) => setFilter(e.target.value)}
@@ -201,8 +204,8 @@ export function SetTrackedDialog({
         {filtered.length === 0 ? (
           <div className="px-3 py-4 text-xs text-text-tertiary text-center">
             {remoteBranches.length === 0
-              ? 'No remote branches. Fetch a remote first.'
-              : 'No remote branches match the filter.'}
+              ? t('branches.noRemoteBranches')
+              : t('branches.noRemoteBranchesMatch')}
           </div>
         ) : (
           filtered.map((b) => (
@@ -225,7 +228,7 @@ export function SetTrackedDialog({
         )}
       </div>
       {current && (
-        <div className="text-2xs text-text-tertiary mt-2">Current upstream: <code>{current}</code></div>
+        <div className="text-2xs text-text-tertiary mt-2">{t('branches.currentUpstream')} <code>{current}</code></div>
       )}
     </DialogShell>
   );
@@ -270,13 +273,14 @@ export function PushToDialog({
   const [target, setTarget] = useState(branchName);
   const [setUpstream, setSetUpstream] = useState(!hasUpstream);
   const [force, setForce] = useState(false);
+  const { t } = useI18n();
   useEscapeKey(true, onClose);
 
   const trimmed = target.trim();
   const targetError = !trimmed
-    ? 'Target branch is required'
+    ? t('branches.targetRequired')
     : BRANCH_NAME_INVALID.test(trimmed)
-      ? 'Branch name contains invalid characters'
+      ? t('branches.nameInvalidChars')
       : null;
 
   // Suggest existing branches that live on the SELECTED remote
@@ -299,23 +303,23 @@ export function PushToDialog({
 
   return (
     <DialogShell
-      title="Push To..."
-      subtitle={`Push local branch '${branchName}' to a remote repository.\nYou choose WHERE (remote) and under which name (target branch).`}
+      title={t('branches.pushTo')}
+      subtitle={t('branches.pushToSubtitle', { name: branchName })}
       onClose={onClose}
       width={480}
       buttons={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button className="btn btn-primary" disabled={!canSubmit} onClick={submit}>
             {busy ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}
-            Push
+            {t('branches.push')}
           </button>
         </>
       }
     >
       <div className="space-y-3">
         <div>
-          <label htmlFor="push-to-remote" className="text-xs text-text-tertiary block mb-1">Remote repository</label>
+          <label htmlFor="push-to-remote" className="text-xs text-text-tertiary block mb-1">{t('branches.remoteRepoLabel')}</label>
           {remotes.length > 0 ? (
             <select
               id="push-to-remote"
@@ -341,7 +345,7 @@ export function PushToDialog({
           )}
         </div>
         <div>
-          <label htmlFor="push-to-target" className="text-xs text-text-tertiary block mb-1">Target branch</label>
+          <label htmlFor="push-to-target" className="text-xs text-text-tertiary block mb-1">{t('branches.targetBranchLabel')}</label>
           <input
             id="push-to-target"
             type="text"
@@ -361,18 +365,18 @@ export function PushToDialog({
           {targetError && <div className="text-2xs text-status-deleted mt-1">{targetError}</div>}
           {renamed && (
             <div className="text-2xs text-text-tertiary mt-1">
-              Remote ref will be <code>{remote}/{trimmed}</code> — the local branch keeps its name.
+              {t('branches.remoteRefWillBe')} <code>{remote}/{trimmed}</code> {t('branches.localKeepsName')}
             </div>
           )}
         </div>
         <div className="space-y-1 pt-1">
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input type="checkbox" checked={setUpstream} onChange={(e) => setSetUpstream(e.target.checked)} />
-            Set upstream tracking (-u)
+            {t('branches.setUpstreamCheckbox')}
           </label>
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-            Force push (--force-with-lease)
+            {t('branches.forcePushCheckbox')}
           </label>
         </div>
         <div data-testid="push-to-cmd" className="text-2xs text-text-tertiary font-mono bg-bg-hover/60 rounded px-2 py-1.5 break-all">
@@ -399,41 +403,42 @@ export function AddTagDialog({
   const [message, setMessage] = useState('');
   const [ref, setRef] = useState(defaultRef);
   const [force, setForce] = useState(false);
+  const { t } = useI18n();
   useEscapeKey(true, onClose);
 
   const invalidChars = /[~^:?*[\]\\@\s]|\.\.|^-$|^--/;
   const nameError = !name.trim()
-    ? 'Tag name is required'
+    ? t('tags.nameRequired')
     : invalidChars.test(name.trim())
-      ? 'Tag name contains invalid characters'
+      ? t('tags.nameInvalidChars')
       : null;
   const canSubmit = !nameError && !!ref.trim() && !busy;
   const annotated = message.trim().length > 0;
 
   return (
     <DialogShell
-      title="Add Tag..."
+      title={t('tags.addTagMenu')}
       subtitle={annotated
-        ? 'A non-empty message creates an ANNOTATED tag (stored as a real tag object with author + date).'
-        : 'Leave the message empty to create a lightweight tag.'}
+        ? t('tags.addTagAnnotatedHint')
+        : t('tags.addTagLightweightHint')}
       onClose={onClose}
       buttons={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button
             className="btn btn-primary"
             disabled={!canSubmit}
             onClick={() => onSubmit({ name: name.trim(), message: message.trim(), ref: ref.trim(), force })}
           >
             {busy ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}
-            Add Tag
+            {t('tags.addButton')}
           </button>
         </>
       }
     >
       <div className="space-y-3">
         <div>
-          <label className="text-xs text-text-tertiary block mb-1">Name</label>
+          <label className="text-xs text-text-tertiary block mb-1">{t('tags.nameLabel')}</label>
           <input
             type="text"
             className="w-full text-sm font-mono"
@@ -446,28 +451,28 @@ export function AddTagDialog({
           {nameError && <div className="text-2xs text-status-deleted mt-1">{nameError}</div>}
         </div>
         <div>
-          <label className="text-xs text-text-tertiary block mb-1">Message (optional — makes it annotated)</label>
+          <label className="text-xs text-text-tertiary block mb-1">{t('tags.messageOptionalAnnotated')}</label>
           <input
             type="text"
             className="w-full text-sm"
-            placeholder="Release 1.0.0"
+            placeholder={t('tags.addTagMessagePlaceholder')}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
           />
         </div>
         <div>
-          <label className="text-xs text-text-tertiary block mb-1">Add to (ref)</label>
+          <label className="text-xs text-text-tertiary block mb-1">{t('tags.addToRefLabel')}</label>
           <input
             type="text"
             className="w-full text-sm font-mono"
             value={ref}
             onChange={(e) => setRef(e.target.value)}
-            placeholder="HEAD, branch, tag or commit hash"
+            placeholder={t('tags.addTagRefPlaceholder')}
           />
         </div>
         <label className="flex items-center gap-2 text-sm cursor-pointer">
           <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-          Force (replace existing tag with the same name)
+          {t('tags.forceCheckbox')}
         </label>
       </div>
     </DialogShell>
@@ -487,19 +492,20 @@ export function PullOptionsDialog({
 }) {
   const [rebase, setRebase] = useState(false);
   const [noFF, setNoFF] = useState(false);
+  const { t } = useI18n();
   useEscapeKey(true, onClose);
 
   return (
     <DialogShell
-      title={`Pull — ${remoteName}`}
-      subtitle={`Fetch new commits from '${remoteName}' and integrate them into the current branch.`}
+      title={t('remotes.pullTitle', { name: remoteName })}
+      subtitle={t('remotes.pullSubtitle', { name: remoteName })}
       onClose={onClose}
       buttons={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button className="btn btn-primary" disabled={busy} onClick={() => onSubmit({ rebase, noFF })}>
             {busy ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}
-            Pull
+            {t('remotes.pull')}
           </button>
         </>
       }
@@ -513,9 +519,9 @@ export function PullOptionsDialog({
         >
           <input type="radio" name="pull-mode" checked={!rebase} onChange={() => setRebase(false)} className="mt-0.5" />
           <span>
-            <span className="font-medium">Merge</span>
+            <span className="font-medium">{t('toolbar.merge')}</span>
             <span className="block text-2xs text-text-tertiary">
-              git pull → fetch + merge. Creates a merge commit when histories diverged.
+              {t('remotes.mergeDesc')}
             </span>
           </span>
         </label>
@@ -527,9 +533,9 @@ export function PullOptionsDialog({
         >
           <input type="radio" name="pull-mode" checked={rebase} onChange={() => setRebase(true)} className="mt-0.5" />
           <span>
-            <span className="font-medium">Rebase</span>
+            <span className="font-medium">{t('toolbar.rebase')}</span>
             <span className="block text-2xs text-text-tertiary">
-              git pull --rebase → replay your local commits on top of the fetched ones (linear history).
+              {t('remotes.rebaseDesc')}
             </span>
           </span>
         </label>
@@ -537,7 +543,7 @@ export function PullOptionsDialog({
       {!rebase && (
         <label className="flex items-center gap-2 text-sm cursor-pointer mt-2 px-2.5">
           <input type="checkbox" checked={noFF} onChange={(e) => setNoFF(e.target.checked)} />
-          Create a merge commit even when a fast-forward is possible (--no-ff)
+          {t('remotes.noFFCheckbox')}
         </label>
       )}
     </DialogShell>
@@ -557,27 +563,28 @@ export function SetDepthDialog({
   onClose: () => void;
 }) {
   const [depth, setDepth] = useState('50');
+  const { t } = useI18n();
   useEscapeKey(true, onClose);
 
   const parsed = parseInt(depth, 10);
 
   return (
     <DialogShell
-      title={`Set Depth — ${remoteName}`}
-      subtitle={`Set the shallow fetch depth for '${remoteName}'.\nOnly the newest N commits will be downloaded (git fetch --depth=N).`}
+      title={t('remotes.setDepthTitle', { name: remoteName })}
+      subtitle={t('remotes.setDepthSubtitle', { name: remoteName })}
       onClose={onClose}
       buttons={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button className="btn btn-primary" disabled={busy || isNaN(parsed)} onClick={() => onSubmit(parsed)}>
             {busy ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}
-            Set Depth
+            {t('remotes.setDepthButton')}
           </button>
         </>
       }
     >
       <div className="flex items-center gap-2">
-        <label className="text-xs text-text-tertiary flex-shrink-0">Depth:</label>
+        <label className="text-xs text-text-tertiary flex-shrink-0">{t('remotes.depthLabel')}</label>
         <input
           type="number"
           min={0}
@@ -590,7 +597,7 @@ export function SetDepthDialog({
         />
       </div>
       <div className="text-2xs text-text-tertiary mt-2">
-        Enter <code>0</code> (or a negative number) to download the <b>full history</b> (git fetch --unshallow).
+        {t('remotes.depthHintBefore')} <code>0</code> {t('remotes.depthHintMiddle')} <b>{t('remotes.depthHintFullHistory')}</b> {t('remotes.depthHintAfter')}
       </div>
     </DialogShell>
   );
@@ -608,6 +615,7 @@ export function FetchMoreDialog({
   onClose: () => void;
 }) {
   const [commits, setCommits] = useState('100');
+  const { t } = useI18n();
   useEscapeKey(true, onClose);
 
   const parsed = parseInt(commits, 10);
@@ -615,21 +623,21 @@ export function FetchMoreDialog({
 
   return (
     <DialogShell
-      title={`Fetch More — ${remoteName}`}
-      subtitle={`Download more commit history beyond the current shallow boundary\n(git fetch --deepen=N) without changing the depth setting.`}
+      title={t('remotes.fetchMoreTitle', { name: remoteName })}
+      subtitle={t('remotes.fetchMoreSubtitle')}
       onClose={onClose}
       buttons={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button className="btn btn-primary" disabled={!canSubmit || busy} onClick={() => onSubmit(parsed)}>
             {busy ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}
-            Fetch More
+            {t('remotes.fetchMoreButton')}
           </button>
         </>
       }
     >
       <div className="flex items-center gap-2">
-        <label className="text-xs text-text-tertiary flex-shrink-0">Commits:</label>
+        <label className="text-xs text-text-tertiary flex-shrink-0">{t('remotes.commitsLabel')}</label>
         <input
           type="number"
           min={1}
@@ -653,16 +661,17 @@ export function RemotePropertiesDialog({
   onClose: () => void;
 }) {
   useEscapeKey(true, onClose);
+  const { t } = useI18n();
 
   return (
     <DialogShell
-      title={`Properties — ${props.name}`}
-      subtitle="Read-only remote configuration, tracked branches and repository state."
+      title={t('remotes.propertiesTitle', { name: props.name })}
+      subtitle={t('remotes.propertiesSubtitle')}
       onClose={onClose}
       width={560}
       buttons={
         <button className="btn btn-primary" onClick={onClose}>
-          <Check size={13} /> Close
+          <Check size={13} /> {t('common.close')}
         </button>
       }
     >
@@ -670,34 +679,34 @@ export function RemotePropertiesDialog({
         <table className="w-full text-xs">
           <tbody>
             <tr>
-              <td className="text-text-tertiary py-1 pr-3 align-top w-36">Name</td>
+              <td className="text-text-tertiary py-1 pr-3 align-top w-36">{t('remotes.nameLabel')}</td>
               <td className="font-mono py-1">{props.name}</td>
             </tr>
             <tr>
-              <td className="text-text-tertiary py-1 pr-3 align-top">Fetch URL</td>
+              <td className="text-text-tertiary py-1 pr-3 align-top">{t('remotes.fetchUrlLabel')}</td>
               <td className="font-mono py-1 break-all select-text">{props.fetchUrl || '—'}</td>
             </tr>
             <tr>
-              <td className="text-text-tertiary py-1 pr-3 align-top">Push URL</td>
+              <td className="text-text-tertiary py-1 pr-3 align-top">{t('remotes.pushUrlLabel')}</td>
               <td className="font-mono py-1 break-all select-text">{props.pushUrl || props.fetchUrl || '—'}</td>
             </tr>
             <tr>
-              <td className="text-text-tertiary py-1 pr-3 align-top">HEAD branch</td>
-              <td className="font-mono py-1">{props.headBranch || '(unknown — run Fetch)'}</td>
+              <td className="text-text-tertiary py-1 pr-3 align-top">{t('remotes.headBranchLabel')}</td>
+              <td className="font-mono py-1">{props.headBranch || t('remotes.headUnknown')}</td>
             </tr>
             <tr>
-              <td className="text-text-tertiary py-1 pr-3 align-top">Tracked branches</td>
+              <td className="text-text-tertiary py-1 pr-3 align-top">{t('remotes.trackedBranchesLabel')}</td>
               <td className="py-1">{props.trackingBranchCount}</td>
             </tr>
             <tr>
-              <td className="text-text-tertiary py-1 pr-3 align-top">Clone state</td>
+              <td className="text-text-tertiary py-1 pr-3 align-top">{t('remotes.cloneStateLabel')}</td>
               <td className="py-1">
                 {props.shallow ? (
-                  <span className="badge badge-modified">shallow clone</span>
+                  <span className="badge badge-modified">{t('remotes.shallowBadge')}</span>
                 ) : (
-                  <span className="badge badge-added">complete</span>
+                  <span className="badge badge-added">{t('remotes.completeBadge')}</span>
                 )}
-                {props.mirror && <span className="badge badge-modified ml-1">mirror</span>}
+                {props.mirror && <span className="badge badge-modified ml-1">{t('remotes.mirrorBadge')}</span>}
               </td>
             </tr>
           </tbody>
@@ -706,8 +715,8 @@ export function RemotePropertiesDialog({
         {props.trackingBranches.length > 0 && (
           <div>
             <div className="text-2xs uppercase text-text-tertiary mb-1">
-              Remote-tracking branches ({props.trackingBranchCount}
-              {props.trackingBranchCount > props.trackingBranches.length ? '+, showing first 50' : ''})
+              {t('remotes.trackingBranchesHeader')} ({props.trackingBranchCount}
+              {props.trackingBranchCount > props.trackingBranches.length ? t('remotes.showingFirst50') : ''})
             </div>
             <div className="border border-border-default rounded max-h-32 overflow-y-auto">
               {props.trackingBranches.map((b) => (
@@ -722,7 +731,7 @@ export function RemotePropertiesDialog({
         {props.config.length > 0 && (
           <div>
             <div className="text-2xs uppercase text-text-tertiary mb-1 flex items-center gap-1">
-              <SettingsIcon size={10} /> Config (remote.{props.name}.*)
+              <SettingsIcon size={10} /> {t('remotes.configHeader', { name: props.name })}
             </div>
             <div className="border border-border-default rounded max-h-40 overflow-y-auto">
               {props.config.map((c) => (

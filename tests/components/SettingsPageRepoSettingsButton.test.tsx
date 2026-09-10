@@ -45,18 +45,40 @@ vi.mock('../../src/lib/api', () => ({
   api: {
     fs: { openDirectoryPicker: vi.fn().mockResolvedValue(null) },
     git: { configList: vi.fn().mockResolvedValue([]) },
+    // VS Code integration surface used by SettingsPage effects/handlers
+    vscode: {
+      detect: vi.fn().mockResolvedValue({ available: false, source: 'none', path: '', version: '' }),
+      diffToolStatus: vi.fn().mockResolvedValue({ diffTool: '', mergeTool: '', vscodeConfigured: false }),
+      open: vi.fn().mockResolvedValue({ ok: true, via: 'none' }),
+      openFileDiff: vi.fn().mockResolvedValue({ ok: true }),
+      openMerge: vi.fn().mockResolvedValue({ ok: true }),
+      installDiffTool: vi.fn().mockResolvedValue({ ok: true }),
+      removeDiffTool: vi.fn().mockResolvedValue({ ok: true }),
+    },
   },
 }));
 
-// Mock i18n — SettingsPage imports useI18n
-vi.mock('../../src/lib/i18n', () => ({
-  useI18n: () => ({
-    t: (key: string) => key,
-    locale: 'en',
-    setLocale: vi.fn(),
-  }),
-  LOCALES: [{ id: 'en', label: 'English', flag: '🇬🇧' }],
-}));
+// Mock i18n — same English dictionary + interpolation as the real t(), so
+// localized labels still render the expected visible English text.
+vi.mock('../../src/lib/i18n', async () => {
+  const { en } = await import('../../src/i18n/locales');
+  return {
+    useI18n: () => ({
+      t: (key: string, params?: Record<string, string | number>): string => {
+        let str = en[key] ?? key;
+        if (params) {
+          for (const [k, v] of Object.entries(params)) {
+            str = str.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
+          }
+        }
+        return str;
+      },
+      locale: 'en' as const,
+      setLocale: vi.fn(),
+    }),
+    LOCALES: [{ id: 'en' as const, label: 'English', flag: '🇬🇧' }],
+  };
+});
 
 function renderPage() {
   return render(

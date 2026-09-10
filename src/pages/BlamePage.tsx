@@ -5,8 +5,10 @@ import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type BlameResult } from '../lib/api';
 import { shortHash } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 export function BlamePage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const [filePath, setFilePath] = useState('');
@@ -28,7 +30,7 @@ export function BlamePage() {
     const path = overridePath || filePath;
     const effectiveRef = refOverride || ref;
     if (!path.trim()) {
-      toast.warning('File path is required');
+      toast.warning(t('pages.filePathRequired'));
       return;
     }
     setLoading(true);
@@ -37,7 +39,7 @@ export function BlamePage() {
         setBlame(result);
         if (path.trim()) useSelectionStore.getState().selectFile(path.trim());
       })
-      .catch((e) => { toast.error('Blame failed', String(e)); setBlame(null); })
+      .catch((e) => { toast.error(t('pages.blameFailed'), String(e)); setBlame(null); })
       .finally(() => setLoading(false));
   };
 
@@ -82,7 +84,7 @@ export function BlamePage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border-default bg-bg-secondary">
         <FileText size={14} />
-        <span className="text-sm font-medium">Blame</span>
+        <span className="text-sm font-medium">{t('nav.blame')}</span>
         {filePath && (
           <span className="text-2xs text-text-tertiary ml-2 truncate">
             {filePath} @ {ref || 'HEAD'}
@@ -112,7 +114,7 @@ export function BlamePage() {
           disabled={loading || !filePath.trim()}
         >
           {loading ? <Loader size={12} className="animate-spin" /> : <Search size={12} />}
-          Blame
+          {t('nav.blame')}
         </button>
       </div>
 
@@ -120,18 +122,17 @@ export function BlamePage() {
         {loading ? (
           <div className="p-8 text-center text-text-tertiary text-sm flex items-center justify-center gap-2">
             <Loader size={14} className="animate-spin" />
-            Loading blame information...
+            {t('pages.blameLoading')}
           </div>
         ) : !blame ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
             <FileText size={32} className="mb-2 opacity-50" />
-            <div className="text-sm">No blame information</div>
+            <div className="text-sm">{t('pages.blameEmpty')}</div>
             <div className="text-xs mt-1">
-              Enter a file path and click Blame, or right-click a file in
-              Changes and select "Blame this file".
+              {t('pages.blameEmptyHint')}
             </div>
             <div className="text-xs mt-1 text-text-tertiary">
-              Click a commit hash in the results to view it in History.
+              {t('pages.blameEmptyHint2')}
             </div>
           </div>
         ) : (
@@ -147,13 +148,13 @@ export function BlamePage() {
                     <GitCommit size={9} />
                     <button
                       className="text-accent hover:underline cursor-pointer font-mono"
-                      title={`View commit ${shortHash(line.hash)} in History (with file filter: ${filePath})`}
+                      title={t('pages.blameViewCommitHint', { hash: shortHash(line.hash), file: filePath })}
                       onClick={() => handleCommitClick(line.hash)}
                     >
                       {shortHash(line.hash)}
                     </button>
                   </div>
-                  <div className="text-2xs mt-0.5 truncate">{line.author || 'unknown'}</div>
+                  <div className="text-2xs mt-0.5 truncate">{line.author || t('pages.authorUnknown')}</div>
                 </div>
                 <div className="w-12 flex-shrink-0 px-2 py-1 text-right text-text-tertiary border-r border-border-subtle">
                   {line.finalLineNumber}
@@ -167,7 +168,7 @@ export function BlamePage() {
                 {/* Hover button: jump to this commit in History */}
                 <button
                   className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0 m-1 transition-opacity"
-                  title="View this commit in History (with file filter)"
+                  title={t('pages.blameViewCommitShort')}
                   onClick={() => handleCommitClick(line.hash)}
                 >
                   <History size={10} />
@@ -180,8 +181,8 @@ export function BlamePage() {
 
       {blame && blame.lines.length > 0 && (
         <div className="border-t border-border-default bg-bg-secondary p-2 text-xs text-text-tertiary">
-          {blame.lines.length} lines · {new Set(blame.lines.map((l) => l.hash)).size} unique commits
-          {filePath && <span className="ml-2">· file: <code className="mono">{filePath}</code></span>}
+          {blame.lines.length} {t('pages.blameLines')} · {new Set(blame.lines.map((l) => l.hash)).size} {t('pages.blameUniqueCommits')}
+          {filePath && <span className="ml-2">· {t('pages.blameFileLabel')} <code className="mono">{filePath}</code></span>}
         </div>
       )}
     </div>

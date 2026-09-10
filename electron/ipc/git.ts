@@ -164,6 +164,7 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:revert', (_e, p: string, h: string[], nc?: boolean) => gitService.revert(p, h, nc));
   ipcMain.handle('git:revertAbort', (_e, p: string) => gitService.revertAbort(p));
   ipcMain.handle('git:revertContinue', (_e, p: string) => gitService.revertContinue(p));
+  ipcMain.handle('git:revertSkip', (_e, p: string) => gitService.revertSkip(p));
 
   // Rebase (SmartGit 20+)
   ipcMain.handle('git:rebase', (_e, p: string, o: string, opts?: { interactive?: boolean; autosquash?: boolean; abort?: boolean; continue?: boolean; skip?: boolean }) =>
