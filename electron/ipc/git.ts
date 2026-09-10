@@ -35,6 +35,7 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:findCommit', (_e, p: string, q: string) => gitService.findCommit(p, q));
   ipcMain.handle('git:commitFiles', (_e, p: string, h: string) => gitService.commitFiles(p, h));
   ipcMain.handle('git:diffCommit', (_e, p: string, h: string, ph?: string) => gitService.diffCommit(p, h, ph));
+  ipcMain.handle('git:commitExists', (_e, p: string, h: string) => gitService.commitExists(p, h));
 
   // Branches
   ipcMain.handle('git:branches', (_e, p: string) => gitService.branches(p));

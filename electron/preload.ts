@@ -29,6 +29,8 @@ const api = {
     commitFiles: (repoPath: string, hash: string) => ipcRenderer.invoke('git:commitFiles', repoPath, hash),
     diffCommit: (repoPath: string, hash: string, parentHash?: string) =>
       ipcRenderer.invoke('git:diffCommit', repoPath, hash, parentHash),
+    commitExists: (repoPath: string, hash: string) =>
+      ipcRenderer.invoke('git:commitExists', repoPath, hash),
     branches: (repoPath: string) => ipcRenderer.invoke('git:branches', repoPath),
     remotes: (repoPath: string) => ipcRenderer.invoke('git:remotes', repoPath),
     checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) =>

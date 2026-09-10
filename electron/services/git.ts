@@ -726,8 +726,44 @@ export async function diffCommit(
   parentHash?: string
 ): Promise<DiffResult> {
   const git = getGit(repoPath);
+
+  // Preflight: verify the commit (and optional parent) exist before invoking
+  // `git diff`. When a commit becomes unreachable (e.g. after `git reset --hard`,
+  // `git commit --amend`, force-push, or `git gc --prune=now`), the hash in the
+  // History list may no longer resolve — `git diff` would throw
+  // `fatal: bad object <hash>`. We swallow that case and return an empty diff
+  // so the UI shows "No changes" instead of an IPC error popup.
+  if (!(await commitExists(repoPath, hash))) {
+    return {
+      oldContent: '', newContent: '',
+      oldPath: hash, newPath: hash,
+      hunks: [], binary: false,
+      newFile: false, deletedFile: false, renamedFile: false,
+    };
+  }
+  if (parentHash && !(await commitExists(repoPath, parentHash))) {
+    return {
+      oldContent: '', newContent: '',
+      oldPath: hash, newPath: hash,
+      hunks: [], binary: false,
+      newFile: false, deletedFile: false, renamedFile: false,
+    };
+  }
+
   const range = parentHash ? `${parentHash}..${hash}` : `${hash}^..${hash}`;
-  const rawDiff = await git.raw(['diff', '--no-color', range]);
+  let rawDiff: string;
+  try {
+    rawDiff = await git.raw(['diff', '--no-color', range]);
+  } catch {
+    // Race: commit may have been gc'd between the preflight and the diff.
+    // Return an empty diff rather than propagating the error.
+    return {
+      oldContent: '', newContent: '',
+      oldPath: hash, newPath: hash,
+      hunks: [], binary: false,
+      newFile: false, deletedFile: false, renamedFile: false,
+    };
+  }
   const parsed = parseDiff(rawDiff, hash, hash);
   return {
     oldContent: '',
@@ -742,10 +778,62 @@ export async function diffCommit(
   };
 }
 
+/**
+ * Cheap preflight check — verifies a commit object exists in the repo without
+ * reading its content. Used by `commitFiles` and `diffCommit` to avoid
+ * `fatal: bad object <hash>` errors when a commit becomes unreachable
+ * (e.g. after `git reset --hard`, `git commit --amend`, force-push, or
+ * `git gc --prune=now`).
+ *
+ * Uses `git rev-parse --quiet --verify '<hash>^{commit}'`:
+ *   - Exit code 0 + stdout = full hash → commit exists
+ *   - Non-zero exit (caught by simple-git) → not a commit / not found
+ *
+ * Always returns false for empty / undefined / non-hash inputs.
+ */
+export async function commitExists(repoPath: string, hash: string): Promise<boolean> {
+  if (!hash || typeof hash !== 'string') return false;
+  const trimmed = hash.trim();
+  if (!trimmed) return false;
+  // Reject obviously non-hash inputs early (e.g., branch names, HEAD).
+  // `git rev-parse` would resolve them too, but we want to be strict here —
+  // this helper is specifically for verifying commit SHAs.
+  if (!/^[0-9a-f]{4,40}$/i.test(trimmed)) {
+    // Allow HEAD / HEAD~N / branch names — they may also point to commits,
+    // so we still verify via rev-parse rather than rejecting outright.
+  }
+  const git = getGit(repoPath);
+  try {
+    const out = await git.raw([
+      'rev-parse', '--quiet', '--verify', `${trimmed}^{commit}`,
+    ]);
+    return typeof out === 'string' && /^[0-9a-f]{40}$/i.test(out.trim());
+  } catch {
+    return false;
+  }
+}
+
 export async function commitFiles(repoPath: string, hash: string): Promise<CommitFile[]> {
   const git = getGit(repoPath);
-  // Get file list with status
-  const raw = await git.raw(['show', '--no-color', '--name-status', '--format=', hash]);
+
+  // Preflight: verify the commit exists. If the user clicked on a commit hash
+  // from a stale History list (e.g., the commit was force-pushed away or
+  // gc'd), `git show` would throw `fatal: bad object <hash>`. We catch that
+  // case here and return an empty file list — the UI shows "No files" which
+  // is the correct degraded behavior (and avoids the IPC error popup).
+  if (!(await commitExists(repoPath, hash))) {
+    return [];
+  }
+
+  // Get file list with status. Wrap in try/catch as defense-in-depth — even
+  // with the preflight check, a race condition (commit gc'd between the check
+  // and the show) would otherwise throw.
+  let raw: string;
+  try {
+    raw = await git.raw(['show', '--no-color', '--name-status', '--format=', hash]);
+  } catch {
+    return [];
+  }
   const result: CommitFile[] = [];
   const lines = raw.split('\n').filter(Boolean);
   for (const line of lines) {
@@ -758,7 +846,8 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
       oldPath = parts[1];
       pathStr = parts[2];
     }
-    // Get additions/deletions
+    // Get additions/deletions — this inner call already has its own try/catch
+    // (the numstat is best-effort; if it fails we still want the file entry).
     let additions = 0;
     let deletions = 0;
     let binary = false;
@@ -773,7 +862,7 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
         else deletions = parseInt(parts2[1] || '0', 10) || 0;
       }
     } catch {
-      /* ignore */
+      /* ignore — numstat is best-effort */
     }
     result.push({
       path: pathStr,

@@ -227,6 +227,14 @@ export interface GitApi {
   diffBranches: (repoPath: string, base: string, compare: string) => Promise<DiffResult>;
   diffCommit: (repoPath: string, hash: string, parentHash?: string) => Promise<DiffResult>;
   commitFiles: (repoPath: string, hash: string) => Promise<CommitFile[]>;
+  /**
+   * Cheap preflight: does the commit object exist in the repo?
+   * Returns false silently for non-existent / unreachable commits
+   * (e.g. after git reset --hard, amend, force-push, or gc --prune=now).
+   * Used internally by commitFiles + diffCommit to avoid IPC errors,
+   * exposed publicly so callers can verify before showing commit links.
+   */
+  commitExists: (repoPath: string, hash: string) => Promise<boolean>;
   stashList: (repoPath: string) => Promise<StashEntry[]>;
   stashPush: (repoPath: string, message?: string, includeUntracked?: boolean, keepIndex?: boolean, files?: string[]) => Promise<string>;
   stashPop: (repoPath: string, index?: number) => Promise<void>;

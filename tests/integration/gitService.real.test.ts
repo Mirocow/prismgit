@@ -370,6 +370,73 @@ describe('git service — integration with real git repo', () => {
       expect(files[0].status).toBe('A');
       expect(files[0].additions).toBeGreaterThan(0);
     });
+
+    // Regression test for the IPC error popup:
+    //   "Error occurred in handler for 'git:commitFiles': GitError:
+    //    fatal: bad object bd63c71d32d9aac193cbb6620d8257bcadacb484"
+    //
+    // This happens when the History page calls commitFiles with a hash that
+    // no longer exists — e.g., after `git reset --hard`, `git commit --amend`,
+    // force-push, or `git gc --prune=now`. The preflight check should catch
+    // this and return [] silently instead of throwing.
+    it('returns [] silently for a non-existent commit hash (no throw)', async () => {
+      const fakeHash = 'bd63c71d32d9aac193cbb6620d8257bcadacb484';
+      // This hash doesn't exist in the test repo — must not throw.
+      const files = await gitService.commitFiles(TEST_REPO_DIR, fakeHash);
+      expect(Array.isArray(files)).toBe(true);
+      expect(files.length).toBe(0);
+    });
+
+    it('returns [] for empty / undefined / invalid hash inputs', async () => {
+      // Empty string
+      expect(await gitService.commitFiles(TEST_REPO_DIR, '')).toEqual([]);
+      // Whitespace only
+      expect(await gitService.commitFiles(TEST_REPO_DIR, '   ')).toEqual([]);
+      // Too short to be a hash
+      expect(await gitService.commitFiles(TEST_REPO_DIR, 'abc')).toEqual([]);
+      // Non-hex characters
+      expect(await gitService.commitFiles(TEST_REPO_DIR, 'xyz1234567890abcdef1234567890abcdef12345')).toEqual([]);
+    });
+
+    it('returns [] for a hash that LOOKS valid but is not a real commit', async () => {
+      // 40 hex chars — passes the regex but no commit exists at this hash.
+      const fakeHash = '0000000000000000000000000000000000000000';
+      const files = await gitService.commitFiles(TEST_REPO_DIR, fakeHash);
+      expect(files).toEqual([]);
+    });
+  });
+
+  describe('commitExists (preflight check)', () => {
+    it('returns true for a valid commit hash', async () => {
+      const log = await gitService.log(TEST_REPO_DIR, { maxCount: 1 });
+      expect(log.length).toBeGreaterThan(0);
+      const exists = await gitService.commitExists(TEST_REPO_DIR, log[0].hash);
+      expect(exists).toBe(true);
+    });
+
+    it('returns true for a valid commit hash prefix (>=4 chars)', async () => {
+      const log = await gitService.log(TEST_REPO_DIR, { maxCount: 1 });
+      const shortHash = log[0].hash.substring(0, 7);
+      const exists = await gitService.commitExists(TEST_REPO_DIR, shortHash);
+      expect(exists).toBe(true);
+    });
+
+    it('returns false for a non-existent hash', async () => {
+      const fakeHash = 'bd63c71d32d9aac193cbb6620d8257bcadacb484';
+      const exists = await gitService.commitExists(TEST_REPO_DIR, fakeHash);
+      expect(exists).toBe(false);
+    });
+
+    it('returns false for empty / invalid inputs', async () => {
+      expect(await gitService.commitExists(TEST_REPO_DIR, '')).toBe(false);
+      expect(await gitService.commitExists(TEST_REPO_DIR, '   ')).toBe(false);
+      expect(await gitService.commitExists(TEST_REPO_DIR, 'not-a-hash')).toBe(false);
+    });
+
+    it('resolves HEAD to the current commit (returns true)', async () => {
+      const exists = await gitService.commitExists(TEST_REPO_DIR, 'HEAD');
+      expect(exists).toBe(true);
+    });
   });
 
   describe('diffCommit', () => {
@@ -379,6 +446,27 @@ describe('git service — integration with real git repo', () => {
       expect(commit).toBeDefined();
       const diff = await gitService.diffCommit(TEST_REPO_DIR, commit!.hash);
       expect(diff.hunks.length).toBeGreaterThan(0);
+    });
+
+    // Regression test for the IPC error popup — same root cause as commitFiles.
+    // diffCommit uses `git diff <hash>^..<hash>` which throws on a bad hash.
+    it('returns empty diff (no throw) for a non-existent commit hash', async () => {
+      const fakeHash = 'bd63c71d32d9aac193cbb6620d8257bcadacb484';
+      const diff = await gitService.diffCommit(TEST_REPO_DIR, fakeHash);
+      expect(diff).toBeDefined();
+      expect(diff.hunks).toEqual([]);
+      expect(diff.binary).toBe(false);
+      expect(diff.newFile).toBe(false);
+    });
+
+    it('returns empty diff when parentHash is non-existent', async () => {
+      // Real commit, fake parent — must not throw, must return empty diff.
+      const log = await gitService.log(TEST_REPO_DIR, { maxCount: 1 });
+      const realHash = log[0].hash;
+      const fakeParent = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+      const diff = await gitService.diffCommit(TEST_REPO_DIR, realHash, fakeParent);
+      expect(diff).toBeDefined();
+      expect(diff.hunks).toEqual([]);
     });
   });
 
