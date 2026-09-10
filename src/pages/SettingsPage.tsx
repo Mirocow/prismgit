@@ -7,6 +7,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore } from '../stores/toastStore';
+import { useI18n, LOCALES } from '../lib/i18n';
 
 export function SettingsPage() {
   const { settings, theme, setSetting, toggleTheme } = useSettingsStore();
@@ -14,6 +15,7 @@ export function SettingsPage() {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastStore();
   const { repos, removeRepo, loadRepos } = useRepositoryStore();
+  const { t, locale, setLocale } = useI18n();
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
   // Top-level tab: Application Settings vs Project Settings
@@ -200,6 +202,26 @@ export function SettingsPage() {
                 {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
                 {theme === 'dark' ? 'Light' : 'Dark'}
               </button>
+            </div>
+            {/* Language selector */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">{t('settings.language')}</div>
+                <div className="text-xs text-text-tertiary">
+                  English, Русский, 中文, Deutsch
+                </div>
+              </div>
+              <select
+                className="text-sm px-3 py-1.5 bg-bg-secondary border border-border-default rounded"
+                value={locale}
+                onChange={(e) => setLocale(e.target.value as 'en' | 'ru' | 'zh' | 'de')}
+              >
+                {LOCALES.map(l => (
+                  <option key={l.id} value={l.id}>
+                    {l.flag} {l.label}
+                  </option>
+                ))}
+              </select>
             </div>
             {/* UI Contrast slider — applies CSS `filter: contrast(N%)` on #root */}
             <div>

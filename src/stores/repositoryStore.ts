@@ -115,11 +115,15 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   openRepository: async (path: string) => {
     set({ loading: true, error: null });
     try {
-      const isRepo = await api.git.isRepo(path);
+      // Perf: validity check and basename are independent — run them in one
+      // round-trip instead of two sequential IPC hops (repo open latency).
+      const [isRepo, name] = await Promise.all([
+        api.git.isRepo(path),
+        api.fs.pathBasename(path),
+      ]);
       if (!isRepo) {
         throw new Error('Selected directory is not a Git repository');
       }
-      const name = await api.fs.pathBasename(path);
       await api.settings.addRepo({ path, name });
       // Refresh stats in background (don't block UI)
       api.settings.refreshRepoStats(path).then(() => {
@@ -127,7 +131,9 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       }).catch(() => { /* ignore */ });
 
       const repo: RepositoryEntry = { path, name, lastOpened: Date.now() };
-      await get().loadRepos();
+      // Perf: loadMetadata() already re-loads and re-sorts the repository
+      // list at the end, so the explicit loadRepos() here was a duplicate
+      // sequential IPC round-trip on the repo-open critical path.
       await get().loadMetadata();
       const metadata = get().metadata[path] || null;
       set({ currentRepo: repo, currentMetadata: metadata, loading: false });

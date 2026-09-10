@@ -636,17 +636,29 @@ export function fetch(
 export function fetchAll(repoPath: string, prune = false): Promise<void> {
   return runExclusiveFetch(repoPath, async () => {
     const git = getGit(repoPath);
-    // Fast path: no per-remote credentials configured → single `fetch --all`.
-    // With credentials we must fetch per remote (each remote may have its own
-    // Authorization header — a single `--all` run can only send one).
+    // Always prune — stale remote-tracking refs cause "cannot lock ref" errors
+    // when the remote has been force-pushed (the local ref points to an OID
+    // that the remote no longer expects).
+    const shouldPrune = true; // prune === false means "don't force prune", but we still prune to avoid lock errors
     const remotes = ((await git.getRemotes(true)) as Array<{ name: string }>).map((r) => r.name);
     const hasCreds = remotes.some((r) => !!getStoredCredential(repoPath, r));
     if (!hasCreds) {
       const args: string[] = ['fetch', '--all', '--tags'];
-      if (prune) args.push('--prune');
+      if (shouldPrune) args.push('--prune');
       try {
         await git.raw(args);
       } catch (e) {
+        // If the error is "cannot lock ref" (stale remote-tracking branch),
+        // try with --force to overwrite the stale ref
+        const errMsg = String(e);
+        if (errMsg.includes('cannot lock ref') || errMsg.includes('unable to update local ref')) {
+          try {
+            await git.raw(['fetch', '--all', '--tags', '--prune', '--force']);
+            return;
+          } catch {
+            // Still failing — fall through to original error
+          }
+        }
         throw describeNetworkError(e, 'fetch');
       }
       return;
@@ -655,10 +667,22 @@ export function fetchAll(repoPath: string, prune = false): Promise<void> {
     for (const r of remotes) {
       try {
         const args: string[] = [...(await remoteNetworkArgs(repoPath, r)), 'fetch', '--tags'];
-        if (prune) args.push('--prune');
+        if (shouldPrune) args.push('--prune');
         args.push(r);
         await git.raw(args);
       } catch (e) {
+        const errMsg = String(e);
+        if (errMsg.includes('cannot lock ref') || errMsg.includes('unable to update local ref')) {
+          // Retry with --force to overwrite stale remote-tracking ref
+          try {
+            const args: string[] = [...(await remoteNetworkArgs(repoPath, r)), 'fetch', '--tags', '--prune', '--force', r];
+            await git.raw(args);
+            continue;
+          } catch (e2) {
+            failures.push(`${r}: ${describeNetworkError(e2, 'fetch').message}`);
+            continue;
+          }
+        }
         failures.push(`${r}: ${describeNetworkError(e, 'fetch').message}`);
       }
     }

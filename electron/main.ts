@@ -93,6 +93,7 @@ function createWindow(): BrowserWindow {
     },
     show: false,
   });
+  let shown = false;
 
   // Restore maximized/fullscreen state
   if (savedState.isMaximized) {
@@ -103,8 +104,19 @@ function createWindow(): BrowserWindow {
   }
 
   win.once('ready-to-show', () => {
+    shown = true;
     win.show();
   });
+  // Safety net: on some platforms/GPU paths 'ready-to-show' can be delayed
+  // long after the page is actually usable (or never fire), leaving the user
+  // with a running app but NO visible window — perceived as "the app opens
+  // very slowly". Never wait more than 3s to become visible.
+  setTimeout(() => {
+    if (!shown && !win.isDestroyed()) {
+      shown = true;
+      win.show();
+    }
+  }, 3000);
 
   // Save window state on changes
   const saveDebounced = (() => {
@@ -125,6 +137,15 @@ function createWindow(): BrowserWindow {
   win.on('enter-full-screen', saveDebounced);
   win.on('leave-full-screen', saveDebounced);
   win.on('close', saveWindowState);
+  win.on('closed', () => {
+    mainWindow = null;
+    // The keep-alive About window can outlive the main window — on Windows /
+    // Linux 'window-all-closed' would then never fire and the app would keep
+    // running with no visible window. Quit explicitly, as before.
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
 
   if (isDev) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173');
@@ -200,7 +221,13 @@ app.whenReady().then(() => {
   handleCliArgs(process.argv.slice(1));
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    // The keep-alive About window may keep getAllWindows() non-empty even
+    // when the main window is gone — track the main window explicitly.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // Dock icon clicked: restore/focus the existing window.
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+    } else {
       mainWindow = createWindow();
     }
   });

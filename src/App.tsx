@@ -6,16 +6,9 @@ import { StatusBar } from './components/StatusBar';
 import { ToastContainer } from './components/ToastContainer';
 import { ConfirmDialogHost } from './components/ConfirmDialog';
 import { WelcomeScreen } from './components/WelcomeScreen';
-import { CloneModal } from './components/CloneModal';
-import { InitModal } from './components/InitModal';
 import { RebasePanel } from './components/RebasePanel';
 import { FindObjectDialog } from './components/FindObjectDialog';
-import { GitFlowDialog } from './components/GitFlowDialog';
-import { InteractiveRebaseDialog } from './components/InteractiveRebaseDialog';
-import { ConflictSolver } from './components/ConflictSolver';
-import { RepoInfoDialog } from './components/RepoInfoDialog';
 import { SequencerPanel } from './components/SequencerPanel';
-import { ApplyPatchModal } from './components/ApplyPatchModal';
 import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
 import { CommandLogPanel } from './components/CommandLogPanel';
@@ -24,8 +17,21 @@ import { DeepLinkHandler } from './components/DeepLinkHandler';
 import { HelpBanner } from './components/HelpBanner';
 import { NAV_SHORTCUTS } from './components/navItems';
 import { RefActionDialog, type RefAction } from './components/RefActionDialog';
-import { IndexEditorDialog } from './components/IndexEditorDialog';
-import { RepoSettingsDialog } from './components/RepoSettingsDialog';
+import { useChunkPreload } from './hooks/useChunkPreload';
+
+// Heavy dialogs are code-split: they are never needed for first paint, and
+// pulling them out of the initial bundle makes the app window show faster.
+// Their chunks are warmed on idle by useChunkPreload, so the first open of
+// each dialog stays instant (no fetch/parse penalty for the user).
+const CloneModal = lazy(() => import('./components/CloneModal').then(m => ({ default: m.CloneModal })));
+const InitModal = lazy(() => import('./components/InitModal').then(m => ({ default: m.InitModal })));
+const GitFlowDialog = lazy(() => import('./components/GitFlowDialog').then(m => ({ default: m.GitFlowDialog })));
+const InteractiveRebaseDialog = lazy(() => import('./components/InteractiveRebaseDialog').then(m => ({ default: m.InteractiveRebaseDialog })));
+const ConflictSolver = lazy(() => import('./components/ConflictSolver').then(m => ({ default: m.ConflictSolver })));
+const RepoInfoDialog = lazy(() => import('./components/RepoInfoDialog').then(m => ({ default: m.RepoInfoDialog })));
+const ApplyPatchModal = lazy(() => import('./components/ApplyPatchModal').then(m => ({ default: m.ApplyPatchModal })));
+const IndexEditorDialog = lazy(() => import('./components/IndexEditorDialog').then(m => ({ default: m.IndexEditorDialog })));
+const RepoSettingsDialog = lazy(() => import('./components/RepoSettingsDialog').then(m => ({ default: m.RepoSettingsDialog })));
 import { promptDialog, confirmDialog } from './components/ConfirmDialog';
 import { clearProjectPrefs } from './lib/projectPrefs';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
@@ -114,6 +120,9 @@ export default function App() {
   useBackgroundFetch();
   // Periodic remote check for the repository list (fetch --all + ↓/↑ badges)
   useRemotePolling();
+  // Warm lazily-loaded page/dialog chunks during idle time so every tool and
+  // dialog opens instantly (no first-open chunk fetch/parse penalty).
+  useChunkPreload();
 
   useEffect(() => {
     loadRepos();
@@ -1065,8 +1074,8 @@ export default function App() {
         <ConfirmDialogHost />
         <DragDropHandler />
         <DeepLinkHandler />
-        <CloneModal open={showClone} onClose={() => setShowClone(false)} />
-        <InitModal open={showInit} onClose={() => setShowInit(false)} />
+        <Suspense fallback={null}><CloneModal open={showClone} onClose={() => setShowClone(false)} /></Suspense>
+        <Suspense fallback={null}><InitModal open={showInit} onClose={() => setShowInit(false)} /></Suspense>
         <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
         <CommandPalette
           open={showPalette}
@@ -1154,20 +1163,31 @@ export default function App() {
       <ConfirmDialogHost />
       <DragDropHandler />
       <DeepLinkHandler />
-      <CloneModal open={showClone} onClose={() => setShowClone(false)} />
-      <InitModal open={showInit} onClose={() => setShowInit(false)} />
+      <Suspense fallback={null}><CloneModal open={showClone} onClose={() => setShowClone(false)} /></Suspense>
+      <Suspense fallback={null}><InitModal open={showInit} onClose={() => setShowInit(false)} /></Suspense>
       <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
-      <GitFlowDialog open={showGitFlow} onClose={() => { setShowGitFlow(false); setGitFlowType(undefined); }} initialFlow={gitFlowType} />
-      <InteractiveRebaseDialog open={showIRebase} onClose={() => setShowIRebase(false)} />
-      <RepoInfoDialog open={showRepoInfo} onClose={() => setShowRepoInfo(false)} />
+      <Suspense fallback={null}>
+        <GitFlowDialog open={showGitFlow} onClose={() => { setShowGitFlow(false); setGitFlowType(undefined); }} initialFlow={gitFlowType} />
+        <InteractiveRebaseDialog open={showIRebase} onClose={() => setShowIRebase(false)} />
+        <RepoInfoDialog open={showRepoInfo} onClose={() => setShowRepoInfo(false)} />
+        <ApplyPatchModal open={showApplyPatch} onClose={() => setShowApplyPatch(false)} />
+      </Suspense>
       <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       {refAction && <RefActionDialog action={refAction} onClose={() => setRefAction(null)} />}
       {showIndexEditor && (
-        <IndexEditorDialog filePath={indexEditorFile} onClose={() => setShowIndexEditor(false)} />
+        <Suspense fallback={null}>
+          <IndexEditorDialog filePath={indexEditorFile} onClose={() => setShowIndexEditor(false)} />
+        </Suspense>
       )}
-      {showRepoSettings && <RepoSettingsDialog onClose={() => setShowRepoSettings(false)} />}
+      {showRepoSettings && (
+        <Suspense fallback={null}>
+          <RepoSettingsDialog onClose={() => setShowRepoSettings(false)} />
+        </Suspense>
+      )}
       {conflictFile && (
-        <ConflictSolver filePath={conflictFile} onClose={() => setConflictFile(null)} />
+        <Suspense fallback={null}>
+          <ConflictSolver filePath={conflictFile} onClose={() => setConflictFile(null)} />
+        </Suspense>
       )}
       <CommandPalette
         open={showPalette}

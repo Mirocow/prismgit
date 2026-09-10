@@ -30,6 +30,26 @@ declare const __BUILD_DATE__: string;
 let aboutWindow: BrowserWindow | null = null;
 let metaStore: SimpleStore | null = null;
 
+/**
+ * Keep-alive: closing the About window hides it instead of destroying it, so
+ * reopening is instant (no window creation, HTML build, data: URL load or
+ * first paint — all of which the user previously waited for on EVERY open).
+ * The flag below lets real app shutdown close it for good.
+ */
+let appQuitting = false;
+app.on('before-quit', () => {
+  appQuitting = true;
+});
+
+/**
+ * True while the keep-alive window is hidden after an explicit close.
+ * Guards against a late 'ready-to-show' racing with keep-alive hide: if the
+ * user closes the About window before the first paint finished, the pending
+ * ready-to-show callback must NOT re-show it (it would un-hide a window the
+ * user just closed).
+ */
+let aboutKeepAliveHidden = false;
+
 function getMetaStore(): SimpleStore {
   if (!metaStore) {
     metaStore = new SimpleStore({ name: 'prismgit-app-meta', defaults: {} });
@@ -85,6 +105,7 @@ function readLogoDataUri(): string {
  */
 export function openAboutWindow(): BrowserWindow {
   if (aboutWindow && !aboutWindow.isDestroyed()) {
+    aboutKeepAliveHidden = false; // rearm the late ready-to-show guard
     aboutWindow.show();
     aboutWindow.focus();
     return aboutWindow;
@@ -119,16 +140,27 @@ export function openAboutWindow(): BrowserWindow {
   });
   // The About page is static — block any in-window navigation as a safety net.
   win.webContents.on('will-navigate', (e) => e.preventDefault());
+  win.once('ready-to-show', () => {
+    if (!aboutKeepAliveHidden) win.show();
+  });
+  // Keep-alive: intercept close — hide instead of destroy so the next
+  // openAboutWindow() call just shows the cached window (near-instant).
+  win.on('close', (e) => {
+    if (!appQuitting && !win.isDestroyed()) {
+      e.preventDefault();
+      aboutKeepAliveHidden = true;
+      win.hide();
+    }
+  });
   win.on('closed', () => {
     if (aboutWindow === win) aboutWindow = null;
   });
-
-  win.once('ready-to-show', () => win.show());
   void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   return win;
 }
 
-/** Exported for tests / graceful shutdown. */
+/** Exported for tests / graceful shutdown. Force-destroys the cached window. */
 export function closeAboutWindow(): void {
-  if (aboutWindow && !aboutWindow.isDestroyed()) aboutWindow.close();
+  if (aboutWindow && !aboutWindow.isDestroyed()) aboutWindow.destroy();
+  aboutWindow = null;
 }
