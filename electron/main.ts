@@ -12,6 +12,15 @@ import { buildAppMenu } from './menu.js';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
+// Suppress the EGL/GL driver error on Linux:
+//   ERROR:gl_display.cc(497) EGL Driver message (Error) eglQueryDeviceAttribEXT: Bad attribute.
+// This is a known Chromium/Electron issue with certain GPU drivers. The error
+// is cosmetic (doesn't affect functionality) but clutters stderr. Disabling
+// hardware acceleration eliminates the EGL init path that triggers it.
+if (process.platform === 'linux') {
+  app.disableHardwareAcceleration();
+}
+
 // Window state persistence
 interface WindowState {
   bounds?: { x: number; y: number; width: number; height: number };

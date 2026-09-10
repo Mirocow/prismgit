@@ -17,6 +17,8 @@ import {
   type RepoGroupNode, type RepoItemNode,
 } from '../lib/repoTree';
 import type { RemoteCheckSummary } from '../lib/api';
+import { api } from '../lib/api';
+import { useToastStore } from '../stores/toastStore';
 
 /**
  * Drag-and-drop payload for the repository tree. Chromium lowercases custom
@@ -76,9 +78,10 @@ export function Sidebar() {
   const location = useLocation();
   const {
     repos, groups, metadata, remoteChecks, checkingRemotes, currentRepo,
-    openRepository, removeRepo, pinRepo, checkRemotes,
+    openRepository, removeRepo, pinRepo, checkRemotes, loadRepos,
     createGroup, renameGroup, deleteGroup, moveGroup, toggleGroupExpanded, assignRepoGroup,
   } = useRepositoryStore();
+  const toast = useToastStore();
   const favoritePaths = useMemo(
     () => new Set(Object.entries(metadata).filter(([, m]) => m.favorite).map(([p]) => p)),
     [metadata]
@@ -163,6 +166,53 @@ export function Sidebar() {
   const handleDrop = useCallback(async (e: React.DragEvent, targetGroupId: string | null) => {
     e.preventDefault();
     e.stopPropagation();
+    // Check for external OS file/folder drag first
+    const hasFiles = Array.from(e.dataTransfer?.types || []).some(
+      (t) => t.toLowerCase() === 'files'
+    );
+    if (hasFiles) {
+      // External OS folder drag — add repos to the list, optionally into this group
+      setDragOverId(null);
+      const files = Array.from(e.dataTransfer!.files);
+      let addedCount = 0;
+      let skippedCount = 0;
+      for (const f of files) {
+        const filePath = (f as File & { path?: string }).path;
+        if (!filePath) continue;
+        const name = filePath.split('/').pop() || filePath;
+        try {
+          const isRepo = await api.git.isRepo(filePath);
+          if (isRepo) {
+            await api.settings.addRepo({ path: filePath, name });
+            // Assign to the target group if dropping on a group
+            if (targetGroupId) {
+              await api.settings.setRepoGroup(filePath, targetGroupId);
+              // Expand the group so the new repo is visible
+              await toggleGroupExpanded(targetGroupId, true);
+            }
+            api.settings.refreshRepoStats(filePath).then(() => {
+              useRepositoryStore.getState().loadMetadata();
+            }).catch(() => {});
+            addedCount++;
+          } else {
+            skippedCount++;
+          }
+        } catch {
+          skippedCount++;
+        }
+      }
+      if (addedCount > 0) {
+        await loadRepos();
+        toast.success(
+          `Added ${addedCount} repositor${addedCount === 1 ? 'y' : 'ies'}${targetGroupId ? ' to group' : ''}`,
+          skippedCount > 0 ? `${skippedCount} folder(s) skipped (not a git repo)` : undefined
+        );
+      } else if (skippedCount > 0) {
+        toast.warning('No git repositories found', `${skippedCount} folder(s) dropped`);
+      }
+      return;
+    }
+    // Internal drag — move repo/group
     const raw = e.dataTransfer.getData(DND_MIME);
     let payload: DragPayload | null = dragPayloadRef.current;
     if (raw) {
@@ -173,15 +223,22 @@ export function Sidebar() {
     if (!payload) return;
     if (payload.kind === 'repo') await dropRepoIntoGroup(payload.path, targetGroupId);
     else await dropGroupIntoGroup(payload.id, targetGroupId);
-  }, [dropRepoIntoGroup, dropGroupIntoGroup]);
+  }, [dropRepoIntoGroup, dropGroupIntoGroup, loadRepos, toast, toggleGroupExpanded]);
 
   const handleGroupDragOver = useCallback((e: React.DragEvent, groupNode: RepoGroupNode) => {
-    const payload = dragPayloadRef.current;
-    if (!payload) return;
-    if (payload.kind === 'group' && !canMoveGroup(groups, payload.id, groupNode.group.id)) return;
+    // Accept both internal drags and external OS file drags
+    const isInternal = !!dragPayloadRef.current;
+    const isExternal = Array.from(e.dataTransfer?.types || []).some(
+      (t) => t.toLowerCase() === 'files'
+    );
+    if (!isInternal && !isExternal) return;
+    if (isInternal) {
+      const payload = dragPayloadRef.current!;
+      if (payload.kind === 'group' && !canMoveGroup(groups, payload.id, groupNode.group.id)) return;
+    }
     e.preventDefault();
     e.stopPropagation();
-    e.dataTransfer.dropEffect = 'move';
+    e.dataTransfer.dropEffect = isExternal ? 'copy' : 'move';
     setDragOverId(groupNode.group.id);
   }, [groups]);
 
@@ -455,14 +512,20 @@ export function Sidebar() {
 
         {showRepoList && (
           <div
-            className="overflow-y-auto border-t border-border-subtle"
+            className="overflow-y-auto border-t border-border-subtle relative"
             style={{ height: repoListHeight, flexShrink: 0 }}
             data-testid="repo-tree"
             onDragOver={(e) => {
-              // Root drop zone: any empty space in the list = move to root level.
-              const payload = dragPayloadRef.current;
-              if (!payload) return;
+              // Accept BOTH internal repo/group drags AND external OS file/folder drags.
+              // Internal: dragPayloadRef.current is set (application/x-prismgit-repoitem).
+              // External: dataTransfer.types contains 'Files' (OS file manager drag).
+              const isInternal = !!dragPayloadRef.current;
+              const isExternal = Array.from(e.dataTransfer?.types || []).some(
+                (t) => t.toLowerCase() === 'files'
+              );
+              if (!isInternal && !isExternal) return;
               e.preventDefault();
+              e.dataTransfer!.dropEffect = isExternal ? 'copy' : 'move';
               setDragOverId('root');
             }}
             onDragLeave={(e) => {
