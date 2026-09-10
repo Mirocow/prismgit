@@ -1132,7 +1132,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               <SortableHeader label="Name" sortKey="name" sort={fileSort} onSort={handleSort} />
               <span style={{ width: 74 }} title="Added/removed lines"></span>
               <SortableHeader label="State" sortKey="state" sort={fileSort} onSort={handleSort} width={colWidths.state} onResizeStart={(e) => startColResize(e, 'state')} />
-              <SortableHeader label="Relative Directory" sortKey="dir" sort={fileSort} onSort={handleSort} width={colWidths.dir} onResizeStart={(e) => startColResize(e, 'dir')} />
+              {!compressFilePaths && (
+                <SortableHeader label="Relative Directory" sortKey="dir" sort={fileSort} onSort={handleSort} width={colWidths.dir} onResizeStart={(e) => startColResize(e, 'dir')} />
+              )}
               <span style={{ width: 92 }}></span>
             </div>
 
@@ -1149,7 +1151,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                     <span className="flex-1 truncate font-mono whitespace-nowrap">{filePath}</span>
                     <span style={{ width: 74 }}></span>
                     <span className="text-text-tertiary italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>Conflict</span>
-                    <span className="truncate whitespace-nowrap" style={{ width: colWidths.dir }}></span>
+                    {!compressFilePaths && (
+                      <span className="truncate whitespace-nowrap" style={{ width: colWidths.dir }}></span>
+                    )}
                     <span className="flex justify-end flex-shrink-0 overflow-hidden" style={{ width: 92 }}>
                       <button className="btn btn-primary text-2xs !py-0.5 !px-2" onClick={(e) => { e.stopPropagation(); onResolveConflict && onResolveConflict(filePath); }}>
                         Resolve

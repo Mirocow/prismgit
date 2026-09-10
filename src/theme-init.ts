@@ -3,8 +3,11 @@
 //
 // Two things applied early:
 //   1. Theme class (.dark) on <html>
-//   2. Contrast filter on #root (read from localStorage; settingsStore will
-//      re-apply once React mounts, but applying early prevents a flash)
+//   2. UI contrast (text/border color overrides) applied to <html> CSS vars.
+//      The contrast is read from localStorage; settingsStore re-applies once
+//      React mounts. We can't apply it here because the CSS variables aren't
+//      defined yet (they're in globals.css which loads after this module).
+//      The settingsStore.loadSettings() call will apply it.
 try {
   var theme = localStorage.getItem('smartgit-theme') || 'light';
   if (theme === 'dark') {
@@ -14,17 +17,17 @@ try {
   // Default to light
 }
 
+// Contrast is applied by settingsStore after the CSS is loaded — we just
+// persist the value here so it's available before React mounts.
 try {
   var contrastRaw = localStorage.getItem('smartgit-contrast');
-  var contrast = contrastRaw ? parseInt(contrastRaw, 10) : 100;
-  if (!isNaN(contrast) && contrast !== 100) {
-    // Clamp to safe range — anything outside 50–150 makes text hard to read.
-    var clamped = Math.max(50, Math.min(150, contrast));
-    // We can't select #root yet (it doesn't exist when this module loads),
-    // so we apply to <html> for the early flash, then settingsStore will
-    // move it to #root once React mounts.
-    document.documentElement.style.filter = 'contrast(' + clamped + '%)';
+  if (contrastRaw) {
+    var contrast = parseInt(contrastRaw, 10);
+    if (!isNaN(contrast) && contrast !== 100) {
+      // Store on a data attribute so settingsStore can pick it up
+      document.documentElement.setAttribute('data-contrast', String(contrast));
+    }
   }
 } catch (e) {
-  // Ignore — settings will be re-applied after React mounts
+  // Ignore
 }

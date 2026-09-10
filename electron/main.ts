@@ -26,18 +26,31 @@ const windowStateStore = new SimpleStore({
 let mainWindow: BrowserWindow | null = null;
 
 function getWindowState(): WindowState {
-  if (!mainWindow) return {};
-  const bounds = mainWindow.getBounds();
-  return {
-    bounds,
-    isMaximized: mainWindow.isMaximized(),
-    isFullScreen: mainWindow.isFullScreen(),
-  };
+  // Guard: mainWindow may be null OR already destroyed by the time the
+  // 'close' / 'before-quit' event fires. Calling getBounds() on a
+  // destroyed window throws "TypeError: Object has been destroyed".
+  if (!mainWindow || mainWindow.isDestroyed()) return {};
+  try {
+    const bounds = mainWindow.getBounds();
+    return {
+      bounds,
+      isMaximized: mainWindow.isMaximized(),
+      isFullScreen: mainWindow.isFullScreen(),
+    };
+  } catch {
+    // Window was destroyed between the isDestroyed() check and the
+    // getBounds() call — return empty state (use defaults next launch).
+    return {};
+  }
 }
 
 function saveWindowState(): void {
-  if (!mainWindow) return;
-  windowStateStore.set('windowState', getWindowState());
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    windowStateStore.set('windowState', getWindowState());
+  } catch {
+    // Window destroyed between checks — ignore.
+  }
 }
 
 function createWindow(): BrowserWindow {
@@ -118,7 +131,7 @@ function createWindow(): BrowserWindow {
 // Context menu IPC
 function registerContextMenuIpc() {
   ipcMain.handle('context-menu:show', async (_e, items: Array<{ label?: string; type?: 'separator' | 'normal' | 'checkbox' | 'radio'; checked?: boolean; enabled?: boolean; accelerator?: string; clickId?: string }>) => {
-    if (!mainWindow) return null;
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
     const menu = Menu.buildFromTemplate(items.map((item) => ({
       label: item.label,
       type: item.type,
@@ -129,7 +142,7 @@ function registerContextMenuIpc() {
         mainWindow?.webContents.send('context-menu:click', item.clickId);
       },
     })));
-    if (mainWindow) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
       menu.popup({ window: mainWindow });
     }
     return true;
@@ -172,7 +185,7 @@ app.on('before-quit', () => {
 
 // Expose dialog for renderer
 ipcMain.handle('dialog:openDirectory', async () => {
-  if (!mainWindow) return null;
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory', 'createDirectory'],
   });
