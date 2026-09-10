@@ -874,6 +874,13 @@ export default function App() {
     return () => window.removeEventListener('prismgit:show-shortcuts', handler);
   }, []);
 
+  // Repository Settings dialog — triggered from Sidebar context menu
+  useEffect(() => {
+    const handler = () => setShowRepoSettings(true);
+    window.addEventListener('prismgit:repo-settings', handler);
+    return () => window.removeEventListener('prismgit:repo-settings', handler);
+  }, []);
+
   // SmartGit Manual: Command-Line Options
   // Handle --open / --log / --blame / --investigate / --anchor-commit sent from electron/main.ts
   useEffect(() => {

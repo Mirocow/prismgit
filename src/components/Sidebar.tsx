@@ -259,6 +259,8 @@ export function Sidebar() {
         ? [{ label: 'Remove from group', clickId: 'ungroup' }]
         : []),
       { label: 'Check remotes now', clickId: 'check' },
+      { type: 'separator' as const },
+      { label: 'Repository Settings...', clickId: 'repo-settings' },
     ];
     void showContextMenu(items, (clickId) => {
       if (clickId.startsWith('move:')) {
@@ -268,9 +270,15 @@ export function Sidebar() {
         void dropRepoIntoGroup(repoPath, null);
       } else if (clickId === 'check') {
         void checkRemotes([repoPath]);
+      } else if (clickId === 'repo-settings') {
+        // Open the repo first (if not already current), then trigger settings dialog
+        // via a custom DOM event that App.tsx listens for.
+        void openRepository(repoPath).then(() => {
+          window.dispatchEvent(new CustomEvent('prismgit:repo-settings'));
+        });
       }
     });
-  }, [showContextMenu, groups, repos, dropRepoIntoGroup, checkRemotes]);
+  }, [showContextMenu, groups, repos, dropRepoIntoGroup, checkRemotes, openRepository]);
 
   // ============= Tree rendering =============
 
