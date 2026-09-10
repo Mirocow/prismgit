@@ -982,6 +982,13 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               setSelectedFile(file.path);
               selectFileGlobal(file.path);
             },
+            onOpenDiff: () => {
+              // Navigate to the Diff tool with this file pre-selected.
+              // Compare working tree vs HEAD for this file.
+              setSelectedFile(file.path);
+              selectFileGlobal(file.path);
+              window.location.hash = '#/diff';
+            },
             onSelectDirectory: handleSelectDir,
             onFocusCommit: focusCommitBox,
             refresh: () => refreshStatus(repo.path),
