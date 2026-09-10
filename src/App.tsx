@@ -18,6 +18,7 @@ import { ApplyPatchModal } from './components/ApplyPatchModal';
 import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
 import { CommandLogPanel } from './components/CommandLogPanel';
+import { DragDropHandler } from './components/DragDropHandler';
 import { NAV_SHORTCUTS } from './components/navItems';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
@@ -362,6 +363,7 @@ export default function App() {
           onToggleCommandLog={() => setShowCommandLog(s => !s)}
         />
         <ToastContainer />
+        <DragDropHandler />
         <CloneModal open={showClone} onClose={() => setShowClone(false)} />
         <InitModal open={showInit} onClose={() => setShowInit(false)} />
         <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
@@ -433,6 +435,7 @@ export default function App() {
         onToggleCommandLog={() => setShowCommandLog(s => !s)}
       />
       <ToastContainer />
+      <DragDropHandler />
       <CloneModal open={showClone} onClose={() => setShowClone(false)} />
       <InitModal open={showInit} onClose={() => setShowInit(false)} />
       <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
