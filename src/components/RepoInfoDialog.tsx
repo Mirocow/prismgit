@@ -6,6 +6,7 @@ import { api, type RepositoryMetadata, type RemoteInfo } from '../lib/api';
 import { cn, formatDate, shortHash } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useI18n } from '../lib/i18n';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
 import { getAllRemoteAuth, setRemoteAuth } from '../lib/remoteAuth';
 import { RepoSettingsDialog } from './RepoSettingsDialog';
@@ -17,6 +18,7 @@ interface RepoInfoDialogProps {
 
 export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
   useEscapeKey(open, onClose);
+  const { t } = useI18n();
   const { currentRepo, currentMetadata, updateMetadata, toggleFavorite, addTag, removeTag, refreshStats } = useRepositoryStore();
   const toast = useToastStore();
   const [description, setDescription] = useState('');
@@ -92,10 +94,10 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
         });
         setBackgroundFetchForRepo(currentRepo.path, r.name, bgDraft[r.name] ?? false);
       }
-      toast.success('Repository settings saved');
+      toast.success(t('settings.repoSaved'));
       onClose();
     } catch (e) {
-      toast.error('Failed to save', String(e));
+      toast.error(t('dialogs.failedToSave'), String(e));
     } finally {
       setSaving(false);
     }
@@ -107,7 +109,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
       await addTag(currentRepo.path, newTag.trim());
       setNewTag('');
     } catch (e) {
-      toast.error('Failed to add tag', String(e));
+      toast.error(t('dialogs.addTagFailed'), String(e));
     }
   };
 
@@ -116,7 +118,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
     try {
       await removeTag(currentRepo.path, tag);
     } catch (e) {
-      toast.error('Failed to remove tag', String(e));
+      toast.error(t('dialogs.removeTagFailed'), String(e));
     }
   };
 
@@ -125,7 +127,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
     try {
       await toggleFavorite(currentRepo.path);
     } catch (e) {
-      toast.error('Failed to toggle favorite', String(e));
+      toast.error(t('dialogs.toggleFavoriteFailed'), String(e));
     }
   };
 
@@ -134,9 +136,9 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
     setRefreshing(true);
     try {
       await refreshStats(currentRepo.path);
-      toast.success('Stats refreshed');
+      toast.success(t('dialogs.statsRefreshed'));
     } catch (e) {
-      toast.error('Failed to refresh', String(e));
+      toast.error(t('dialogs.refreshFailed'), String(e));
     } finally {
       setRefreshing(false);
     }
@@ -159,7 +161,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
       const raw = await api.git.countObjects(currentRepo.path, true);
       setObjectStats(raw.trim());
     } catch (e) {
-      toast.error('count-objects failed', String(e));
+      toast.error(t('dialogs.countObjectsFailed'), String(e));
     } finally {
       setCounting(false);
     }
@@ -170,9 +172,9 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
     if (!currentRepo) return;
     try {
       await api.git.updateServerInfo(currentRepo.path);
-      toast.success('Server info updated (info/refs + objects/info/packs)');
+      toast.success(t('dialogs.serverInfoUpdated'));
     } catch (e) {
-      toast.error('update-server-info failed', String(e));
+      toast.error(t('dialogs.updateServerInfoFailed'), String(e));
     }
   };
 
@@ -197,7 +199,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
           <div className="flex items-center gap-2">
             <button
               className="icon-btn"
-              title={meta.favorite ? 'Remove from favorites' : 'Add to favorites'}
+              title={meta.favorite ? t('dialogs.removeFavorite') : t('dialogs.addFavorite')}
               onClick={handleToggleFavorite}
             >
               <Star
@@ -213,7 +215,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
           <div className="flex items-center gap-1">
             <button
               className="icon-btn"
-              title="Refresh stats from Git"
+              title={t('dialogs.refreshStatsTitle')}
               onClick={handleRefreshStats}
               disabled={refreshing}
             >
@@ -222,7 +224,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
             {meta.webUrl && (
               <button
                 className="icon-btn"
-                title="Open in browser"
+                title={t('dialogs.openInBrowserTitle')}
                 onClick={handleOpenInBrowser}
               >
                 <ExternalLink size={14} />
@@ -238,7 +240,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Path */}
           <div>
-            <label className="text-xs text-text-tertiary block mb-1">Path</label>
+            <label className="text-xs text-text-tertiary block mb-1">{t('dialogs.pathLabel')}</label>
             <code className="text-xs mono block bg-bg-tertiary p-2 rounded break-all">
               {currentRepo.path}
             </code>
@@ -246,11 +248,11 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
 
           {/* Description */}
           <div>
-            <label className="text-xs text-text-tertiary block mb-1">Description</label>
+            <label className="text-xs text-text-tertiary block mb-1">{t('dialogs.descriptionLabel')}</label>
             <input
               type="text"
               className="w-full text-sm"
-              placeholder="Repository description (custom)"
+              placeholder={t('dialogs.descriptionPlaceholder')}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
@@ -258,12 +260,12 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
 
           {/* Color */}
           <div>
-            <label className="text-xs text-text-tertiary block mb-1">Color tag</label>
+            <label className="text-xs text-text-tertiary block mb-1">{t('dialogs.colorTagLabel')}</label>
             <div className="flex items-center gap-2.5">
               {colors.map(c => (
                 <button
                   key={c}
-                  title={color === c ? `${c} (selected)` : c}
+                  title={color === c ? t('dialogs.colorSelected', { color: c }) : c}
                   className={cn(
                     'w-6 h-6 rounded-full grid place-items-center transition-all',
                     color === c
@@ -283,7 +285,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
               {color && (
                 <button
                   className="icon-btn !w-6 !h-6"
-                  title="Clear color"
+                  title={t('dialogs.clearColor')}
                   onClick={() => setColor('')}
                 >
                   <X size={11} />
@@ -297,12 +299,12 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
             <div className="flex items-center justify-between mb-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-text-secondary flex items-center gap-1.5">
                 <KeyRound size={12} />
-                Remotes &amp; Authorization
+                {t('dialogs.remotesAuth')}
               </div>
               {remotes.length > 0 && (
                 <button
                   className="icon-btn !w-6 !h-6"
-                  title={showPasswords ? 'Hide passwords' : 'Show passwords'}
+                  title={showPasswords ? t('dialogs.hidePasswords') : t('dialogs.showPasswords')}
                   onClick={() => setShowPasswords((v) => !v)}
                 >
                   {showPasswords ? <EyeOff size={12} /> : <Eye size={12} />}
@@ -310,14 +312,13 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
               )}
             </div>
             <p className="text-2xs text-text-tertiary mb-2">
-              Credentials are used for push / pull / fetch on this remote (HTTP/HTTPS). The same
-              values are editable in the Remotes tool. Stored only in the local app settings.
+              {t('dialogs.authHint')}
             </p>
             {remotesLoading ? (
               <div className="flex justify-center py-3"><Loader size={14} className="animate-spin text-text-tertiary" /></div>
             ) : remotes.length === 0 ? (
               <div className="text-xs text-text-tertiary py-2">
-                No remotes configured — add one in the Remotes tool.
+                {t('dialogs.noRemotesTool')}
               </div>
             ) : (
               <div className="space-y-2">
@@ -334,18 +335,18 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
                         <div className="flex-1" />
                         <label
                           className="flex items-center gap-1.5 text-2xs text-text-secondary cursor-pointer select-none"
-                          title="Refresh this remote in the background (also used by the sidebar remote check)"
+                          title={t('dialogs.bgFetchTooltip')}
                         >
                           <input
                             type="checkbox"
                             checked={bgDraft[r.name] ?? false}
                             onChange={(e) => setBgDraft((prev) => ({ ...prev, [r.name]: e.target.checked }))}
                           />
-                          Refresh automatically
+                          {t('dialogs.refreshAutomatically')}
                         </label>
                         <button
                           className="icon-btn !w-5 !h-5"
-                          title="Repository Settings: User, Fetch & Pull, Push, Signing, Encoding, Tag-Grouping"
+                          title={t('dialogs.repoSettingsTooltip')}
                           onClick={() => { setSettingsRemoteName(r.name); setShowRepoSettings(true); }}
                         >
                           <SettingsIcon size={11} />
@@ -358,7 +359,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
                         <input
                           type="text"
                           className={inputCls}
-                          placeholder="Username"
+                          placeholder={t('dialogs.usernamePlaceholder')}
                           autoComplete="off"
                           value={cred.username}
                           onChange={(e) => updateAuthDraft(r.name, { username: e.target.value })}
@@ -366,7 +367,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
                         <input
                           type={showPasswords ? 'text' : 'password'}
                           className={inputCls}
-                          placeholder="Password / token"
+                          placeholder={t('dialogs.passwordPlaceholder')}
                           autoComplete="new-password"
                           value={cred.password}
                           onChange={(e) => updateAuthDraft(r.name, { password: e.target.value })}
@@ -381,7 +382,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
 
           {/* Tags */}
           <div>
-            <label className="text-xs text-text-tertiary block mb-1">Tags</label>
+            <label className="text-xs text-text-tertiary block mb-1">{t('nav.tags')}</label>
             <div className="flex flex-wrap gap-1 mb-2">
               {meta.tags && meta.tags.length > 0 ? (
                 meta.tags.map(tag => (
@@ -400,14 +401,14 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
                   </span>
                 ))
               ) : (
-                <span className="text-xs text-text-tertiary">No tags</span>
+                <span className="text-xs text-text-tertiary">{t('dialogs.noTags')}</span>
               )}
             </div>
             <div className="flex gap-2">
               <input
                 type="text"
                 className="flex-1 text-sm"
-                placeholder="Add tag..."
+                placeholder={t('dialogs.addTagPlaceholder')}
                 value={newTag}
                 onChange={(e) => setNewTag(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
@@ -418,17 +419,17 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
                 disabled={!newTag.trim()}
               >
                 <Plus size={12} />
-                Add
+                {t('common.add')}
               </button>
             </div>
           </div>
 
           {/* Notes */}
           <div>
-            <label className="text-xs text-text-tertiary block mb-1">Notes</label>
+            <label className="text-xs text-text-tertiary block mb-1">{t('nav.notes')}</label>
             <textarea
               className="w-full text-sm h-24 resize-none"
-              placeholder="Personal notes about this repository..."
+              placeholder={t('dialogs.notesPlaceholder')}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
@@ -437,19 +438,19 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
           {/* Repository maintenance */}
           <div className="border-t border-border-default pt-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-2">
-              Repository Maintenance
+              {t('dialogs.maintenanceTitle')}
             </div>
             <div className="flex items-center gap-2 mb-2">
               <button className="btn btn-secondary text-xs" onClick={handleCountObjects} disabled={counting}>
                 {counting ? <Loader size={12} className="spin" /> : <RefreshCw size={12} />}
-                Count objects
+                {t('dialogs.countObjects')}
               </button>
               <button
                 className="btn btn-secondary text-xs"
                 onClick={handleUpdateServerInfo}
-                title="git update-server-info — refresh info/refs for dumb-HTTP hosting"
+                title={t('dialogs.updateServerInfoTooltip')}
               >
-                Update server info
+                {t('dialogs.updateServerInfo')}
               </button>
             </div>
             {objectStats && (
@@ -465,17 +466,17 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
           {/* Auto-collected stats */}
           <div className="border-t border-border-default pt-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-2">
-              Git Statistics
+              {t('dialogs.statsTitle')}
             </div>
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="flex items-center gap-2">
                 <GitBranch size={12} className="text-text-tertiary" />
-                <span className="text-text-tertiary">Branches:</span>
+                <span className="text-text-tertiary">{t('dialogs.branchesLabel')}</span>
                 <span className="text-text-primary font-medium">{meta.branchCount || 0}</span>
               </div>
               <div className="flex items-center gap-2">
                 <FileText size={12} className="text-text-tertiary" />
-                <span className="text-text-tertiary">Last commit:</span>
+                <span className="text-text-tertiary">{t('dialogs.lastCommitLabel')}</span>
                 {meta.lastCommitHash ? (
                   <code className="mono text-accent">{shortHash(meta.lastCommitHash)}</code>
                 ) : (
@@ -494,13 +495,13 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
               )}
               {meta.remoteUrl && (
                 <div className="col-span-2">
-                  <span className="text-text-tertiary">Remote:</span>
+                  <span className="text-text-tertiary">{t('dialogs.remoteLabel')}</span>
                   <code className="mono text-text-secondary ml-1 break-all">{meta.remoteUrl}</code>
                 </div>
               )}
               {meta.owner && meta.repo && (
                 <div className="col-span-2">
-                  <span className="text-text-tertiary">Repository:</span>
+                  <span className="text-text-tertiary">{t('dialogs.repositoryLabel')}</span>
                   <span className="text-text-primary ml-1">{meta.owner}/{meta.repo}</span>
                 </div>
               )}
@@ -510,14 +511,14 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
 
         {/* Footer */}
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button
             className="btn btn-primary"
             onClick={handleSave}
             disabled={saving}
           >
             {saving ? <Loader size={13} className="spin" /> : <Check size={13} />}
-            Save
+            {t('common.save')}
           </button>
         </div>
       </div>

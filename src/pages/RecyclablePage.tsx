@@ -9,6 +9,7 @@ import { CommitHashLink } from '../components/StatusBar';
 import { useSelectionStore } from '../stores/selectionStore';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { blockedOperationToast } from '../lib/repoState';
+import { useI18n } from '../lib/i18n';
 
 /**
  * Recyclable Commits — unreachable reflog commits that are eligible for GC.
@@ -30,6 +31,7 @@ import { blockedOperationToast } from '../lib/repoState';
  *     what "recyclable" actually means.
  */
 export function RecyclablePage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -47,7 +49,7 @@ export function RecyclablePage() {
       const result = await api.git.recyclableCommits(repo.path);
       setCommits(result);
     } catch (e) {
-      toast.error('Failed to load recyclable commits', String(e));
+      toast.error(t('pages.recyclableLoadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -72,21 +74,21 @@ export function RecyclablePage() {
       if (result.conflicts.length > 0) {
         setConflictInfo({ hash, files: result.conflicts });
         toast.warning(
-          `Cherry-pick has ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'}`,
-          'Resolve the conflicts in the Changes view, then commit.',
+          t('pages.cherryPickConflictsFiles', { count: result.conflicts.length }),
+          t('pages.cherryPickConflictsDetail'),
         );
       } else if (result.empty) {
         // "The previous cherry-pick is now empty" — the commit's changes are
         // already applied to HEAD. The repo stays in cherry-picking-state and
         // MUST be resolved on the Changes page (Skip / Commit Empty / Abort).
         toast.warning(
-          'The cherry-pick is empty — these changes are already applied',
-          'Resolve it on the Changes page: Skip (drop) or Commit Empty'
+          t('pages.cherryPickEmpty'),
+          t('pages.cherryPickEmptyDetail')
         );
       } else if (result.error) {
-        toast.error('Cherry-pick failed', result.error);
+        toast.error(t('pages.cherryPickFailed'), result.error);
       } else {
-        toast.success(`Cherry-picked ${shortHash(hash)}`, 'Commit applied to current branch.');
+        toast.success(t('pages.recyclableCherryPicked', { hash: shortHash(hash) }), t('pages.recyclableCherryPickedDetail'));
       }
       await refreshStatus(repo.path);
       await load();
@@ -97,15 +99,15 @@ export function RecyclablePage() {
         // The cherry-pick is now empty (the changes are already applied).
         // The repository is in CHERRY_PICK_HEAD state — offer Skip.
         toast.warning(
-          `Cherry-pick of ${shortHash(hash)} is empty`,
-          'The changes are already applied. The repository is now in cherry-picking state — use Skip in the banner to drop this commit, or Abort to cancel.',
+          t('pages.cherryPickEmptyHint', { hash: shortHash(hash) }),
+          t('pages.cherryPickEmptyStateDetail'),
         );
         // Refresh status so the global SequencerPanel banner appears.
         await refreshStatus(repo.path);
       } else if (/dirty index|uncommitted changes/i.test(msg)) {
-        toast.error('Cherry-pick blocked', 'Commit or stash your current changes first.');
+        toast.error(t('pages.cherryPickBlocked'), t('pages.cherryPickBlockedDetail'));
       } else {
-        toast.error('Cherry-pick failed', msg);
+        toast.error(t('pages.cherryPickFailed'), msg);
       }
     } finally {
       setBusyHash(null);
@@ -115,35 +117,30 @@ export function RecyclablePage() {
   const handleCreateBranch = async (hash: string) => {
     const defaultName = `recover/${hash.substring(0, 8)}`;
     const name = await promptDialog({
-      title: `Create branch at ${shortHash(hash)}`,
-      message: 'Branch name for recovery (this does NOT switch to the new branch):',
-      confirmLabel: 'Create branch',
+      title: t('pages.recyclableBranchAt', { hash: shortHash(hash) }),
+      message: t('pages.recyclableBranchPromptDetail'),
+      confirmLabel: t('pages.recyclableBranchCreate'),
       input: { initialValue: defaultName, placeholder: 'recover/abc12345' },
     });
     if (!name?.trim()) return;
     // Validate branch name (cheap client-side check)
     const trimmed = name.trim();
     if (/\s/.test(trimmed)) {
-      toast.error('Invalid branch name', 'Branch names cannot contain whitespace.');
+      toast.error(t('pages.invalidBranchName'), t('pages.invalidBranchNameWs'));
       return;
     }
     if (trimmed.startsWith('-') || trimmed.startsWith('/')) {
-      toast.error('Invalid branch name', 'Branch name must not start with "-" or "/".');
+      toast.error(t('pages.invalidBranchName'), t('pages.invalidBranchNameDash'));
       return;
     }
     setBusyHash(hash);
     try {
       await api.git.createBranch(repo.path, trimmed, hash);
-      toast.success(`Created branch '${trimmed}'`, `At ${shortHash(hash)} — switch to it from Branches view.`);
+      toast.success(t('pages.branchCreatedName', { name: trimmed }), t('pages.branchCreatedAtDetail', { hash: shortHash(hash) }));
       selectBranch(trimmed);
       await load();
     } catch (e) {
-      const msg = String(e);
-      if (/already exists|not a valid object|not a valid branch name/i.test(msg)) {
-        toast.error('Create branch failed', msg);
-      } else {
-        toast.error('Create branch failed', msg);
-      }
+      toast.error(t('pages.createBranchFailed'), String(e));
     } finally {
       setBusyHash(null);
     }
@@ -151,19 +148,19 @@ export function RecyclablePage() {
 
   const handleExpireAll = async () => {
     if (!(await confirmDialog({
-      title: 'Expire all recyclable commits?',
-      message: `This runs \`git reflog expire --expire=now --all\` and \`git gc --prune=now\`.\n\n${commits.length} commit${commits.length === 1 ? '' : 's'} will be permanently lost. There is NO recovery after this.`,
-      confirmLabel: 'Expire all',
+      title: t('pages.expireAllTitle'),
+      message: t('pages.expireAllMessage', { count: commits.length }),
+      confirmLabel: t('pages.expireAllButton'),
       danger: true,
     }))) return;
     setBusyHash('expire-all');
     try {
       await api.git.raw(repo.path, ['reflog', 'expire', '--expire=now', '--all']);
       await api.git.raw(repo.path, ['gc', '--prune=now']);
-      toast.success('Recyclable commits expired', `${commits.length} commit${commits.length === 1 ? '' : 's'} pruned.`);
+      toast.success(t('pages.recyclableExpired'), t('pages.recyclableExpiredDetail', { count: commits.length }));
       await load();
     } catch (e) {
-      toast.error('Expire failed', String(e));
+      toast.error(t('pages.expireFailed'), String(e));
     } finally {
       setBusyHash(null);
     }
@@ -180,13 +177,13 @@ export function RecyclablePage() {
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
           <RotateCcw size={14} className="text-accent" />
-          <span className="text-sm font-medium">Recyclable Commits</span>
+          <span className="text-sm font-medium">{t('pages.recyclableTitle')}</span>
           <span className="text-2xs text-text-tertiary">
-            {commits.length} unreachable · {filtered.length} shown
+            {t('pages.recyclableCounts', { unreachable: commits.length, shown: filtered.length })}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button className="icon-btn" title="Refresh" onClick={load}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={13} />
           </button>
           {commits.length > 0 && (
@@ -196,7 +193,7 @@ export function RecyclablePage() {
               disabled={busyHash === 'expire-all'}
               title="Run git reflog expire --expire=now --all && git gc --prune=now"
             >
-              <Trash size={11} /> Expire all
+              <Trash size={11} /> {t('pages.expireAllButton')}
             </button>
           )}
         </div>
@@ -216,7 +213,7 @@ export function RecyclablePage() {
         <input
           type="text"
           className="w-full text-xs"
-          placeholder="Filter by subject, hash, or source..."
+          placeholder={t('pages.recyclableFilterPlaceholder')}
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -251,13 +248,13 @@ export function RecyclablePage() {
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+          <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
             <AlertCircle size={32} className="mb-2 opacity-50" />
-            <div className="text-sm">No recyclable commits</div>
+            <div className="text-sm">{t('pages.recyclableEmpty')}</div>
             <div className="text-xs mt-1">
-              All reflog commits are reachable from branches or tags.
+              {t('pages.recyclableEmptyHint')}
             </div>
           </div>
         ) : (
@@ -282,7 +279,7 @@ export function RecyclablePage() {
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       className="icon-btn !w-5 !h-5 !text-accent hover:!bg-accent-muted"
-                      title="Create branch at this commit  (no checkout)"
+                      title={t('pages.createBranchAt')}
                       disabled={isBusy}
                       onClick={(e) => { e.stopPropagation(); handleCreateBranch(c.hash); }}
                     >
@@ -290,7 +287,7 @@ export function RecyclablePage() {
                     </button>
                     <button
                       className="icon-btn !w-5 !h-5 !text-status-added hover:!bg-status-added/15"
-                      title="Cherry-pick onto current branch"
+                      title={t('pages.cherryPickTitleHint')}
                       disabled={isBusy}
                       onClick={(e) => { e.stopPropagation(); handleCherryPick(c.hash); }}
                     >
@@ -298,8 +295,8 @@ export function RecyclablePage() {
                     </button>
                     <button
                       className="icon-btn !w-5 !h-5"
-                      title="Copy hash"
-                      onClick={(e) => { e.stopPropagation(); copyToClipboard(c.hash); toast.success('Copied'); }}
+                      title={t('pages.copyHashTitle')}
+                      onClick={(e) => { e.stopPropagation(); copyToClipboard(c.hash); toast.success(t('pages.copied')); }}
                     >
                       <Copy size={10} />
                     </button>

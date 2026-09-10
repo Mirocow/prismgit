@@ -3,6 +3,7 @@ import { Plus, Folder, X, Loader } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
+import { useI18n } from '../lib/i18n';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 interface InitModalProps {
@@ -12,6 +13,7 @@ interface InitModalProps {
 
 export function InitModal({ open, onClose }: InitModalProps) {
   useEscapeKey(open, onClose);
+  const { t } = useI18n();
   const initRepository = useRepositoryStore((s) => s.initRepository);
   const toast = useToastStore();
   const [path, setPath] = useState('');
@@ -32,16 +34,16 @@ export function InitModal({ open, onClose }: InitModalProps) {
 
   const handleInit = async () => {
     if (!path.trim()) {
-      toast.warning('Target directory is required');
+      toast.warning(t('dialogs.targetRequired'));
       return;
     }
     setLoading(true);
     try {
       await initRepository(path);
-      toast.success('Repository initialized');
+      toast.success(t('dialogs.initCreated'));
       onClose();
     } catch (e) {
-      toast.error('Init failed', String(e));
+      toast.error(t('dialogs.initFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -61,7 +63,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
           <h3 className="text-base font-medium flex items-center gap-2">
             <Plus size={16} />
-            Initialize Repository
+            {t('dialogs.initTitle')}
           </h3>
           <button className="icon-btn" onClick={onClose}>
             <X size={14} />
@@ -71,7 +73,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
         <div className="p-4 space-y-3">
           <div>
             <label className="text-xs text-text-tertiary block mb-1">
-              Directory
+              {t('dialogs.directoryLabel')}
             </label>
             <div className="flex gap-2">
               <input
@@ -84,7 +86,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
               />
               <button className="btn btn-secondary" onClick={handleBrowse}>
                 <Folder size={12} />
-                Browse
+                {t('dialogs.browse')}
               </button>
             </div>
           </div>
@@ -94,13 +96,13 @@ export function InitModal({ open, onClose }: InitModalProps) {
               checked={bare}
               onChange={(e) => setBare(e.target.checked)}
             />
-            Create bare repository (for server use)
+            {t('dialogs.bareRepo')}
           </label>
         </div>
 
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
           <button className="btn btn-secondary" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             className="btn btn-primary"
@@ -108,7 +110,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
             disabled={loading || !path.trim()}
           >
             {loading ? <Loader size={13} className="animate-spin" /> : <Plus size={13} />}
-            Initialize
+            {t('dialogs.initButton')}
           </button>
         </div>
       </div>

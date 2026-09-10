@@ -8,10 +8,12 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useContextMenu } from '../lib/useContextMenu';
+import { useI18n } from '../lib/i18n';
 
 const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
 
 export function ReflogPage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const showContextMenu = useContextMenu();
@@ -27,7 +29,7 @@ export function ReflogPage() {
       const result = await api.git.reflog(repo.path, ref, 500);
       setEntries(result);
     } catch (e) {
-      toast.error('Failed to load reflog', String(e));
+      toast.error(t('pages.reflogLoadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -39,17 +41,17 @@ export function ReflogPage() {
 
   const handleDelete = async (entry: ReflogEntry) => {
     if (!(await confirmDialog({
-      title: 'Delete reflog entry',
-      message: `Delete reflog entry ${entry.selector}? The commit itself is not removed — it just becomes unreachable.`,
-      confirmLabel: 'Delete',
+      title: t('pages.reflogDeleteTitle'),
+      message: t('pages.reflogDeleteMessage', { selector: entry.selector }),
+      confirmLabel: t('common.delete'),
       danger: true,
     }))) return;
     try {
       await api.git.reflogDelete(repo.path, entry.index, ref);
-      toast.success('Reflog entry deleted');
+      toast.success(t('pages.reflogDeleted'));
       await load();
     } catch (e) {
-      toast.error('Failed to delete', String(e));
+      toast.error(t('pages.deleteFailed'), String(e));
     }
   };
 
@@ -57,7 +59,7 @@ export function ReflogPage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Reflog</span>
+          <span className="text-sm font-medium">{t('nav.reflog')}</span>
           <button
             className="text-xs px-2 py-0.5 bg-bg-tertiary rounded flex items-center gap-1 hover:bg-bg-hover"
             onClick={() => setShowRefPicker(!showRefPicker)}
@@ -65,10 +67,10 @@ export function ReflogPage() {
             <span className="font-mono text-accent">{ref}</span>
             {showRefPicker ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           </button>
-          <span className="text-2xs text-text-tertiary">{entries.length} entries</span>
+          <span className="text-2xs text-text-tertiary">{t('pages.entriesCount', { count: entries.length })}</span>
         </div>
         <div className="flex items-center gap-2">
-          <button className="icon-btn" title="Refresh" onClick={load}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={13} />
           </button>
         </div>
@@ -79,7 +81,7 @@ export function ReflogPage() {
           <input
             type="text"
             className="w-full text-sm font-mono"
-            placeholder="Enter ref name (e.g., HEAD, refs/heads/main, refs/heads/feature/branch)"
+            placeholder={t('pages.reflogRefPlaceholder')}
             value={ref}
             onChange={(e) => setRef(e.target.value)}
             onKeyDown={(e) => {
@@ -110,12 +112,12 @@ export function ReflogPage() {
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+          <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
         ) : entries.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
             <History size={32} className="mb-2 opacity-50" />
-            <div className="text-sm">No reflog entries</div>
-            <div className="text-xs mt-1">The reflog is empty for {ref}</div>
+            <div className="text-sm">{t('pages.noReflogEntries')}</div>
+            <div className="text-xs mt-1">{t('pages.reflogEmptyFor', { ref })}</div>
           </div>
         ) : (
           entries.map((entry) => (
@@ -129,22 +131,22 @@ export function ReflogPage() {
               onContextMenu={(e) => {
                 e.preventDefault();
                 showContextMenu([
-                  { label: 'View Commit in History', clickId: 'view-commit' },
+                  { label: t('pages.menuViewCommitInHistory'), clickId: 'view-commit' },
                   { type: 'separator' },
-                  { label: 'Copy Short Hash', clickId: 'copy-short' },
-                  { label: 'Copy Full Hash', clickId: 'copy-full' },
-                  { label: 'Copy Message', clickId: 'copy-msg' },
+                  { label: t('history.copyShortHash'), clickId: 'copy-short' },
+                  { label: t('history.copyFullHash'), clickId: 'copy-full' },
+                  { label: t('pages.menuCopyMessage'), clickId: 'copy-msg' },
                   { type: 'separator' },
-                  { label: 'Delete entry...', clickId: 'delete' },
+                  { label: t('pages.menuDeleteEntry'), clickId: 'delete' },
                 ], (action) => {
                   switch (action) {
                     case 'view-commit':
                       useSelectionStore.getState().selectCommit(entry.hash);
                       window.location.hash = '#/history';
                       break;
-                    case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success('Copied'); break;
-                    case 'copy-full': copyToClipboard(entry.hash); toast.success('Copied'); break;
-                    case 'copy-msg': copyToClipboard(entry.message); toast.success('Copied'); break;
+                    case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success(t('pages.copied')); break;
+                    case 'copy-full': copyToClipboard(entry.hash); toast.success(t('pages.copied')); break;
+                    case 'copy-msg': copyToClipboard(entry.message); toast.success(t('pages.copied')); break;
                     case 'delete': handleDelete(entry); break;
                   }
                 });
@@ -166,17 +168,17 @@ export function ReflogPage() {
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
                 <button
                   className="icon-btn !w-5 !h-5"
-                  title="Copy hash"
+                  title={t('pages.copyHashTitle')}
                   onClick={() => {
                     copyToClipboard(entry.hash);
-                    toast.success('Hash copied');
+                    toast.success(t('pages.hashCopied'));
                   }}
                 >
-                  <span className="text-2xs">copy</span>
+                  <span className="text-2xs">{t('pages.copyHashShort')}</span>
                 </button>
                 <button
                   className="icon-btn !w-5 !h-5 hover:!text-status-deleted"
-                  title="Delete entry"
+                  title={t('pages.deleteEntryTitle')}
                   onClick={() => handleDelete(entry)}
                 >
                   <Trash size={11} />

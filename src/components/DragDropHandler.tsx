@@ -4,6 +4,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { FolderGit, FolderGitOpen, Plus, X, Check, Loader } from './icons';
+import { useI18n } from '../lib/i18n';
 
 /**
  * Global Drag-and-Drop Repository Handler
@@ -39,6 +40,7 @@ export function DragDropHandler() {
   const openRepository = useRepositoryStore((s) => s.openRepository);
   const loadRepos = useRepositoryStore((s) => s.loadRepos);
   const toast = useToastStore();
+  const { t } = useI18n();
 
   // A file drag lists the special 'Files' type. Some sources (synthetic events,
   // platform quirks) expose it lowercased — accept both.
@@ -154,15 +156,15 @@ export function DragDropHandler() {
       const skippedCount = dropResults.filter((r) => !r.isRepo).length;
       if (addedCount > 0 && skippedCount > 0) {
         toast.success(
-          `Added ${addedCount} repositor${addedCount === 1 ? 'y' : 'ies'}`,
-          `${skippedCount} folder${skippedCount === 1 ? '' : 's'} skipped (not a git repo)`
+          addedCount === 1 ? t('shell.repoAdded') : t('shell.reposAdded', { count: addedCount }),
+          skippedCount === 1 ? t('shell.folderSkipped', { count: skippedCount }) : t('shell.foldersSkipped', { count: skippedCount })
         );
       } else if (addedCount > 0) {
-        toast.success(`Added ${addedCount} repositor${addedCount === 1 ? 'y' : 'ies'}`);
+        toast.success(addedCount === 1 ? t('shell.repoAdded') : t('shell.reposAdded', { count: addedCount }));
       } else if (skippedCount > 0) {
         toast.warning(
-          `No git repositories found`,
-          `${skippedCount} folder${skippedCount === 1 ? '' : 's'} dropped, none contained a .git directory`
+          t('shell.noGitReposFound'),
+          skippedCount === 1 ? t('shell.folderDroppedNoGit', { count: skippedCount }) : t('shell.foldersDroppedNoGit', { count: skippedCount })
         );
       }
 
@@ -182,7 +184,7 @@ export function DragDropHandler() {
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('drop', handleDrop);
     };
-  }, [openRepository, loadRepos, toast]);
+  }, [openRepository, loadRepos, toast, t]);
 
   // Don't render anything if not dragging and no results
   if (!isDragging && !processing && !results) return null;
@@ -213,10 +215,10 @@ export function DragDropHandler() {
               <FolderGitOpen size={48} className="text-white" strokeWidth={2} />
             </div>
             <div className="text-xl font-bold text-text-primary">
-              Drop repositories to open
+              {t('shell.dropReposTitle')}
             </div>
             <div className="text-sm text-text-secondary">
-              Drag one or more folders here — git repositories will be added automatically
+              {t('shell.dropReposHint')}
             </div>
           </div>
         </div>
@@ -230,10 +232,10 @@ export function DragDropHandler() {
           <div className="flex flex-col items-center gap-3 bg-bg-elevated rounded-xl p-8 shadow-lg border border-border-default">
             <Loader size={32} className="spin text-accent" />
             <div className="text-sm font-medium text-text-primary">
-              Checking repositories...
+              {t('shell.checkingRepos')}
             </div>
             <div className="text-xs text-text-tertiary">
-              Verifying .git directories
+              {t('shell.verifyingGit')}
             </div>
           </div>
         </div>
@@ -244,12 +246,12 @@ export function DragDropHandler() {
         <div className="fixed bottom-12 right-4 z-[200] w-96 bg-bg-elevated rounded-lg shadow-lg border border-border-default animate-slide-up overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-bg-tertiary">
             <span className="text-sm font-semibold text-text-primary">
-              {results.filter((r) => r.isRepo).length > 0 ? 'Repositories Added' : 'No Repositories Found'}
+              {results.filter((r) => r.isRepo).length > 0 ? t('shell.reposAddedTitle') : t('shell.noReposFoundTitle')}
             </span>
             <button
               className="icon-btn !w-6 !h-6"
               onClick={() => setResults(null)}
-              title="Close"
+              title={t('common.close')}
             >
               <X size={12} />
             </button>
@@ -280,17 +282,17 @@ export function DragDropHandler() {
                 </span>
                 {r.opened && (
                   <span className="text-2xs text-accent font-medium flex-shrink-0">
-                    opened
+                    {t('shell.statusOpened')}
                   </span>
                 )}
                 {r.isRepo && !r.opened && (
                   <span className="text-2xs text-text-tertiary flex-shrink-0">
-                    added
+                    {t('shell.statusAdded')}
                   </span>
                 )}
                 {!r.isRepo && (
                   <span className="text-2xs text-text-tertiary flex-shrink-0">
-                    not a repo
+                    {t('shell.statusNotRepo')}
                   </span>
                 )}
               </div>
@@ -298,7 +300,7 @@ export function DragDropHandler() {
           </div>
           {results.some((r) => r.isRepo) && (
             <div className="px-4 py-2 border-t border-border-subtle text-2xs text-text-tertiary">
-              {results.filter((r) => r.isRepo).length} added · {results.filter((r) => !r.isRepo).length} skipped
+              {t('shell.addedSkippedSummary', { added: results.filter((r) => r.isRepo).length, skipped: results.filter((r) => !r.isRepo).length })}
             </div>
           )}
         </div>

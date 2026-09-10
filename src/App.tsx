@@ -35,6 +35,7 @@ const ApplyPatchModal = lazy(() => import('./components/ApplyPatchModal').then(m
 const IndexEditorDialog = lazy(() => import('./components/IndexEditorDialog').then(m => ({ default: m.IndexEditorDialog })));
 const RepoSettingsDialog = lazy(() => import('./components/RepoSettingsDialog').then(m => ({ default: m.RepoSettingsDialog })));
 import { promptDialog, confirmDialog } from './components/ConfirmDialog';
+import { t as i18nT, useI18nStore } from './lib/i18n';
 import { clearProjectPrefs } from './lib/projectPrefs';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useRepositoryStore } from './stores/repositoryStore';
@@ -126,6 +127,13 @@ export default function App() {
   // Warm lazily-loaded page/dialog chunks during idle time so every tool and
   // dialog opens instantly (no first-open chunk fetch/parse penalty).
   useChunkPreload();
+
+  // Locale sync: notify the main process so the native application menu is
+  // rebuilt in the active UI language (main initializes from the OS locale).
+  const locale = useI18nStore((s) => s.locale);
+  useEffect(() => {
+    window.smartgit?.app?.setLocale?.(locale);
+  }, [locale]);
 
   useEffect(() => {
     loadRepos();
@@ -620,6 +628,17 @@ export default function App() {
       const ok = await api.fs.openTerminal(repo.path);
       if (!ok) toast.error('Could not open a terminal');
     };
+    const handleOpenInVscode = async () => {
+      const repo = requireRepo();
+      if (!repo) return;
+      try {
+        const res = await api.vscode.open(repo.path);
+        if (res.ok) toast.success(i18nT('vscode.opened'));
+        else toast.error(i18nT('vscode.openFailed'));
+      } catch (e) {
+        toast.error(i18nT('vscode.openFailed'), String(e));
+      }
+    };
     const handleFormatPatch = async () => {
       const repo = requireRepo();
       if (!repo) return;
@@ -785,6 +804,7 @@ export default function App() {
       window.smartgit.events.on('menu:repoSettings', () => setShowRepoSettings(true)),
       window.smartgit.events.on('menu:editGitConfig', () => handleNavigate('/settings')),
       window.smartgit.events.on('menu:openTerminal', handleOpenTerminal),
+      window.smartgit.events.on('menu:openInVscode', handleOpenInVscode),
       window.smartgit.events.on('menu:preferences', () => handleNavigate('/settings')),
       // Query / Tools
       window.smartgit.events.on('menu:navigate', handleNavigate),

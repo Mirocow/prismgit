@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { api } from '../lib/api';
 import { segmentMessageWithBugTraq, type BugTraqConfig } from '../lib/bugtraq';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useI18n } from '../lib/i18n';
 
 /**
  * Render a commit message with BugTraq link substitution.
@@ -12,6 +13,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
  *   <CommitMessage text={entry.subject} />
  */
 export function CommitMessage({ text, className = '' }: { text: string; className?: string }) {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo);
   const [configs, setConfigs] = useState<BugTraqConfig[]>([]);
 
@@ -56,7 +58,7 @@ export function CommitMessage({ text, className = '' }: { text: string; classNam
             target="_blank"
             rel="noopener noreferrer"
             className="text-accent hover:underline"
-            title={`Open in ${seg.link.source}: ${seg.link.url}`}
+            title={t('history.openInLink', { source: seg.link.source, url: seg.link.url })}
             onClick={(e) => {
               e.preventDefault();
               api.app.openExternal(seg.link!.url);

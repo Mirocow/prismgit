@@ -5,6 +5,7 @@ import { api, type CommandLogEntry } from '../lib/api';
 import { Check, X, ChevronDown, ChevronRight, Trash, Loader, Copy, Terminal, Search } from './icons';
 import { cn } from '../lib/utils';
 import { useLazyList } from '../lib/useLazyList';
+import { useI18n } from '../lib/i18n';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -45,6 +46,7 @@ function CommandStatusDot({ entry }: { entry: CommandLogEntry }) {
 }
 
 const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEntry }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const cmdline = `git ${entry.args.join(' ')}`;
   const failed = entry.exitCode !== 0;
@@ -69,7 +71,7 @@ const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEn
         </span>
         {!isUser && (
           <span className="text-2xs px-1 rounded bg-bg-tertiary text-text-tertiary flex-shrink-0">
-            sys
+            {t('pages.sysBadge')}
           </span>
         )}
         <span
@@ -90,12 +92,12 @@ const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEn
       {expanded && (
         <div className="px-6 py-2 bg-bg-tertiary/50 text-2xs space-y-1.5">
           <div>
-            <span className="text-text-tertiary">Command: </span>
+            <span className="text-text-tertiary">{t('pages.commandLabel')}</span>
             <code className="font-mono text-text-secondary break-all">{cmdline}</code>
           </div>
           {entry.repo && (
             <div>
-              <span className="text-text-tertiary">Directory: </span>
+              <span className="text-text-tertiary">{t('pages.directoryLabel')}</span>
               <code className="font-mono text-text-secondary break-all">{entry.repo}</code>
             </div>
           )}
@@ -134,6 +136,7 @@ export function CommandLogPanel({
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [showSystem, setShowSystem] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const { t } = useI18n();
   const settings = useSettingsStore((s) => s.settings);
   const maxCommands = settings.commandLogLimit ?? 20;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -207,10 +210,10 @@ export function CommandLogPanel({
             className="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider transition-colors bg-bg-hover text-text-primary"
           >
             <Terminal size={11} />
-            Output
+            {t('pages.outputTab')}
             {failedCount > 0 && (
               <span className="text-2xs px-1 rounded bg-status-deleted/15 text-status-deleted normal-case">
-                {failedCount} failed
+                {t('pages.failedCount', { count: failedCount })}
               </span>
             )}
           </button>
@@ -221,14 +224,14 @@ export function CommandLogPanel({
             <input
               type="text"
               className="text-2xs pl-5 pr-2 py-0.5 w-32 bg-bg-secondary border border-border-default rounded"
-              placeholder="Filter..."
+              placeholder={t('pages.filterPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
           <label
             className="flex items-center gap-1 text-2xs text-text-tertiary cursor-pointer select-none"
-            title="Show read-only git commands (status, log, branches, etc.) in addition to user actions"
+            title={t('pages.systemTitle')}
           >
             <input
               type="checkbox"
@@ -236,11 +239,11 @@ export function CommandLogPanel({
               onChange={(e) => setShowSystem(e.target.checked)}
               className="accent-current"
             />
-            System
+            {t('pages.systemLabel')}
           </label>
           <label
             className="flex items-center gap-1 text-2xs text-text-tertiary cursor-pointer select-none"
-            title="Show only failed commands (non-zero exit code)"
+            title={t('pages.errorsTitle')}
           >
             <input
               type="checkbox"
@@ -248,25 +251,25 @@ export function CommandLogPanel({
               onChange={(e) => setErrorsOnly(e.target.checked)}
               className="accent-current"
             />
-            Errors
+            {t('pages.errorsLabel')}
           </label>
           <button
             className="icon-btn !w-6 !h-6"
-            title="Copy all visible commands with their output"
+            title={t('pages.copyAllTitle')}
             onClick={copyAll}
           >
             <Copy size={11} />
           </button>
           <button
             className="icon-btn !w-6 !h-6"
-            title="Clear command log"
+            title={t('pages.clearLogTitle')}
             onClick={() => clearCommands()}
           >
             <Trash size={11} />
           </button>
           <button
             className="icon-btn !w-6 !h-6"
-            title="Close panel"
+            title={t('pages.closePanelTitle')}
             onClick={onClose}
           >
             <X size={12} />
@@ -279,10 +282,10 @@ export function CommandLogPanel({
         {visibleEntries.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-tertiary text-xs px-4 text-center">
             {errorsOnly
-              ? 'No failed commands.'
+              ? t('pages.noFailed')
               : showSystem
-                ? 'No git commands captured yet.'
-                : 'No user commands yet. Only mutating commands (push, pull, commit, checkout, etc.) are shown by default. Enable "System" to see read-only commands too.'}
+                ? t('pages.noCommands')
+                : t('pages.noUserCommands')}
           </div>
         ) : (
           <div style={{ height: lazyList.totalHeight, position: 'relative' }}>

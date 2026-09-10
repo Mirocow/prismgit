@@ -27,6 +27,7 @@ import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { copyToClipboard } from './utils';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { t as i18nT } from './i18n';
 
 export interface IndexFlags {
   assumeUnchanged: boolean;
@@ -128,6 +129,7 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
 
   // --- Open (opens EVERY selected file, like a file manager) ----------------
   items.push({ label: `Open${bulk}`, clickId: 'open' });
+  items.push({ label: i18nT('vscode.openInVscode'), clickId: 'open-vscode' });
   items.push({ label: `Reveal in File Manager${bulk}`, clickId: 'reveal' });
   items.push({ type: 'separator' });
 
@@ -137,6 +139,9 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
   }
   if ((ctx.mode === 'history' || ctx.mode === 'changes') && ctx.onOpenDiff) {
     items.push({ label: 'Open in Diff tool', clickId: 'open-diff' });
+  }
+  if (ctx.mode === 'changes') {
+    items.push({ label: i18nT('vscode.openDiffInVscode'), clickId: 'open-vscode-diff' });
   }
   items.push({ label: 'File History (Log)', clickId: 'file-history' });
   items.push({ label: 'Blame this file', clickId: 'blame' });
@@ -192,6 +197,7 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
     if (ctx.isConflict) {
       items.push({ type: 'separator' });
       items.push({ label: 'Resolve Conflict...', clickId: 'resolve-conflict' });
+      items.push({ label: i18nT('vscode.resolveInVscode'), clickId: 'open-vscode-merge' });
     }
     items.push({ type: 'separator' });
   }
@@ -259,6 +265,28 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
         }
       } catch (e) {
         t.error('Failed to reveal', String(e));
+      }
+      return true;
+    }
+
+    // --- VS Code integration ----------------------------------------------
+    case 'open-vscode': {
+      try {
+        const res = await api.vscode.open(ctx.repoPath, { file: ctx.path });
+        if (res.ok) t.success(i18nT('vscode.opened'));
+        else t.error(i18nT('vscode.notFound'));
+      } catch (e) {
+        t.error(i18nT('vscode.openFailed'), String(e));
+      }
+      return true;
+    }
+    case 'open-vscode-diff': {
+      try {
+        const res = await api.vscode.openFileDiff(ctx.repoPath, ctx.path);
+        if (res.ok) t.success(i18nT('vscode.opened'));
+        else t.error(res.detail || i18nT('vscode.notFound'));
+      } catch (e) {
+        t.error(i18nT('vscode.openFailed'), String(e));
       }
       return true;
     }
@@ -454,6 +482,17 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
         refresh();
       } catch (e) {
         t.error('Delete failed', String(e));
+      }
+      return true;
+    }
+    case 'open-vscode-merge': {
+      // VS Code three-way merge editor (stages :1/:2/:3 materialized by main).
+      try {
+        const res = await api.vscode.openMerge(ctx.repoPath, ctx.path);
+        if (res.ok) t.success(i18nT('vscode.mergeOpened'));
+        else t.error(res.detail || i18nT('vscode.notFound'));
+      } catch (e) {
+        t.error(i18nT('vscode.openFailed'), String(e));
       }
       return true;
     }

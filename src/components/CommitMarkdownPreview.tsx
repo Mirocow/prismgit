@@ -3,10 +3,12 @@
  * Renders: headers, bold, italic, code, lists, links, code blocks.
  */
 import { useMemo } from 'react';
+import { useI18n } from '../lib/i18n';
 
 export function CommitMarkdownPreview({ content }: { content: string }) {
+  const { t } = useI18n();
   const html = useMemo(() => {
-    if (!content.trim()) return '<div class="text-text-tertiary italic">Preview will appear here...</div>';
+    if (!content.trim()) return '<div class="text-text-tertiary italic">' + t('changes.previewPlaceholder') + '</div>';
 
     let html = content
       // Escape HTML
@@ -40,7 +42,7 @@ export function CommitMarkdownPreview({ content }: { content: string }) {
       .replace(/\n/g, '<br/>');
 
     return html;
-  }, [content]);
+  }, [content, t]);
 
   return <div dangerouslySetInnerHTML={{ __html: html }} />;
 }

@@ -5,6 +5,7 @@ import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 interface ApplyPatchModalProps {
@@ -22,6 +23,7 @@ type Mode = 'file' | 'paste';
  */
 export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
   useEscapeKey(open, onClose);
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();
@@ -39,11 +41,11 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
   const handleApply = useCallback(async () => {
     if (!repo) return;
     if (mode === 'file' && !patchFile.trim()) {
-      toast.warning('Patch file path is required');
+      toast.warning(t('dialogs.patchPathRequired'));
       return;
     }
     if (mode === 'paste' && !patchText.trim()) {
-      toast.warning('Patch content is required');
+      toast.warning(t('dialogs.patchContentRequired'));
       return;
     }
     setBusy(true);
@@ -62,19 +64,19 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
       if (index) options.push('--index');
       const output = await api.git.applyPatch(repo.path, patchArg, options);
       const msg = checkOnly
-        ? 'Patch applies cleanly (--check passed)'
-        : 'Patch applied successfully';
+        ? t('dialogs.patchCheckPassed')
+        : t('dialogs.patchApplied');
       toast.success(msg);
       setResult(output || msg);
       if (!checkOnly) await refreshStatus(repo.path);
       onClose();
     } catch (e) {
-      toast.error('Apply patch failed', String(e));
+      toast.error(t('dialogs.applyPatchFailed'), String(e));
       setResult(String(e));
     } finally {
       setBusy(false);
     }
-  }, [repo, mode, patchFile, patchText, checkOnly, reverse, index, toast, refreshStatus, onClose]);
+  }, [repo, mode, patchFile, patchText, checkOnly, reverse, index, toast, refreshStatus, onClose, t]);
 
   useEffect(() => {
     if (open) {
@@ -100,7 +102,7 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
           <div className="flex items-center gap-2">
             <FileText size={15} className="text-accent" />
-            <h3 className="text-base font-medium">Apply Patch</h3>
+            <h3 className="text-base font-medium">{t('dialogs.applyPatchTitle')}</h3>
           </div>
           <button className="icon-btn" onClick={onClose}>
             <X size={14} />
@@ -114,19 +116,19 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
               className={cn('px-3 py-1 text-xs transition-colors', mode === 'paste' ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
               onClick={() => setMode('paste')}
             >
-              Paste patch
+              {t('dialogs.pastePatchTab')}
             </button>
             <button
               className={cn('px-3 py-1 text-xs transition-colors border-l border-border-default', mode === 'file' ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
               onClick={() => setMode('file')}
             >
-              Patch file
+              {t('dialogs.patchFileTab')}
             </button>
           </div>
 
           {mode === 'paste' ? (
             <div>
-              <label className="text-xs text-text-tertiary block mb-1">Patch content (unified diff)</label>
+              <label className="text-xs text-text-tertiary block mb-1">{t('dialogs.patchContentLabel')}</label>
               <textarea
                 className="w-full h-48 text-xs font-mono resize-none"
                 placeholder={'diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1,3 +1,3 @@\n old\n-new\n+new'}
@@ -137,7 +139,7 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
             </div>
           ) : (
             <div>
-              <label className="text-xs text-text-tertiary block mb-1">Path to .diff/.patch file</label>
+              <label className="text-xs text-text-tertiary block mb-1">{t('dialogs.patchPathLabel')}</label>
               <input
                 type="text"
                 className="w-full text-sm font-mono"
@@ -150,17 +152,17 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
 
           {/* Options */}
           <div className="flex items-center gap-4 flex-wrap">
-            <label className="flex items-center gap-1.5 text-xs cursor-pointer" title="git apply --check — validate without applying">
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer" title={t('dialogs.checkTooltip')}>
               <input type="checkbox" checked={checkOnly} onChange={(e) => setCheckOnly(e.target.checked)} />
-              Check only (--check)
+              {t('dialogs.checkOnly')}
             </label>
-            <label className="flex items-center gap-1.5 text-xs cursor-pointer" title="git apply --reverse — undo the patch">
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer" title={t('dialogs.reverseTooltip')}>
               <input type="checkbox" checked={reverse} onChange={(e) => setReverse(e.target.checked)} />
-              Reverse (--reverse)
+              {t('dialogs.reverse')}
             </label>
-            <label className="flex items-center gap-1.5 text-xs cursor-pointer" title="git apply --index — apply to the working tree AND the index (stages the result)">
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer" title={t('dialogs.applyIndexTooltip')}>
               <input type="checkbox" checked={index} onChange={(e) => setIndex(e.target.checked)} />
-              Apply to index (--index)
+              {t('dialogs.applyToIndex')}
             </label>
           </div>
 
@@ -172,10 +174,10 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
         </div>
 
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button className="btn btn-primary" onClick={handleApply} disabled={busy}>
             {busy ? <Loader size={13} className="spin" /> : <Check size={13} />}
-            {checkOnly ? 'Check Patch' : 'Apply Patch'}
+            {checkOnly ? t('dialogs.checkPatch') : t('dialogs.applyPatchButton')}
           </button>
         </div>
       </div>

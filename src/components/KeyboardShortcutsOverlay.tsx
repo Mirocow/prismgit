@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { X } from './icons';
+import { useI18n } from '../lib/i18n';
 
 /**
  * Keyboard Shortcuts Overlay
@@ -12,69 +13,71 @@ import { X } from './icons';
  */
 
 interface ShortcutEntry {
-  desc: string;
+  /** i18n key — translated at render time. */
+  descKey: string;
   keys: string[]; // e.g. ['Ctrl', 'Enter']
 }
 
 interface ShortcutGroup {
-  title: string;
+  /** i18n key — translated at render time. */
+  titleKey: string;
   shortcuts: ShortcutEntry[];
 }
 
 const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
-    title: 'Global',
+    titleKey: 'shell.shortcutGroupGlobal',
     shortcuts: [
-      { desc: 'Command palette (pages, actions, tools)', keys: ['Ctrl', 'K'] },
-      { desc: 'Command palette (alternative)', keys: ['Ctrl', 'P'] },
-      { desc: 'Open repository', keys: ['Ctrl', 'O'] },
-      { desc: 'Clone repository', keys: ['Ctrl', 'Shift', 'O'] },
-      { desc: 'Find object (commit/branch/tag)', keys: ['Ctrl', 'F'] },
-      { desc: 'Refresh git status', keys: ['F5'] },
-      { desc: 'Toggle theme (dark/light)', keys: ['Ctrl', 'Shift', 'T'] },
-      { desc: 'Show this shortcuts overlay', keys: ['?'] },
-      { desc: 'Toggle this shortcuts overlay', keys: ['Ctrl', '?'] },
-      { desc: 'Git-Flow dialog', keys: ['Ctrl', 'Shift', 'G'] },
-      { desc: 'Interactive rebase', keys: ['Ctrl', 'Shift', 'R'] },
-      { desc: 'Window style: Standard', keys: ['Ctrl', 'Shift', '1'] },
-      { desc: 'Window style: Log', keys: ['Ctrl', 'Shift', '2'] },
-      { desc: 'Window style: Working Tree', keys: ['Ctrl', 'Shift', '3'] },
+      { descKey: 'shell.scCommandPalette', keys: ['Ctrl', 'K'] },
+      { descKey: 'shell.scCommandPaletteAlt', keys: ['Ctrl', 'P'] },
+      { descKey: 'shell.scOpenRepo', keys: ['Ctrl', 'O'] },
+      { descKey: 'shell.scCloneRepo', keys: ['Ctrl', 'Shift', 'O'] },
+      { descKey: 'shell.scFindObject', keys: ['Ctrl', 'F'] },
+      { descKey: 'shell.scRefreshStatus', keys: ['F5'] },
+      { descKey: 'shell.scToggleTheme', keys: ['Ctrl', 'Shift', 'T'] },
+      { descKey: 'shell.scShowOverlay', keys: ['?'] },
+      { descKey: 'shell.scToggleOverlay', keys: ['Ctrl', '?'] },
+      { descKey: 'shell.scGitFlow', keys: ['Ctrl', 'Shift', 'G'] },
+      { descKey: 'shell.interactiveRebase', keys: ['Ctrl', 'Shift', 'R'] },
+      { descKey: 'shell.scWindowStyleStandard', keys: ['Ctrl', 'Shift', '1'] },
+      { descKey: 'shell.scWindowStyleLog', keys: ['Ctrl', 'Shift', '2'] },
+      { descKey: 'shell.scWindowStyleWorktree', keys: ['Ctrl', 'Shift', '3'] },
     ],
   },
   {
-    title: 'Navigation',
+    titleKey: 'shell.shortcutGroupNavigation',
     shortcuts: [
-      { desc: 'Go to Changes', keys: ['Alt', '1'] },
-      { desc: 'Go to History', keys: ['Alt', '2'] },
-      { desc: 'Go to Diff', keys: ['Alt', '3'] },
-      { desc: 'Go to Branches', keys: ['Alt', '4'] },
-      { desc: 'Go to Tags', keys: ['Alt', '5'] },
-      { desc: 'Go to Stashes', keys: ['Alt', '6'] },
-      { desc: 'Go to Settings', keys: ['Alt', ','] },
-      { desc: 'Quick nav: Changes / History / Diff', keys: ['Ctrl', '1–3'] },
-      { desc: 'Quick nav: Branches / Tags / Stashes', keys: ['Ctrl', '4–6'] },
-      { desc: 'Quick nav: Remotes / Journal / Investigate', keys: ['Ctrl', '7–9'] },
+      { descKey: 'shell.scGoChanges', keys: ['Alt', '1'] },
+      { descKey: 'shell.scGoHistory', keys: ['Alt', '2'] },
+      { descKey: 'shell.scGoDiff', keys: ['Alt', '3'] },
+      { descKey: 'shell.scGoBranches', keys: ['Alt', '4'] },
+      { descKey: 'shell.scGoTags', keys: ['Alt', '5'] },
+      { descKey: 'shell.scGoStashes', keys: ['Alt', '6'] },
+      { descKey: 'shell.scGoSettings', keys: ['Alt', ','] },
+      { descKey: 'shell.scQuickNavChanges', keys: ['Ctrl', '1–3'] },
+      { descKey: 'shell.scQuickNavRefs', keys: ['Ctrl', '4–6'] },
+      { descKey: 'shell.scQuickNavRemotes', keys: ['Ctrl', '7–9'] },
     ],
   },
   {
-    title: 'Git Operations',
+    titleKey: 'shell.shortcutGroupGitOps',
     shortcuts: [
-      { desc: 'Commit (when in Changes)', keys: ['Ctrl', 'Enter'] },
-      { desc: 'Push', keys: ['Ctrl', 'Shift', 'P'] },
-      { desc: 'Pull', keys: ['Ctrl', 'Shift', 'L'] },
-      { desc: 'Fetch', keys: ['Ctrl', 'Shift', 'F'] },
-      { desc: 'Stage all', keys: ['Ctrl', 'Shift', 'A'] },
-      { desc: 'Close dialog / palette', keys: ['Esc'] },
+      { descKey: 'shell.scCommit', keys: ['Ctrl', 'Enter'] },
+      { descKey: 'shell.scPush', keys: ['Ctrl', 'Shift', 'P'] },
+      { descKey: 'shell.scPull', keys: ['Ctrl', 'Shift', 'L'] },
+      { descKey: 'shell.scFetch', keys: ['Ctrl', 'Shift', 'F'] },
+      { descKey: 'shell.scStageAll', keys: ['Ctrl', 'Shift', 'A'] },
+      { descKey: 'shell.scCloseDialog', keys: ['Esc'] },
     ],
   },
   {
-    title: 'History / Commit List',
+    titleKey: 'shell.shortcutGroupHistory',
     shortcuts: [
-      { desc: 'Move selection up', keys: ['↑'] },
-      { desc: 'Move selection down', keys: ['↓'] },
-      { desc: 'Select commit (open detail)', keys: ['Enter'] },
-      { desc: 'Clear selection', keys: ['Esc'] },
-      { desc: 'Search by message/author/hash', keys: ['/'] },
+      { descKey: 'shell.scMoveUp', keys: ['↑'] },
+      { descKey: 'shell.scMoveDown', keys: ['↓'] },
+      { descKey: 'shell.scSelectCommit', keys: ['Enter'] },
+      { descKey: 'shell.clearSelection', keys: ['Esc'] },
+      { descKey: 'shell.scSearch', keys: ['/'] },
     ],
   },
 ];
@@ -86,6 +89,7 @@ export function KeyboardShortcutsOverlay({
   open: boolean;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   // Close on Esc
   useEffect(() => {
     if (!open) return;
@@ -111,22 +115,22 @@ export function KeyboardShortcutsOverlay({
     >
       <div className="shortcut-overlay-panel">
         <div className="shortcut-overlay-header">
-          <span className="shortcut-overlay-title">Keyboard Shortcuts</span>
+          <span className="shortcut-overlay-title">{t('shell.keyboardShortcuts')}</span>
           <button
             className="icon-btn !w-8 !h-8"
             onClick={onClose}
-            title="Close (Esc)"
+            title={t('shell.closeEsc')}
           >
             <X size={16} />
           </button>
         </div>
         <div className="shortcut-overlay-body">
           {SHORTCUT_GROUPS.map((group) => (
-            <div key={group.title}>
-              <div className="shortcut-section-title">{group.title}</div>
+            <div key={group.titleKey}>
+              <div className="shortcut-section-title">{t(group.titleKey)}</div>
               {group.shortcuts.map((s) => (
-                <div key={s.desc} className="shortcut-row">
-                  <span className="shortcut-row-desc">{s.desc}</span>
+                <div key={s.descKey} className="shortcut-row">
+                  <span className="shortcut-row-desc">{t(s.descKey)}</span>
                   <span className="shortcut-row-keys">
                     {s.keys.map((k, i) => (
                       <kbd key={i}>{k}</kbd>
@@ -141,7 +145,7 @@ export function KeyboardShortcutsOverlay({
           className="px-5 py-3 border-t border-border-default text-2xs text-text-tertiary"
           style={{ borderTop: '1px solid var(--border-default)' }}
         >
-          Tip: press <kbd>Ctrl</kbd>+<kbd>?</kbd> anytime to reopen this overlay.
+          {t('shell.tipPrefix')} <kbd>Ctrl</kbd>+<kbd>?</kbd> {t('shell.tipSuffix')}
         </div>
       </div>
     </div>

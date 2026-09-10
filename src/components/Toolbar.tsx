@@ -12,6 +12,7 @@ import { useToastStore } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
 import { getRepoInProgressState, isRepoBusy } from '../lib/repoState';
+import { useI18n } from '../lib/i18n';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
@@ -20,6 +21,7 @@ import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, 
 
 // Window control buttons — frameless window
 function WindowControls() {
+  const { t } = useI18n();
   const handleMinimize = () => api.window.minimize();
   const handleMaximize = async () => {
     const isMax = await api.window.isMaximized();
@@ -37,21 +39,21 @@ function WindowControls() {
       <button
         className="flex items-center justify-center w-11 h-9 hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-text-secondary"
         onClick={handleMinimize}
-        title="Minimize"
+        title={t('shell.minimize')}
       >
         <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor" /></svg>
       </button>
       <button
         className="flex items-center justify-center w-11 h-9 hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-text-secondary"
         onClick={handleMaximize}
-        title="Maximize"
+        title={t('shell.maximize')}
       >
         <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" /></svg>
       </button>
       <button
         className="flex items-center justify-center w-11 h-9 hover:bg-red-500 hover:text-white transition-colors text-text-secondary rounded-bl-md"
         onClick={handleClose}
-        title="Close"
+        title={t('common.close')}
       >
         <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" strokeWidth="1.4" /></svg>
       </button>
@@ -96,6 +98,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
   const setGroup = useToolbarStore((s) => s.setGroup);
   const setGroups = useToolbarStore((s) => s.setGroups);
   const [showCustomize, setShowCustomize] = useState(false);
+  const { t } = useI18n();
 
   const disabled = !currentRepo;
   const location = useLocation();
@@ -113,17 +116,17 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
     if (!currentRepo) return;
     try {
       const res = await push(currentRepo.path);
-      const t = describePushResult(res);
-      if (t.kind === 'error') toast.error(t.title, t.detail);
-      else if (t.kind === 'info') toast.info(t.title, t.detail);
-      else toast.success(t.title, t.detail);
+      const pr = describePushResult(res);
+      if (pr.kind === 'error') toast.error(pr.title, pr.detail);
+      else if (pr.kind === 'info') toast.info(pr.title, pr.detail);
+      else toast.success(pr.title, pr.detail);
     }
-    catch (e) { toast.error('Push failed', String(e)); }
+    catch (e) { toast.error(t('shell.pushFailed'), String(e)); }
   };
   const handlePull = async () => {
     if (!currentRepo) return;
-    try { await pull(currentRepo.path); toast.success('Pulled successfully'); }
-    catch (e) { toast.error('Pull failed', String(e)); }
+    try { await pull(currentRepo.path); toast.success(t('status.pulledSuccessfully')); }
+    catch (e) { toast.error(t('shell.pullFailed'), String(e)); }
   };
   const handleSynchronize = async () => {
     if (!currentRepo) return;
@@ -131,21 +134,21 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
       await fetch(currentRepo.path, undefined, true);
       await pull(currentRepo.path);
       await push(currentRepo.path);
-      toast.success('Synchronized successfully');
-    } catch (e) { toast.error('Synchronize failed', String(e)); }
+      toast.success(t('shell.synchronized'));
+    } catch (e) { toast.error(t('shell.synchronizeFailed'), String(e)); }
   };
   const handleOpenInBrowser = async () => {
     if (!currentRepo) return;
     try {
       const info = await api.git.extractRepoInfo(currentRepo.path);
       if (info.webUrl && info.provider !== 'unknown') { api.app.openExternal(info.webUrl); }
-      else { toast.info('Repository has no remote URL'); }
-    } catch (e) { toast.error('Failed to open in browser', String(e)); }
+      else { toast.info(t('shell.noRemoteUrl')); }
+    } catch (e) { toast.error(t('shell.openInBrowserFailed'), String(e)); }
   };
   const handleRevealInFileManager = async () => {
     if (!currentRepo) return;
     try { await api.git.revealInFileManager(currentRepo.path); }
-    catch (e) { toast.error('Failed to reveal in file manager', String(e)); }
+    catch (e) { toast.error(t('shell.revealFailed'), String(e)); }
   };
 
   // SmartGit: while a sequencer state (merge/rebase/cherry-pick/revert/bisect)
@@ -214,17 +217,17 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
           <IconButton
             icon={Folder}
             onClick={() => useRepositoryStore.getState().openRepositoryPicker()}
-            title="Open Repository (Ctrl+O)"
+            title={t('shell.openRepoShortcut')}
           />
           <IconButton
             icon={Download}
             onClick={() => onShowClone && onShowClone()}
-            title="Clone Repository"
+            title={t('welcome.cloneRepo')}
           />
           <IconButton
             icon={Plus}
             onClick={() => onShowInit && onShowInit()}
-            title="New Repository"
+            title={t('welcome.newRepo')}
           />
         </div>
       </div>
@@ -240,43 +243,43 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
       <div className="flex items-center gap-0.5 no-drag pr-2 relative">
         {groups.utils && (
           <>
-            <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title="Repository Info" />
-            <IconButton icon={Search} onClick={() => onFind && onFind()} disabled={disabled} title="Find Object (Ctrl+F)" />
-            <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title="Open in Browser" />
-            <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title="Reveal in File Manager" />
+            <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title={t('shell.repoInfo')} />
+            <IconButton icon={Search} onClick={() => onFind && onFind()} disabled={disabled} title={t('shell.findObject')} />
+            <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title={t('shell.openInBrowser')} />
+            <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title={t('shell.revealInFileManager')} />
             <Divider />
           </>
         )}
         <IconButton
           icon={Terminal}
           onClick={() => onToggleCommandLog && onToggleCommandLog()}
-          title="Command Log — raw git commands output (Ctrl+Shift+U)"
+          title={t('shell.commandLogTooltip')}
         />
         <IconButton
           icon={Keyboard}
           onClick={() => onShowShortcuts && onShowShortcuts()}
-          title="Keyboard Shortcuts (Ctrl+?)"
+          title={t('shell.keyboardShortcutsTooltip')}
         />
         <IconButton
           icon={theme === 'dark' ? Sun : Moon}
           onClick={() => toggleTheme()}
-          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+          title={theme === 'dark' ? t('shell.switchToLightTheme') : t('shell.switchToDarkTheme')}
         />
         {/* Customize toolbar button */}
         <button
           className="flex items-center justify-center w-7 h-7 rounded hover:bg-bg-hover transition-colors no-drag text-text-secondary hover:text-text-primary"
           onClick={() => setShowCustomize(!showCustomize)}
-          title="Customize toolbar"
+          title={t('shell.customizeToolbar')}
         >
           <SettingsIcon size={15} />
         </button>
         {showCustomize && (
           <div className="absolute top-full right-2 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-72">
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
-              Toolbar editor — applies to both toolbars · drag to reorder, click eye to hide
+              {t('shell.toolbarEditorHint')}
             </div>
             <div className="py-1 max-h-72 overflow-y-auto">
-              <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Visible</div>
+              <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">{t('shell.visible')}</div>
               {(Object.keys(groups) as Array<ToolbarGroupKey>)
                 .filter(key => groups[key])
                 .map((key, idx) => (
@@ -307,14 +310,14 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
                       setGroups(newOrdered as ToolbarGroups);
                     }}
                     className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-move text-xs"
-                    title="Drag to reorder"
+                    title={t('shell.dragToReorder')}
                   >
                     <span className="text-text-tertiary">⋮⋮</span>
                     <span className="capitalize flex-1">{key}</span>
                     <button
                       className="text-text-tertiary hover:text-status-deleted"
                       onClick={(e) => { e.stopPropagation(); setGroup(key, false); }}
-                      title="Hide this group"
+                      title={t('shell.hideGroup')}
                     >
                       <EyeOff size={11} />
                     </button>
@@ -323,7 +326,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
               {(Object.keys(groups) as Array<ToolbarGroupKey>)
                 .filter(key => !groups[key]).length > 0 && (
                 <>
-                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary border-t border-border-subtle">Hidden</div>
+                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary border-t border-border-subtle">{t('shell.hidden')}</div>
                   {(Object.keys(groups) as Array<ToolbarGroupKey>)
                     .filter(key => !groups[key])
                     .map(key => (
@@ -333,7 +336,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
                         <button
                           className="text-text-tertiary hover:text-status-added"
                           onClick={() => setGroup(key, true)}
-                          title="Show this group"
+                          title={t('shell.showGroup')}
                         >
                           <Plus size={11} />
                         </button>
@@ -345,11 +348,11 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
             <div className="px-3 py-1 border-t border-border-subtle flex justify-between">
               <button className="text-2xs text-accent"
                 onClick={() => setGroups(DEFAULT_TOOLBAR_GROUPS)}>
-                Reset to default
+                {t('shell.resetToDefault')}
               </button>
               <button className="text-2xs btn btn-primary !py-0.5 !px-2"
                 onClick={() => setShowCustomize(false)}>
-                Done
+                {t('shell.done')}
               </button>
             </div>
           </div>
@@ -374,6 +377,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
   const [defaultRemote, setDefaultRemote] = useState('origin');
@@ -416,7 +420,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
     if (!currentRepo) return;
     const b = branch || selectedBranch;
     if (!selectedRemote) {
-      toast.warning('No remotes configured', 'Add a remote on the Remotes page first');
+      toast.warning(t('shell.noRemotesConfigured'), t('shell.addRemoteFirst'));
       setOpen(false);
       return;
     }
@@ -446,12 +450,12 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
           return r;
         }
       );
-      const t = describePushResult(res, selectedRemote, remoteBranch.trim() || b || undefined);
-      if (t.kind === 'error') toast.error(t.title, t.detail);
-      else if (t.kind === 'info') toast.info(t.title, t.detail);
-      else toast.success(t.title, t.detail);
+      const t2 = describePushResult(res, selectedRemote, remoteBranch.trim() || b || undefined);
+      if (t2.kind === 'error') toast.error(t2.title, t2.detail);
+      else if (t2.kind === 'info') toast.info(t2.title, t2.detail);
+      else toast.success(t2.title, t2.detail);
     } catch (e) {
-      toast.error('Push failed', String(e));
+      toast.error(t('shell.pushFailed'), String(e));
     }
     setOpen(false);
     setForce(false);
@@ -467,16 +471,16 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
           style={{ color: '#86b300' }}
           onClick={() => doPush()}
           disabled={disabled || remotes.length === 0}
-          title={remotes.length === 0 ? 'No remotes configured — add one on the Remotes page' : `Push current branch to ${defaultRemote}`}
+          title={remotes.length === 0 ? t('shell.noRemotesHint') : t('shell.pushCurrentBranchTo', { remote: defaultRemote })}
         >
           <ArrowUp size={14} />
-          <span className="hidden md:inline">Push</span>
+          <span className="hidden md:inline">{t('toolbar.push')}</span>
         </button>
         <button
           className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
           onClick={() => setOpen(!open)}
           disabled={disabled}
-          title="Push options — select remote, branch, force push, tags"
+          title={t('shell.pushOptions')}
         >
           <ChevronDown size={12} />
         </button>
@@ -486,18 +490,18 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded-md shadow-lg z-50 min-w-64">
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
-              Push
+              {t('toolbar.push')}
             </div>
             {remotes.length === 0 ? (
               <div className="px-3 py-3 text-xs text-text-tertiary">
-                No remotes configured.
-                <div className="mt-1">Add one on the <b>Remotes</b> page to push.</div>
+                {t('shell.noRemotesText')}
+                <div className="mt-1">{t('shell.pushNoRemotesHint')}</div>
               </div>
             ) : (
               <>
                 <div className="p-2 space-y-2">
                   <div>
-                    <label className="text-2xs text-text-tertiary block mb-1">Remote</label>
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('shell.remoteLabel')}</label>
                     <select
                       className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
                       value={selectedRemote}
@@ -505,13 +509,13 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
                     >
                       {remotes.map(r => (
                         <option key={r.name} value={r.name}>
-                          {r.name}{r.name === defaultRemote && remotes.length > 1 ? ' (default)' : ''}
+                          {r.name}{r.name === defaultRemote && remotes.length > 1 ? ` ${t('shell.defaultSuffix')}` : ''}
                         </option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="text-2xs text-text-tertiary block mb-1">Branch</label>
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('shell.branchLabel')}</label>
                     <select
                       className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
                       value={selectedBranch}
@@ -523,40 +527,40 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
                     >
                       {branches.map(b => (
                         <option key={b.name} value={b.name}>
-                          {b.name}{b.current ? ' (current)' : ''}
+                          {b.name}{b.current ? ` ${t('shell.currentSuffix')}` : ''}
                         </option>
                       ))}
                     </select>
                   </div>
                   <div>
                     <label className="text-2xs text-text-tertiary block mb-1">
-                      Remote branch (optional — leave empty for same name)
+                      {t('shell.remoteBranchOptional')}
                     </label>
                     <input
                       type="text"
                       className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
-                      placeholder="e.g. main (push current HEAD → this remote branch)"
+                      placeholder={t('shell.remoteBranchPlaceholder')}
                       value={remoteBranch}
                       onChange={(e) => setRemoteBranch(e.target.value)}
                     />
                   </div>
                 </div>
                 <div className="px-3 py-1">
-                  <label className="flex items-center gap-2 text-xs cursor-pointer" title="git push -u — publish a new branch and set its upstream">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer" title={t('shell.setUpstreamTooltip')}>
                     <input type="checkbox" checked={setUpstream} onChange={(e) => setSetUpstream(e.target.checked)} />
-                    <span>Set upstream (-u)</span>
+                    <span>{t('shell.setUpstream')}</span>
                   </label>
                 </div>
                 <div className="px-3 py-1">
                   <label className="flex items-center gap-2 text-xs cursor-pointer">
                     <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-                    <span className="text-status-deleted">Force push (--force-with-lease)</span>
+                    <span className="text-status-deleted">{t('shell.forcePush')}</span>
                   </label>
                 </div>
                 <div className="px-3 py-1">
                   <label className="flex items-center gap-2 text-xs cursor-pointer">
                     <input type="checkbox" checked={pushTags} onChange={(e) => setPushTags(e.target.checked)} />
-                    <span>Push tags</span>
+                    <span>{t('shell.pushTags')}</span>
                   </label>
                 </div>
                 <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
@@ -565,9 +569,9 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
                     onClick={() => doPush()}
                     disabled={!selectedBranch}
                   >
-                    <ArrowUp size={12} /> Push to {selectedRemote}
+                    <ArrowUp size={12} /> {t('shell.pushToRemote', { remote: selectedRemote })}
                   </button>
-                  <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>Cancel</button>
+                  <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>{t('common.cancel')}</button>
                 </div>
               </>
             )}
@@ -596,6 +600,7 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
   const toast = useToastStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const settings = useSettingsStore((s) => s.settings);
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
   const [selectedRemote, setSelectedRemote] = useState('');
@@ -651,9 +656,9 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
     setFetching(true);
     try {
       await api.git.fetch(currentRepo.path, selectedRemote, false, true);
-      toast.success(`Fetched ${selectedRemote}`, 'Remote branches and tags updated');
+      toast.success(t('shell.fetchedRemote', { remote: selectedRemote }), t('shell.remoteBranchesUpdated'));
     } catch (e) {
-      toast.error(`Fetch ${selectedRemote} failed`, String(e));
+      toast.error(t('shell.fetchRemoteFailed', { remote: selectedRemote }), String(e));
     } finally {
       setFetching(false);
       loadRemoteBranches();
@@ -666,16 +671,16 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
     // rebase, cherry-pick, revert, bisect) and discard it — blocked. Fetch /
     // Fetch All remain available (they never touch the working tree).
     if (pullBlocked) {
-      toast.error('Pull is not available now', pullBlocked);
+      toast.error(t('shell.pullNotAvailable'), pullBlocked);
       setOpen(false);
       return;
     }
     if (!selectedBranch) {
       toast.warning(
-        'Nothing to pull from',
+        t('shell.nothingToPull'),
         remotes.length === 0
-          ? 'No remotes configured — add one on the Remotes page'
-          : `No fetched branches on '${selectedRemote || 'any remote'}' — open Pull options and Fetch first`
+          ? t('shell.noRemotesHint')
+          : t('shell.noFetchedBranchesOn', { remote: selectedRemote || t('shell.anyRemote') })
       );
       setOpen(false);
       return;
@@ -697,15 +702,17 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
           await refreshStatus(currentRepo.path);
         }
       );
-      toast.success(`Pulled from ${selectedBranch}${shouldRebase ? ' (rebase)' : ' (merge)'}`);
+      toast.success(shouldRebase
+        ? t('shell.pulledFromRebase', { branch: selectedBranch })
+        : t('shell.pulledFromMerge', { branch: selectedBranch }));
     } catch (e) {
       // Don't crash — show error, let user resolve conflicts via ConflictSolver
       const msg = String(e);
       if (msg.includes('CONFLICT') || msg.includes('conflict')) {
-        toast.warning('Pull resulted in conflicts', 'Use "Resolve Conflicts" button in toolbar');
+        toast.warning(t('shell.pullConflicts'), t('shell.useResolveConflicts'));
         refreshStatus(currentRepo.path);
       } else {
-        toast.error('Pull failed', msg);
+        toast.error(t('shell.pullFailed'), msg);
       }
     }
     setOpen(false);
@@ -723,19 +730,19 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
           onClick={() => doPull()}
           disabled={disabled || !!pullBlocked}
           title={pullBlocked
-            ? `Pull is blocked — ${pullBlocked}`
+            ? t('shell.pullBlocked', { reason: pullBlocked })
             : pullTarget
-              ? `Pull ${pullTarget} into the current branch`
-              : 'Pull — no remote branches available'}
+              ? t('shell.pullTargetTooltip', { ref: pullTarget })
+              : t('shell.pullNoBranches')}
         >
           <ArrowDown size={14} />
-          <span className="hidden md:inline">Pull</span>
+          <span className="hidden md:inline">{t('toolbar.pull')}</span>
         </button>
         <button
           className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
           onClick={() => setOpen(!open)}
           disabled={disabled}
-          title="Pull options — select remote, branch, rebase, no-ff"
+          title={t('shell.pullOptions')}
         >
           <ChevronDown size={12} />
         </button>
@@ -760,15 +767,15 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
                   if (!currentRepo || !selectedRemote) return;
                   try {
                     await api.git.fetch(currentRepo.path, selectedRemote, true, true);
-                    toast.success(`Fetched from ${selectedRemote}`, 'Remote branches and tags updated');
+                    toast.success(t('shell.fetchedFromRemote', { remote: selectedRemote }), t('shell.remoteBranchesUpdated'));
                     await refreshStatus(currentRepo.path);
                     loadRemoteBranches();
-                  } catch (e) { toast.error(`Fetch ${selectedRemote} failed`, String(e)); }
+                  } catch (e) { toast.error(t('shell.fetchRemoteFailed', { remote: selectedRemote }), String(e)); }
                 }}
                 disabled={!selectedRemote || remotes.length === 0}
                 title={`git fetch ${selectedRemote || '<remote>'} --prune --tags`}
               >
-                <CloudDownload size={11} /> Fetch from
+                <CloudDownload size={11} /> {t('toolbar.fetchFrom')}
               </button>
               <button
                 className="btn btn-secondary text-2xs flex-1"
@@ -776,30 +783,30 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
                   if (!currentRepo) return;
                   try {
                     await api.git.fetchAll(currentRepo.path, true);
-                    toast.success('Fetched all remotes', 'All remote branches and tags updated');
+                    toast.success(t('shell.fetchedAllRemotes'), t('shell.remoteBranchesUpdated'));
                     await refreshStatus(currentRepo.path);
                     loadRemoteBranches();
-                  } catch (e) { toast.error('Fetch all failed', String(e)); }
+                  } catch (e) { toast.error(t('shell.fetchAllFailed'), String(e)); }
                 }}
                 disabled={remotes.length === 0}
                 title="git fetch --all --prune --tags"
               >
-                <CloudDownload size={11} /> Fetch All
+                <CloudDownload size={11} /> {t('toolbar.fetchAll')}
               </button>
             </div>
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
-              Pull from remote
+              {t('toolbar.pullFromRemote')}
             </div>
             {remotes.length === 0 ? (
               <div className="px-3 py-3 text-xs text-text-tertiary">
-                No remotes configured.
-                <div className="mt-1">Add one on the <b>Remotes</b> page to pull.</div>
+                {t('shell.noRemotesText')}
+                <div className="mt-1">{t('shell.pullNoRemotesHint')}</div>
               </div>
             ) : (
               <>
                 <div className="p-2 space-y-2">
                   <div>
-                    <label className="text-2xs text-text-tertiary block mb-1">Remote</label>
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('shell.remoteLabel')}</label>
                     <select
                       className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
                       value={selectedRemote}
@@ -813,7 +820,7 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
                     </select>
                   </div>
                   <div>
-                    <label className="text-2xs text-text-tertiary block mb-1">Remote branch</label>
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('shell.remoteBranchLabel')}</label>
                     {remoteBranches.length > 0 ? (
                       <select
                         className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
@@ -826,7 +833,7 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
                       </select>
                     ) : (
                       <div className="text-xs text-text-tertiary px-1 py-1">
-                        No branches fetched from <b>{selectedRemote}</b> yet.
+                        {t('shell.noFetchedBranches', { remote: selectedRemote })}
                       </div>
                     )}
                   </div>
@@ -838,20 +845,20 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
                       title={`git fetch ${selectedRemote} --tags`}
                     >
                       {fetching ? <Loader size={12} className="spin" /> : <CloudDownload size={12} />}
-                      Fetch {selectedRemote} now
+                      {t('shell.fetchRemoteNow', { remote: selectedRemote })}
                     </button>
                   )}
                 </div>
                 <div className="px-3 py-1">
                   <label className="flex items-center gap-2 text-xs cursor-pointer">
                     <input type="checkbox" checked={useRebase} onChange={(e) => setUseRebase(e.target.checked)} />
-                    <span>Rebase instead of merge</span>
+                    <span>{t('shell.rebaseInsteadOfMerge')}</span>
                   </label>
                 </div>
                 <div className="px-3 py-1">
                   <label className="flex items-center gap-2 text-xs cursor-pointer">
                     <input type="checkbox" checked={noFF} onChange={(e) => setNoFF(e.target.checked)} />
-                    <span>No fast-forward (always create merge commit)</span>
+                    <span>{t('shell.noFastForward')}</span>
                   </label>
                 </div>
                 <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
@@ -861,9 +868,9 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
                     disabled={!selectedBranch || !!pullBlocked}
                     title={pullBlocked ? `Pull is blocked — ${pullBlocked}` : undefined}
                   >
-                    <ArrowDown size={12} /> Pull{useRebase ? ' (rebase)' : ''}
+                    <ArrowDown size={12} /> {useRebase ? t('shell.pullRebase') : t('toolbar.pull')}
                   </button>
-                  <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>Cancel</button>
+                  <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>{t('common.cancel')}</button>
                 </div>
               </>
             )}

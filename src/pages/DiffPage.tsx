@@ -12,6 +12,7 @@ import { useLazyList } from '../lib/useLazyList';
 import { useContextMenu } from '../lib/useContextMenu';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
+import { useI18n } from '../lib/i18n';
 
 /**
  * Diff Tool — standalone comparison tool.
@@ -35,6 +36,7 @@ import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 export function DiffPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
+  const { t } = useI18n();
   const globalFilePath = useSelectionStore((s) => s.selectedFilePath);
   const globalCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const globalBranch = useSelectionStore((s) => s.selectedBranch);
@@ -210,7 +212,7 @@ export function DiffPage() {
         setDiff(result);
       }
     } catch (e) {
-      toast.error('Failed to compute diff', String(e));
+      toast.error(t('diff.computeFailed'), String(e));
       setDiff(null);
     } finally {
       setLoading(false);
@@ -246,7 +248,7 @@ export function DiffPage() {
       }
       setDiff(result);
     } catch (e) {
-      toast.error('Failed to load file diff', String(e));
+      toast.error(t('diff.loadFileFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -277,16 +279,16 @@ export function DiffPage() {
   }, [repo.path]);
 
   if (!repo) {
-    return <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">No repository open</div>;
+    return <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">{t('diff.noRepository')}</div>;
   }
 
   const title = stashHash
-    ? `Stash ${shortHash(stashHash)} content`
+    ? t('diff.stashContentTitle', { hash: shortHash(stashHash) })
     : compareMode === 'ref' && compareRef
-      ? `${baseRef} → ${compareRef}`
+      ? `${baseRef} → ${compareRef}` // pure refs — nothing to translate
       : compareMode === 'staged'
-        ? `${baseRef} → Staged`
-        : `${baseRef} → Working Tree`;
+        ? t('diff.toStaged', { base: baseRef })
+        : t('diff.toWorkingTree', { base: baseRef });
 
   // The file the toolbar actions (Blame) and the header bar refer to.
   const blameTarget = selectedFileInList || filePath;
@@ -302,29 +304,29 @@ export function DiffPage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header with comparison controls */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border-default bg-bg-tertiary flex-wrap">
-        <span className="text-xs font-semibold flex-shrink-0">Diff</span>
+        <span className="text-xs font-semibold flex-shrink-0">{t('nav.diff')}</span>
 
         {/* File path input */}
         <div className="flex items-center gap-1 flex-shrink-0">
           <FileText size={11} className="text-text-tertiary" />
           <input
             type="text"
-            placeholder="file path (or . for all)"
+            placeholder={t('diff.filePathPlaceholder')}
             value={filePath}
             onChange={(e) => setFilePath(e.target.value)}
             className="text-xs w-48 px-2 py-1 font-mono bg-bg-secondary border border-border-default rounded"
-            title="File to compare. Use '.' to compare all files."
+            title={t('diff.filePathTooltip')}
           />
         </div>
 
         {/* Base ref selector */}
         <div className="flex items-center gap-1 flex-shrink-0">
-          <span className="text-2xs text-text-tertiary">Base:</span>
+          <span className="text-2xs text-text-tertiary">{t('diff.baseLabel')}</span>
           <select
             value={baseRef}
             onChange={(e) => setBaseRef(e.target.value)}
             className="text-xs px-1.5 py-1 bg-bg-secondary border border-border-default rounded font-mono"
-            title="Base reference (what to compare FROM)"
+            title={t('diff.baseTooltip')}
           >
             <option value="HEAD">HEAD</option>
             {branches.filter(b => !b.remote).map(b => (
@@ -342,7 +344,7 @@ export function DiffPage() {
           {globalCommitHash && baseRef !== globalCommitHash && (
             <button
               className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent whitespace-nowrap"
-              title={`Use the commit selected in History (${shortHash(globalCommitHash)}) as base`}
+              title={t('diff.useSelectedCommit', { hash: shortHash(globalCommitHash) })}
               onClick={() => setBaseRef(globalCommitHash)}
             >
               → {shortHash(globalCommitHash)}
@@ -359,25 +361,25 @@ export function DiffPage() {
             className={cn('text-2xs px-2.5 py-1 rounded-l border',
               compareMode === 'working' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setCompareMode('working')}
-            title="Compare with working tree (unstaged changes)"
+            title={t('diff.workingTreeTooltip')}
           >
-            Working Tree
+            {t('diff.workingTree')}
           </button>
           <button
             className={cn('text-2xs px-2.5 py-1 border-t border-b',
               compareMode === 'staged' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setCompareMode('staged')}
-            title="Compare with staged (index)"
+            title={t('diff.stagedTooltip')}
           >
-            Staged
+            {t('changes.staged')}
           </button>
           <button
             className={cn('text-2xs px-2.5 py-1 rounded-r border',
               compareMode === 'ref' ? 'bg-accent text-text-inverse border-accent' : 'bg-bg-secondary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setCompareMode('ref')}
-            title="Compare with another ref (commit/branch)"
+            title={t('diff.refTooltip')}
           >
-            Ref...
+            {t('diff.refButton')}
           </button>
         </div>
 
@@ -387,9 +389,9 @@ export function DiffPage() {
             value={compareRef}
             onChange={(e) => setCompareRef(e.target.value)}
             className="text-xs px-1.5 py-1 bg-bg-secondary border border-border-default rounded font-mono"
-            title="Compare TO this reference"
+            title={t('diff.compareTooltip')}
           >
-            <option value="">Select ref...</option>
+            <option value="">{t('diff.selectRef')}</option>
             {branches.filter(b => !b.remote).map(b => (
               <option key={b.name} value={b.name}>{b.name}</option>
             ))}
@@ -404,7 +406,7 @@ export function DiffPage() {
             the file context menu. */}
         <button
           className="icon-btn !w-6 !h-6 ml-auto"
-          title="Blame this file — line-by-line authorship"
+          title={t('diff.blameTooltip')}
           disabled={!blameTarget || blameTarget === '.'}
           onClick={() => {
             if (!blameTarget || blameTarget === '.') return;
@@ -414,14 +416,14 @@ export function DiffPage() {
         >
           <Search size={12} />
         </button>
-        <button className="icon-btn !w-6 !h-6" title="Refresh" onClick={computeDiff}>
+        <button className="icon-btn !w-6 !h-6" title={t('common.refresh')} onClick={computeDiff}>
           <RefreshCw size={12} className={loading ? 'spin' : ''} />
         </button>
       </div>
 
       {/* Diff title bar */}
       <div className="px-3 py-1 border-b border-border-subtle bg-bg-secondary text-2xs text-text-tertiary font-mono truncate">
-        {loading ? 'Computing diff...' : title} · {selectedFileInList || filePath}
+        {loading ? t('diff.computing') : title} · {selectedFileInList || filePath}
       </div>
 
       {/* Body: file list (left, when multi-file) + splitter + diff viewer (right) */}
@@ -434,21 +436,23 @@ export function DiffPage() {
               style={{ width: fileListWidth }}
             >
               <div className="px-2 py-1.5 text-2xs font-bold uppercase tracking-wider text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary">
-                Changed Files ({visibleFiles.length}{visibleFiles.length !== changedFiles.length ? ` of ${changedFiles.length}` : ''})
+                {visibleFiles.length !== changedFiles.length
+                  ? t('diff.changedFilesOf', { count: visibleFiles.length, total: changedFiles.length })
+                  : t('diff.changedFiles', { count: visibleFiles.length })}
               </div>
               {changedFiles.length > 5 && (
                 <div className="px-2 py-1 border-b border-border-subtle">
                   <input
                     type="text"
                     className="w-full text-2xs px-1.5 py-0.5 bg-bg-primary border border-border-default rounded"
-                    placeholder="Filter files..."
+                    placeholder={t('diff.filterFiles')}
                     value={fileListFilter}
                     onChange={(e) => setFileListFilter(e.target.value)}
                   />
                 </div>
               )}
               {visibleFiles.length === 0 && changedFiles.length > 0 && (
-                <div className="px-2 py-2 text-2xs text-text-tertiary">No files match '{fileListFilter.trim()}'</div>
+                <div className="px-2 py-2 text-2xs text-text-tertiary">{t('diff.noFilesMatch', { filter: fileListFilter.trim() })}</div>
               )}
               {visibleFiles.slice(0, 200).map((f, i) => (
                 <div
@@ -473,7 +477,7 @@ export function DiffPage() {
                       await runFileAction(action, fileCtx);
                     });
                   }}
-                  title="Click to load diff · Right-click for more actions"
+                  title={t('diff.fileRowTooltip')}
                 >
                   <span className="font-mono font-bold w-3 text-center flex-shrink-0"
                     style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
@@ -484,7 +488,7 @@ export function DiffPage() {
               ))}
               {changedFiles.length > 200 && (
                 <div className="px-2 py-1 text-2xs text-text-tertiary border-t border-border-subtle">
-                  Showing first 200 of {changedFiles.length}
+                  {t('diff.showingFirst200', { count: changedFiles.length })}
                 </div>
               )}
             </div>
@@ -501,7 +505,7 @@ export function DiffPage() {
             <DiffViewer diff={diff} filePath={selectedFileInList || filePath} />
           ) : (
             <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm p-8">
-              {loading ? 'Loading...' : 'Select base and compare refs to see diff'}
+              {loading ? t('common.loading') : t('diff.selectRefs')}
             </div>
           )}
         </div>

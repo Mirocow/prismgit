@@ -5,6 +5,7 @@ import { useToastStore } from '../stores/toastStore';
 import { cn } from '../lib/utils';
 import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader } from './icons';
 import { wordDiff, type WordSegment } from '../lib/wordDiff';
+import { useI18n } from '../lib/i18n';
 
 interface DiffViewerProps {
   diff: DiffResult | null;
@@ -109,6 +110,7 @@ function shouldShowLine(line: DiffLine, wsMode: WhitespaceMode): boolean {
 
 export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit', onStaged, onForceCompare }: DiffViewerProps) {
   const toast = useToastStore();
+  const { t } = useI18n();
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
   const [wsMode, setWsMode] = useState<WhitespaceMode>('normal');
   // Lazy loading: show first N lines per hunk, expand on demand
@@ -230,17 +232,17 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
     try {
       if (mode === 'staged') {
         await api.git.unstageLines(repoPath, filePath, ranges);
-        toast.success(`Unstaged ${sorted.length} line${sorted.length > 1 ? 's' : ''}`);
+        toast.success(sorted.length === 1 ? t('diff.unstagedLine', { count: sorted.length }) : t('diff.unstagedLines', { count: sorted.length }));
       } else {
         await api.git.stageLines(repoPath, filePath, ranges);
-        toast.success(`Staged ${sorted.length} line${sorted.length > 1 ? 's' : ''}`);
+        toast.success(sorted.length === 1 ? t('diff.stagedLine', { count: sorted.length }) : t('diff.stagedLines', { count: sorted.length }));
       }
       setSelectedLines(new Set());
       onStaged?.();
     } catch (e) {
-      toast.error('Partial staging failed', String(e));
+      toast.error(t('diff.partialStageFailed'), String(e));
     }
-  }, [repoPath, filePath, selectedLines, diff, mode, onStaged, toast]);
+  }, [repoPath, filePath, selectedLines, diff, mode, onStaged, toast, t]);
 
   /** Save the HEAD version of a binary file to disk (git show HEAD:path via showBuffer). */
   const handleSaveBlob = useCallback(async () => {
@@ -257,13 +259,13 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       a.download = filePath.split('/').pop() || 'blob';
       a.click();
       URL.revokeObjectURL(url);
-      toast.success(`Saved ${filePath.split('/').pop()} (${bytes.length} bytes from HEAD)`);
+      toast.success(t('diff.blobSaved', { name: filePath.split('/').pop() ?? '', bytes: bytes.length }));
     } catch (e) {
-      toast.error('Failed to save blob', String(e));
+      toast.error(t('diff.blobSaveFailed'), String(e));
     } finally {
       setSavingBlob(false);
     }
-  }, [repoPath, filePath, toast]);
+  }, [repoPath, filePath, toast, t]);
 
   const rendered = useMemo(() => {
     if (!diff || diff.binary) return null;
@@ -349,7 +351,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                         return next;
                       })}
                     >
-                      ▼ Show {visibleLines.length - MAX_LINES_PER_HUNK} more lines
+                      ▼ {t('diff.showMoreLines', { count: visibleLines.length - MAX_LINES_PER_HUNK })}
                     </div>
                   )}
                 </>
@@ -440,7 +442,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
     return (
       <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
         <RefreshCw size={16} className="spin mr-2" />
-        Loading diff...
+        {t('diff.loading')}
       </div>
     );
   }
@@ -448,7 +450,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   if (!diff) {
     return (
       <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
-        Select a file to view its diff
+        {t('diff.selectFile')}
       </div>
     );
   }
@@ -456,20 +458,20 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   if (diff.binary) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary text-sm gap-3">
-        <div>Binary file — diff not available</div>
+        <div>{t('diff.binary')}</div>
         {repoPath && filePath && (
           <button className="btn btn-secondary text-xs" onClick={handleSaveBlob} disabled={savingBlob}>
             {savingBlob ? <Loader size={12} className="animate-spin" /> : <Download size={12} />}
-            Save version from HEAD
+            {t('diff.saveFromHead')}
           </button>
         )}
         {onForceCompare && (
           <button
             className="btn btn-secondary text-xs"
-            title="SmartGit Manual: Force Compare — bypass the maximumFileSize limit and compare anyway. May be slow for very large files."
+            title={t('diff.forceCompareTooltip')}
             onClick={onForceCompare}
           >
-            <RefreshCw size={12} /> Force Compare
+            <RefreshCw size={12} /> {t('diff.forceCompare')}
           </button>
         )}
       </div>
@@ -484,10 +486,10 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       {/* Diff header */}
       <div className="px-3 py-2 border-b border-border-default text-xs bg-bg-secondary flex items-center justify-between flex-shrink-0 gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          {diff.newFile && <span className="badge badge-added">NEW</span>}
-          {diff.deletedFile && <span className="badge badge-deleted">DELETED</span>}
-          {diff.renamedFile && <span className="badge badge-renamed">RENAMED</span>}
-          {diff.modeChange && <span className="badge badge-modified">MODE</span>}
+          {diff.newFile && <span className="badge badge-added">{t('diff.badgeNew')}</span>}
+          {diff.deletedFile && <span className="badge badge-deleted">{t('diff.badgeDeleted')}</span>}
+          {diff.renamedFile && <span className="badge badge-renamed">{t('diff.badgeRenamed')}</span>}
+          {diff.modeChange && <span className="badge badge-modified">{t('diff.badgeMode')}</span>}
           <span className="font-mono truncate text-text-primary">{diff.newPath}</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -498,12 +500,12 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               <div className="w-px h-4 bg-border-default mx-1" />
               <span className="text-2xs text-text-tertiary">
                 {collapsedHunks.size > 0
-                  ? `${diff.hunks.length - collapsedHunks.size}/${diff.hunks.length} hunks`
-                  : `${diff.hunks.length} hunks`}
+                  ? t('diff.hunksCount', { visible: diff.hunks.length - collapsedHunks.size, total: diff.hunks.length })
+                  : t('diff.hunksCountAll', { count: diff.hunks.length })}
               </span>
               <button
                 className="icon-btn !w-5 !h-5"
-                title="Collapse all hunks"
+                title={t('diff.collapseAll')}
                 onClick={() => {
                   const all = new Set(diff.hunks.map((_, i) => i));
                   setCollapsedHunks(collapsedHunks.size === diff.hunks.length ? new Set() : all);
@@ -518,20 +520,20 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
             className="text-2xs bg-bg-tertiary border border-border-default rounded px-1.5 py-0.5"
             value={wsMode}
             onChange={(e) => setWsMode(e.target.value as WhitespaceMode)}
-            title="Whitespace mode"
+            title={t('diff.wsModeTooltip')}
           >
-            <option value="normal">Normal</option>
-            <option value="ignore-all">Ignore all WS</option>
-            <option value="ignore-trailing">Ignore trailing</option>
+            <option value="normal">{t('diff.wsNormal')}</option>
+            <option value="ignore-all">{t('diff.wsIgnoreAll')}</option>
+            <option value="ignore-trailing">{t('diff.wsIgnoreTrailing')}</option>
           </select>
           <button
             className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', useWordDiff
               ? 'bg-accent text-text-inverse border-accent'
               : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setUseWordDiff(!useWordDiff)}
-            title="Toggle word-level diff highlighting"
+            title={t('diff.wordDiffTooltip')}
           >
-            Word diff
+            {t('diff.wordDiffButton')}
           </button>
           {/* SmartGit manual: Compact mode — hide unchanged sections */}
           <button
@@ -539,16 +541,16 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               ? 'bg-accent text-text-inverse border-accent'
               : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setCompactMode(!compactMode)}
-            title="Compact mode — hide unchanged lines (SmartGit)"
+            title={t('diff.compactTooltip')}
           >
-            Compact
+            {t('diff.compact')}
           </button>
           {/* SmartGit manual: prev/next hunk navigation arrows */}
           {diff.hunks.length > 1 && (
             <div className="flex items-center gap-0.5">
               <button
                 className="icon-btn !w-5 !h-5"
-                title="Previous hunk"
+                title={t('diff.prevHunk')}
                 onClick={() => {
                   const prev = Math.max(0, currentHunkIdx - 1);
                   setCurrentHunkIdx(prev);
@@ -563,7 +565,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               </span>
               <button
                 className="icon-btn !w-5 !h-5"
-                title="Next hunk"
+                title={t('diff.nextHunk')}
                 onClick={() => {
                   const next = Math.min(diff.hunks.length - 1, currentHunkIdx + 1);
                   setCurrentHunkIdx(next);
@@ -579,16 +581,16 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
             <button
               className={cn('px-2.5 py-0.5 text-2xs transition-colors', viewMode === 'unified' ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
               onClick={() => setViewMode('unified')}
-              title="Unified view"
+              title={t('diff.unifiedViewTooltip')}
             >
-              Unified
+              {t('diff.unified')}
             </button>
             <button
               className={cn('px-2.5 py-0.5 text-2xs transition-colors border-l border-border-default', viewMode === 'split' ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
               onClick={() => setViewMode('split')}
-              title="Split view (side-by-side)"
+              title={t('diff.splitViewTooltip')}
             >
-              Split
+              {t('diff.splitButton')}
             </button>
           </div>
           {selectedLines.size > 0 && repoPath && mode !== 'commit' && (
@@ -596,10 +598,10 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               className="btn btn-primary text-2xs !py-0.5 !px-2"
               onClick={handleApplySelection}
               title={mode === 'staged'
-                ? 'Unstage the selected lines (mixed add+del hunks are unstaged as a whole)'
-                : 'Stage the selected lines (mixed add+del hunks are staged as a whole)'}
+                ? t('diff.unstageSelectionTooltip')
+                : t('diff.stageSelectionTooltip')}
             >
-              {mode === 'staged' ? 'Unstage' : 'Stage'} Selection ({selectedLines.size})
+              {mode === 'staged' ? t('diff.unstage') : t('toolbar.stage')} {t('diff.selectionCount', { count: selectedLines.size })}
             </button>
           )}
         </div>
@@ -608,7 +610,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       <div className="flex-1 overflow-auto">
         {rendered}
         {diff.hunks.length === 0 && (
-          <div className="p-4 text-sm text-text-tertiary">No changes</div>
+          <div className="p-4 text-sm text-text-tertiary">{t('diff.noChanges')}</div>
         )}
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, Folder, FolderOpen, FolderGit, FolderGitOpen } from './icons';
 import type { DirNode } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 interface DirTreePanelProps {
   repoName: string;
@@ -19,10 +20,11 @@ interface DirTreePanelProps {
 
 /** Small rounded counter shown next to folders that contain changed files. */
 function ChangeBadge({ count }: { count: number }) {
+  const { t } = useI18n();
   return (
     <span
       className="ml-auto flex-shrink-0 min-w-[18px] text-center rounded-full bg-accent-muted text-accent text-2xs font-bold px-1.5 leading-[14px]"
-      title={`${count} changed file${count === 1 ? '' : 's'}`}
+      title={count === 1 ? t('changes.changedFileCountOne', { count }) : t('changes.changedFileCountMany', { count })}
     >
       {count}
     </span>
@@ -48,6 +50,7 @@ function DirRows({
   onSelectDir: (dir: string | null) => void;
   changeCounts: Map<string, number>;
 }) {
+  const { t } = useI18n();
   const open = expanded.has(node.path);
   const hasChildren = node.children.length > 0;
   const selected = selectedDir === node.path;
@@ -71,7 +74,7 @@ function DirRows({
               e.stopPropagation();
               onToggleExpand(node.path);
             }}
-            title={open ? 'Collapse' : 'Expand'}
+            title={open ? t('changes.collapse') : t('changes.expand')}
           >
             {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           </button>
@@ -116,6 +119,7 @@ function DirRows({
  * the file list; selecting the repository root shows everything.
  */
 export function DirTreePanel(p: DirTreePanelProps) {
+  const { t } = useI18n();
   const rootOpen = p.expanded.has(ROOT_KEY);
   return (
     <div className="py-1 select-none">
@@ -125,7 +129,7 @@ export function DirTreePanel(p: DirTreePanelProps) {
           p.selectedDir === null ? 'bg-bg-selected' : 'hover:bg-bg-hover'
         )}
         onClick={() => p.onSelectDir(null)}
-        title="Show all changed files"
+        title={t('changes.showAllChanged')}
       >
         <button
           className="w-4 h-4 grid place-items-center rounded-sm text-text-tertiary hover:text-text-primary hover:bg-bg-hover flex-shrink-0 transition-colors"
@@ -133,7 +137,7 @@ export function DirTreePanel(p: DirTreePanelProps) {
             e.stopPropagation();
             p.onToggleExpand(ROOT_KEY);
           }}
-          title={rootOpen ? 'Collapse' : 'Expand'}
+          title={rootOpen ? t('changes.collapse') : t('changes.expand')}
         >
           {rootOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         </button>
@@ -147,9 +151,9 @@ export function DirTreePanel(p: DirTreePanelProps) {
 
       {rootOpen &&
         (p.loading && p.tree.length === 0 ? (
-          <div className="pl-8 py-1 text-2xs text-text-tertiary animate-pulse">Loading...</div>
+          <div className="pl-8 py-1 text-2xs text-text-tertiary animate-pulse">{t('common.loading')}</div>
         ) : p.tree.length === 0 ? (
-          <div className="pl-8 py-1 text-2xs text-text-tertiary">No folders</div>
+          <div className="pl-8 py-1 text-2xs text-text-tertiary">{t('changes.noFolders')}</div>
         ) : (
           p.tree.map((node) => (
             <DirRows

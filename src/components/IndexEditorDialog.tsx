@@ -5,6 +5,7 @@ import { useToastStore } from '../stores/toastStore';
 import { api, type StatusResult, type DiffHunk } from '../lib/api';
 import { parseDiff } from '../lib/diffParser';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 /**
  * SmartGit "Index Editor" (Local | Index Editor): a three-pane view of
@@ -22,6 +23,7 @@ interface PaneContent {
 type PaneKey = 'head' | 'index' | 'wt';
 
 export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | null; onClose: () => void }) {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const [files, setFiles] = useState<string[]>([]);
@@ -73,7 +75,7 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
       setSel({ index: null, wt: null });
       setEditing({ index: false, wt: false });
     } catch (e) {
-      toast.error('Failed to load file versions', String(e));
+      toast.error(t('dialogs.loadVersionsFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -103,15 +105,15 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
       if (pane === 'wt') {
         // stage: unstaged diff ranges are in Working-Tree coordinates
         await api.git.stageLines(repo.path, file, [{ start: range[0], end: range[1] }]);
-        toast.success(`Staged lines ${range[0]}–${range[1]} → Index`);
+        toast.success(t('dialogs.stagedLines', { from: range[0], to: range[1] }));
       } else {
         // unstage: staged diff ranges are in Index coordinates
         await api.git.unstageLines(repo.path, file, [{ start: range[0], end: range[1] }]);
-        toast.success(`Unstaged lines ${range[0]}–${range[1]} → Working Tree`);
+        toast.success(t('dialogs.unstagedLines', { from: range[0], to: range[1] }));
       }
       await loadPanes();
     } catch (e) {
-      toast.error('Partial staging failed', String(e));
+      toast.error(t('dialogs.partialStageFailed'), String(e));
     } finally {
       setBusy(false);
     }
@@ -129,16 +131,16 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
         // Mixed/replace hunks: stage the whole hunk span (context included —
         // stageLines filters pure hunks by range overlap)
         await api.git.stageLines(repo.path, file, ranges.length ? ranges : [{ start: hunk.newStart, end: hunk.newStart }]);
-        toast.success('Hunk staged → Index');
+        toast.success(t('dialogs.hunkStaged'));
       } else {
         const start = hunk.newStart;
         const end = hunk.newStart + Math.max(hunk.newLines, 0) - 1;
         await api.git.unstageLines(repo.path, file, [{ start, end }]);
-        toast.success('Hunk unstaged → Working Tree');
+        toast.success(t('dialogs.hunkUnstaged'));
       }
       await loadPanes();
     } catch (e) {
-      toast.error('Hunk operation failed', String(e));
+      toast.error(t('dialogs.hunkFailed'), String(e));
     } finally {
       setBusy(false);
     }
@@ -149,15 +151,15 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
     try {
       if (pane === 'index') {
         await api.git.setIndexContent(repo.path, file, draft.index);
-        toast.success('Index content saved');
+        toast.success(t('dialogs.indexSaved'));
       } else {
         await api.fs.writeFile(`${repo.path}/${file}`, draft.wt);
-        toast.success('Working Tree file saved');
+        toast.success(t('dialogs.wtSaved'));
       }
       setEditing((e) => ({ ...e, [pane]: false }));
       await loadPanes();
     } catch (e) {
-      toast.error('Save failed', String(e));
+      toast.error(t('dialogs.saveFailed'), String(e));
     } finally {
       setBusy(false);
     }
@@ -168,24 +170,24 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
     try {
       if (pane === 'wt') {
         await api.git.checkoutFile(repo.path, file, 'HEAD');
-        toast.success('Working Tree restored from HEAD');
+        toast.success(t('dialogs.wtRestored'));
       } else {
         await api.git.setIndexContent(repo.path, file, head.text);
-        toast.success('Index restored from HEAD');
+        toast.success(t('dialogs.indexRestored'));
       }
       await loadPanes();
     } catch (e) {
-      toast.error('Restore failed', String(e));
+      toast.error(t('dialogs.restoreFailed'), String(e));
     } finally {
       setBusy(false);
     }
   };
 
   const paneDefs = useMemo(() => ([
-    { key: 'head' as const, title: 'Repository (HEAD)', content: head, readOnly: true, hint: 'read-only' },
-    { key: 'index' as const, title: 'Index', content: index, readOnly: false, hint: 'editable · staged' },
-    { key: 'wt' as const, title: 'Working Tree', content: wt, readOnly: false, hint: 'editable' },
-  ]), [head, index, wt]);
+    { key: 'head' as const, title: t('dialogs.paneHead'), content: head, readOnly: true, hint: t('dialogs.hintReadOnly') },
+    { key: 'index' as const, title: t('dialogs.paneIndex'), content: index, readOnly: false, hint: t('dialogs.hintEditableStaged') },
+    { key: 'wt' as const, title: t('dialogs.paneWt'), content: wt, readOnly: false, hint: t('dialogs.hintEditable') },
+  ]), [head, index, wt, t]);
 
   const renderPane = (pane: (typeof paneDefs)[number]) => {
     const text = editing[pane.key as 'index' | 'wt'] ? draft[pane.key as 'index' | 'wt'] : pane.content.text;
@@ -198,7 +200,7 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
         {/* Pane header */}
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border bg-surface/60">
           <span className="text-xs font-semibold truncate">{pane.title}</span>
-          <span className="text-2xs text-text-tertiary">{pane.readOnly ? pane.hint : `${lineCount(pane.content.text)} lines`}</span>
+          <span className="text-2xs text-text-tertiary">{pane.readOnly ? pane.hint : t('dialogs.nLines', { count: lineCount(pane.content.text) })}</span>
           <div className="flex-1" />
           {!pane.readOnly && (
             <>
@@ -207,7 +209,7 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
                   onClick={() => savePane(pane.key as 'index' | 'wt')}
                   disabled={busy}
                   className="p-1 rounded hover:bg-surface-hover text-green-500"
-                  title="Save this pane's content"
+                  title={t('dialogs.savePaneTooltip')}
                 >
                   {busy ? <Loader size={13} className="animate-spin" /> : <Save size={13} />}
                 </button>
@@ -218,7 +220,7 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
                     setEditing((e) => ({ ...e, [pane.key]: true }));
                   }}
                   className="p-1 rounded hover:bg-surface-hover text-text-secondary"
-                  title="Edit this pane's content directly"
+                  title={t('dialogs.editPaneTooltip')}
                 >
                   <Pencil size={13} />
                 </button>
@@ -227,7 +229,7 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
                 onClick={() => revertPaneToHead(pane.key as 'index' | 'wt')}
                 disabled={busy}
                 className="p-1 rounded hover:bg-surface-hover text-text-secondary"
-                title="Restore this pane from HEAD"
+                title={t('dialogs.restorePaneTooltip')}
               >
                 <RefreshCw size={13} />
               </button>
@@ -248,7 +250,7 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
                     ? 'border-green-500/40 text-green-500 hover:bg-green-500/10'
                     : 'border-blue-500/40 text-blue-400 hover:bg-blue-500/10'
                 )}
-                title={pane.key === 'wt' ? 'Stage this hunk → Index' : 'Unstage this hunk → Working Tree'}
+                title={pane.key === 'wt' ? t('dialogs.stageHunkTooltip') : t('dialogs.unstageHunkTooltip')}
               >
                 {pane.key === 'wt' ? <ArrowRight size={10} /> : <ArrowLeft size={10} />}
                 @{h.newStart}
@@ -259,23 +261,23 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
         {/* Selection actions */}
         {!pane.readOnly && selRange && !isEditing && (
           <div className="flex items-center gap-2 px-2 py-1 border-b border-border bg-accent/10">
-            <span className="text-2xs">Lines {selRange[0]}–{selRange[1]} selected</span>
+            <span className="text-2xs">{t('dialogs.linesSelected', { from: selRange[0], to: selRange[1] })}</span>
             <button
               onClick={() => stageSelection(pane.key as 'index' | 'wt')}
               disabled={busy}
               className="px-1.5 py-0.5 rounded text-2xs bg-accent text-accent-foreground hover:opacity-90"
             >
-              {pane.key === 'wt' ? 'Stage selected → Index' : 'Unstage selected → Working Tree'}
+              {pane.key === 'wt' ? t('dialogs.stageSelected') : t('dialogs.unstageSelected')}
             </button>
             <button onClick={() => setSel((s) => ({ ...s, [pane.key]: null }))} className="text-2xs text-text-tertiary hover:text-text-primary">
-              clear
+              {t('dialogs.clearSel')}
             </button>
           </div>
         )}
         {/* Content */}
         <div className="flex-1 overflow-auto mono text-2xs leading-[1.45]">
           {pane.content.error && !pane.readOnly ? (
-            <div className="p-2 text-text-tertiary italic">{pane.key === 'index' ? '(not in index — file is new)' : pane.content.error}</div>
+            <div className="p-2 text-text-tertiary italic">{pane.key === 'index' ? t('dialogs.notInIndex') : pane.content.error}</div>
           ) : isEditing ? (
             <textarea
               value={draft[pane.key as 'index' | 'wt']}
@@ -301,7 +303,7 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
                   );
                 })}
                 {lines.length === 0 && (
-                  <tr><td className="p-2 text-text-tertiary italic" colSpan={2}>(empty)</td></tr>
+                  <tr><td className="p-2 text-text-tertiary italic" colSpan={2}>{t('dialogs.emptyPane')}</td></tr>
                 )}
               </tbody>
             </table>
@@ -319,25 +321,25 @@ export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | n
       >
         {/* Dialog header */}
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border">
-          <span className="text-sm font-semibold">Index Editor</span>
+          <span className="text-sm font-semibold">{t('dialogs.indexEditorTitle')}</span>
           <select
             value={file}
             onChange={(e) => setFile(e.target.value)}
             className="flex-1 max-w-md px-2 py-1 text-xs mono bg-surface border border-border rounded focus:outline-none focus:border-accent"
           >
-            {files.length === 0 && <option value="">(no changed files)</option>}
+            {files.length === 0 && <option value="">{t('dialogs.noChangedFiles')}</option>}
             {files.map((f) => (
               <option key={f} value={f}>{f}</option>
             ))}
           </select>
           <span className="text-2xs text-text-tertiary hidden md:block">
-            Click a line to select · Shift+click for a range · arrows stage/unstage hunks
+            {t('dialogs.indexEditorHint')}
           </span>
           <div className="flex-1" />
-          <button onClick={loadPanes} className="p-1.5 rounded hover:bg-surface-hover" title="Reload (F5)">
+          <button onClick={loadPanes} className="p-1.5 rounded hover:bg-surface-hover" title={t('dialogs.reloadTooltip')}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-surface-hover" title="Close (Esc)">
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-surface-hover" title={t('dialogs.closeEscTooltip')}>
             <X size={14} />
           </button>
         </div>

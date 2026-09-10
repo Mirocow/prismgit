@@ -1,0 +1,108 @@
+/**
+ * vscode domain translations.
+ * Sweep owner: this file is the ONLY dictionary for the 'vscode' domain —
+ * add every new key to ALL FOUR locales (unit tests assert key parity).
+ */
+export const en: Record<string, string> = {
+  'vscode.openInVscode': 'Open in VS Code',
+  'vscode.openDiffInVscode': 'Open Diff in VS Code',
+  'vscode.resolveInVscode': 'Resolve in VS Code (Merge Editor)',
+  'vscode.opened': 'Opened in VS Code',
+  'vscode.mergeOpened': 'Merge editor opened in VS Code',
+  'vscode.notFound': 'VS Code CLI not found — install VS Code or set its path in Settings → External Tools',
+  'vscode.openFailed': 'Failed to open VS Code',
+
+  'vscode.settings.title': 'Visual Studio Code',
+  'vscode.settings.detect': 'Detect',
+  'vscode.settings.detected': 'Found',
+  'vscode.settings.notDetected': 'Not found',
+  'vscode.settings.statusDetected': 'Found: {version}',
+  'vscode.settings.pathLabel': 'CLI path (optional)',
+  'vscode.settings.pathHint': 'Leave empty to auto-detect (standard install locations and PATH).',
+  'vscode.settings.saved': 'Path saved',
+  'vscode.settings.openRepo': 'Open repository in VS Code',
+  'vscode.settings.registerDiffTool': 'Register as git difftool & mergetool (this repository)',
+  'vscode.settings.removeDiffTool': 'Remove difftool/mergetool registration',
+  'vscode.settings.registered': 'VS Code is registered as the diff/merge tool for this repository',
+  'vscode.settings.notRegistered': 'VS Code is not registered as the diff/merge tool',
+  'vscode.settings.registeredToast': 'VS Code registered as difftool/mergetool',
+  'vscode.settings.removedToast': 'difftool/mergetool registration removed',
+};
+
+export const ru: Record<string, string> = {
+  'vscode.openInVscode': 'Открыть в VS Code',
+  'vscode.openDiffInVscode': 'Открыть diff в VS Code',
+  'vscode.resolveInVscode': 'Разрешить в VS Code (редактор слияния)',
+  'vscode.opened': 'Открыто в VS Code',
+  'vscode.mergeOpened': 'Редактор слияния открыт в VS Code',
+  'vscode.notFound': 'VS Code CLI не найден — установите VS Code или укажите путь в Settings → External Tools',
+  'vscode.openFailed': 'Не удалось открыть VS Code',
+
+  'vscode.settings.title': 'Visual Studio Code',
+  'vscode.settings.detect': 'Найти',
+  'vscode.settings.detected': 'Найден',
+  'vscode.settings.notDetected': 'Не найден',
+  'vscode.settings.statusDetected': 'Найден: {version}',
+  'vscode.settings.pathLabel': 'Путь к CLI (необязательно)',
+  'vscode.settings.pathHint': 'Оставьте пустым для автоопределения (стандартные пути установки и PATH).',
+  'vscode.settings.saved': 'Путь сохранён',
+  'vscode.settings.openRepo': 'Открыть репозиторий в VS Code',
+  'vscode.settings.registerDiffTool': 'Назначить git difftool и mergetool для этого репозитория',
+  'vscode.settings.removeDiffTool': 'Убрать регистрацию difftool/mergetool',
+  'vscode.settings.registered': 'VS Code назначен инструментом diff/merge для этого репозитория',
+  'vscode.settings.notRegistered': 'VS Code не назначен инструментом diff/merge',
+  'vscode.settings.registeredToast': 'VS Code назначен difftool/mergetool',
+  'vscode.settings.removedToast': 'Регистрация difftool/mergetool убрана',
+};
+
+export const zh: Record<string, string> = {
+  'vscode.openInVscode': '在 VS Code 中打开',
+  'vscode.openDiffInVscode': '在 VS Code 中打开 diff',
+  'vscode.resolveInVscode': '在 VS Code 中解决（合并编辑器）',
+  'vscode.opened': '已在 VS Code 中打开',
+  'vscode.mergeOpened': '合并编辑器已在 VS Code 中打开',
+  'vscode.notFound': '未找到 VS Code CLI — 请安装 VS Code 或在 设置 → 外部工具 中设置路径',
+  'vscode.openFailed': '无法打开 VS Code',
+
+  'vscode.settings.title': 'Visual Studio Code',
+  'vscode.settings.detect': '检测',
+  'vscode.settings.detected': '已找到',
+  'vscode.settings.notDetected': '未找到',
+  'vscode.settings.statusDetected': '已找到：{version}',
+  'vscode.settings.pathLabel': 'CLI 路径（可选）',
+  'vscode.settings.pathHint': '留空则自动检测（标准安装路径与 PATH）。',
+  'vscode.settings.saved': '路径已保存',
+  'vscode.settings.openRepo': '在 VS Code 中打开仓库',
+  'vscode.settings.registerDiffTool': '将 VS Code 注册为此仓库的 git difftool 和 mergetool',
+  'vscode.settings.removeDiffTool': '取消注册 difftool/mergetool',
+  'vscode.settings.registered': 'VS Code 已注册为此仓库的 diff/merge 工具',
+  'vscode.settings.notRegistered': 'VS Code 未注册为 diff/merge 工具',
+  'vscode.settings.registeredToast': '已将 VS Code 注册为 difftool/mergetool',
+  'vscode.settings.removedToast': '已取消 difftool/mergetool 注册',
+};
+
+export const de: Record<string, string> = {
+  'vscode.openInVscode': 'In VS Code öffnen',
+  'vscode.openDiffInVscode': 'Diff in VS Code öffnen',
+  'vscode.resolveInVscode': 'In VS Code auflösen (Merge-Editor)',
+  'vscode.opened': 'In VS Code geöffnet',
+  'vscode.mergeOpened': 'Merge-Editor in VS Code geöffnet',
+  'vscode.notFound': 'VS Code CLI nicht gefunden — VS Code installieren oder Pfad unter Einstellungen → Externe Tools setzen',
+  'vscode.openFailed': 'VS Code konnte nicht geöffnet werden',
+
+  'vscode.settings.title': 'Visual Studio Code',
+  'vscode.settings.detect': 'Erkennen',
+  'vscode.settings.detected': 'Gefunden',
+  'vscode.settings.notDetected': 'Nicht gefunden',
+  'vscode.settings.statusDetected': 'Gefunden: {version}',
+  'vscode.settings.pathLabel': 'CLI-Pfad (optional)',
+  'vscode.settings.pathHint': 'Leer lassen für automatische Erkennung (Standardpfade und PATH).',
+  'vscode.settings.saved': 'Pfad gespeichert',
+  'vscode.settings.openRepo': 'Repository in VS Code öffnen',
+  'vscode.settings.registerDiffTool': 'Als git difftool & mergetool für dieses Repository registrieren',
+  'vscode.settings.removeDiffTool': 'difftool/mergetool-Registrierung entfernen',
+  'vscode.settings.registered': 'VS Code ist als Diff/Merge-Tool für dieses Repository registriert',
+  'vscode.settings.notRegistered': 'VS Code ist nicht als Diff/Merge-Tool registriert',
+  'vscode.settings.registeredToast': 'VS Code als difftool/mergetool registriert',
+  'vscode.settings.removedToast': 'difftool/mergetool-Registrierung entfernt',
+};

@@ -126,6 +126,9 @@ export async function launchApp(opts: {
       NODE_ENV: 'production',
       DISPLAY: process.env.DISPLAY || ':99',
       PRISMGIT_USER_DATA: userDataDir,
+      // Pin the UI locale to English for e2e: the app detects the OS language
+      // otherwise, and text assertions in the specs are English-based.
+      PRISMGIT_LOCALE: 'en',
     },
     timeout: 30000,
   });

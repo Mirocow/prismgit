@@ -8,9 +8,11 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { api, type GithubPullRequest } from '../lib/api';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { cn, formatDate } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 export function PullRequestsPage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { authenticated, user } = useAuthStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -60,7 +62,7 @@ export function PullRequestsPage() {
       // (not just "not authenticated" which is handled by the auth check above)
       const msg = String(e);
       if (!msg.includes('Not authenticated')) {
-        toast.error('Failed to load pull requests', msg);
+        toast.error(t('pages.prLoadFailed'), msg);
       }
     } finally {
       setLoading(false);
@@ -80,7 +82,7 @@ export function PullRequestsPage() {
   const handleCreate = async () => {
     if (!repoInfo.owner || !repoInfo.repo) return;
     if (!prTitle.trim() || !prHead.trim() || !prBase.trim()) {
-      toast.warning('Title, head, and base are required');
+      toast.warning(t('pages.prFieldsRequired'));
       return;
     }
     setCreating(true);
@@ -91,14 +93,14 @@ export function PullRequestsPage() {
         base: prBase,
         body: prBody || undefined,
       });
-      toast.success('Pull request created');
+      toast.success(t('pages.prCreated'));
       setShowCreate(false);
       setPrTitle('');
       setPrHead('');
       setPrBody('');
       await loadPRs();
     } catch (e) {
-      toast.error('Failed to create PR', String(e));
+      toast.error(t('pages.prCreateFailed'), String(e));
     } finally {
       setCreating(false);
     }
@@ -113,9 +115,9 @@ export function PullRequestsPage() {
     try {
       await api.git.fetchAll(repo.path, true);
       await refreshStatus(repo.path);
-      toast.success('Fetched from all remotes (with prune)');
+      toast.success(t('pages.fetchedAllRemotes'));
     } catch (e) {
-      toast.error('Fetch failed', String(e));
+      toast.error(t('pages.fetchFailed'), String(e));
     } finally {
       setSyncing(null);
     }
@@ -127,14 +129,14 @@ export function PullRequestsPage() {
       const remote = (await resolveDefaultRemote(repo.path)) || 'origin';
       await api.git.pull(repo.path, remote, undefined, false, false);
       await refreshStatus(repo.path);
-      toast.success(`Pulled from ${remote}`);
+      toast.success(t('pages.pulledFrom', { remote }));
     } catch (e) {
       const msg = String(e);
       if (msg.includes('CONFLICT') || msg.includes('conflict')) {
-        toast.warning('Pull resulted in conflicts', 'Resolve them in the Changes tool');
+        toast.warning(t('pages.pullConflicts'), t('pages.pullConflictsHint'));
         refreshStatus(repo.path);
       } else {
-        toast.error('Pull failed', msg);
+        toast.error(t('pages.pullFailed'), msg);
       }
     } finally {
       setSyncing(null);
@@ -145,13 +147,13 @@ export function PullRequestsPage() {
   // PRs starts with getting the latest remote state into the local repo.
   const syncButtons = (
     <>
-      <button className="btn btn-secondary text-xs" onClick={handleFetchAll} disabled={syncing !== null} title="Fetch from ALL remotes with prune">
+      <button className="btn btn-secondary text-xs" onClick={handleFetchAll} disabled={syncing !== null} title={t('pages.fetchAllTitle')}>
         {syncing === 'fetch' ? <Loader size={12} className="animate-spin" /> : <CloudDownload size={12} />}
-        Fetch
+        {t('remotes.fetch')}
       </button>
-      <button className="btn btn-secondary text-xs" onClick={handlePull} disabled={syncing !== null} title="Pull the current branch from its remote">
+      <button className="btn btn-secondary text-xs" onClick={handlePull} disabled={syncing !== null} title={t('pages.pushButtonTitle')}>
         {syncing === 'pull' ? <Loader size={12} className="animate-spin" /> : <ArrowDown size={12} />}
-        Pull
+        {t('remotes.pull')}
       </button>
     </>
   );
@@ -162,13 +164,13 @@ export function PullRequestsPage() {
         <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
           <div className="flex items-center gap-2">
             <GitPullRequest size={14} />
-            <span className="text-sm font-medium">Pull Requests</span>
+            <span className="text-sm font-medium">{t('nav.pulls')}</span>
           </div>
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary">
           <GitPullRequest size={32} className="mb-2 opacity-50" />
-          <div className="text-sm">GitHub not connected</div>
-          <div className="text-xs mt-1">Connect your GitHub account in Settings to manage pull requests</div>
+          <div className="text-sm">{t('pages.ghNotConnected')}</div>
+          <div className="text-xs mt-1">{t('pages.ghNotConnectedHint')}</div>
         </div>
       </div>
     );
@@ -180,15 +182,15 @@ export function PullRequestsPage() {
         <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
           <div className="flex items-center gap-2">
             <GitPullRequest size={14} />
-            <span className="text-sm font-medium">Pull Requests</span>
+            <span className="text-sm font-medium">{t('nav.pulls')}</span>
           </div>
           {syncButtons}
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary">
           <GitPullRequest size={32} className="mb-2 opacity-50" />
-          <div className="text-sm">Not a GitHub repository</div>
-          <div className="text-xs mt-1">Pull requests are only available for GitHub repositories</div>
-          <div className="text-xs mt-1">Fetch / Pull still work — they are plain git operations</div>
+          <div className="text-sm">{t('pages.notGithubRepo')}</div>
+          <div className="text-xs mt-1">{t('pages.notGithubHint')}</div>
+          <div className="text-xs mt-1">{t('pages.notGithubHint2')}</div>
         </div>
       </div>
     );
@@ -199,7 +201,7 @@ export function PullRequestsPage() {
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
           <GitPullRequest size={14} />
-          <span className="text-sm font-medium">Pull Requests</span>
+          <span className="text-sm font-medium">{t('nav.pulls')}</span>
           <span className="text-2xs text-text-tertiary">{repoInfo.owner}/{repoInfo.repo}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -218,12 +220,12 @@ export function PullRequestsPage() {
               </button>
             ))}
           </div>
-          <button className="icon-btn" title="Refresh" onClick={loadPRs}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={loadPRs}>
             <RefreshCw size={13} />
           </button>
           <button
             className="btn btn-primary text-xs"
-            title="Create Pull Request — head/base default to the globally selected branch"
+            title={t('pages.prNewTitle')}
             onClick={() => {
               // Re-read at open time so the latest cross-tool selection applies
               const sel = useSelectionStore.getState().selectedBranch;
@@ -232,7 +234,7 @@ export function PullRequestsPage() {
             }}
           >
             <Plus size={12} />
-            New PR
+            {t('pages.prNewButton')}
           </button>
         </div>
       </div>
@@ -241,12 +243,12 @@ export function PullRequestsPage() {
         {loading ? (
           <div className="p-8 text-center text-text-tertiary text-sm flex items-center justify-center gap-2">
             <Loader size={14} className="spin" />
-            Loading pull requests...
+            {t('pages.prLoading')}
           </div>
         ) : prs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
             <GitPullRequest size={32} className="mb-2 opacity-50" />
-            <div className="text-sm">No {state} pull requests</div>
+            <div className="text-sm">{t('pages.prNone', { state })}</div>
           </div>
         ) : (
           prs.map(pr => (
@@ -273,7 +275,7 @@ export function PullRequestsPage() {
                   <span>·</span>
                   <button
                     className="text-status-renamed hover:underline"
-                    title={`Show log of head branch '${pr.head.ref}'`}
+                    title={t('pages.prHeadLog', { ref: pr.head.ref })}
                     onClick={(e) => {
                       e.stopPropagation();
                       useSelectionStore.getState().selectBranch(pr.head.ref);
@@ -285,7 +287,7 @@ export function PullRequestsPage() {
                   <span>→</span>
                   <button
                     className="text-status-added hover:underline"
-                    title={`Show log of base branch '${pr.base.ref}'`}
+                    title={t('pages.prBaseLog', { ref: pr.base.ref })}
                     onClick={(e) => {
                       e.stopPropagation();
                       useSelectionStore.getState().selectBranch(pr.base.ref);
@@ -311,7 +313,7 @@ export function PullRequestsPage() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
               <h3 className="text-base font-medium flex items-center gap-2">
                 <GitPullRequest size={16} />
-                Create Pull Request
+                {t('pages.prCreateTitle')}
               </h3>
               <button className="icon-btn" onClick={() => setShowCreate(false)}>
                 <X size={14} />
@@ -319,11 +321,11 @@ export function PullRequestsPage() {
             </div>
             <div className="p-4 space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Title</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('pages.prTitleLabel')}</label>
                 <input
                   type="text"
                   className="w-full text-sm"
-                  placeholder="PR title"
+                  placeholder={t('pages.prTitlePlaceholder')}
                   value={prTitle}
                   onChange={e => setPrTitle(e.target.value)}
                   autoFocus
@@ -331,7 +333,7 @@ export function PullRequestsPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-text-tertiary block mb-1">Head (source branch)</label>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('pages.prHeadLabel')}</label>
                   <input
                     type="text"
                     className="w-full text-sm mono"
@@ -341,7 +343,7 @@ export function PullRequestsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-text-tertiary block mb-1">Base (target branch)</label>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('pages.prBaseLabel')}</label>
                   <input
                     type="text"
                     className="w-full text-sm mono"
@@ -352,24 +354,24 @@ export function PullRequestsPage() {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Description (optional)</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('pages.prDescriptionLabel')}</label>
                 <textarea
                   className="w-full text-sm h-24 resize-none"
-                  placeholder="Describe your changes..."
+                  placeholder={t('pages.prDescriptionPlaceholder')}
                   value={prBody}
                   onChange={e => setPrBody(e.target.value)}
                 />
               </div>
             </div>
             <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
-              <button className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => setShowCreate(false)}>{t('common.cancel')}</button>
               <button
                 className="btn btn-primary"
                 onClick={handleCreate}
                 disabled={creating || !prTitle.trim() || !prHead.trim()}
               >
                 {creating ? <Loader size={13} className="spin" /> : <Plus size={13} />}
-                Create PR
+                {t('pages.prCreateButton')}
               </button>
             </div>
           </div>

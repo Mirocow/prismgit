@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Folder, Plus, Github, BookOpen, Star, ChevronRight, GitBranch, FileText, History, Download, Search, X } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useI18n } from '../lib/i18n';
 
 export function WelcomeScreen({
   onClone,
@@ -11,6 +12,7 @@ export function WelcomeScreen({
 }) {
   const openRepo = useRepositoryStore((s) => s.openRepositoryPicker);
   const { repos, metadata, openRepository } = useRepositoryStore();
+  const { t } = useI18n();
   const [search, setSearch] = useState('');
   // Show ALL repos (not just 5) — favorites first, then lastOpened desc, stable order otherwise
   const safeRepos = Array.isArray(repos) ? repos : [];
@@ -42,9 +44,9 @@ export function WelcomeScreen({
 
   // Quick feature highlights shown beneath the primary actions
   const features = [
-    { icon: History, title: 'Visual Git Graph', desc: 'Multi-branch history with passing-lane layout' },
-    { icon: FileText, title: 'Word-level Diffs', desc: 'Side-by-side or unified, with syntax highlighting' },
-    { icon: GitBranch, title: 'Branches & Tags', desc: 'Drag-to-merge, multi-select, Git-Flow built in' },
+    { icon: History, title: t('shell.featureGraphTitle'), desc: t('shell.featureGraphDesc') },
+    { icon: FileText, title: t('shell.featureDiffsTitle'), desc: t('shell.featureDiffsDesc') },
+    { icon: GitBranch, title: t('shell.featureBranchesTitle'), desc: t('shell.featureBranchesDesc') },
   ];
 
   return (
@@ -96,39 +98,38 @@ export function WelcomeScreen({
             </div>
           </div>
           <h1 className="text-3xl font-bold text-text-primary mb-3 tracking-tight">
-            PrismGit
+            {t('welcome.title')}
           </h1>
           <p className="text-sm text-text-secondary mb-8 max-w-md mx-auto leading-relaxed">
-            A modern, cross-platform Git client. Open a repository to start
-            managing branches, commits, and history.
+            {t('welcome.subtitle')}
           </p>
 
           {/* Three primary actions: Open, Clone, New */}
           <div className="flex flex-col sm:flex-row gap-3 max-w-lg mx-auto">
             <button className="btn btn-primary justify-center flex-1" onClick={openRepo}>
               <Folder size={16} />
-              Open Repository
+              {t('welcome.openRepo')}
             </button>
             <button
               className="btn btn-secondary justify-center flex-1"
               onClick={() => onClone && onClone()}
             >
               <Download size={16} />
-              Clone Repository
+              {t('welcome.cloneRepo')}
             </button>
             <button
               className="btn btn-secondary justify-center flex-1"
               onClick={() => onInit && onInit()}
             >
               <Plus size={16} />
-              New Repository
+              {t('welcome.newRepo')}
             </button>
           </div>
 
           <div className="mt-6 flex items-center justify-center gap-2 text-xs text-text-tertiary">
             <BookOpen size={12} />
             <span>
-              Drag folders onto this window to open · Press Ctrl+? for shortcuts
+              {t('welcome.dragHint')}
             </span>
           </div>
         </div>
@@ -139,9 +140,9 @@ export function WelcomeScreen({
         <div className="max-w-2xl mx-auto px-6 pb-6">
           <div className="flex items-center justify-between mb-3 px-1">
             <div className="text-2xs uppercase tracking-wider text-text-tertiary font-semibold">
-              All Repositories
+              {t('welcome.allRepos')}
               <span className="ml-2 text-text-tertiary/70 font-normal normal-case">
-                {filteredRepos.length} of {allSortedRepos.length}
+                {t('shell.countOf', { count: filteredRepos.length, total: allSortedRepos.length })}
               </span>
             </div>
           </div>
@@ -151,7 +152,7 @@ export function WelcomeScreen({
             <input
               type="text"
               className="w-full text-sm pl-9 pr-8 py-2 bg-bg-secondary border border-border-default rounded-lg focus:outline-none focus:border-accent transition-colors"
-              placeholder="Search repositories by name, path, or tag..."
+              placeholder={t('welcome.searchPlaceholder')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               autoFocus={allSortedRepos.length > 8}
@@ -159,7 +160,7 @@ export function WelcomeScreen({
             {search && (
               <button
                 className="absolute right-2 top-1/2 -translate-y-1/2 icon-btn !w-6 !h-6"
-                title="Clear search"
+                title={t('shell.clearSearch')}
                 onClick={() => setSearch('')}
               >
                 <X size={11} />
@@ -170,7 +171,7 @@ export function WelcomeScreen({
             {filteredRepos.length === 0 ? (
               <div className="px-4 py-8 text-center text-text-tertiary text-sm">
                 <Search size={20} className="mx-auto mb-2 opacity-40" />
-                No repositories match "{search}"
+                {t('welcome.noMatch', { search })}
               </div>
             ) : (
               filteredRepos.map((repo, i) => {

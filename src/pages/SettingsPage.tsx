@@ -33,6 +33,12 @@ export function SettingsPage() {
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
 
+  // === Visual Studio Code integration state ===
+  const [vscodeDet, setVscodeDet] = useState<{ available: boolean; path: string; version: string } | null>(null);
+  const [vscodeChecking, setVscodeChecking] = useState(false);
+  const [vscodeTool, setVscodeTool] = useState<{ diffTool: string; mergeTool: string; vscodeConfigured: boolean } | null>(null);
+  const [vscodePathInput, setVscodePathInput] = useState('');
+
 
   const loadConfig = useCallback(async () => {
     if (!currentRepo) return;
@@ -41,7 +47,7 @@ export function SettingsPage() {
       const entries = await api.git.configList(currentRepo.path, configScope);
       setConfigEntries(entries);
     } catch (e) {
-      toast.error('Failed to load git config', String(e));
+      toast.error(t('settings.failedToLoadGitConfig'), String(e));
       setConfigEntries([]);
     } finally {
       setConfigLoading(false);
@@ -52,46 +58,73 @@ export function SettingsPage() {
     if (currentRepo) loadConfig();
   }, [currentRepo, loadConfig]);
 
+  // VS Code detection + per-repo difftool status (refreshed on repo change)
+  const detectVsCodeCli = useCallback(async (force = false) => {
+    setVscodeChecking(true);
+    try {
+      const det = await api.vscode.detect(force);
+      setVscodeDet(det);
+    } catch {
+      setVscodeDet({ available: false, path: '', version: '' });
+    } finally {
+      setVscodeChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    detectVsCodeCli();
+  }, [detectVsCodeCli]);
+
+  useEffect(() => {
+    setVscodeTool(null);
+    if (!currentRepo) return;
+    let cancelled = false;
+    api.vscode.diffToolStatus(currentRepo.path).then((st) => {
+      if (!cancelled) setVscodeTool(st);
+    }).catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, [currentRepo]);
+
   const handleConfigSet = async (key: string, value: string) => {
     if (!currentRepo) return;
     try {
       await api.git.configSet(currentRepo.path, key, value, configScope);
-      toast.success(`Set ${key} (${configScope})`);
+      toast.success(t('settings.configSetToast', { key, scope: configScope }));
       await loadConfig();
     } catch (e) {
-      toast.error('Failed to set value', String(e));
+      toast.error(t('settings.failedToSetValue'), String(e));
     }
   };
 
   const handleConfigUnset = async (key: string) => {
     if (!currentRepo) return;
     if (!(await confirmDialog({
-      title: 'Remove config entry',
-      message: `Remove '${key}' from ${configScope} config?`,
-      confirmLabel: 'Remove',
+      title: t('settings.removeConfigEntryTitle'),
+      message: t('settings.removeConfigConfirm', { key, scope: configScope }),
+      confirmLabel: t('common.remove'),
       danger: true,
     }))) return;
     try {
       await api.git.configUnset(currentRepo.path, key, configScope);
-      toast.success(`Removed ${key}`);
+      toast.success(t('settings.configRemovedToast', { key }));
       await loadConfig();
     } catch (e) {
-      toast.error('Failed to unset', String(e));
+      toast.error(t('settings.failedToUnset'), String(e));
     }
   };
 
   const handleLogin = async () => {
     if (!pat.trim()) {
-      toast.warning('Please enter a PAT');
+      toast.warning(t('settings.pleaseEnterPat'));
       return;
     }
     setLoadingAuth(true);
     try {
       const u = await loginWithPAT(pat);
-      toast.success(`Welcome, ${u.login}!`);
+      toast.success(t('settings.welcomeGithubUser', { login: u.login }));
       setPat('');
     } catch (e) {
-      toast.error('Authentication failed', String(e));
+      toast.error(t('settings.authFailed'), String(e));
     } finally {
       setLoadingAuth(false);
     }
@@ -99,14 +132,14 @@ export function SettingsPage() {
 
   const handleLogout = async () => {
     await logout();
-    toast.info('Logged out from GitHub');
+    toast.info(t('settings.loggedOutGithub'));
   };
 
   const handleChooseCloneDir = async () => {
     const path = await api.fs.openDirectoryPicker();
     if (path) {
       await setSetting('defaultCloneDir', path);
-      toast.success('Default clone directory updated');
+      toast.success(t('settings.cloneDirUpdated'));
     }
   };
 
@@ -120,23 +153,23 @@ export function SettingsPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-text-primary tracking-tight">
-                {showApp ? 'Application Settings' : 'Project Settings'}
+                {showApp ? t('settings.application') : t('settings.project')}
               </h1>
               <p className="text-xs text-text-tertiary">
                 {showApp
-                  ? 'Global application preferences (appearance, integrations, AI, CI/CD)'
-                  : 'Per-repository configuration (Git, remotes, pull strategy, config)'}
+                  ? t('settings.appDescription')
+                  : t('settings.projectDescription')}
               </p>
             </div>
           </div>
           {currentRepo && (
             <button
               className="btn btn-secondary text-xs flex-shrink-0"
-              title="Per-repository settings: remotes, authorization, metadata"
+              title={t('settings.repoSettingsButtonTitle')}
               onClick={() => window.dispatchEvent(new CustomEvent('prismgit:repo-settings'))}
             >
               <GitBranch size={12} />
-              Repository Settings...
+              {t('settings.repoSettingsButton')}
             </button>
           )}
         </div>
@@ -152,7 +185,7 @@ export function SettingsPage() {
             )}
             onClick={() => setActiveTab('application')}
           >
-            Application Settings
+            {t('settings.application')}
           </button>
           <button
             className={cn(
@@ -164,9 +197,9 @@ export function SettingsPage() {
             )}
             onClick={() => currentRepo && setActiveTab('project')}
             disabled={!currentRepo}
-            title={currentRepo ? undefined : 'Open a repository to access Project Settings'}
+            title={currentRepo ? undefined : t('settings.openRepoForProject')}
           >
-            Project Settings
+            {t('settings.project')}
             {currentRepo && (
               <span className="text-2xs text-text-tertiary font-normal truncate max-w-32">
                 {currentRepo.name}
@@ -179,20 +212,20 @@ export function SettingsPage() {
         {activeTab === 'project' && !currentRepo && (
           <div className="panel p-8 text-center text-text-tertiary">
             <SettingsIcon size={32} className="mx-auto mb-3 opacity-40" />
-            <div className="text-sm">Open a repository to access Project Settings</div>
+            <div className="text-sm">{t('settings.openRepoForProject')}</div>
           </div>
         )}
 
         {/* Appearance — Application Settings */}
         {showApp && (
         <section className="panel mb-4">
-          <div className="panel-header">Appearance</div>
+          <div className="panel-header">{t('settings.appearance')}</div>
           <div className="p-5 space-y-5">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Theme</div>
+                <div className="text-sm font-medium">{t('settings.theme')}</div>
                 <div className="text-xs text-text-tertiary">
-                  Switch between dark and light appearance
+                  {t('settings.themeDescription')}
                 </div>
               </div>
               <button
@@ -200,7 +233,7 @@ export function SettingsPage() {
                 onClick={toggleTheme}
               >
                 {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-                {theme === 'dark' ? 'Light' : 'Dark'}
+                {theme === 'dark' ? t('settings.lightMode') : t('settings.darkMode')}
               </button>
             </div>
             {/* Language selector */}
@@ -208,7 +241,7 @@ export function SettingsPage() {
               <div>
                 <div className="text-sm font-medium">{t('settings.language')}</div>
                 <div className="text-xs text-text-tertiary">
-                  English, Русский, 中文, Deutsch
+                  {t('settings.languagesHint')}
                 </div>
               </div>
               <select
@@ -227,9 +260,9 @@ export function SettingsPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <div>
-                  <div className="text-sm font-medium">UI Contrast</div>
+                  <div className="text-sm font-medium">{t('settings.contrast')}</div>
                   <div className="text-xs text-text-tertiary">
-                    Softer ↔ punchier. Applied as a live CSS contrast filter on the whole app.
+                    {t('settings.contrastHint')}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -239,14 +272,14 @@ export function SettingsPage() {
                   <button
                     className="text-2xs text-accent hover:underline"
                     onClick={() => setSetting('contrast', 100)}
-                    title="Reset to default (100%)"
+                    title={t('settings.contrastResetTitle')}
                   >
-                    Reset
+                    {t('settings.contrastReset')}
                   </button>
                 </div>
               </div>
               <div className="flex items-center gap-3 px-1">
-                <span className="text-2xs text-text-tertiary w-8">Soft</span>
+                <span className="text-2xs text-text-tertiary w-8">{t('settings.contrastSoft')}</span>
                 <input
                   type="range"
                   min={50}
@@ -256,18 +289,18 @@ export function SettingsPage() {
                   onChange={(e) => setSetting('contrast', Number(e.target.value))}
                   className="flex-1"
                   style={{ accentColor: 'var(--accent)' }}
-                  title="Drag left for softer appearance, right for punchier colors"
+                  title={t('settings.contrastSliderTitle')}
                 />
-                <span className="text-2xs text-text-tertiary w-12">Punchy</span>
+                <span className="text-2xs text-text-tertiary w-12">{t('settings.contrastPunchy')}</span>
               </div>
               {/* Quick presets */}
               <div className="flex items-center gap-1 mt-2">
-                <span className="text-2xs text-text-tertiary mr-1">Presets:</span>
+                <span className="text-2xs text-text-tertiary mr-1">{t('settings.contrastPresets')}</span>
                 {[
-                  { label: 'Soft', value: 75 },
-                  { label: 'Normal', value: 100 },
-                  { label: 'High', value: 125 },
-                  { label: 'Max', value: 150 },
+                  { label: t('settings.presetSoft'), value: 75 },
+                  { label: t('settings.presetNormal'), value: 100 },
+                  { label: t('settings.presetHigh'), value: 125 },
+                  { label: t('settings.presetMax'), value: 150 },
                 ].map(p => (
                   <button
                     key={p.value}
@@ -286,8 +319,8 @@ export function SettingsPage() {
             </div>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Font size (base)</div>
-                <div className="text-xs text-text-tertiary">Global base font size in pixels</div>
+                <div className="text-sm font-medium">{t('settings.fontSizeBase')}</div>
+                <div className="text-xs text-text-tertiary">{t('settings.fontSizeBaseHint')}</div>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -303,35 +336,35 @@ export function SettingsPage() {
             </div>
             {/* Per-area font sizes */}
             <div className="border-t border-border-subtle pt-4 mt-4">
-              <div className="text-2xs uppercase text-text-tertiary mb-3 font-bold tracking-wider">Per-area font sizes</div>
+              <div className="text-2xs uppercase text-text-tertiary mb-3 font-bold tracking-wider">{t('settings.perAreaFontSizes')}</div>
               <div className="grid grid-cols-2 gap-4">
                 <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
-                  <span className="text-xs">File tree</span>
+                  <span className="text-xs">{t('settings.fontAreaTree')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeTree ?? 12}
                     onChange={(e) => setSetting('fontSizeTree', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
                 <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
-                  <span className="text-xs">Commit/branch lists</span>
+                  <span className="text-xs">{t('settings.fontAreaLists')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeList ?? 12}
                     onChange={(e) => setSetting('fontSizeList', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
                 <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
-                  <span className="text-xs">Diff viewer (code)</span>
+                  <span className="text-xs">{t('settings.fontAreaDiff')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeDiff ?? 11}
                     onChange={(e) => setSetting('fontSizeDiff', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
                 <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
-                  <span className="text-xs">Monospace (hashes/paths)</span>
+                  <span className="text-xs">{t('settings.fontAreaMonospace')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeMonospace ?? 11}
                     onChange={(e) => setSetting('fontSizeMonospace', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
               </div>
-              <div className="text-2xs text-text-tertiary mt-2 px-2">These apply to the respective UI areas immediately.</div>
+              <div className="text-2xs text-text-tertiary mt-2 px-2">{t('settings.fontSizesApplyHint')}</div>
             </div>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Sidebar width</div>
-                <div className="text-xs text-text-tertiary">Width in pixels</div>
+                <div className="text-sm font-medium">{t('settings.sidebarWidth')}</div>
+                <div className="text-xs text-text-tertiary">{t('settings.sidebarWidthHint')}</div>
               </div>
               <input
                 type="number"
@@ -349,30 +382,30 @@ export function SettingsPage() {
         {/* Git */}
         {showProject && (
         <section className="panel mb-4">
-          <div className="panel-header">Git</div>
+          <div className="panel-header">{t('settings.git')}</div>
           <div className="p-5 space-y-5">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Default clone directory</div>
+                <div className="text-sm font-medium">{t('settings.defaultCloneDir')}</div>
                 <div className="text-xs text-text-tertiary">
-                  Where new repositories will be cloned to
+                  {t('settings.defaultCloneDirHint')}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <code className="text-xs font-mono px-2 py-1 bg-bg-tertiary rounded max-w-xs truncate">
-                  {settings.defaultCloneDir || '(not set)'}
+                  {settings.defaultCloneDir || t('settings.notSet')}
                 </code>
                 <button className="btn btn-secondary text-xs" onClick={handleChooseCloneDir}>
                   <Folder size={12} />
-                  Browse
+                  {t('settings.browse')}
                 </button>
               </div>
             </div>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Max history entries</div>
+                <div className="text-sm font-medium">{t('settings.maxHistoryEntries')}</div>
                 <div className="text-xs text-text-tertiary">
-                  Maximum commits to load in history view
+                  {t('settings.maxHistoryEntriesHint')}
                 </div>
               </div>
               <input
@@ -387,9 +420,9 @@ export function SettingsPage() {
             </div>
             <label className="flex items-center justify-between cursor-pointer">
               <div>
-                <div className="text-sm font-medium">Show reflog in history</div>
+                <div className="text-sm font-medium">{t('settings.showReflogInHistory')}</div>
                 <div className="text-xs text-text-tertiary">
-                  Include reflog entries in the history view
+                  {t('settings.showReflogHint')}
                 </div>
               </div>
               <input
@@ -399,17 +432,15 @@ export function SettingsPage() {
               />
             </label>
             <div className="border-t border-border-subtle pt-4 mt-4">
-              <div className="text-2xs uppercase text-text-tertiary mb-3 font-bold tracking-wider">Repository list</div>
+              <div className="text-2xs uppercase text-text-tertiary mb-3 font-bold tracking-wider">{t('settings.repoList')}</div>
               <label
                 className="flex items-center justify-between cursor-pointer mb-4"
                 data-testid="auto-refresh-setting"
               >
                 <div>
-                  <div className="text-sm font-medium">Auto refresh</div>
+                  <div className="text-sm font-medium">{t('settings.autoRefresh')}</div>
                   <div className="text-xs text-text-tertiary">
-                    Master switch for automatic repository refreshing. When off,
-                    no periodic remote checks happen — the ↓/↑ badges in the
-                    repository list stay frozen until you press "Check now".
+                    {t('settings.autoRefreshHint')}
                   </div>
                 </div>
                 <input
@@ -420,13 +451,9 @@ export function SettingsPage() {
               </label>
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-medium">Remote check interval</div>
+                  <div className="text-sm font-medium">{t('settings.remoteCheckInterval')}</div>
                   <div className="text-xs text-text-tertiary">
-                    How often the sidebar fetches all remotes of every listed
-                    repository and shows ↓ incoming / ↑ outgoing badges.
-                    Only applies while Auto refresh is on.
-                    Minimum 30&nbsp;s; set 0 to disable the periodic check
-                    (the "Check now" button still works).
+                    {t('settings.remoteCheckIntervalHint')}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -440,7 +467,7 @@ export function SettingsPage() {
                     className="w-20 text-sm"
                     data-testid="remote-check-interval-input"
                   />
-                  <span className="text-xs text-text-tertiary">sec</span>
+                  <span className="text-xs text-text-tertiary">{t('settings.secUnit')}</span>
                 </div>
               </div>
             </div>
@@ -454,7 +481,7 @@ export function SettingsPage() {
           <div className="panel-header">
             <span className="flex items-center gap-2">
               <Github size={12} />
-              GitHub Integration
+              {t('settings.github')}
             </span>
           </div>
           <div className="p-5 space-y-4">
@@ -471,17 +498,17 @@ export function SettingsPage() {
                 </div>
                 <button className="btn btn-danger text-xs" onClick={handleLogout}>
                   <LogOut size={12} />
-                  Logout
+                  {t('settings.logout')}
                 </button>
               </div>
             ) : (
               <>
                 <div>
                   <div className="text-sm mb-2">
-                    Authenticate with a Personal Access Token
+                    {t('settings.authenticatePat')}
                   </div>
                   <div className="text-xs text-text-tertiary mb-3">
-                    Create a token at{' '}
+                    {t('settings.createTokenAt')}{' '}
                     <a
                       href="#"
                       onClick={(e) => {
@@ -492,8 +519,8 @@ export function SettingsPage() {
                     >
                       github.com/settings/tokens
                     </a>{' '}
-                    with <code className="font-mono">repo</code> and{' '}
-                    <code className="font-mono">read:user</code> scopes.
+                    {t('settings.withScopes')} <code className="font-mono">repo</code> {t('settings.and')}{' '}
+                    <code className="font-mono">read:user</code>{t('settings.scopesSuffix')}
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -510,7 +537,7 @@ export function SettingsPage() {
                       disabled={loadingAuth}
                     >
                       {loadingAuth ? <RefreshCw size={12} className="animate-spin" /> : <Github size={12} />}
-                      Connect
+                      {t('settings.connect')}
                     </button>
                   </div>
                 </div>
@@ -524,10 +551,10 @@ export function SettingsPage() {
         {showProject && (
         <section className="panel mb-4">
           <div className="panel-header">
-            <span>Known Repositories ({repos.length})</span>
+            <span>{t('settings.knownRepositories', { count: repos.length })}</span>
             <button
               className="icon-btn !w-6 !h-6"
-              title="Refresh"
+              title={t('common.refresh')}
               onClick={() => loadRepos()}
             >
               <RefreshCw size={12} />
@@ -537,7 +564,7 @@ export function SettingsPage() {
             {repos.length === 0 ? (
               <div className="p-6 text-center text-sm text-text-tertiary">
                 <Folder size={24} className="mx-auto mb-2 opacity-40" />
-                No repositories added yet.
+                {t('settings.noReposAdded')}
               </div>
             ) : (
               repos.map((r) => (
@@ -556,7 +583,7 @@ export function SettingsPage() {
                   </div>
                   <button
                     className="opacity-0 group-hover:opacity-100 icon-btn !w-6 !h-6 hover:!text-status-deleted transition-opacity"
-                    title="Remove"
+                    title={t('common.remove')}
                     onClick={() => removeRepo(r.path)}
                   >
                     <Plus size={12} className="rotate-45" />
@@ -571,10 +598,119 @@ export function SettingsPage() {
         {/* External Tools */}
         {showProject && (
         <section className="panel mb-4">
-          <div className="panel-header">External Tools</div>
+          <div className="panel-header">{t('settings.externalTools')}</div>
           <div className="p-5 space-y-4">
+            {/* --- Visual Studio Code integration --- */}
+            <div className="pb-3 mb-1 border-b border-border-subtle">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{t('vscode.settings.title')}</span>
+                  {vscodeChecking ? (
+                    <Loader size={13} className="animate-spin text-text-tertiary" />
+                  ) : vscodeDet?.available ? (
+                    <span className="text-2xs px-1.5 py-0.5 rounded bg-green-500/15 text-green-600 dark:text-green-400">
+                      {t('vscode.settings.statusDetected', { version: vscodeDet.version })}
+                    </span>
+                  ) : (
+                    <span className="text-2xs px-1.5 py-0.5 rounded bg-red-500/15 text-red-600 dark:text-red-400">
+                      {t('vscode.settings.notDetected')}
+                    </span>
+                  )}
+                </div>
+                <button
+                  className="btn-secondary text-xs px-2 py-1"
+                  onClick={() => detectVsCodeCli(true)}
+                  disabled={vscodeChecking}
+                >
+                  <RefreshCw size={12} className={cn('mr-1', vscodeChecking && 'animate-spin')} />
+                  {t('vscode.settings.detect')}
+                </button>
+              </div>
+              <div className="text-2xs text-text-tertiary mono mb-2 truncate" title={vscodeDet?.path || ''}>
+                {vscodeDet?.path || '—'}
+              </div>
+              <label className="text-xs text-text-tertiary block mb-1">{t('vscode.settings.pathLabel')}</label>
+              <input
+                type="text"
+                className="w-full text-sm mono"
+                placeholder="/usr/bin/code · C:\\...\\bin\\code.cmd"
+                value={vscodePathInput}
+                onChange={(e) => setVscodePathInput(e.target.value)}
+                onBlur={async () => {
+                  if (vscodePathInput === (settings.vscodePath ?? '')) return;
+                  try {
+                    await setSetting('vscodePath', vscodePathInput.trim());
+                    toast.success(t('vscode.settings.saved'));
+                    await detectVsCodeCli(true);
+                  } catch { /* ignore */ }
+                }}
+              />
+              <div className="text-2xs text-text-tertiary mt-1">{t('vscode.settings.pathHint')}</div>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button
+                  className="btn-secondary text-xs px-2 py-1"
+                  disabled={!currentRepo}
+                  onClick={async () => {
+                    if (!currentRepo) return;
+                    try {
+                      const res = await api.vscode.open(currentRepo.path);
+                      if (res.ok) toast.success(t('vscode.opened'));
+                      else toast.error(t('vscode.openFailed'));
+                    } catch (e) {
+                      toast.error(t('vscode.openFailed'), String(e));
+                    }
+                  }}
+                >
+                  {t('vscode.settings.openRepo')}
+                </button>
+                {vscodeTool?.vscodeConfigured ? (
+                  <>
+                    <span className="text-2xs px-2 py-1 rounded bg-green-500/15 text-green-600 dark:text-green-400 self-center">
+                      {t('vscode.settings.registered')}
+                    </span>
+                    <button
+                      className="btn-secondary text-xs px-2 py-1"
+                      disabled={!currentRepo}
+                      onClick={async () => {
+                        if (!currentRepo) return;
+                        try {
+                          const res = await api.vscode.removeDiffTool(currentRepo.path);
+                          if (res.ok) {
+                            toast.success(t('vscode.settings.removedToast'));
+                            setVscodeTool(await api.vscode.diffToolStatus(currentRepo.path));
+                          } else toast.error(res.detail || t('vscode.openFailed'));
+                        } catch (e) {
+                          toast.error(t('vscode.openFailed'), String(e));
+                        }
+                      }}
+                    >
+                      {t('vscode.settings.removeDiffTool')}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="btn-secondary text-xs px-2 py-1"
+                    disabled={!currentRepo}
+                    onClick={async () => {
+                      if (!currentRepo) return;
+                      try {
+                        const res = await api.vscode.installDiffTool(currentRepo.path);
+                        if (res.ok) {
+                          toast.success(t('vscode.settings.registeredToast'));
+                          setVscodeTool(await api.vscode.diffToolStatus(currentRepo.path));
+                        } else toast.error(res.detail || t('vscode.notFound'));
+                      } catch (e) {
+                        toast.error(t('vscode.openFailed'), String(e));
+                      }
+                    }}
+                  >
+                    {t('vscode.settings.registerDiffTool')}
+                  </button>
+                )}
+              </div>
+            </div>
             <div>
-              <label className="text-xs text-text-tertiary block mb-1">Diff tool command</label>
+              <label className="text-xs text-text-tertiary block mb-1">{t('settings.diffToolCommand')}</label>
               <input
                 type="text"
                 className="w-full text-sm mono"
@@ -584,18 +720,17 @@ export function SettingsPage() {
                   if (currentRepo) {
                     try {
                       await api.git.configSet(currentRepo.path, 'diff.tool', e.target.value);
-                      toast.success('Diff tool saved');
+                      toast.success(t('settings.diffToolSaved'));
                     } catch { /* ignore */ }
                   }
                 }}
               />
               <div className="text-2xs text-text-tertiary mt-1">
-                Use <code className="mono">$LOCAL</code> and <code className="mono">$REMOTE</code> variables.
-                Leave empty to use built-in diff viewer.
+                {t('settings.diffVarsUse')} <code className="mono">$LOCAL</code> {t('settings.and')} <code className="mono">$REMOTE</code>{t('settings.diffVarsSuffix')}
               </div>
             </div>
             <div>
-              <label className="text-xs text-text-tertiary block mb-1">Merge tool command</label>
+              <label className="text-xs text-text-tertiary block mb-1">{t('settings.mergeToolCommand')}</label>
               <input
                 type="text"
                 className="w-full text-sm mono"
@@ -605,13 +740,13 @@ export function SettingsPage() {
                   if (currentRepo) {
                     try {
                       await api.git.configSet(currentRepo.path, 'merge.tool', e.target.value);
-                      toast.success('Merge tool saved');
+                      toast.success(t('settings.mergeToolSaved'));
                     } catch { /* ignore */ }
                   }
                 }}
               />
               <div className="text-2xs text-text-tertiary mt-1">
-                Variables: <code className="mono">$LOCAL $BASE $REMOTE $MERGED</code>
+                {t('settings.variables')} <code className="mono">$LOCAL $BASE $REMOTE $MERGED</code>
               </div>
             </div>
           </div>
@@ -621,10 +756,10 @@ export function SettingsPage() {
         {/* Pull Strategy */}
         {showProject && (
         <section className="panel mb-4">
-          <div className="panel-header">Pull Strategy</div>
+          <div className="panel-header">{t('settings.pullStrategy')}</div>
           <div className="p-5 space-y-4">
             <div>
-              <label className="text-xs text-text-tertiary block mb-2">When pulling from remote:</label>
+              <label className="text-xs text-text-tertiary block mb-2">{t('settings.whenPulling')}</label>
               <div className="flex gap-4">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input
@@ -635,8 +770,8 @@ export function SettingsPage() {
                     onChange={() => setSetting('pullStrategy', 'merge')}
                   />
                   <div>
-                    <div className="font-medium">Merge (default)</div>
-                    <div className="text-2xs text-text-tertiary">Creates a merge commit when local and remote have diverged</div>
+                    <div className="font-medium">{t('settings.mergeDefault')}</div>
+                    <div className="text-2xs text-text-tertiary">{t('settings.mergeDesc')}</div>
                   </div>
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -648,14 +783,14 @@ export function SettingsPage() {
                     onChange={() => setSetting('pullStrategy', 'rebase')}
                   />
                   <div>
-                    <div className="font-medium">Rebase</div>
-                    <div className="text-2xs text-text-tertiary">Replays local commits on top of remote, linear history</div>
+                    <div className="font-medium">{t('toolbar.rebase')}</div>
+                    <div className="text-2xs text-text-tertiary">{t('settings.rebaseDesc')}</div>
                   </div>
                 </label>
               </div>
             </div>
             <div className="text-2xs text-text-tertiary">
-              This setting applies to the quick Pull button and the Pull dropdown. The dropdown also has per-pull checkboxes for manual override.
+              {t('settings.pullStrategyHint')}
             </div>
           </div>
         </section>
@@ -665,7 +800,7 @@ export function SettingsPage() {
         {showProject && (
           <section className="panel mb-4">
             <div className="panel-header flex items-center justify-between">
-              <span>Git Config — {currentRepo.name}</span>
+              <span>{t('settings.gitConfig')} — {currentRepo.name}</span>
               <div className="flex items-center gap-1">
                 {(['local', 'global', 'system'] as const).map((s) => (
                   <button
@@ -681,7 +816,7 @@ export function SettingsPage() {
                     {s}
                   </button>
                 ))}
-                <button className="icon-btn !w-5 !h-5 ml-1" title="Reload config" onClick={loadConfig}>
+                <button className="icon-btn !w-5 !h-5 ml-1" title={t('settings.reloadConfig')} onClick={loadConfig}>
                   {configLoading ? <Loader size={11} className="spin" /> : <RefreshCw size={11} />}
                 </button>
               </div>
@@ -690,14 +825,14 @@ export function SettingsPage() {
               <input
                 type="text"
                 className="w-full text-xs"
-                placeholder="Filter keys..."
+                placeholder={t('settings.filterKeys')}
                 value={configFilter}
                 onChange={(e) => setConfigFilter(e.target.value)}
               />
               <div className="max-h-72 overflow-y-auto border border-border-default rounded">
                 {configEntries.length === 0 ? (
                   <div className="p-4 text-xs text-text-tertiary text-center">
-                    No {configScope} config entries
+                    {t('settings.noConfigEntries', { scope: configScope })}
                   </div>
                 ) : (
                   configEntries
@@ -725,7 +860,7 @@ export function SettingsPage() {
                             />
                             <button
                               className="icon-btn !w-5 !h-5 hover:!text-status-added"
-                              title="Save (Enter)"
+                              title={t('settings.saveEnter')}
                               onClick={() => { handleConfigSet(entry.key, editingValue); setEditingKey(null); }}
                             >
                               ✓
@@ -735,14 +870,14 @@ export function SettingsPage() {
                           <>
                             <code
                               className="flex-1 font-mono text-text-primary truncate cursor-pointer hover:text-accent"
-                              title="Click to edit value"
+                              title={t('settings.clickToEdit')}
                               onClick={() => { setEditingKey(`${entry.key}-${i}`); setEditingValue(entry.value); }}
                             >
-                              {entry.value || <span className="text-text-tertiary italic">(empty)</span>}
+                              {entry.value || <span className="text-text-tertiary italic">{t('settings.emptyValue')}</span>}
                             </code>
                             <button
                               className="icon-btn !w-5 !h-5 opacity-0 group-hover:opacity-100 hover:!text-status-deleted"
-                              title="Remove key (git config --unset)"
+                              title={t('settings.removeKeyTitle')}
                               onClick={() => handleConfigUnset(entry.key)}
                             >
                               <Trash size={10} />
@@ -765,7 +900,7 @@ export function SettingsPage() {
                 <input
                   type="text"
                   className="flex-1 font-mono text-xs"
-                  placeholder="value"
+                  placeholder={t('settings.valuePlaceholder')}
                   value={newValue}
                   onChange={(e) => setNewValue(e.target.value)}
                 />
@@ -778,12 +913,11 @@ export function SettingsPage() {
                   }}
                 >
                   <Plus size={11} />
-                  Add
+                  {t('common.add')}
                 </button>
               </div>
               <div className="text-2xs text-text-tertiary">
-                Click a value to edit it. Changes apply to the <b>{configScope}</b> scope
-                {configScope === 'local' ? ' (this repository only)' : configScope === 'global' ? ' (your user account)' : ' (whole machine)'}.
+                {t('settings.configScopeHint')} <b>{configScope}</b>{configScope === 'local' ? t('settings.scopeNoteLocal') : configScope === 'global' ? t('settings.scopeNoteGlobal') : t('settings.scopeNoteSystem')}
               </div>
             </div>
           </section>
@@ -792,7 +926,7 @@ export function SettingsPage() {
         {/* SmartGit Manual: Preferences → Commands */}
         {showApp && (
         <section className="panel mb-4">
-          <div className="panel-header">Commands</div>
+          <div className="panel-header">{t('settings.commands')}</div>
           <div className="p-5 space-y-3 text-sm">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
@@ -801,9 +935,9 @@ export function SettingsPage() {
                 onChange={(e) => setSetting('allowModifyingPushedCommits', e.target.checked)}
               />
               <div className="flex-1">
-                <div>Allow modifying pushed commits (e.g. forced-push)</div>
+                <div>{t('settings.allowModifyingPushed')}</div>
                 <div className="text-2xs text-text-tertiary mt-0.5">
-                  When enabled, the amend / squash / rebase confirmation for pushed commits becomes a warning instead of a hard block.
+                  {t('settings.allowModifyingPushedHint')}
                 </div>
               </div>
             </label>
@@ -814,9 +948,9 @@ export function SettingsPage() {
                 onChange={(e) => setSetting('detectRenames', e.target.checked)}
               />
               <div className="flex-1">
-                <div>Detect renames in refresh</div>
+                <div>{t('settings.detectRenames')}</div>
                 <div className="text-2xs text-text-tertiary mt-0.5">
-                  Pair added + deleted files as renames (git diff --find-renames=50%).
+                  {t('settings.detectRenamesHint')}
                 </div>
               </div>
             </label>
@@ -827,9 +961,9 @@ export function SettingsPage() {
                 onChange={(e) => setSetting('distinguishEolChanges', e.target.checked)}
               />
               <div className="flex-1">
-                <div>Distinguish between content and EOL-only changes</div>
+                <div>{t('settings.distinguishEol')}</div>
                 <div className="text-2xs text-text-tertiary mt-0.5">
-                  Marks files whose only changes are line-ending differences (CRLF ↔ LF).
+                  {t('settings.distinguishEolHint')}
                 </div>
               </div>
             </label>
@@ -840,9 +974,9 @@ export function SettingsPage() {
                 onChange={(e) => setSetting('autoStashOnCommonCommands', e.target.checked)}
               />
               <div className="flex-1">
-                <div>Auto-stash on common commands</div>
+                <div>{t('settings.autoStash')}</div>
                 <div className="text-2xs text-text-tertiary mt-0.5">
-                  Stash local changes before merge/rebase/pull, then pop after.
+                  {t('settings.autoStashHint')}
                 </div>
               </div>
             </label>
@@ -853,9 +987,9 @@ export function SettingsPage() {
                 onChange={(e) => setSetting('includeUntrackedInStash', e.target.checked)}
               />
               <div className="flex-1">
-                <div>Include untracked files in stash</div>
+                <div>{t('settings.includeUntrackedStash')}</div>
                 <div className="text-2xs text-text-tertiary mt-0.5">
-                  Passes -u to git stash push — also stashes untracked files.
+                  {t('settings.includeUntrackedStashHint')}
                 </div>
               </div>
             </label>
@@ -866,11 +1000,10 @@ export function SettingsPage() {
         {/* SmartGit Manual: External Tools system */}
         {showApp && (
         <section className="panel mb-4">
-          <div className="panel-header">External Tools</div>
+          <div className="panel-header">{t('settings.externalTools')}</div>
           <div className="p-5 text-sm space-y-3">
             <div className="text-2xs text-text-tertiary">
-              Configure external tools for opening files, comparing, and conflict solving.
-              Variables: <code className="mono text-accent">{`{filePath}`}</code>,{' '}
+              {t('settings.extToolsConfigure')} {t('settings.variables')} <code className="mono text-accent">{`{filePath}`}</code>,{' '}
               <code className="mono text-accent">{`{repositoryRootPath}`}</code>,{' '}
               <code className="mono text-accent">{`{commit}`}</code>,{' '}
               <code className="mono text-accent">{`{leftFile}`}</code>,{' '}
@@ -896,9 +1029,9 @@ export function SettingsPage() {
               />
             </div>
             <div className="text-2xs text-text-tertiary">
-              These write to git config <code>diff.tool</code> and <code>merge.tool</code>.
-              The actual tool command should be defined in <code>[difftool "..."]</code> /{' '}
-              <code>[mergetool "..."]</code> sections.
+              {t('settings.extToolsWrite')} <code>diff.tool</code> {t('settings.and')} <code>merge.tool</code>.{' '}
+              {t('settings.extToolsCommandHint')} <code>[difftool "..."]</code> /{' '}
+              <code>[mergetool "..."]</code>{t('settings.extToolsSectionsSuffix')}
             </div>
           </div>
         </section>
@@ -907,11 +1040,10 @@ export function SettingsPage() {
         {/* SmartGit Manual: Low-Level Properties editor */}
         {showApp && (
         <section className="panel mb-4">
-          <div className="panel-header">Low-Level Properties</div>
+          <div className="panel-header">{t('settings.lowLevelProps')}</div>
           <div className="p-5 text-sm space-y-3">
             <div className="text-2xs text-text-tertiary">
-              Advanced settings stored in <code>smartgit.properties</code>.
-              Changes apply on next restart.
+              {t('settings.lowLevelHint')} <code>smartgit.properties</code>. {t('settings.lowLevelRestart')}
             </div>
             <textarea
               className="w-full font-mono text-xs h-32 resize-y p-2 border border-border-default rounded bg-bg-tertiary"
@@ -936,7 +1068,7 @@ smartgit.refresh.inspectEol=true
 `);
                 }}
               >
-                Reset to defaults
+                {t('settings.resetToDefaults')}
               </button>
             </div>
           </div>
@@ -946,7 +1078,7 @@ smartgit.refresh.inspectEol=true
         {/* SmartGit Manual: AI Commit Messages (v25+) */}
         {showApp && (
         <section className="panel mb-4">
-          <div className="panel-header">AI Commit Messages</div>
+          <div className="panel-header">{t('settings.aiCommitMessages')}</div>
           <div className="p-5 text-sm space-y-3">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
@@ -955,31 +1087,31 @@ smartgit.refresh.inspectEol=true
                 onChange={(e) => setSetting('aiCommitMessagesEnabled', e.target.checked)}
               />
               <div className="flex-1">
-                <div>Enable AI integration</div>
+                <div>{t('settings.enableAi')}</div>
                 <div className="text-2xs text-text-tertiary mt-0.5">
-                  Use <code className="mono">@ai</code> in commit message to generate, or <code className="mono">WIP</code> for "WIP: &lt;ai message&gt;".
+                  {t('settings.aiHintUse')} <code className="mono">@ai</code> {t('settings.aiHintOr')} <code className="mono">WIP</code> {t('settings.aiHintWipSuffix')}
                 </div>
               </div>
             </label>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Provider</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('settings.provider')}</label>
                 <select
                   className="w-full text-sm"
                   value={settings.aiProvider || ''}
                   onChange={(e) => setSetting('aiProvider', e.target.value)}
                 >
-                  <option value="">— Disabled —</option>
+                  <option value="">{t('settings.disabledOption')}</option>
                   <option value="openai">OpenAI (gpt-4o-mini)</option>
                   <option value="anthropic">Anthropic (Claude)</option>
                   <option value="github">GitHub Models</option>
                   <option value="mistral">Mistral</option>
-                  <option value="ollama">Ollama (local)</option>
-                  <option value="custom">Custom (OpenAI-compatible)</option>
+                  <option value="ollama">{t('settings.aiProviderOllamaLocal')}</option>
+                  <option value="custom">{t('settings.aiProviderCustom')}</option>
                 </select>
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Model</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('settings.model')}</label>
                 <input
                   type="text"
                   className="w-full text-sm font-mono"
@@ -989,7 +1121,7 @@ smartgit.refresh.inspectEol=true
                 />
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">API URL</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiUrl')}</label>
                 <input
                   type="text"
                   className="w-full text-sm font-mono"
@@ -999,7 +1131,7 @@ smartgit.refresh.inspectEol=true
                 />
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">API Key</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiKey')}</label>
                 <input
                   type="password"
                   className="w-full text-sm font-mono"
@@ -1010,13 +1142,12 @@ smartgit.refresh.inspectEol=true
               </div>
             </div>
             <div className="text-2xs text-text-tertiary">
-              For Ollama (local LLM), leave API Key empty and set URL to <code>http://localhost:11434</code>.
-              The model must already be pulled (<code className="mono">ollama pull llama3.2</code>).
+              {t('settings.ollamaHint')} <code>http://localhost:11434</code>. {t('settings.ollamaPullHint')} (<code className="mono">ollama pull llama3.2</code>).
             </div>
             {/* SmartGit Manual v26: Custom AI Prompts with template vars */}
             <div>
               <label className="text-xs text-text-tertiary block mb-1">
-                Custom System Prompt (optional — supports {'{{branch}}'}, {'{{author}}'}, {'{{date}}'}, {'{{repository}}'} template vars)
+                {t('settings.customPromptLabel')} {'{{branch}}'}, {'{{author}}'}, {'{{date}}'}, {'{{repository}}'}{t('settings.customPromptSuffix')}
               </label>
               <textarea
                 className="w-full font-mono text-xs h-16 resize-none p-2 border border-border-default rounded bg-bg-tertiary"
@@ -1032,23 +1163,23 @@ smartgit.refresh.inspectEol=true
         {/* SmartGit Manual: Force Push Policies */}
         {showApp && (
         <section className="panel mb-4">
-          <div className="panel-header">Force Push Policy</div>
+          <div className="panel-header">{t('settings.forcePushPolicy')}</div>
           <div className="p-5 space-y-3 text-sm">
             <div>
-              <label className="text-xs text-text-tertiary block mb-1">Policy</label>
+              <label className="text-xs text-text-tertiary block mb-1">{t('settings.policy')}</label>
               <select
                 className="w-full text-sm"
                 value={settings.forcePushPolicy || 'feature-only'}
                 onChange={(e) => setSetting('forcePushPolicy', e.target.value as 'deny' | 'feature-only' | 'allow')}
               >
-                <option value="allow">Allow force push on all branches (dangerous)</option>
-                <option value="feature-only">Allow on feature branches only (protect main/master)</option>
-                <option value="deny">Deny force push globally (safest)</option>
+                <option value="allow">{t('settings.forcePushAllow')}</option>
+                <option value="feature-only">{t('settings.forcePushFeatureOnly')}</option>
+                <option value="deny">{t('settings.forcePushDeny')}</option>
               </select>
             </div>
             <div>
               <label className="text-xs text-text-tertiary block mb-1">
-                Protected branches (one glob per line — e.g., main, master, develop, release/*)
+                {t('settings.protectedBranchesLabel')}
               </label>
               <textarea
                 className="w-full font-mono text-xs h-20 resize-none p-2 border border-border-default rounded bg-bg-tertiary"
@@ -1058,8 +1189,8 @@ smartgit.refresh.inspectEol=true
               />
             </div>
             <div className="text-2xs text-text-tertiary">
-              When policy is <code>feature-only</code>, force push is rejected on protected branches.
-              SmartGit Manual: thin safety configuration for force push.
+              {t('settings.forcePushHint')} <code>feature-only</code>, {t('settings.forcePushHint2')}{' '}
+              {t('settings.forcePushManualNote')}
             </div>
           </div>
         </section>
@@ -1068,11 +1199,10 @@ smartgit.refresh.inspectEol=true
         {/* SmartGit Manual: CI/CD Integration (Jenkins, TeamCity, GitLab CI) */}
         {showApp && (
         <section className="panel mb-4">
-          <div className="panel-header">CI/CD Integration</div>
+          <div className="panel-header">{t('settings.ciCd')}</div>
           <div className="p-5 space-y-3 text-sm">
             <div className="text-2xs text-text-tertiary">
-              Configure CI servers to display pipeline status badges in History.
-              GitHub Actions is configured via GitHub PAT (see GitHub Integration above).
+              {t('settings.ciCdHint')}
             </div>
             {/* Jenkins */}
             <div className="border-t border-border-subtle pt-3">
@@ -1148,13 +1278,13 @@ smartgit.refresh.inspectEol=true
         {/* Output / Command Log Settings */}
         {showApp && (
         <section className="panel mb-4">
-          <div className="panel-header">Output Panel</div>
+          <div className="panel-header">{t('settings.outputPanel')}</div>
           <div className="p-5 space-y-3 text-sm">
             <label className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Command log limit</div>
+                <div className="text-sm font-medium">{t('settings.commandLogLimit')}</div>
                 <div className="text-xs text-text-tertiary">
-                  Maximum number of commands shown in the Output panel's Commands tab (default 20)
+                  {t('settings.commandLogLimitHint')}
                 </div>
               </div>
               <input
@@ -1173,14 +1303,14 @@ smartgit.refresh.inspectEol=true
         {/* About */}
         {showApp && (
         <section className="panel mb-4">
-          <div className="panel-header">About</div>
+          <div className="panel-header">{t('settings.about')}</div>
           <div className="p-5 text-sm space-y-2">
             <div className="flex justify-between">
-              <span className="text-text-tertiary">Version</span>
+              <span className="text-text-tertiary">{t('settings.version')}</span>
               <span className="font-mono">2.0.0</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-text-tertiary">Platform</span>
+              <span className="text-text-tertiary">{t('settings.platform')}</span>
               <span className="font-mono">{navigator.platform}</span>
             </div>
             <div className="flex justify-between">

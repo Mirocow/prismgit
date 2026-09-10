@@ -90,6 +90,8 @@ export interface AppSettings {
   diffTool?: string;
   /** git config merge.tool value (e.g., "vscode-merge"). */
   mergeTool?: string;
+  /** Custom VS Code CLI path (auto-detected from platform paths / PATH when empty). */
+  vscodePath?: string;
   // === SmartGit Manual: Low-Level Properties ===
   /** Contents of smartgit.properties file (UTF-8, key=value, # for comments). */
   lowLevelProperties?: string;

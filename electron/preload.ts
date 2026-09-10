@@ -4,6 +4,7 @@ import type { GithubApi } from './types/github-api.js';
 import type { FsApi } from './types/fs-api.js';
 import type { SettingsApi } from './types/settings-api.js';
 import type { CommandLogEntry } from './types/command-log-api.js';
+import type { VsCodeApi } from './types/vscode-api.js';
 
 const api = {
   // Git operations
@@ -410,7 +411,23 @@ const api = {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
     openExternal: (url: string) => ipcRenderer.send('app:openExternal', url),
+    /** Locale override for e2e/tests (PRISMGIT_LOCALE), empty in normal runs. */
+    envLocale: (typeof process !== 'undefined' && process.env && process.env.PRISMGIT_LOCALE) || '',
+    /** Notify the main process of the active UI locale (rebuilds the menu). */
+    setLocale: (locale: string) => ipcRenderer.send('app:setLocale', locale),
   },
+
+  // VSCode integration
+  vscode: {
+    detect: (force?: boolean) => ipcRenderer.invoke('vscode:detect', force),
+    open: (repoPath: string, target?: { file?: string; line?: number }) =>
+      ipcRenderer.invoke('vscode:open', repoPath, target),
+    openFileDiff: (repoPath: string, file: string) => ipcRenderer.invoke('vscode:openFileDiff', repoPath, file),
+    openMerge: (repoPath: string, file: string) => ipcRenderer.invoke('vscode:openMerge', repoPath, file),
+    diffToolStatus: (repoPath: string) => ipcRenderer.invoke('vscode:diffToolStatus', repoPath),
+    installDiffTool: (repoPath: string) => ipcRenderer.invoke('vscode:installDiffTool', repoPath),
+    removeDiffTool: (repoPath: string) => ipcRenderer.invoke('vscode:removeDiffTool', repoPath),
+  } as VsCodeApi,
 
   // File watcher for auto-refresh
   watcher: {

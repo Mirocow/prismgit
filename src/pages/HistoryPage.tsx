@@ -36,6 +36,7 @@ import { RefBadges } from '../lib/refBadge';
 import { blockedOperationToast } from '../lib/repoState';
 import { useLazyList } from '../lib/useLazyList';
 import { cn, copyToClipboard, formatDate, shortHash } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -52,6 +53,7 @@ const GRAPH_PAD = 8;
 export { BRANCH_COLORS };
 
 export function HistoryPage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -260,7 +262,7 @@ export function HistoryPage() {
           selectCommit(result[0].hash);
         }
       }
-    } catch (e) { toast.error('Failed to load history', String(e)); }
+    } catch (e) { toast.error(t('history.loadFailed'), String(e)); }
     finally { setLoading(false); }
   }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit]);
 
@@ -636,27 +638,27 @@ export function HistoryPage() {
   const handleCherryPick = async (entry: { hash: string; subject: string }) => {
     if (blockedByCherryPick()) return;
     if (!(await confirmDialog({
-      title: `Cherry-pick ${shortHash(entry.hash)}`,
-      message: `Apply the changes from this commit onto your current branch?\n\nCommit: "${entry.subject}"`,
-      confirmLabel: 'Cherry-pick',
+      title: t('history.cherryPickTitle', { hash: shortHash(entry.hash) }),
+      message: t('history.cherryPickMessage', { subject: entry.subject }),
+      confirmLabel: t('history.cherryPickAction'),
     }))) return;
     setCpBusyHash(entry.hash);
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) {
-        toast.warning(`${result.conflicts.length} conflicts`, 'Resolve them on the Changes page, then press Continue');
+        toast.warning(t('history.nConflicts', { count: result.conflicts.length }), t('history.cherryPickConflictsDetail'));
       } else if (result.empty) {
         toast.warning(
-          'The cherry-pick is empty — changes are already applied',
-          'Resolve it on the Changes page: Skip (drop) or Commit Empty'
+          t('history.cherryPickEmpty'),
+          t('history.cherryPickEmptyDetail')
         );
       } else if (result.error) {
-        toast.error('Cherry-pick failed', result.error);
+        toast.error(t('history.cherryPickFailed'), result.error);
       } else {
-        toast.success('Cherry-picked');
+        toast.success(t('history.cherryPicked'));
       }
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Cherry-pick failed', String(e)); }
+    } catch (e) { toast.error(t('history.cherryPickFailed'), String(e)); }
     finally { setCpBusyHash(null); }
   };
 
@@ -667,74 +669,74 @@ export function HistoryPage() {
   const handleRevert = async (entry: LogEntry) => {
     if (blockedByCherryPick()) return;
     if (!(await confirmDialog({
-      title: `Revert ${shortHash(entry.hash)}`,
-      message: `Create a NEW commit that undoes the changes from this commit?\n\nOriginal commit: "${entry.subject}"`,
-      confirmLabel: 'Revert',
+      title: t('history.revertTitle', { hash: shortHash(entry.hash) }),
+      message: t('history.revertMessage', { subject: entry.subject }),
+      confirmLabel: t('history.revertAction'),
     }))) return;
     try {
       const result = await api.git.revert(repo.path, [entry.hash]);
-      if (result.conflicts.length > 0) toast.warning(`${result.conflicts.length} conflicts`);
-      else toast.success('Reverted');
+      if (result.conflicts.length > 0) toast.warning(t('history.nConflicts', { count: result.conflicts.length }));
+      else toast.success(t('history.reverted'));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Revert failed', String(e)); }
+    } catch (e) { toast.error(t('history.revertFailed'), String(e)); }
   };
 
   const handleReset = async (hash: string, mode: 'soft' | 'mixed' | 'hard' | 'keep') => {
     if (blockedByCherryPick()) return;
     if (!(await confirmDialog({
-      title: `Reset to ${shortHash(hash)} (${mode})`,
+      title: t('history.resetTitle', { hash: shortHash(hash), mode }),
       message: mode === 'hard'
-        ? 'WARNING: all uncommitted changes will be lost!'
-        : `Move the current branch to ${shortHash(hash)} using a ${mode} reset.`,
-      confirmLabel: 'Reset',
+        ? t('history.resetHardWarning')
+        : t('history.resetMessage', { hash: shortHash(hash), mode }),
+      confirmLabel: t('history.resetAction'),
       danger: mode === 'hard',
     }))) return;
     try {
       await api.git.reset(repo.path, mode, hash);
-      toast.success(`Reset ${mode} to ${shortHash(hash)}`);
+      toast.success(t('history.resetDone', { mode, hash: shortHash(hash) }));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Reset failed', String(e)); }
+    } catch (e) { toast.error(t('history.resetFailed'), String(e)); }
   };
 
   const handleRebase = async (hash: string) => {
     if (blockedByCherryPick()) return;
     if (!(await confirmDialog({
-      title: 'Rebase current branch',
-      message: `Replay your current branch's commits on top of ${shortHash(hash)}?\nMay cause conflicts.`,
-      confirmLabel: 'Rebase',
+      title: t('history.rebaseTitle'),
+      message: t('history.rebaseMessage', { hash: shortHash(hash) }),
+      confirmLabel: t('history.rebaseAction'),
     }))) return;
     try {
       await api.git.rebase(repo.path, hash);
-      toast.success('Rebase started');
+      toast.success(t('history.rebaseStarted'));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Rebase failed', String(e)); }
+    } catch (e) { toast.error(t('history.rebaseFailed'), String(e)); }
   };
 
   // Full commit diff via git diff <hash>^..<hash> — rendered in the compare modal
   const handleShowCommitDiff = async (entry: LogEntry) => {
     try {
       const result = await api.git.diffCommit(repo.path, entry.hash);
-      setCompareDiff({ result, title: `Commit ${shortHash(entry.hash)} vs parent` });
-    } catch (e) { toast.error('Failed to load commit diff', String(e)); }
+      setCompareDiff({ result, title: t('history.commitVsParent', { hash: shortHash(entry.hash) }) });
+    } catch (e) { toast.error(t('history.commitDiffFailed'), String(e)); }
   };
 
   // Start an interactive rebase stopped at this commit ('edit') — the user then
   // splits the commit by staging parts and continuing via the Rebase panel.
   const handleStartSplitCommit = async (entry: LogEntry) => {
     if (!(await confirmDialog({
-      title: `Split ${shortHash(entry.hash)}`,
-      message: "This starts an interactive rebase stopped at this commit ('edit').\nThen: reset parts of the commit, stage pieces, commit repeatedly, and press Continue in the Rebase panel.",
-      confirmLabel: 'Split',
+      title: t('history.splitTitle', { hash: shortHash(entry.hash) }),
+      message: t('history.splitMessage'),
+      confirmLabel: t('history.splitAction'),
     }))) return;
     try {
       const res = await api.git.splitCommit(repo.path, entry.hash);
       if (res.started) {
-        toast.success('Interactive edit started — use the Rebase panel to continue');
+        toast.success(t('history.splitStarted'));
         await refreshStatus(repo.path); await loadHistory();
       } else {
-        toast.error('Failed to start split', res.message);
+        toast.error(t('history.splitStartFailed'), res.message);
       }
-    } catch (e) { toast.error('Split failed', String(e)); }
+    } catch (e) { toast.error(t('history.splitFailed'), String(e)); }
   };
 
   // Split-off dialog: move the selected files from this commit into a NEW commit
@@ -759,30 +761,30 @@ export function HistoryPage() {
 
   const handleSplitOffExecute = async () => {
     if (!splitOffEntry) return;
-    if (splitOffSelected.size === 0) { toast.warning('Select at least one file'); return; }
-    if (!splitOffMessage.trim()) { toast.warning('New commit message is required'); return; }
+    if (splitOffSelected.size === 0) { toast.warning(t('history.selectAtLeastOneFile')); return; }
+    if (!splitOffMessage.trim()) { toast.warning(t('history.newCommitMsgRequired')); return; }
     setSplitOffBusy(true);
     try {
       await api.git.splitOffFiles(repo.path, splitOffEntry.hash, Array.from(splitOffSelected), splitOffMessage.trim());
-      toast.success(`Moved ${splitOffSelected.size} file${splitOffSelected.size > 1 ? 's' : ''} into a new commit`);
+      toast.success(splitOffSelected.size === 1 ? t('history.movedOneFile') : t('history.movedNFiles', { count: splitOffSelected.size }));
       setShowSplitOff(false);
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Split off failed', String(e)); }
+    } catch (e) { toast.error(t('history.splitOffFailed'), String(e)); }
     finally { setSplitOffBusy(false); }
   };
 
   const handleCheckout = async (hash: string) => {
     if (blockedByCherryPick()) return;
     if (!(await confirmDialog({
-      title: `Checkout ${shortHash(hash)}`,
-      message: "This puts you in detached HEAD state — you won't be on any branch.",
-      confirmLabel: 'Checkout',
+      title: t('history.checkoutTitle', { hash: shortHash(hash) }),
+      message: t('history.checkoutMessage'),
+      confirmLabel: t('history.checkoutAction'),
     }))) return;
     try {
       await api.git.checkout(repo.path, hash);
-      toast.success(`Checked out ${shortHash(hash)}`);
+      toast.success(t('history.checkedOut', { hash: shortHash(hash) }));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Checkout failed', String(e)); }
+    } catch (e) { toast.error(t('history.checkoutFailed'), String(e)); }
   };
 
   const handleEditMessage = (entry: LogEntry) => {
@@ -796,61 +798,61 @@ export function HistoryPage() {
     if (!selected) return;
     try {
       await api.git.editCommitMessage(repo.path, selected.hash, editMsgValue);
-      toast.success('Commit message updated');
+      toast.success(t('history.commitMsgUpdated'));
       setEditingMessage(false);
       await loadHistory();
-    } catch (e) { toast.error('Failed', String(e)); }
+    } catch (e) { toast.error(t('history.failed'), String(e)); }
   };
 
   const handleEditAuthor = async (entry: LogEntry) => {
     const value = await promptDialog({
-      title: 'Edit Commit Author',
-      message: `Author of ${shortHash(entry.hash)} — current: ${entry.author.name} <${entry.author.email}>`,
+      title: t('history.editAuthorTitle'),
+      message: t('history.editAuthorMessage', { hash: shortHash(entry.hash), author: `${entry.author.name} <${entry.author.email}>` }),
       input: { initialValue: `${entry.author.name} <${entry.author.email}>` },
     });
     if (!value) return;
     const m = value.match(/^([^<]+)<([^>]+)>\s*$/);
-    if (!m) { toast.error('Invalid format', 'Use: Name <email>'); return; }
+    if (!m) { toast.error(t('history.invalidAuthorFormat'), t('history.authorFormatHint')); return; }
     try {
       await api.git.editCommitAuthor(repo.path, entry.hash, m[1].trim(), m[2].trim());
-      toast.success('Author updated');
+      toast.success(t('history.authorUpdated'));
       await loadHistory();
-    } catch (e) { toast.error('Edit author failed', String(e)); }
+    } catch (e) { toast.error(t('history.editAuthorFailed'), String(e)); }
   };
 
   const handleAddNote = async (entry: LogEntry) => {
     const existing = await api.git.notesShow(repo.path, 'commits', entry.hash).catch(() => null);
     const message = await promptDialog({
-      title: existing ? 'Edit Note' : 'Add Note',
-      message: `Git note on ${shortHash(entry.hash)} (category commits)`,
+      title: existing ? t('history.editNoteTitle') : t('history.addNoteTitle'),
+      message: t('history.noteMessage', { hash: shortHash(entry.hash) }),
       input: { initialValue: existing ?? '' },
     });
     if (message === null) return;
     if (message.trim() === '') {
       if (existing) {
-        try { await api.git.notesRemove(repo.path, 'commits', entry.hash); toast.success('Note removed'); }
-        catch (e) { toast.error('Remove note failed', String(e)); }
+        try { await api.git.notesRemove(repo.path, 'commits', entry.hash); toast.success(t('history.noteRemoved')); }
+        catch (e) { toast.error(t('history.removeNoteFailed'), String(e)); }
       }
       return;
     }
     try {
       await api.git.notesAdd(repo.path, 'commits', entry.hash, message.trim(), true);
-      toast.success('Note saved');
+      toast.success(t('history.noteSaved'));
       await loadHistory();
-    } catch (e) { toast.error('Save note failed', String(e)); }
+    } catch (e) { toast.error(t('history.saveNoteFailed'), String(e)); }
   };
 
   const handleFormatPatch = async (entry: LogEntry) => {
     const outDir = await promptDialog({
-      title: 'Format Patch',
-      message: `Write a .patch file for ${shortHash(entry.hash)} to`,
+      title: t('history.formatPatchTitle'),
+      message: t('history.formatPatchMessage', { hash: shortHash(entry.hash) }),
       input: { initialValue: `${repo.path}/patches` },
     });
     if (!outDir) return;
     try {
       const files = await api.git.formatPatch(repo.path, { outputDir: outDir, commit: entry.hash });
-      await confirmDialog({ title: 'Format Patch', message: `Written:\n${files.join('\n')}`, confirmLabel: 'Close', hideCancel: true });
-    } catch (e) { toast.error('Format patch failed', String(e)); }
+      await confirmDialog({ title: t('history.formatPatchTitle'), message: t('history.formatPatchWritten', { files: files.join('\n') }), confirmLabel: t('common.close'), hideCancel: true });
+    } catch (e) { toast.error(t('history.formatPatchFailed'), String(e)); }
   };
 
   const handleOpenInBrowser = async () => {
@@ -860,8 +862,8 @@ export function HistoryPage() {
     try {
       const info = await api.git.extractRepoInfo(repo.path);
       if (info.webUrl) api.app.openExternal(`${info.webUrl}/commit/${selected.hash}`);
-      else toast.info('No remote URL');
-    } catch (e) { toast.error('Failed', String(e)); }
+      else toast.info(t('history.noRemoteUrl'));
+    } catch (e) { toast.error(t('history.failed'), String(e)); }
   };
 
   const showCommitContextMenu = (e: React.MouseEvent, entry: LogEntry, idx: number) => {
@@ -869,42 +871,42 @@ export function HistoryPage() {
     e.stopPropagation();
     setSelectedIdx(idx);
     const items: ContextMenuItem[] = [
-      { label: 'Cherry Pick', clickId: 'cherry-pick' },
-      { label: 'Revert Commit', clickId: 'revert' },
+      { label: t('history.cherryPick'), clickId: 'cherry-pick' },
+      { label: t('history.revert'), clickId: 'revert' },
       { type: 'separator' },
-      { label: 'Checkout (detached HEAD)', clickId: 'checkout' },
+      { label: t('history.checkout'), clickId: 'checkout' },
       { type: 'separator' },
-      { label: 'Reset to this commit', clickId: 'reset-header' },
-      { label: '  Reset Soft (keep changes)', clickId: 'reset-soft' },
-      { label: '  Reset Mixed (unstage)', clickId: 'reset-mixed' },
-      { label: '  Reset Hard (discard all)', clickId: 'reset-hard' },
-      { label: '  Reset Keep (keep working tree)', clickId: 'reset-keep' },
+      { label: t('history.resetToCommit'), clickId: 'reset-header' },
+      { label: t('history.resetSoftMenu'), clickId: 'reset-soft' },
+      { label: t('history.resetMixedMenu'), clickId: 'reset-mixed' },
+      { label: t('history.resetHardMenu'), clickId: 'reset-hard' },
+      { label: t('history.resetKeepMenu'), clickId: 'reset-keep' },
       { type: 'separator' },
-      { label: 'Rebase onto this commit', clickId: 'rebase' },
+      { label: t('history.rebaseOnto'), clickId: 'rebase' },
       { type: 'separator' },
-      { label: 'Create Tag here...', clickId: 'create-tag' },
-      { label: 'Create Branch here...', clickId: 'create-branch' },
+      { label: t('history.createTag'), clickId: 'create-tag' },
+      { label: t('history.createBranch'), clickId: 'create-branch' },
       { type: 'separator' },
-      { label: 'Open in Diff tool...', clickId: 'open-in-diff' },
-      { label: 'Compare with Working Tree...', clickId: 'compare-wt' },
-      { label: 'Show Full Commit Diff', clickId: 'show-commit-diff' },
+      { label: t('history.openInDiff'), clickId: 'open-in-diff' },
+      { label: t('history.compareWithWT'), clickId: 'compare-wt' },
+      { label: t('history.showFullCommitDiff'), clickId: 'show-commit-diff' },
       { type: 'separator' },
-      { label: 'Split Off Files Into New Commit...', clickId: 'split-off' },
-      { label: 'Start Interactive Edit (split commit)', clickId: 'split-commit' },
+      { label: t('history.splitOff'), clickId: 'split-off' },
+      { label: t('history.startInteractiveEdit'), clickId: 'split-commit' },
       { type: 'separator' },
-      { label: 'Add Git Note...', clickId: 'add-note' },
-      { label: 'Show Git Note', clickId: 'show-note' },
-      { label: 'Remove Git Note', clickId: 'remove-note' },
+      { label: t('history.addNote'), clickId: 'add-note' },
+      { label: t('history.showNote'), clickId: 'show-note' },
+      { label: t('history.removeNote'), clickId: 'remove-note' },
       { type: 'separator' },
-      { label: 'Copy Short Hash', clickId: 'copy-short' },
-      { label: 'Copy Full Hash', clickId: 'copy-full' },
-      { label: 'Copy Commit Message', clickId: 'copy-msg' },
+      { label: t('history.copyShortHash'), clickId: 'copy-short' },
+      { label: t('history.copyFullHash'), clickId: 'copy-full' },
+      { label: t('history.copyMessage'), clickId: 'copy-msg' },
       { type: 'separator' },
-      { label: 'Edit Commit Message...', clickId: 'edit-msg' },
-      { label: 'Edit Commit Author...', clickId: 'edit-author' },
+      { label: t('history.editMessage'), clickId: 'edit-msg' },
+      { label: t('history.editCommitAuthorMenu'), clickId: 'edit-author' },
       { type: 'separator' },
-      { label: 'Format Patch...', clickId: 'format-patch' },
-      { label: 'Open in Browser', clickId: 'browser' },
+      { label: t('history.formatPatch'), clickId: 'format-patch' },
+      { label: t('history.openInBrowser'), clickId: 'browser' },
     ];
     showContextMenu(items, (action) => {
       switch (action) {
@@ -939,9 +941,9 @@ export function HistoryPage() {
           window.location.hash = '#/diff';
           break;
         }
-        case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success('Copied'); break;
-        case 'copy-full': copyToClipboard(entry.hash); toast.success('Copied'); break;
-        case 'copy-msg': copyToClipboard(entry.subject); toast.success('Copied'); break;
+        case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success(t('history.copied')); break;
+        case 'copy-full': copyToClipboard(entry.hash); toast.success(t('history.copied')); break;
+        case 'copy-msg': copyToClipboard(entry.subject); toast.success(t('history.copied')); break;
         case 'edit-msg': handleEditMessage(entry); break;
         case 'edit-author': handleEditAuthor(entry); break;
         case 'add-note': handleAddNote(entry); break;
@@ -962,24 +964,24 @@ export function HistoryPage() {
     try {
       const note = await api.git.noteShow(repo.path, entry.hash);
       if (note.trim()) {
-        toast.info(`Note for ${shortHash(entry.hash)}`, note);
+        toast.info(t('history.noteFor', { hash: shortHash(entry.hash) }), note);
       } else {
-        toast.info('No note for this commit');
+        toast.info(t('history.noNote'));
       }
-    } catch (e) { toast.error('Failed to load note', String(e)); }
+    } catch (e) { toast.error(t('history.noteLoadFailed'), String(e)); }
   };
 
   const handleRemoveNote = async (entry: LogEntry) => {
     if (!(await confirmDialog({
-      title: 'Remove Git Note',
-      message: `Remove the Git Note from ${shortHash(entry.hash)}?`,
-      confirmLabel: 'Remove',
+      title: t('history.removeNote'),
+      message: t('history.removeNoteMessage', { hash: shortHash(entry.hash) }),
+      confirmLabel: t('common.remove'),
       danger: true,
     }))) return;
     try {
       await api.git.noteRemove(repo.path, entry.hash);
-      toast.success('Note removed');
-    } catch (e) { toast.error('Failed to remove note', String(e)); }
+      toast.success(t('history.noteRemoved'));
+    } catch (e) { toast.error(t('history.noteRemoveFailed'), String(e)); }
   };
 
   // Tag-from-commit dialog state
@@ -1002,11 +1004,11 @@ export function HistoryPage() {
     if (!tagTarget || !tagName.trim()) return;
     try {
       await api.git.createTag(repo.path, tagName.trim(), tagMessage || undefined, tagTarget, false, tagAnnotated);
-      toast.success(`Tag '${tagName}' created`, `Points to ${shortHash(tagTarget)}`);
+      toast.success(t('history.tagCreatedToast', { name: tagName }), t('history.tagPointsTo', { hash: shortHash(tagTarget) }));
       setShowTagDialog(false);
       // Refresh history so the tag decoration appears immediately
       await loadHistory();
-    } catch (e) { toast.error('Failed to create tag', String(e)); }
+    } catch (e) { toast.error(t('history.tagCreateFailed'), String(e)); }
   };
 
   // Branch-from-commit dialog state
@@ -1028,10 +1030,10 @@ export function HistoryPage() {
     try {
       await api.git.createBranch(repo.path, branchName.trim(), branchTarget);
       if (branchCheckout) await api.git.checkout(repo.path, branchName.trim());
-      toast.success(`Branch '${branchName}' created`, `From ${shortHash(branchTarget)}`);
+      toast.success(t('history.branchCreatedToast', { name: branchName }), t('history.branchFrom', { hash: shortHash(branchTarget) }));
       setShowBranchDialog(false);
       await loadHistory();
-    } catch (e) { toast.error('Failed to create branch', String(e)); }
+    } catch (e) { toast.error(t('history.branchCreateFailed'), String(e)); }
   };
 
   // ===== SmartGit Log groups: Stashes + Recyclable Commits — row actions =====
@@ -1099,16 +1101,16 @@ export function HistoryPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default bg-bg-tertiary" style={{ height: 32 }}>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold">Graph</span>
-          <span className="text-2xs text-text-tertiary">{filtered.length} commits</span>
+          <span className="text-xs font-semibold">{t('history.graph')}</span>
+          <span className="text-2xs text-text-tertiary">{t('history.commits', { count: filtered.length })}</span>
           {/* Incoming count badge — shows how many remote-only commits are visible */}
           {(() => {
             const visibleIncoming = filtered.filter(e => incomingHashes.has(e.hash)).length;
             if (visibleIncoming === 0) return null;
             return (
               <span className="text-2xs px-1.5 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium flex items-center gap-0.5"
-                title={`${visibleIncoming} incoming commit(s) — exist on remote but not yet pulled`}>
-                ↓ {visibleIncoming} incoming
+                title={t('history.incomingTitle', { count: visibleIncoming })}>
+                ↓ {t('history.incoming', { count: visibleIncoming })}
               </span>
             );
           })()}
@@ -1135,8 +1137,8 @@ export function HistoryPage() {
             </a>
           )}
           {(authorFilter || dateFrom || dateTo || pathFilter || useRegex) && (
-            <span className="text-2xs text-accent flex items-center gap-1" title="Active filters">
-              <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />filtered
+            <span className="text-2xs text-accent flex items-center gap-1" title={t('history.activeFilters')}>
+              <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />{t('history.filtered')}
             </span>
           )}
           {selectedBranches.size > 0 && (
@@ -1144,35 +1146,35 @@ export function HistoryPage() {
               {Array.from(selectedBranches).slice(0, 3).map(b => (
                 <span key={b} className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1">
                   <GitBranch size={8} />{b}
-                  <button onClick={() => toggleBranch(b)} title="Remove">
+                  <button onClick={() => toggleBranch(b)} title={t('common.remove')}>
                     <X size={8} />
                   </button>
                 </span>
               ))}
               {selectedBranches.size > 3 && (
-                <span className="text-2xs text-text-tertiary">+{selectedBranches.size - 3} more</span>
+                <span className="text-2xs text-text-tertiary">{t('history.nMore', { count: selectedBranches.size - 3 })}</span>
               )}
             </div>
           )}
           {globalPathFilter && (
             <span className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/40 bg-status-modified/10 text-status-modified flex items-center gap-1 ml-2">
               <FileText size={9} />{globalPathFilter}
-              <button onClick={() => setGlobalPathFilter(null)} title="Clear file filter">
+              <button onClick={() => setGlobalPathFilter(null)} title={t('history.clearFileFilter')}>
                 <X size={8} />
               </button>
             </span>
           )}
         </div>
         <div className="flex items-center gap-1">
-          <input type="text" placeholder={useRegex ? 'Regex...' : 'Filter / hash...'} value={search}
+          <input type="text" placeholder={useRegex ? t('history.regexPlaceholder') : t('history.filter')} value={search}
             onChange={(e) => setSearch(e.target.value)} className="text-xs w-40 px-2 py-0.5 font-mono"
-            title={useRegex ? 'Search using JavaScript regex' : 'Search by subject/author/hash — hash prefix resolves across the whole history'} />
+            title={useRegex ? t('history.regexSearchTitle') : t('history.searchTitle')} />
           <button className={cn('icon-btn !w-5 !h-5', useRegex && 'active')}
-            title="Toggle regex" onClick={() => setUseRegex(!useRegex)}>
+            title={t('history.toggleRegex')} onClick={() => setUseRegex(!useRegex)}>
             <span className="text-2xs font-mono">.*</span>
           </button>
           <button className={cn('icon-btn !w-5 !h-5', showFilters && 'active')}
-            title="More filters" onClick={() => setShowFilters(!showFilters)}>
+            title={t('history.moreFilters')} onClick={() => setShowFilters(!showFilters)}>
             <Filter size={11} />
           </button>
           {/* Quick-filter chips — one-click filters without expanding the panel */}
@@ -1181,17 +1183,17 @@ export function HistoryPage() {
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
                 authorFilter === myAuthorName && myAuthorName ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
               onClick={() => setAuthorFilter(authorFilter ? '' : myAuthorName)}
-              title="Show only my commits"
+              title={t('history.mineTitle')}
             >
-              Mine
+              {t('history.mine')}
             </button>
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
                 search.toLowerCase() === 'merge' ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
               onClick={() => setSearch(search.toLowerCase() === 'merge' ? '' : 'merge')}
-              title="Show only merge commits"
+              title={t('history.mergesTitle')}
             >
-              Merges
+              {t('history.merges')}
             </button>
             {/* Smart Views presets (SmartGit Manual) — "Recent" is a DATE preset:
                 it must not pollute the author filter (a 'recent' author filter
@@ -1211,9 +1213,9 @@ export function HistoryPage() {
                   setDateFrom(d.toISOString().slice(0, 10));
                 }
               }}
-              title="Show commits from the last 7 days"
+              title={t('history.recentTitle')}
             >
-              Recent
+              {t('history.recent')}
             </button>
             {/* "Current only" — quick toggle that filters history to just the
                 checked-out branch. Highlights which branch HEAD points at.
@@ -1288,8 +1290,8 @@ export function HistoryPage() {
             >
               <GitBranch size={10} />
               {selectedBranches.size > 0
-                ? `${selectedBranches.size} branch${selectedBranches.size === 1 ? '' : 'es'}`
-                : (branchFilter === 'all' ? 'All branches' : branchFilter)}
+                ? (selectedBranches.size === 1 ? t('history.nBranchOne', { count: selectedBranches.size }) : t('history.nBranchMany', { count: selectedBranches.size }))
+                : (branchFilter === 'all' ? t('history.allBranchesFilter') : branchFilter)}
               <ChevronDown size={9} />
             </button>
             {showBranchPicker && (
@@ -1305,10 +1307,10 @@ export function HistoryPage() {
                       setShowBranchPicker(false);
                     }}
                   />
-                  <span className="font-medium">All branches</span>
+                  <span className="font-medium">{t('history.allBranchesOption')}</span>
                 </label>
                 {branches.filter(b => !b.remote).length > 0 && (
-                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary sticky top-0">Local</div>
+                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary sticky top-0">{t('history.localGroup')}</div>
                 )}
                 {branches.filter(b => !b.remote).map(b => (
                   <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
@@ -1326,7 +1328,7 @@ export function HistoryPage() {
                   </label>
                 ))}
                 {branches.filter(b => b.remote).length > 0 && (
-                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary sticky top-0">Remote</div>
+                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary sticky top-0">{t('history.remoteGroup')}</div>
                 )}
                 {branches.filter(b => b.remote).map(b => (
                   <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
@@ -1347,11 +1349,11 @@ export function HistoryPage() {
                       clearBranches();
                       setBranchFilter('all');
                     }}>
-                    Clear
+                    {t('common.clear')}
                   </button>
                   <button className="text-2xs btn btn-primary !py-0.5 !px-2"
                     onClick={() => setShowBranchPicker(false)}>
-                    Done
+                    {t('history.done')}
                   </button>
                 </div>
               </div>
@@ -1385,25 +1387,25 @@ export function HistoryPage() {
             <ChevronDown size={9} />
           </button>
           <label className="flex items-center gap-1">
-            <span className="text-text-tertiary">Author:</span>
-            <input type="text" value={authorFilter} placeholder="name or email"
+            <span className="text-text-tertiary">{t('history.authorLabel')}</span>
+            <input type="text" value={authorFilter} placeholder={t('history.authorPlaceholder')}
               onChange={(e) => setAuthorFilter(e.target.value)}
               className="text-xs w-32 px-1 py-0.5 bg-bg-tertiary border border-border-default rounded" />
           </label>
           <label className="flex items-center gap-1">
-            <span className="text-text-tertiary">From:</span>
+            <span className="text-text-tertiary">{t('history.fromLabel')}</span>
             <input type="date" value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
               className="text-xs px-1 py-0.5 bg-bg-tertiary border border-border-default rounded" />
           </label>
           <label className="flex items-center gap-1">
-            <span className="text-text-tertiary">To:</span>
+            <span className="text-text-tertiary">{t('history.toLabel')}</span>
             <input type="date" value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
               className="text-xs px-1 py-0.5 bg-bg-tertiary border border-border-default rounded" />
           </label>
           <label className="flex items-center gap-1">
-            <span className="text-text-tertiary">Path:</span>
+            <span className="text-text-tertiary">{t('history.pathLabel')}</span>
             <input type="text" value={pathFilter} placeholder="src/*"
               onChange={(e) => setPathFilter(e.target.value)}
               className="text-xs w-32 px-1 py-0.5 bg-bg-tertiary border border-border-default rounded font-mono" />
@@ -1411,7 +1413,7 @@ export function HistoryPage() {
           {(authorFilter || dateFrom || dateTo || pathFilter) && (
             <button className="btn btn-secondary text-2xs !py-0.5 !px-2"
               onClick={() => { setAuthorFilter(''); setDateFrom(''); setDateTo(''); setPathFilter(''); }}>
-              Clear
+              {t('common.clear')}
             </button>
           )}
         </div>
@@ -1427,10 +1429,10 @@ export function HistoryPage() {
         {/* Graph + Commit list */}
         <div className="flex-1 overflow-y-auto" ref={listScrollRef} style={{ position: 'relative' }}>
           {loading ? (
-            <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+            <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
           ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-text-tertiary text-sm">
-              {search ? 'No commits match' : 'No commits yet'}
+              {search ? t('history.noMatch') : t('history.noCommitsYet')}
             </div>
           ) : (
             <div style={{ position: 'relative' }}>
@@ -1540,7 +1542,7 @@ export function HistoryPage() {
                   onClick={() => { setSelectedIdx(-1); window.location.hash = '#/changes'; }}
                 >
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--status-deleted)' }} />
-                  <span className="text-xs font-medium">Working Tree ({status?.files.length || 0} changed)</span>
+                  <span className="text-xs font-medium">{t('history.workingTreeRow', { count: status?.files.length || 0 })}</span>
                 </div>
               )}
 
@@ -1583,7 +1585,7 @@ export function HistoryPage() {
                         branch name. */}
                     {incomingHashes.has(entry.hash) && (
                       <span className="flex-shrink-0 text-2xs px-1.5 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium flex items-center gap-0.5"
-                        title="Incoming — this commit exists on a remote but has not been pulled into a local branch yet. Use Pull to bring it into your local branch.">
+                        title={t('history.incomingBadgeTitle')}>
                         ↓
                         {entry.refs.some(r => r.includes('refs/remotes/') || r.includes('/')) && (
                           <span className="opacity-75">
@@ -1667,7 +1669,7 @@ export function HistoryPage() {
                     {ciStatus[entry.hash]?.conclusion && (
                       <span
                         className="flex-shrink-0 text-2xs"
-                        title={`CI: ${ciStatus[entry.hash].conclusion} (${ciStatus[entry.hash].totalChecks} checks)`}
+                        title={t('history.ciTitle', { conclusion: ciStatus[entry.hash].conclusion ?? '', count: ciStatus[entry.hash].totalChecks })}
                       >
                         {ciStatus[entry.hash].conclusion === 'success' && <span className="text-green-500">●</span>}
                         {ciStatus[entry.hash].conclusion === 'failure' && <span className="text-red-500">●</span>}
@@ -1767,10 +1769,10 @@ export function HistoryPage() {
               )}
               <div className="flex items-center gap-2 mb-3">
                 <CommitHashLink hash={selected.hash} />
-                <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>
+                <button className="icon-btn !w-5 !h-5" title={t('common.copy')} onClick={() => { copyToClipboard(selected.hash); toast.success(t('history.copied')); }}>
                   <Copy size={10} />
                 </button>
-                <button className="icon-btn !w-5 !h-5" title="Browser" onClick={handleOpenInBrowser}>
+                <button className="icon-btn !w-5 !h-5" title={t('history.browserTitle')} onClick={handleOpenInBrowser}>
                   <ExternalLink size={11} />
                 </button>
               </div>
@@ -1786,7 +1788,7 @@ export function HistoryPage() {
               </div>
               {selected.parents.length > 0 && (
                 <div className="mb-3">
-                  <div className="text-2xs uppercase text-text-tertiary mb-1">Parents</div>
+                  <div className="text-2xs uppercase text-text-tertiary mb-1">{t('history.parents')}</div>
                   {selected.parents.map((p, i) => (
                     <div key={i} className="flex items-center gap-1">
                       <CornerDownRight size={10} className="text-text-tertiary" />
@@ -1804,16 +1806,16 @@ export function HistoryPage() {
                   <button
                     className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-1"
                     onClick={() => setShowNested(!showNested)}
-                    title="Commits merged by this merge commit (relative to the first parent)"
+                    title={t('history.mergedCommitsTitle')}
                   >
                     <span className="flex items-center gap-1">
                       {showNested ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                      <GitMerge size={10} /> Merged commits ({nestedCommits.length - 1})
+                      <GitMerge size={10} /> {t('history.mergedCommits', { count: nestedCommits.length - 1 })}
                     </span>
                   </button>
                   {showNested && (
                     <div className="space-y-0.5">
-                      {loadingNested && <div className="text-2xs text-text-tertiary">Loading...</div>}
+                      {loadingNested && <div className="text-2xs text-text-tertiary">{t('common.loading')}</div>}
                       {nestedCommits.map((c) => (
                         <div
                           key={c.hash}
@@ -1822,7 +1824,7 @@ export function HistoryPage() {
                             c.hash === selected.hash && 'text-text-tertiary'
                           )}
                           onClick={() => selectCommit(c.hash)}
-                          title={c.hash === selected.hash ? 'This merge commit' : 'Jump to commit'}
+                          title={c.hash === selected.hash ? t('history.thisMergeCommit') : t('history.jumpToCommit')}
                         >
                           {c.hash === selected.hash
                             ? <GitMerge size={10} className="text-text-tertiary flex-shrink-0" />
@@ -1839,8 +1841,8 @@ export function HistoryPage() {
               {selected.body && !editingMessage && (
                 <div className="mb-3">
                   <div className="text-2xs uppercase text-text-tertiary mb-1 flex items-center justify-between">
-                    <span>Message</span>
-                    <button className="icon-btn !w-4 !h-4" title="Edit" onClick={() => handleEditMessage(selected)}>
+                    <span>{t('history.messageLabel')}</span>
+                    <button className="icon-btn !w-4 !h-4" title={t('common.edit')} onClick={() => handleEditMessage(selected)}>
                       <Pencil size={9} />
                     </button>
                   </div>
@@ -1852,28 +1854,28 @@ export function HistoryPage() {
                   <textarea className="w-full text-xs font-mono h-20 resize-none mb-1"
                     value={editMsgValue} onChange={(e) => setEditMsgValue(e.target.value)} />
                   <div className="flex gap-1">
-                    <button className="btn btn-primary text-2xs" onClick={handleSaveMessage}>Save</button>
-                    <button className="btn btn-secondary text-2xs" onClick={() => setEditingMessage(false)}>Cancel</button>
+                    <button className="btn btn-primary text-2xs" onClick={handleSaveMessage}>{t('common.save')}</button>
+                    <button className="btn btn-secondary text-2xs" onClick={() => setEditingMessage(false)}>{t('common.cancel')}</button>
                   </div>
                 </div>
               )}
               <div className="flex flex-wrap gap-1 mb-3 pb-3 border-b border-border-default">
                 <button className="btn btn-secondary text-2xs" onClick={() => handleCherryPick(selected)}>
-                  <GitPullRequest size={10} /> Cherry Pick
+                  <GitPullRequest size={10} /> {t('history.cherryPick')}
                 </button>
                 <button className="btn btn-secondary text-2xs" onClick={() => handleRevert(selected)}>
-                  <Undo size={10} /> Revert
+                  <Undo size={10} /> {t('history.revertAction')}
                 </button>
                 <button className="btn btn-secondary text-2xs" onClick={() => handleReset(selected.hash, 'mixed')}
-                  title="Reset to this commit (mixed)">
-                  <RotateCcw size={10} /> Reset
+                  title={t('history.resetMixedTitle')}>
+                  <RotateCcw size={10} /> {t('history.resetAction')}
                 </button>
               </div>
               <div>
                 <div className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-1">
                   <button className="flex items-center gap-1" onClick={() => setShowFiles(!showFiles)}>
                     {showFiles ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                    <FileText size={10} /> Files ({commitFiles.length})
+                    <FileText size={10} /> {t('history.filesCount', { count: commitFiles.length })}
                   </button>
                   <div className="flex items-center gap-2 normal-case">
                     {/* View mode toggle: List / Tree */}
@@ -1881,13 +1883,13 @@ export function HistoryPage() {
                       <button
                         className={cn('px-1.5 py-0.5 rounded-l', filesViewMode === 'list' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}
                         onClick={() => setFilesViewMode('list')}
-                        title="Flat list view"
-                      >List</button>
+                        title={t('history.flatListView')}
+                      >{t('history.listView')}</button>
                       <button
                         className={cn('px-1.5 py-0.5 rounded-r', filesViewMode === 'tree' ? 'bg-accent text-text-inverse' : 'text-text-secondary')}
                         onClick={() => setFilesViewMode('tree')}
-                        title="Tree view (collapsible folders)"
-                      >Tree</button>
+                        title={t('history.treeViewTitle')}
+                      >{t('history.treeView')}</button>
                     </div>
                     {/* Pagination for large commits */}
                     {commitFiles.length > 50 && filesViewMode === 'list' && (
@@ -1901,7 +1903,7 @@ export function HistoryPage() {
                 </div>
                 {showFiles && (
                   <div className="space-y-0.5">
-                    {loadingFiles ? <div className="text-2xs text-text-tertiary">Loading...</div> :
+                    {loadingFiles ? <div className="text-2xs text-text-tertiary">{t('common.loading')}</div> :
                       filesViewMode === 'tree' ? (
                         <CommitFileTree
                           files={commitFiles}
@@ -1983,7 +1985,7 @@ export function HistoryPage() {
                               await runFileAction(action, fileCtx);
                             });
                           }}
-                          title={isHighlighted ? `${f.path} — matches your file-history filter` : 'Click to view file history · Right-click for more actions'}
+                          title={isHighlighted ? t('history.matchesFileFilter', { path: f.path }) : t('history.fileRowTitle')}
                         >
                           <span className="font-mono font-bold w-3 text-center"
                             style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
@@ -2007,7 +2009,7 @@ export function HistoryPage() {
               </div>
             </div>
           ) : (
-            <div className="p-4 text-center text-text-tertiary text-sm">Select a commit</div>
+            <div className="p-4 text-center text-text-tertiary text-sm">{t('history.selectCommit')}</div>
           )}
         </div>
       </div>
@@ -2017,19 +2019,19 @@ export function HistoryPage() {
         <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowTagDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-1 flex items-center gap-2">
-              <TagIcon size={16} /> Create Tag at {shortHash(tagTarget || '')}
+              <TagIcon size={16} /> {t('history.createTagAt', { hash: shortHash(tagTarget || '') })}
             </h3>
-            <div className="text-2xs text-text-tertiary mb-4">Tag will point to this commit.</div>
+            <div className="text-2xs text-text-tertiary mb-4">{t('history.tagWillPoint')}</div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Tag name</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('history.tagName')}</label>
                 <input type="text" className="w-full text-sm font-mono" placeholder="v1.0.0"
                   value={tagName} autoFocus
                   onChange={(e) => setTagName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveTag()} />
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Message (optional, for annotated tags)</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('history.tagMessageLabel')}</label>
                 <textarea className="w-full text-sm h-20 resize-none"
                   value={tagMessage}
                   onChange={(e) => setTagMessage(e.target.value)}
@@ -2038,13 +2040,13 @@ export function HistoryPage() {
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={tagAnnotated}
                   onChange={(e) => setTagAnnotated(e.target.checked)} />
-                <span>Annotated tag (recommended — stores tagger + date + message)</span>
+                <span>{t('history.annotatedTagHint')}</span>
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button className="btn btn-secondary" onClick={() => setShowTagDialog(false)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => setShowTagDialog(false)}>{t('common.cancel')}</button>
               <button className="btn btn-primary" onClick={handleSaveTag} disabled={!tagName.trim()}>
-                <TagIcon size={13} /> Create Tag
+                <TagIcon size={13} /> {t('history.createTagButton')}
               </button>
             </div>
           </div>
@@ -2056,12 +2058,12 @@ export function HistoryPage() {
         <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowBranchDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-1 flex items-center gap-2">
-              <GitBranch size={16} /> Create Branch at {shortHash(branchTarget || '')}
+              <GitBranch size={16} /> {t('history.createBranchAt', { hash: shortHash(branchTarget || '') })}
             </h3>
-            <div className="text-2xs text-text-tertiary mb-4">Branch will start from this commit.</div>
+            <div className="text-2xs text-text-tertiary mb-4">{t('history.branchWillStart')}</div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Branch name</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('history.branchName')}</label>
                 <input type="text" className="w-full text-sm font-mono" placeholder="feature/my-branch"
                   value={branchName} autoFocus
                   onChange={(e) => setBranchName(e.target.value)}
@@ -2070,13 +2072,13 @@ export function HistoryPage() {
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={branchCheckout}
                   onChange={(e) => setBranchCheckout(e.target.checked)} />
-                <span>Checkout after creation</span>
+                <span>{t('history.checkoutAfterCreation')}</span>
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button className="btn btn-secondary" onClick={() => setShowBranchDialog(false)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => setShowBranchDialog(false)}>{t('common.cancel')}</button>
               <button className="btn btn-primary" onClick={handleSaveBranch} disabled={!branchName.trim()}>
-                <GitBranch size={13} /> Create Branch
+                <GitBranch size={13} /> {t('history.createBranchButton')}
               </button>
             </div>
           </div>
@@ -2101,14 +2103,14 @@ export function HistoryPage() {
         <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowSplitOff(false)}>
           <div className="panel w-[560px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-4 pt-4">
-              <h3 className="text-base font-medium">Split Off Files Into New Commit</h3>
+              <h3 className="text-base font-medium">{t('history.splitOffDialogTitle')}</h3>
               <div className="text-xs text-text-tertiary mt-1">
-                From {shortHash(splitOffEntry.hash)} "{splitOffEntry.subject}" — selected files move into a NEW commit right after this one.
+                {t('history.splitOffFrom', { hash: shortHash(splitOffEntry.hash), subject: splitOffEntry.subject })}
               </div>
             </div>
             <div className="flex-1 overflow-y-auto mx-4 my-3 border border-border-default rounded">
               {splitOffFileList.length === 0 ? (
-                <div className="p-4 text-xs text-text-tertiary text-center">Loading files...</div>
+                <div className="p-4 text-xs text-text-tertiary text-center">{t('history.loadingFiles')}</div>
               ) : (
                 splitOffFileList.map((f) => (
                   <label
@@ -2137,18 +2139,18 @@ export function HistoryPage() {
               <input
                 type="text"
                 className="w-full text-sm"
-                placeholder="Message for the new commit"
+                placeholder={t('history.newCommitMsgPlaceholder')}
                 value={splitOffMessage}
                 onChange={(e) => setSplitOffMessage(e.target.value)}
               />
               <div className="flex justify-end gap-2">
-                <button className="btn btn-secondary text-xs" onClick={() => setShowSplitOff(false)}>Cancel</button>
+                <button className="btn btn-secondary text-xs" onClick={() => setShowSplitOff(false)}>{t('common.cancel')}</button>
                 <button
                   className="btn btn-primary text-xs"
                   onClick={handleSplitOffExecute}
                   disabled={splitOffBusy || splitOffSelected.size === 0}
                 >
-                  {splitOffBusy ? 'Splitting...' : `Split Off ${splitOffSelected.size} File${splitOffSelected.size === 1 ? '' : 's'}`}
+                  {splitOffBusy ? t('history.splitting') : (splitOffSelected.size === 1 ? t('history.splitOffOne') : t('history.splitOffN', { count: splitOffSelected.size }))}
                 </button>
               </div>
             </div>
