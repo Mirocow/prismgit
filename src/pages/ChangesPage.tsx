@@ -1448,8 +1448,11 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
               </>
             ) : (
               /* === COMBINED VIEW: all files in one list === */
-              <>
-              </>
+              <LazyFileList
+                files={[...stagedFiles, ...unstagedFiles, ...untrackedFiles]}
+                isStaged={false}
+                renderRow={renderFileRow}
+              />
             )}
 
             {totalChanged === 0 && (
