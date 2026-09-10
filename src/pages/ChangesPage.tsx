@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X, Sparkles } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X, Sparkles, SplitSquareHorizontal } from '../components/icons';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { LazyFileList } from '../components/LazyFileList';
@@ -1172,6 +1172,14 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             onClick={() => setCompressFilePaths(!compressFilePaths)}
           >
             <EyeOff size={11} />
+          </button>
+          {/* Diff panel toggle — show/hide the right-side diff viewer */}
+          <button
+            className={cn('icon-btn !w-5 !h-5', showSplitView && 'active')}
+            title={showSplitView ? 'Hide Diff panel' : 'Show Diff panel'}
+            onClick={() => setShowSplitView(!showSplitView)}
+          >
+            <SplitSquareHorizontal size={11} />
           </button>
           {/* Separate Staged/Unstaged view toggle (SmartGit 20.1) */}
           <button
