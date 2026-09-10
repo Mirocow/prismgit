@@ -37,8 +37,17 @@ export interface IndexFlags {
 export interface FileMenuCtx {
   /** Absolute repository path. */
   repoPath: string;
-  /** Repo-relative file path. */
+  /** Repo-relative file path (the clicked file — primary/diff target). */
   path: string;
+  /**
+   * FULL multi-selection (Ctrl/Cmd+click, Ctrl/Cmd+A) the menu was opened
+   * on — ALWAYS including `path`. When absent/empty the menu works on the
+   * clicked file only. Bulk operations (Stage/Unstage/Discard/Stash/
+   * Ignore/Delete/flags/copy) apply to every path; navigation actions
+   * (Show Changes, Blame, File History, Move/Rename, conflict solver)
+   * stay on the clicked file.
+   */
+  paths?: string[];
   /** Which file list the menu is opened from. */
   mode: 'changes' | 'diff' | 'history';
   /** Changes-page working-tree state. */
@@ -88,6 +97,24 @@ export function dirName(path: string): string {
   return i === -1 ? '' : path.substring(0, i);
 }
 
+/**
+ * Target list for a menu action: the whole multi-selection when present,
+ * otherwise just the clicked file. `path` is always included even if the
+ * caller's selection somehow lost it.
+ */
+export function actionTargets(ctx: Pick<FileMenuCtx, 'path' | 'paths'>): string[] {
+  const paths = (ctx.paths ?? []).filter((p) => !!p);
+  const unique = Array.from(new Set(paths));
+  if (unique.length === 0) return [ctx.path];
+  return unique.includes(ctx.path) ? unique : [ctx.path, ...unique];
+}
+
+/** Human label suffix for bulk operations: " (3 files)". */
+export function bulkSuffix(ctx: Pick<FileMenuCtx, 'path' | 'paths'>): string {
+  const n = actionTargets(ctx).length;
+  return n > 1 ? ` (${n} files)` : '';
+}
+
 /** Build the menu items for a file (pure — no side effects). */
 export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
@@ -96,10 +123,12 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
   const tracked =
     ctx.mode === 'changes' ? !(ctx.isUntracked ?? false) && (ctx.indexFlags?.tracked ?? true) : true;
   const untracked = ctx.mode === 'changes' && !!ctx.isUntracked;
+  // Multi-selection: bulk labels show how many files the action will hit.
+  const bulk = bulkSuffix(ctx);
 
-  // --- Open ---------------------------------------------------------------
-  items.push({ label: 'Open', clickId: 'open' });
-  items.push({ label: 'Reveal in File Manager', clickId: 'reveal' });
+  // --- Open (opens EVERY selected file, like a file manager) ----------------
+  items.push({ label: `Open${bulk}`, clickId: 'open' });
+  items.push({ label: `Reveal in File Manager${bulk}`, clickId: 'reveal' });
   items.push({ type: 'separator' });
 
   // --- Inspect ------------------------------------------------------------
@@ -116,19 +145,19 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
   // --- Working-tree operations (Changes mode only) -------------------------
   if (ctx.mode === 'changes') {
     if (ctx.isStaged) {
-      items.push({ label: 'Unstage', clickId: 'unstage' });
+      items.push({ label: `Unstage${bulk}`, clickId: 'unstage' });
     } else {
-      items.push({ label: 'Stage', clickId: 'stage' });
+      items.push({ label: `Stage${bulk}`, clickId: 'stage' });
     }
     items.push({ label: 'Commit...', clickId: 'commit' });
     if (!untracked) {
-      items.push({ label: 'Stash Selection...', clickId: 'stash-file' });
+      items.push({ label: `Stash Selection...${bulk}`, clickId: 'stash-file' });
       items.push({ type: 'separator' });
       items.push({
-        label: ctx.isStaged ? 'Discard Staged Changes...' : 'Discard Changes...',
+        label: ctx.isStaged ? `Discard Staged Changes...${bulk}` : `Discard Changes...${bulk}`,
         clickId: 'discard',
       });
-      items.push({ label: 'Restore from Ref...', clickId: 'restore-from-ref' });
+      items.push({ label: `Restore from Ref...${bulk}`, clickId: 'restore-from-ref' });
     }
     items.push({ type: 'separator' });
 
@@ -151,13 +180,13 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
 
     // --- File operations --------------------------------------------------
     if (untracked) {
-      items.push({ label: 'Add to .gitignore', clickId: 'ignore' });
+      items.push({ label: `Add to .gitignore${bulk}`, clickId: 'ignore' });
       items.push({ label: 'Edit .gitignore', clickId: 'edit-ignore-local' });
       items.push({ label: 'Edit global ignore file', clickId: 'edit-ignore-global' });
     }
     items.push({ label: 'Move or Rename...', clickId: 'move-rename' });
     items.push({
-      label: tracked ? 'Remove...' : 'Delete File...',
+      label: `${tracked ? 'Remove...' : 'Delete File...'}${bulk}`,
       clickId: 'delete-file',
     });
     if (ctx.isConflict) {
@@ -188,8 +217,12 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
  */
 export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<boolean> {
   const t = toast();
-  const full = fullPathOf(ctx.repoPath, ctx.path);
+  // Multi-selection: bulk operations hit every selected file; navigation
+  // actions (history/blame/diff/move/conflict) stay on the clicked file.
+  const targets = actionTargets(ctx);
   const refresh = () => ctx.refresh?.();
+  const n = (verb: string) =>
+    targets.length > 1 ? `${verb} ${targets.length} files` : `${verb} ${baseName(ctx.path)}`;
   const goTo = (hash: string, withPathFilter: boolean) => {
     const sel = useSelectionStore.getState();
     sel.selectFile(ctx.path);
@@ -201,8 +234,14 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     // --- Open ---------------------------------------------------------------
     case 'open': {
       try {
-        const ok = await api.git.openFile(full);
-        if (!ok) t.error(`File not found in working tree`, ctx.path);
+        const missing: string[] = [];
+        for (const p of targets) {
+          const ok = await api.git.openFile(fullPathOf(ctx.repoPath, p));
+          if (!ok) missing.push(p);
+        }
+        if (missing.length > 0) {
+          t.error(`File not found in working tree`, missing.length > 1 ? missing.join(', ') : missing[0]);
+        }
       } catch (e) {
         t.error('Failed to open file', String(e));
       }
@@ -210,8 +249,14 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     }
     case 'reveal': {
       try {
-        const ok = await api.git.revealInFileManager(full);
-        if (!ok) t.error(`File not found in working tree`, ctx.path);
+        const missing: string[] = [];
+        for (const p of targets) {
+          const ok = await api.git.revealInFileManager(fullPathOf(ctx.repoPath, p));
+          if (!ok) missing.push(p);
+        }
+        if (missing.length > 0) {
+          t.error(`File not found in working tree`, missing.length > 1 ? missing.join(', ') : missing[0]);
+        }
       } catch (e) {
         t.error('Failed to reveal', String(e));
       }
@@ -238,8 +283,8 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     // --- Working-tree operations ------------------------------------------------
     case 'stage': {
       try {
-        await api.git.add(ctx.repoPath, [ctx.path]);
-        t.success(`Staged ${baseName(ctx.path)}`);
+        await api.git.add(ctx.repoPath, targets);
+        t.success(n('Staged'));
         refresh();
       } catch (e) {
         t.error('Failed to stage', String(e));
@@ -248,8 +293,8 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     }
     case 'unstage': {
       try {
-        await api.git.resetFile(ctx.repoPath, ctx.path);
-        t.success(`Unstaged ${baseName(ctx.path)}`);
+        for (const p of targets) await api.git.resetFile(ctx.repoPath, p);
+        t.success(n('Unstaged'));
         refresh();
       } catch (e) {
         t.error('Failed to unstage', String(e));
@@ -258,7 +303,7 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     }
     case 'commit': {
       try {
-        if (!ctx.isStaged) await api.git.add(ctx.repoPath, [ctx.path]);
+        if (!ctx.isStaged) await api.git.add(ctx.repoPath, targets);
         refresh();
         ctx.onFocusCommit?.();
       } catch (e) {
@@ -269,7 +314,10 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     case 'stash-file': {
       const msg = await promptDialog({
         title: 'Stash Selection',
-        message: `Stash only '${ctx.path}'?\nEnter an optional stash message.`,
+        message:
+          targets.length > 1
+            ? `Stash ${targets.length} selected files?\nEnter an optional stash message.`
+            : `Stash only '${ctx.path}'?\nEnter an optional stash message.`,
         confirmLabel: 'Stash',
         input: { placeholder: `WIP: ${baseName(ctx.path)}` },
       });
@@ -277,8 +325,8 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       try {
         // Untracked files need --include-untracked, otherwise git refuses:
         // "No local changes to save" — the stash is silently NOT created.
-        await api.git.stashPush(ctx.repoPath, msg.trim() || undefined, ctx.isUntracked ?? false, false, [ctx.path]);
-        t.success(`Stashed ${baseName(ctx.path)}`);
+        await api.git.stashPush(ctx.repoPath, msg.trim() || undefined, ctx.isUntracked ?? false, false, targets);
+        t.success(n('Stashed'));
         refresh();
       } catch (e) {
         t.error('Stash failed', String(e));
@@ -286,23 +334,27 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       return true;
     }
     case 'discard': {
+      const what =
+        targets.length > 1
+          ? `${targets.length} selected files`
+          : `'${ctx.path}'`;
       const ok = await confirmDialog({
         title: ctx.isStaged ? 'Discard staged changes' : 'Discard changes',
         message: ctx.isStaged
-          ? `Discard staged changes for '${ctx.path}'?\nThis will unstage AND restore the file to HEAD.`
-          : `Discard local changes to '${ctx.path}'?\nThis cannot be undone.`,
+          ? `Discard staged changes for ${what}?\nThis will unstage AND restore the files to HEAD.`
+          : `Discard local changes to ${what}?\nThis cannot be undone.`,
         confirmLabel: 'Discard',
         danger: true,
       });
       if (!ok) return true;
       try {
         if (ctx.isStaged) {
-          await api.git.resetFile(ctx.repoPath, ctx.path);
-          await api.git.restore(ctx.repoPath, [ctx.path]);
+          for (const p of targets) await api.git.resetFile(ctx.repoPath, p);
+          await api.git.restore(ctx.repoPath, targets);
         } else {
-          await api.git.restore(ctx.repoPath, [ctx.path]);
+          await api.git.restore(ctx.repoPath, targets);
         }
-        t.success(`Discarded changes in ${baseName(ctx.path)}`);
+        t.success(n('Discarded changes in'));
         refresh();
       } catch (e) {
         t.error('Discard failed', String(e));
@@ -311,15 +363,15 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     }
     case 'restore-from-ref': {
       const ref = await promptDialog({
-        title: `Restore '${ctx.path}' from a ref`,
-        message: 'Enter a ref (commit hash, branch, tag, HEAD~1, …). The working tree copy will be overwritten with that version.',
+        title: targets.length > 1 ? `Restore ${targets.length} files from a ref` : `Restore '${ctx.path}' from a ref`,
+        message: 'Enter a ref (commit hash, branch, tag, HEAD~1, …). The working tree copies will be overwritten with that version.',
         confirmLabel: 'Restore',
         input: { placeholder: 'HEAD~1' },
       });
       if (!ref || !ref.trim()) return true;
       try {
-        await api.git.checkoutFile(ctx.repoPath, ctx.path, ref.trim());
-        t.success(`Restored '${ctx.path}' from ${ref.trim()}`);
+        for (const p of targets) await api.git.checkoutFile(ctx.repoPath, p, ref.trim());
+        t.success(targets.length > 1 ? `Restored ${targets.length} files from ${ref.trim()}` : `Restored '${ctx.path}' from ${ref.trim()}`);
         refresh();
       } catch (e) {
         t.error(`Restore from ${ref.trim()} failed`, String(e));
@@ -334,8 +386,8 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       try {
         const flag = clickId === 'toggle-assume-unchanged' ? 'assume-unchanged' as const : 'skip-worktree' as const;
         const current = flag === 'assume-unchanged' ? ctx.indexFlags.assumeUnchanged : ctx.indexFlags.skipWorktree;
-        await api.git.setIndexFlag(ctx.repoPath, ctx.path, flag, !current);
-        t.success(`${!current ? 'Set' : 'Cleared'} ${flag} on ${baseName(ctx.path)}`);
+        for (const p of targets) await api.git.setIndexFlag(ctx.repoPath, p, flag, !current);
+        t.success(`${!current ? 'Set' : 'Cleared'} ${flag} on ${targets.length > 1 ? `${targets.length} files` : baseName(ctx.path)}`);
         refresh();
       } catch (e) {
         t.error('Failed to update index flag', String(e));
@@ -346,7 +398,7 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     // --- File operations -------------------------------------------------------
     case 'ignore': {
       try {
-        await api.git.ignore(ctx.repoPath, [ctx.path]);
+        await api.git.ignore(ctx.repoPath, targets);
         t.success('Added to .gitignore');
         refresh();
       } catch (e) {
@@ -386,18 +438,19 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     case 'delete-file': {
       const tracked =
         ctx.mode === 'changes' ? !(ctx.isUntracked ?? false) && (ctx.indexFlags?.tracked ?? true) : true;
+      const what = targets.length > 1 ? `${targets.length} selected files` : `'${ctx.path}'`;
       const ok = await confirmDialog({
         title: tracked ? 'Remove file' : 'Delete file',
         message: tracked
-          ? `Remove '${ctx.path}' from the repository AND disk?\nThis cannot be undone.`
-          : `Delete '${ctx.path}' from disk?\nThis cannot be undone.`,
+          ? `Remove ${what} from the repository AND disk?\nThis cannot be undone.`
+          : `Delete ${what} from disk?\nThis cannot be undone.`,
         confirmLabel: tracked ? 'Remove' : 'Delete',
         danger: true,
       });
       if (!ok) return true;
       try {
-        await api.git.deleteFile(ctx.repoPath, ctx.path);
-        t.success(`Deleted ${baseName(ctx.path)}`);
+        for (const p of targets) await api.git.deleteFile(ctx.repoPath, p);
+        t.success(n('Deleted'));
         refresh();
       } catch (e) {
         t.error('Delete failed', String(e));
@@ -408,17 +461,17 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       window.dispatchEvent(new CustomEvent('smartgit:resolve-conflict', { detail: { file: ctx.path } }));
       return true;
 
-    // --- Clipboard ---------------------------------------------------------------
+    // --- Clipboard (multi-selection copies one path per line) ---------------------
     case 'copy-name':
-      copyToClipboard(baseName(ctx.path));
+      copyToClipboard(targets.map((p) => baseName(p)).join('\n'));
       t.success('Name copied');
       return true;
     case 'copy-rel-path':
-      copyToClipboard(ctx.path);
+      copyToClipboard(targets.join('\n'));
       t.success('Relative path copied');
       return true;
     case 'copy-full-path':
-      copyToClipboard(full);
+      copyToClipboard(targets.map((p) => fullPathOf(ctx.repoPath, p)).join('\n'));
       t.success('Full path copied');
       return true;
 

@@ -961,9 +961,26 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setSelectedFiles(new Set([file.path]));
+          // SmartGit behavior: right-clicking a file that is ALREADY part of
+          // the multi-selection keeps the selection (menu actions then apply
+          // to every selected file); right-clicking OUTSIDE it re-selects
+          // just the clicked file.
+          const keepSelection = selectedFiles.has(file.path);
+          if (!keepSelection) {
+            setSelectedFiles(new Set([file.path]));
+          }
           setSelectedFile(file.path);
           selectFileGlobal(file.path);
+          // Bulk targets = the kept selection scoped to THIS list's section
+          // (staged vs unstaged/untracked): staging a staged file or
+          // unstaging an unstaged one from a mixed selection would be wrong.
+          const sectionPaths = isStaged
+            ? stagedFiles.map((f) => f.path)
+            : [...unstagedFiles, ...untrackedFiles].map((f) => f.path);
+          const sectionSet = new Set(sectionPaths);
+          const multiPaths = keepSelection
+            ? Array.from(selectedFiles).filter((p) => sectionSet.has(p))
+            : [file.path];
           const focusCommitBox = () => {
             const box = document.getElementById('commit-message-input') as HTMLTextAreaElement | null;
             box?.focus();
@@ -972,13 +989,13 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           const makeCtx = (indexFlags?: IndexFlags) => ({
             repoPath: repo.path,
             path: file.path,
+            paths: multiPaths.length > 1 ? multiPaths : undefined,
             mode: 'changes' as const,
             isStaged,
             isUntracked,
             isConflict,
             indexFlags,
             onShowChanges: () => {
-              setSelectedFiles(new Set([file.path]));
               setSelectedFile(file.path);
               selectFileGlobal(file.path);
             },

@@ -7,6 +7,7 @@
  * clipboard, directory scoping).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { useSelectionStore } from '../../src/stores/selectionStore';
 
 // --- api mock (vi.hoisted — factories run before module top-level code) -----
 const apiGitMock = vi.hoisted(() => ({
@@ -39,6 +40,8 @@ import {
   buildFileMenu,
   runFileAction,
   getIndexFlagsAsync,
+  actionTargets,
+  bulkSuffix,
   baseName,
   dirName,
   fullPathOf,
@@ -263,5 +266,165 @@ describe('helpers', () => {
     expect(dirName('src/app/main.ts')).toBe('src/app');
     expect(dirName('README.md')).toBe('');
     expect(fullPathOf('/repo', 'src/a.ts')).toBe('/repo/src/a.ts');
+  });
+});
+
+// =====================================================================
+// Multi-selection (Ctrl/Cmd+click, Ctrl/Cmd+A): bulk menu operations
+// =====================================================================
+describe('multi-selection — actionTargets / bulkSuffix', () => {
+  it('falls back to the clicked file when no selection is given', () => {
+    expect(actionTargets({ path: 'a.ts' })).toEqual(['a.ts']);
+    expect(actionTargets({ path: 'a.ts', paths: [] })).toEqual(['a.ts']);
+    expect(bulkSuffix({ path: 'a.ts' })).toBe('');
+  });
+
+  it('returns the full selection (dedup, always includes the clicked file)', () => {
+    expect(actionTargets({ path: 'b.ts', paths: ['a.ts', 'b.ts', 'c.ts'] }))
+      .toEqual(['a.ts', 'b.ts', 'c.ts']);
+    // clicked file missing from the selection → still included first
+    expect(actionTargets({ path: 'z.ts', paths: ['a.ts', 'b.ts'] }))
+      .toEqual(['z.ts', 'a.ts', 'b.ts']);
+    // duplicates are dropped
+    expect(actionTargets({ path: 'a.ts', paths: ['a.ts', 'a.ts', 'b.ts'] }))
+      .toEqual(['a.ts', 'b.ts']);
+    expect(bulkSuffix({ path: 'b.ts', paths: ['a.ts', 'b.ts', 'c.ts'] })).toBe(' (3 files)');
+  });
+});
+
+describe('multi-selection — buildFileMenu labels show the file count', () => {
+  const multi = { paths: ['a.ts', 'b.ts', 'c.ts'], path: 'a.ts' };
+
+  it('annotates bulk operations with " (N files)"', () => {
+    const items = labels(buildFileMenu(baseCtx(multi)));
+    expect(items).toContain('Open (3 files)');
+    expect(items).toContain('Reveal in File Manager (3 files)');
+    expect(items).toContain('Stage (3 files)');
+    expect(items).toContain('Stash Selection... (3 files)');
+    expect(items).toContain('Discard Changes... (3 files)');
+    expect(items).toContain('Restore from Ref... (3 files)');
+    expect(items).toContain('Remove... (3 files)');
+  });
+
+  it('annotates staged bulk operations too', () => {
+    const items = labels(buildFileMenu(baseCtx({ ...multi, isStaged: true })));
+    expect(items).toContain('Unstage (3 files)');
+    expect(items).toContain('Discard Staged Changes... (3 files)');
+  });
+
+  it('single-file menu keeps the plain labels', () => {
+    const items = labels(buildFileMenu(baseCtx()));
+    expect(items).toContain('Stage');
+    expect(items).not.toContain('Stage (1 files)');
+  });
+});
+
+describe('multi-selection — runFileAction bulk operations', () => {
+  const multi = { paths: ['a.ts', 'b.ts', 'c.ts'], path: 'a.ts' };
+
+  it('stages EVERY selected file in one git add call', async () => {
+    const ctx = baseCtx(multi);
+    const handled = await runFileAction('stage', ctx);
+    expect(handled).toBe(true);
+    expect(apiGitMock.add).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.add).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
+    expect(ctx.refresh).toHaveBeenCalled();
+  });
+
+  it('unstages EVERY selected file', async () => {
+    await runFileAction('unstage', baseCtx({ ...multi, isStaged: true }));
+    expect(apiGitMock.resetFile).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.resetFile).toHaveBeenCalledWith('/repo', 'a.ts');
+    expect(apiGitMock.resetFile).toHaveBeenCalledWith('/repo', 'c.ts');
+  });
+
+  it('stashes EVERY selected file with one prompt', async () => {
+    promptAnswer = 'WIP: batch';
+    await runFileAction('stash-file', baseCtx(multi));
+    expect(apiGitMock.stashPush).toHaveBeenCalledWith('/repo', 'WIP: batch', false, false, ['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('discards EVERY selected file after ONE confirmation', async () => {
+    confirmAnswer = true;
+    await runFileAction('discard', baseCtx(multi));
+    expect(apiGitMock.restore).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.restore).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('discarding a multi staged selection unstages AND restores all', async () => {
+    confirmAnswer = true;
+    await runFileAction('discard', baseCtx({ ...multi, isStaged: true }));
+    expect(apiGitMock.resetFile).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.restore).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('restores EVERY selected file from the prompted ref', async () => {
+    promptAnswer = 'HEAD~1';
+    await runFileAction('restore-from-ref', baseCtx(multi));
+    expect(apiGitMock.checkoutFile).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.checkoutFile).toHaveBeenCalledWith('/repo', 'c.ts', 'HEAD~1');
+  });
+
+  it('deletes EVERY selected file after ONE confirmation', async () => {
+    confirmAnswer = true;
+    await runFileAction('delete-file', baseCtx(multi));
+    expect(apiGitMock.deleteFile).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.deleteFile).toHaveBeenCalledWith('/repo', 'b.ts');
+  });
+
+  it('does not delete anything when the bulk confirmation is declined', async () => {
+    confirmAnswer = false;
+    await runFileAction('delete-file', baseCtx(multi));
+    expect(apiGitMock.deleteFile).not.toHaveBeenCalled();
+  });
+
+  it('ignores EVERY selected untracked file', async () => {
+    await runFileAction('ignore', baseCtx({ ...multi, isUntracked: true, indexFlags: undefined }));
+    expect(apiGitMock.ignore).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('toggles an index flag on EVERY selected file', async () => {
+    await runFileAction('toggle-skip-worktree', baseCtx(multi));
+    expect(apiGitMock.setIndexFlag).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.setIndexFlag).toHaveBeenCalledWith('/repo', 'a.ts', 'skip-worktree', true);
+    expect(apiGitMock.setIndexFlag).toHaveBeenCalledWith('/repo', 'b.ts', 'skip-worktree', true);
+  });
+
+  it('copies ALL selected paths (one per line) in the three copy variants', async () => {
+    await runFileAction('copy-name', baseCtx(multi));
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('a.ts\nb.ts\nc.ts');
+
+    await runFileAction('copy-rel-path', baseCtx(multi));
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('a.ts\nb.ts\nc.ts');
+
+    await runFileAction('copy-full-path', baseCtx({ path: 'src/a.ts', paths: ['src/a.ts', 'src/b.ts'] }));
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('/repo/src/a.ts\n/repo/src/b.ts');
+  });
+
+  it('opens/reveals EVERY selected file', async () => {
+    await runFileAction('open', baseCtx(multi));
+    expect(apiGitMock.openFile).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.openFile).toHaveBeenCalledWith('/repo/b.ts');
+
+    await runFileAction('reveal', baseCtx(multi));
+    expect(apiGitMock.revealInFileManager).toHaveBeenCalledTimes(3);
+  });
+
+  it('navigation actions stay on the CLICKED file (blame, file history)', async () => {
+    const sel = useSelectionStore.getState();
+    const selectFileSpy = vi.spyOn(sel, 'selectFile');
+    await runFileAction('blame', baseCtx(multi));
+    expect(selectFileSpy).toHaveBeenLastCalledWith('a.ts');
+    selectFileSpy.mockRestore();
+  });
+
+  it('single-file behavior is unchanged (no paths in ctx)', async () => {
+    confirmAnswer = true;
+    await runFileAction('stage', baseCtx());
+    expect(apiGitMock.add).toHaveBeenCalledWith('/repo', ['src/app/main.ts']);
+
+    await runFileAction('delete-file', baseCtx());
+    expect(apiGitMock.deleteFile).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.deleteFile).toHaveBeenCalledWith('/repo', 'src/app/main.ts');
   });
 });
