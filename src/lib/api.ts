@@ -27,6 +27,7 @@ import type {
   SubtreeInfo,
   UnreachableCommit,
   BugtraqConfig,
+  RemoteCheckSummary,
 } from '../../electron/types/git-api';
 import type {
   GithubUser,
@@ -34,7 +35,7 @@ import type {
   GithubPullRequest,
   CommitCheckStatus,
 } from '../../electron/types/github-api';
-import type { AppSettings, RepositoryEntry, RepositoryMetadata } from '../../electron/types/settings-api';
+import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../../electron/types/settings-api';
 
 export type {
   StatusResult,
@@ -65,6 +66,7 @@ export type {
   SubtreeInfo,
   UnreachableCommit,
   BugtraqConfig,
+  RemoteCheckSummary,
   GithubUser,
   GithubRepository,
   GithubPullRequest,
@@ -72,6 +74,7 @@ export type {
   AppSettings,
   RepositoryEntry,
   RepositoryMetadata,
+  RepoGroup,
 };
 
 export const api = window.smartgit;

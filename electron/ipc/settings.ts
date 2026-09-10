@@ -35,4 +35,23 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:addTag', (_e, path: string, tag: string) => storage.addTag(path, tag));
   ipcMain.handle('settings:removeTag', (_e, path: string, tag: string) => storage.removeTag(path, tag));
   ipcMain.handle('settings:refreshRepoStats', (_e, path: string) => storage.refreshRepoStats(path));
+
+  // Repository groups (tree in the sidebar)
+  ipcMain.handle('settings:getRepoGroups', () => storage.getRepoGroups());
+  ipcMain.handle('settings:createRepoGroup', (_e, name: string, parentId?: string | null) =>
+    storage.createRepoGroup(name, parentId ?? null)
+  );
+  ipcMain.handle('settings:renameRepoGroup', (_e, id: string, name: string) =>
+    storage.renameRepoGroup(id, name)
+  );
+  ipcMain.handle('settings:deleteRepoGroup', (_e, id: string) => storage.deleteRepoGroup(id));
+  ipcMain.handle('settings:moveRepoGroup', (_e, id: string, newParentId: string | null) =>
+    storage.moveRepoGroup(id, newParentId)
+  );
+  ipcMain.handle('settings:setRepoGroupExpanded', (_e, id: string, expanded: boolean) =>
+    storage.setRepoGroupExpanded(id, expanded)
+  );
+  ipcMain.handle('settings:setRepoGroup', (_e, path: string, groupId: string | null) =>
+    storage.setRepoGroup(path, groupId)
+  );
 }
