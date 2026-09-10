@@ -41,6 +41,15 @@ app.on('before-quit', () => {
   appQuitting = true;
 });
 
+/**
+ * True while the keep-alive window is hidden after an explicit close.
+ * Guards against a late 'ready-to-show' racing with keep-alive hide: if the
+ * user closes the About window before the first paint finished, the pending
+ * ready-to-show callback must NOT re-show it (it would un-hide a window the
+ * user just closed).
+ */
+let aboutKeepAliveHidden = false;
+
 function getMetaStore(): SimpleStore {
   if (!metaStore) {
     metaStore = new SimpleStore({ name: 'prismgit-app-meta', defaults: {} });
@@ -96,6 +105,7 @@ function readLogoDataUri(): string {
  */
 export function openAboutWindow(): BrowserWindow {
   if (aboutWindow && !aboutWindow.isDestroyed()) {
+    aboutKeepAliveHidden = false; // rearm the late ready-to-show guard
     aboutWindow.show();
     aboutWindow.focus();
     return aboutWindow;
@@ -130,12 +140,15 @@ export function openAboutWindow(): BrowserWindow {
   });
   // The About page is static — block any in-window navigation as a safety net.
   win.webContents.on('will-navigate', (e) => e.preventDefault());
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => {
+    if (!aboutKeepAliveHidden) win.show();
+  });
   // Keep-alive: intercept close — hide instead of destroy so the next
   // openAboutWindow() call just shows the cached window (near-instant).
   win.on('close', (e) => {
     if (!appQuitting && !win.isDestroyed()) {
       e.preventDefault();
+      aboutKeepAliveHidden = true;
       win.hide();
     }
   });
