@@ -57,7 +57,7 @@ interface GitLabAuthState {
 }
 
 const store = new SimpleStore({
-  name: 'smartgit-gitlab',
+  name: 'prismgit-gitlab',
   defaults: {},
 });
 

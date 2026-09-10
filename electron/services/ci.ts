@@ -29,7 +29,7 @@ interface CIConfig {
 }
 
 const store = new SimpleStore({
-  name: 'smartgit-ci',
+  name: 'prismgit-ci',
   defaults: {},
 });
 

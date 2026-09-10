@@ -9,7 +9,11 @@
 //      defined yet (they're in globals.css which loads after this module).
 //      The settingsStore.loadSettings() call will apply it.
 try {
-  var theme = localStorage.getItem('smartgit-theme') || 'light';
+  // Migrate legacy 'smartgit-theme' key if 'prismgit-theme' doesn't exist
+  if (!localStorage.getItem('prismgit-theme') && localStorage.getItem('smartgit-theme')) {
+    localStorage.setItem('prismgit-theme', localStorage.getItem('smartgit-theme')!);
+  }
+  var theme = localStorage.getItem('prismgit-theme') || 'light';
   if (theme === 'dark') {
     document.documentElement.classList.add('dark');
   }
@@ -20,7 +24,11 @@ try {
 // Contrast is applied by settingsStore after the CSS is loaded — we just
 // persist the value here so it's available before React mounts.
 try {
-  var contrastRaw = localStorage.getItem('smartgit-contrast');
+  // Migrate legacy 'smartgit-contrast' key
+  if (!localStorage.getItem('prismgit-contrast') && localStorage.getItem('smartgit-contrast')) {
+    localStorage.setItem('prismgit-contrast', localStorage.getItem('smartgit-contrast')!);
+  }
+  var contrastRaw = localStorage.getItem('prismgit-contrast');
   if (contrastRaw) {
     var contrast = parseInt(contrastRaw, 10);
     if (!isNaN(contrast) && contrast !== 100) {

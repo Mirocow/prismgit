@@ -18,11 +18,17 @@ export const DEFAULT_TOOLBAR_GROUPS = {
 export type ToolbarGroups = typeof DEFAULT_TOOLBAR_GROUPS;
 export type ToolbarGroupKey = keyof ToolbarGroups;
 
-const STORAGE_KEY = 'toolbar-groups';
+const STORAGE_KEY = 'prismgit-toolbar-groups';
+const LEGACY_STORAGE_KEY = 'toolbar-groups';
 
 function loadToolbarGroups(): ToolbarGroups {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    // Migrate from legacy 'toolbar-groups' key (no prefix)
+    if (!raw && localStorage.getItem(LEGACY_STORAGE_KEY)) {
+      raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (raw) localStorage.setItem(STORAGE_KEY, raw);
+    }
     if (raw) return { ...DEFAULT_TOOLBAR_GROUPS, ...JSON.parse(raw) };
   } catch { /* ignore */ }
   return DEFAULT_TOOLBAR_GROUPS;

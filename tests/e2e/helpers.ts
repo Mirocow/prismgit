@@ -29,15 +29,15 @@ export function makeUserDataDir(prefix = 'prismgit-e2e-'): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-/** Write a smartgit-settings.json with the fixture repo pre-loaded */
+/** Write a prismgit-settings.json with the fixture repo pre-loaded */
 export function seedUserData(
   userDataDir: string,
   repos: Array<{ path: string; name: string }> = [{ path: FIXTURE_REPO, name: 'test-repo' }]
 ): void {
-  // The app uses a SINGLE SimpleStore file named `smartgit-settings.json`
+  // The app uses a SINGLE SimpleStore file named `prismgit-settings.json`
   // containing { settings, repositories, repoMetadata }. We pre-populate it
   // so the app opens the fixture repo immediately on launch.
-  const settingsFile = path.join(userDataDir, 'smartgit-settings.json');
+  const settingsFile = path.join(userDataDir, 'prismgit-settings.json');
   const reposData = repos.map((r, i) => ({
     path: r.path,
     name: r.name,
@@ -67,7 +67,7 @@ export function seedUserData(
 
   // Also write the window-state file so the window doesn't open maximized
   // (which can cause issues with screenshots)
-  const windowStateFile = path.join(userDataDir, 'smartgit-window-state.json');
+  const windowStateFile = path.join(userDataDir, 'prismgit-window-state.json');
   fs.writeFileSync(
     windowStateFile,
     JSON.stringify(

@@ -32,7 +32,7 @@ interface WindowState {
 }
 
 const windowStateStore = new SimpleStore({
-  name: 'smartgit-window-state',
+  name: 'prismgit-window-state',
   defaults: {},
 });
 

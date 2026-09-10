@@ -1,5 +1,5 @@
 {
-  "name": "prismgit-electron",
+  "name": "PrismGit",
   "version": "2.0.0",
   "description": "A modern Git client built on Electron + React + TypeScript — visual history, smart merges, and a clean Ayu palette.",
   "author": "PrismGit Team",

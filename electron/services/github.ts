@@ -10,7 +10,7 @@ interface AuthState {
 }
 
 const store = new SimpleStore({
-  name: 'smartgit-github',
+  name: 'prismgit-github',
   defaults: {},
 });
 

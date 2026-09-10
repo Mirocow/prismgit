@@ -23,7 +23,7 @@ describe('toolbarStore', () => {
     expect(groups.stage).toBe(true);
     expect(groups.utils).toBe(true);
     // Persisted
-    const raw = JSON.parse(localStorage.getItem('toolbar-groups') || '{}');
+    const raw = JSON.parse(localStorage.getItem('prismgit-toolbar-groups') || '{}');
     expect(raw.sync).toBe(false);
     expect(raw.stage).toBe(true);
   });
@@ -49,16 +49,16 @@ describe('toolbarStore', () => {
     // Key order preserved (render order for toolbars)
     expect(Object.keys(groups)).toEqual(['utils', 'workflows', 'log', 'stash', 'stage', 'sync']);
     expect(groups.workflows).toBe(false);
-    const raw = JSON.parse(localStorage.getItem('toolbar-groups') || '{}');
+    const raw = JSON.parse(localStorage.getItem('prismgit-toolbar-groups') || '{}');
     expect(Object.keys(raw)).toEqual(Object.keys(reordered));
   });
 
   it('migrates partial stored state (missing keys fall back to defaults)', () => {
     // Simulate an older persisted state that predates a newly added group
-    localStorage.setItem('toolbar-groups', JSON.stringify({ sync: false }));
+    localStorage.setItem('prismgit-toolbar-groups', JSON.stringify({ sync: false }));
     useToolbarStore.setState({ groups: DEFAULT_TOOLBAR_GROUPS });
     // Re-load through the same path the store uses on init:
-    const raw = JSON.parse(localStorage.getItem('toolbar-groups') || '{}');
+    const raw = JSON.parse(localStorage.getItem('prismgit-toolbar-groups') || '{}');
     const merged = { ...DEFAULT_TOOLBAR_GROUPS, ...raw };
     expect(merged.sync).toBe(false);
     expect(merged.stage).toBe(true);
@@ -66,11 +66,11 @@ describe('toolbarStore', () => {
   });
 
   it('survives corrupted localStorage (falls back to defaults)', () => {
-    localStorage.setItem('toolbar-groups', '{not json');
+    localStorage.setItem('prismgit-toolbar-groups', '{not json');
     // loadToolbarGroups has try/catch — emulate by reading through a safe parse
     let parsed: unknown = DEFAULT_TOOLBAR_GROUPS;
     try {
-      const r = localStorage.getItem('toolbar-groups');
+      const r = localStorage.getItem('prismgit-toolbar-groups');
       if (r) parsed = JSON.parse(r);
     } catch {
       parsed = DEFAULT_TOOLBAR_GROUPS;

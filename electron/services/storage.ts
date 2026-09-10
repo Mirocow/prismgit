@@ -12,7 +12,7 @@ interface StoreSchema {
 }
 
 const store = new SimpleStore({
-  name: 'smartgit-settings',
+  name: 'prismgit-settings',
   defaults: {
     settings: {
       theme: 'dark',
