@@ -920,6 +920,43 @@ async function stashParents(git: SimpleGit, hash: string): Promise<string[]> {
   return parts.slice(1); // drop the stash commit itself → [base, index?, untracked?]
 }
 
+/**
+ * Decode git's C-style quoted path back to UTF-8. With the default
+ * core.quotePath=true, non-ASCII paths come out as `"uni-\321\204..."` —
+ * feeding that literal string back into a git pathspec matches nothing,
+ * so the file list showed garbage and clicking a file gave an empty diff.
+ * Octal escapes are UTF-8 BYTES (not code points) → collect into a Buffer.
+ */
+/** Exported for tests (tests/unit/unquoteGitPath.test.ts). */
+export function unquoteGitPath(p: string): string {
+  const m = /^"([\s\S]*)"$/.exec(p);
+  if (!m) return p;
+  const body = m[1];
+  const enc = new TextEncoder();
+  const bytes: number[] = [];
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c !== '\\') {
+      bytes.push(...enc.encode(c));
+      continue;
+    }
+    const n = body[++i];
+    if (n === undefined) {
+      bytes.push(0x5c); // dangling backslash
+      break;
+    }
+    if (n >= '0' && n <= '7') {
+      let oct = n;
+      while (oct.length < 3 && body[i + 1] >= '0' && body[i + 1] <= '7') oct += body[++i];
+      bytes.push(parseInt(oct, 8) & 0xff);
+    } else {
+      const esc: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 };
+      bytes.push(...enc.encode(esc[n] !== undefined ? String.fromCharCode(esc[n]) : n));
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
 /** Parse a `--name-status` line into a CommitFile (handles R/C two-path form). */
 function parseNameStatusLine(line: string): CommitFile | null {
   const parts = line.split('\t');
@@ -931,7 +968,15 @@ function parseNameStatusLine(line: string): CommitFile | null {
     oldPath = parts[1];
     pathStr = parts[2];
   }
-  return { path: pathStr, status: statusCode, oldPath, additions: 0, deletions: 0, binary: false, mode: '' };
+  return {
+    path: unquoteGitPath(pathStr),
+    status: statusCode,
+    oldPath: oldPath === undefined ? undefined : unquoteGitPath(oldPath),
+    additions: 0,
+    deletions: 0,
+    binary: false,
+    mode: '',
+  };
 }
 
 /** Best-effort numstat merge into the file list. */
@@ -946,7 +991,7 @@ async function applyNumstat(git: SimpleGit, args: string[], files: CommitFile[])
     if (!line.trim()) continue;
     const cols = line.split('\t');
     if (cols.length < 3) continue;
-    const pathStr = cols[cols.length - 1];
+    const pathStr = unquoteGitPath(cols[cols.length - 1]);
     const target = files.find((f) => f.path === pathStr);
     if (!target) continue;
     if (cols[0] === '-') target.binary = true;
@@ -966,7 +1011,9 @@ export async function stashFiles(repoPath: string, hash: string): Promise<Commit
   // Tracked changes: direct two-dot diff base..stash (working-tree part; the
   // index part is included in the stash tree as well — the union is what the
   // user expects to see, exactly like `git stash show`).
-  const tracked = await git.raw(['diff', '--name-status', '--no-color', `${base}..${hash}`]);
+  // core.quotePath=false: paths come out as plain UTF-8 instead of C-quoted
+  // "uni-\321\204..." (unquoteGitPath in the parsers is the safety net).
+  const tracked = await git.raw(['-c', 'core.quotePath=false', 'diff', '--name-status', '--no-color', `${base}..${hash}`]);
   for (const line of tracked.split('\n').filter(Boolean)) {
     const f = parseNameStatusLine(line);
     if (f) result.push(f);
@@ -975,7 +1022,10 @@ export async function stashFiles(repoPath: string, hash: string): Promise<Commit
 
   // Untracked files: stored ONLY in parent[2] as a root commit holding them.
   if (parents.length >= 3) {
-    const untracked = await git.raw(['diff-tree', '--root', '--no-color', '--name-status', '-r', parents[2]]);
+    const untracked = await git.raw([
+      '-c', 'core.quotePath=false',
+      'diff-tree', '--root', '--no-color', '--name-status', '-r', parents[2],
+    ]);
     for (const line of untracked.split('\n').filter(Boolean)) {
       if (!line.includes('\t')) continue; // diff-tree --root echoes the commit id first
       const f = parseNameStatusLine(line);
@@ -993,12 +1043,15 @@ export async function stashFileRawDiff(repoPath: string, hash: string, file: str
   const git = getGit(repoPath);
   const parents = await stashParents(git, hash);
   const base = parents[0];
-  // 1) tracked: base..stash -- file
-  const tracked = await git.raw(['diff', '--no-color', `${base}..${hash}`, '--', file]);
+  // 1) tracked: base..stash -- file (quotePath=false → UTF-8 diff headers)
+  const tracked = await git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', `${base}..${hash}`, '--', file]);
   if (tracked.trim()) return tracked;
   // 2) untracked: only present in the third parent (root commit)
   if (parents.length >= 3) {
-    const untracked = await git.raw(['show', '--format=', '--no-color', parents[2], '--', file]);
+    const untracked = await git.raw([
+      '-c', 'core.quotePath=false',
+      'show', '--format=', '--no-color', parents[2], '--', file,
+    ]);
     if (untracked.trim()) return untracked;
   }
   return '';
