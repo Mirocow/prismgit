@@ -6,16 +6,18 @@ import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type StashEntry, type DiffResult } from '../lib/api';
-import { formatDate, shortHash } from '../lib/utils';
+import { formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { CommitHashLink } from '../components/StatusBar';
 import { cn } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useContextMenu } from '../lib/useContextMenu';
 export function StashesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();
+  const showContextMenu = useContextMenu();
   const navigate = useNavigate();
   const [stashes, setStashes] = useState<StashEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -183,6 +185,31 @@ export function StashesPage() {
                 className="group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
                 onClick={() => handleViewStash(s)}
                 title="Click to open in Diff tool"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  showContextMenu([
+                    { label: 'View Stash (Diff tool)', clickId: 'view' },
+                    { type: 'separator' },
+                    { label: `Apply stash@{${s.index}}`, clickId: 'apply' },
+                    { label: `Pop stash@{${s.index}}...`, clickId: 'pop' },
+                    { label: 'Branch from Stash...', clickId: 'branch' },
+                    { type: 'separator' },
+                    { label: `Drop stash@{${s.index}}...`, clickId: 'drop' },
+                    { type: 'separator' },
+                    { label: 'Copy Message', clickId: 'copy-msg' },
+                    { label: 'Copy Hash', clickId: 'copy-hash' },
+                  ], (action) => {
+                    switch (action) {
+                      case 'view': handleViewStash(s); break;
+                      case 'apply': handleApply(s); break;
+                      case 'pop': handlePop(s); break;
+                      case 'branch': handleStashBranch(s); break;
+                      case 'drop': handleDrop(s); break;
+                      case 'copy-msg': copyToClipboard(s.message); toast.success('Copied'); break;
+                      case 'copy-hash': copyToClipboard(s.hash); toast.success('Copied'); break;
+                    }
+                  });
+                }}
               >
                 <code className="text-xs font-mono text-text-tertiary flex-shrink-0">
                   stash@{'{' + s.index + '}'}

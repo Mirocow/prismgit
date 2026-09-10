@@ -20,6 +20,9 @@
 import { memo } from 'react';
 import { Tag as TagIcon } from '../components/icons';
 import { cn } from './utils';
+import { useContextMenu } from './useContextMenu';
+import { buildRefMenu, runRefMenuAction } from './commitMenu';
+import { useRepositoryStore } from '../stores/repositoryStore';
 
 export type RefKind = 'tag' | 'head' | 'branch' | 'remote' | 'stash' | 'other';
 
@@ -61,10 +64,14 @@ export function parseDecoratedRef(ref: string): ParsedRef {
   return { kind: 'branch', label: raw, raw };
 }
 
-/** Parse + sort a %D list: tags first, then HEAD, branches, remotes. */
+/** Parse + sort a %D list: tags first, then HEAD, branches, remotes.
+ *  Defensive: silently drops null/undefined/non-string/blank entries — git
+ *  decorations arrive from several parsers and a bad entry must never crash
+ *  the whole page (see RefBadge crash: undefined 'kind'). */
 export function parseDecoratedRefs(refs: string[]): ParsedRef[] {
   const order: Record<RefKind, number> = { tag: 0, head: 1, branch: 2, remote: 3, stash: 4, other: 5 };
-  return refs
+  return (Array.isArray(refs) ? refs : [])
+    .filter((r): r is string => typeof r === 'string' && r.trim().length > 0)
     .map(parseDecoratedRef)
     .sort((a, b) => order[a.kind] - order[b.kind]);
 }
@@ -79,11 +86,32 @@ const badgeClass: Record<RefKind, string> = {
   other: 'border-border-strong bg-bg-hover text-text-secondary',
 };
 
-export function RefBadge({ ref: parsed, size = 8 }: { ref: ParsedRef; size?: number }) {
+// NOTE: the prop MUST NOT be named `ref` — that is a React special prop, it
+// never reaches function components (React 18) and silently becomes undefined,
+// which used to crash every page rendering badges (`reading 'kind' of undefined`).
+export interface RefBadgeProps {
+  parsed: ParsedRef;
+  size?: number;
+  /** Commit the badge points at — enables "View Commit in History". */
+  hash?: string;
+  /** Refresh callback after a menu mutation (delete tag/branch, checkout). */
+  onChanged?: () => void;
+}
+
+export function RefBadge({ parsed, size = 8, hash, onChanged }: RefBadgeProps) {
+  const showContextMenu = useContextMenu();
+  const repoPath = useRepositoryStore((s) => s.currentRepo?.path ?? null);
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const ctx = { parsed, hash, repoPath: repoPath ?? undefined, onChanged };
+    showContextMenu(buildRefMenu(ctx), (id) => runRefMenuAction(id, ctx));
+  };
   return (
     <span
-      className={cn('text-2xs px-1.5 py-0.5 rounded border whitespace-nowrap', badgeClass[parsed.kind])}
-      title={parsed.raw}
+      className={cn('text-2xs px-1.5 py-0.5 rounded border whitespace-nowrap cursor-default', badgeClass[parsed?.kind ?? 'other'])}
+      title={parsed?.raw}
+      onContextMenu={handleContextMenu}
     >
       {parsed.kind === 'tag' && <TagIcon size={size} className="inline mr-0.5" />}
       {parsed.kind === 'head' && '▸ '}
@@ -95,26 +123,33 @@ export function RefBadge({ ref: parsed, size = 8 }: { ref: ParsedRef; size?: num
 /**
  * Row of ref badges for a commit. Tags first (SmartGit order), optional cap —
  * graph rows cap at 3 to stay compact; the detail panel shows all.
+ * Every badge has a right-click menu (Copy, Checkout/Delete, View Commit).
  */
 export const RefBadges = memo(function RefBadges({
   refs,
   max,
   size = 8,
   className,
+  hash,
+  onChanged,
 }: {
   refs: string[];
   max?: number;
   size?: number;
   className?: string;
+  /** Commit the badges point at — enables "View Commit in History". */
+  hash?: string;
+  /** Refresh after a menu mutation (delete tag/branch, checkout). */
+  onChanged?: () => void;
 }) {
-  const parsed = parseDecoratedRefs(refs);
+  const parsed = parseDecoratedRefs(Array.isArray(refs) ? refs : []);
   if (parsed.length === 0) return null;
   const visible = max != null ? parsed.slice(0, max) : parsed;
   const hidden = parsed.length - visible.length;
   return (
     <div className={cn('flex items-center gap-1 flex-shrink-0', className)}>
       {visible.map((r, i) => (
-        <RefBadge key={`${r.raw}-${i}`} ref={r} size={size} />
+        <RefBadge key={`${r.raw}-${i}`} parsed={r} size={size} hash={hash} onChanged={onChanged} />
       ))}
       {hidden > 0 && (
         <span className="text-2xs text-text-tertiary" title={parsed.map((r) => r.label).join(', ')}>

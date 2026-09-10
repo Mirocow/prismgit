@@ -7,12 +7,14 @@ import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useContextMenu } from '../lib/useContextMenu';
 
 const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
 
 export function ReflogPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
+  const showContextMenu = useContextMenu();
   const [entries, setEntries] = useState<ReflogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [ref, setRef] = useState('HEAD');
@@ -119,6 +121,29 @@ export function ReflogPage() {
             <div
               key={entry.index}
               className="group flex items-start gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                showContextMenu([
+                  { label: 'View Commit in History', clickId: 'view-commit' },
+                  { type: 'separator' },
+                  { label: 'Copy Short Hash', clickId: 'copy-short' },
+                  { label: 'Copy Full Hash', clickId: 'copy-full' },
+                  { label: 'Copy Message', clickId: 'copy-msg' },
+                  { type: 'separator' },
+                  { label: 'Delete entry...', clickId: 'delete' },
+                ], (action) => {
+                  switch (action) {
+                    case 'view-commit':
+                      useSelectionStore.getState().selectCommit(entry.hash);
+                      window.location.hash = '#/history';
+                      break;
+                    case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success('Copied'); break;
+                    case 'copy-full': copyToClipboard(entry.hash); toast.success('Copied'); break;
+                    case 'copy-msg': copyToClipboard(entry.message); toast.success('Copied'); break;
+                    case 'delete': handleDelete(entry); break;
+                  }
+                });
+              }}
             >
               <code className="text-xs font-mono text-text-tertiary flex-shrink-0 mt-0.5">
                 {entry.selector}

@@ -971,18 +971,19 @@ export function HistoryPage() {
 
                     {/* Decorations: tags first, then HEAD/branches/remotes — parsed
                         from BOTH short and --decorate=full shapes (see refBadge). */}
-                    <RefBadges refs={entry.refs} max={3} />
+                    <RefBadges refs={entry.refs} max={3} hash={entry.hash} onChanged={loadHistory} />
 
                     <span className={cn('flex-1 truncate text-xs', isSelected ? 'font-semibold text-text-primary' : 'font-medium text-text-primary')}>{entry.subject}</span>
 
-                    <span
-                      className="text-2xs font-mono text-text-tertiary/60 flex-shrink-0 truncate cursor-pointer hover:text-accent"
-                      style={{ width: 56 }}
-                      title={`${entry.hash} — click to copy`}
-                      onClick={(e) => { e.stopPropagation(); copyToClipboard(entry.hash); toast.success('Copied'); }}
-                    >
-                      {entry.hashAbbrev || shortHash(entry.hash)}
-                    </span>
+                    {/* Hash — clicking ANY commit hash opens History focused on
+                        that commit (same as PARENTS links); copy lives in the
+                        right-click menu and the row menu. */}
+                    <CommitHashLink
+                      hash={entry.hash}
+                      plain
+                      display={entry.hashAbbrev || shortHash(entry.hash)}
+                      className="text-text-tertiary/60 flex-shrink-0 truncate"
+                    />
 
                     <span className="flex-shrink-0 rounded author-badge text-center"
                       style={{ backgroundColor: color.bg, width: 24, height: 16, fontSize: 8, lineHeight: '16px' }}>
@@ -1007,7 +1008,7 @@ export function HistoryPage() {
             <div className="p-3">
               <div className="text-sm font-medium text-text-primary mb-2">{selected.subject}</div>
               {/* Tags and branch refs on this commit (shared badge renderer) */}
-              <RefBadges refs={selected.refs} className="mb-3" />
+              <RefBadges refs={selected.refs} className="mb-3" hash={selected.hash} onChanged={loadHistory} />
               <div className="flex items-center gap-2 mb-3">
                 <CommitHashLink hash={selected.hash} />
                 <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>

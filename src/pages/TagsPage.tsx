@@ -9,9 +9,12 @@ import { api, type TagInfo } from '../lib/api';
 import { shortHash } from '../lib/utils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useContextMenu } from '../lib/useContextMenu';
+import { copyToClipboard } from '../lib/utils';
 export function TagsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastStore();
+  const showContextMenu = useContextMenu();
   const [tags, setTags] = useState<TagInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
@@ -158,6 +161,29 @@ export function TagsPage() {
                 window.location.hash = '#/history';
               }}
               title="Click to view this tag's commit in History"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                showContextMenu([
+                  { label: 'Copy Name', clickId: 'copy-name' },
+                  { label: 'Copy Hash', clickId: 'copy-hash' },
+                  { type: 'separator' },
+                  { label: `Rename '${t.name}'...`, clickId: 'rename' },
+                  { label: `Delete Tag '${t.name}'...`, clickId: 'delete' },
+                  { type: 'separator' },
+                  { label: 'View Commit in History', clickId: 'view-commit' },
+                ], (action) => {
+                  switch (action) {
+                    case 'copy-name': copyToClipboard(t.name); toast.success('Copied'); break;
+                    case 'copy-hash': copyToClipboard(t.hash); toast.success('Copied'); break;
+                    case 'rename': setRenamingTag(t.name); setRenameValue(t.name); break;
+                    case 'delete': handleDelete(t); break;
+                    case 'view-commit':
+                      useSelectionStore.getState().selectCommit(t.hash);
+                      window.location.hash = '#/history';
+                      break;
+                  }
+                });
+              }}
             >
               <TagIcon size={14} className="text-status-modified flex-shrink-0" />
               <div className="flex-1 min-w-0">

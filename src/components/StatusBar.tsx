@@ -7,6 +7,8 @@ import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { memo, useEffect, useState, useCallback } from 'react';
 import { ArrowUp, ArrowDown, Loader, ChevronUp, ChevronDown } from './icons';
+import { useContextMenu } from '../lib/useContextMenu';
+import { buildHashMenu, runHashMenuAction } from '../lib/commitMenu';
 
 /**
  * Clickable commit hash — clicking jumps to History and focuses that commit.
@@ -19,27 +21,53 @@ import { ArrowUp, ArrowDown, Loader, ChevronUp, ChevronDown } from './icons';
  * - History's useEffect on selectedCommitHash will auto-scroll to the commit
  *   if it's already in the loaded list, otherwise the next loadHistory() will
  *   include it (or user can search by hash)
+ * - Right-click opens a context menu (Copy Short/Full Hash, View in History,
+ *   Open in Browser) — "right-click must work on every UI element"
+ * - Pass `plain` for the compact in-row look (no badge chrome)
  */
-export const CommitHashLink = memo(function CommitHashLink({ hash, short = true, className }: {
+export const CommitHashLink = memo(function CommitHashLink({ hash, short = true, className, plain = false, display }: {
   hash: string;
   short?: boolean;
   className?: string;
+  /** Compact flat style for dense rows (History list). */
+  plain?: boolean;
+  /** Override the visible text (e.g. git's own abbrev length). */
+  display?: string;
 }) {
   const selectCommit = useSelectionStore((s) => s.selectCommit);
-  const handleClick = useCallback(() => {
+  const repo = useRepositoryStore((s) => s.currentRepo);
+  const showContextMenu = useContextMenu();
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    // Don't let the row's own click handler also fire — the hash targets its
+    // own commit (same behavior as clicking a parent hash in PARENTS).
+    e.stopPropagation();
+    // Set global selection FIRST — History's useEffect will pick this up
+    // and scroll to the commit if it's already loaded, or trigger a reload.
     selectCommit(hash);
     if (!window.location.hash.startsWith('#/history')) {
       window.location.hash = '#/history';
     }
   }, [hash, selectCommit]);
-  const display = short ? hash.substring(0, 7) : hash;
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu(buildHashMenu({ hash, repoPath: repo?.path }), (id) =>
+      runHashMenuAction(id, { hash, repoPath: repo?.path }));
+  }, [hash, repo, showContextMenu]);
+  const displayText = display ?? (short ? hash.substring(0, 7) : hash);
   return (
     <code
-      className={cn('font-mono text-2xs px-1 py-0.5 rounded bg-bg-tertiary border border-border-subtle cursor-pointer hover:bg-accent-muted hover:border-accent hover:text-accent transition-colors', className)}
+      className={cn(
+        plain
+          ? 'font-mono text-2xs cursor-pointer hover:text-accent transition-colors'
+          : 'font-mono text-2xs px-1 py-0.5 rounded bg-bg-tertiary border border-border-subtle cursor-pointer hover:bg-accent-muted hover:border-accent hover:text-accent transition-colors',
+        className,
+      )}
       onClick={handleClick}
+      onContextMenu={handleContextMenu}
       title={`Click to view commit ${hash} in History`}
     >
-      {display}
+      {displayText}
     </code>
   );
 });

@@ -1258,7 +1258,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                             >
                               {initials}
                             </span>
-                            <RefBadges refs={entry.refs} max={3} />
+                            <RefBadges refs={entry.refs} max={3} hash={entry.hash} onChanged={loadJournal} />
                             <span className="flex-1 truncate font-medium text-text-primary">{entry.subject}</span>
                             <CommitHashLink hash={entry.hash} />
                             {grp.entries.length === 1 && (
@@ -1267,6 +1267,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                           </div>
                         );
                       })}
+
                     </div>
                   ));
                 })()

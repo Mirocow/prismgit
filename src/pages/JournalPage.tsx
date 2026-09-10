@@ -8,11 +8,13 @@ import { CommitHashLink } from '../components/StatusBar';
 import { api, type ReflogEntry } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useContextMenu } from '../lib/useContextMenu';
 
 export function JournalPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastStore();
+  const showContextMenu = useContextMenu();
   const [entries, setEntries] = useState<ReflogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'commit' | 'checkout' | 'merge' | 'rebase' | 'reset' | 'other'>('all');
@@ -139,6 +141,31 @@ export function JournalPage() {
             <div
               key={entry.index}
               className="group flex items-start gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                showContextMenu([
+                  { label: 'View Commit in History', clickId: 'view-commit' },
+                  { type: 'separator' },
+                  { label: 'Copy Short Hash', clickId: 'copy-short' },
+                  { label: 'Copy Full Hash', clickId: 'copy-full' },
+                  { label: 'Copy Message', clickId: 'copy-msg' },
+                  { type: 'separator' },
+                  { label: 'Cherry-pick this commit...', clickId: 'cherry-pick' },
+                  { label: 'Reset HEAD here (hard)...', clickId: 'reset-hard' },
+                ], (action) => {
+                  switch (action) {
+                    case 'view-commit':
+                      useSelectionStore.getState().selectCommit(entry.hash);
+                      window.location.hash = '#/history';
+                      break;
+                    case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success('Copied'); break;
+                    case 'copy-full': copyToClipboard(entry.hash); toast.success('Copied'); break;
+                    case 'copy-msg': copyToClipboard(entry.message); toast.success('Copied'); break;
+                    case 'cherry-pick': handleCherryPick(entry); break;
+                    case 'reset-hard': handleResetToHere(entry); break;
+                  }
+                });
+              }}
             >
               <code className="text-2xs font-mono text-text-tertiary flex-shrink-0 mt-0.5 w-20">
                 {entry.selector}
