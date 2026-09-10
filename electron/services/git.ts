@@ -594,57 +594,80 @@ export async function pull(
   }
 }
 
-export async function fetch(
+// ── Fetch deduplication — one download per repo at a time ──────────────────
+// The same repository can be fetched concurrently from several entry points
+// (app menu accelerator + renderer keydown double-fire, background
+// "Poll or Fetch", History page auto-fetch, sidebar remote check, a double
+// click). Overlapping fetches download the same objects twice and show up as
+// duplicate "Fetch" commands in the command log. The second concurrent caller
+// now JOINS the in-flight fetch instead of starting a second download.
+const inFlightFetches = new Map<string, Promise<void>>();
+
+function runExclusiveFetch(repoPath: string, run: () => Promise<void>): Promise<void> {
+  const existing = inFlightFetches.get(repoPath);
+  if (existing) return existing;
+  const p = run().finally(() => {
+    if (inFlightFetches.get(repoPath) === p) inFlightFetches.delete(repoPath);
+  });
+  inFlightFetches.set(repoPath, p);
+  return p;
+}
+
+export function fetch(
   repoPath: string,
   remote = 'origin',
   prune = false,
   tags = false
 ): Promise<void> {
-  const git = getGit(repoPath);
-  const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'fetch'];
-  if (prune) args.push('--prune');
-  if (tags) args.push('--tags');
-  args.push(remote);
-  try {
-    await git.raw(args);
-  } catch (e) {
-    throw describeNetworkError(e, 'fetch');
-  }
-}
-
-export async function fetchAll(repoPath: string, prune = false): Promise<void> {
-  const git = getGit(repoPath);
-  // Fast path: no per-remote credentials configured → single `fetch --all`.
-  // With credentials we must fetch per remote (each remote may have its own
-  // Authorization header — a single `--all` run can only send one).
-  const remotes = ((await git.getRemotes(true)) as Array<{ name: string }>).map((r) => r.name);
-  const hasCreds = remotes.some((r) => !!getStoredCredential(repoPath, r));
-  if (!hasCreds) {
-    const args: string[] = ['fetch', '--all', '--tags'];
+  return runExclusiveFetch(repoPath, async () => {
+    const git = getGit(repoPath);
+    const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'fetch'];
     if (prune) args.push('--prune');
+    if (tags) args.push('--tags');
+    args.push(remote);
     try {
       await git.raw(args);
     } catch (e) {
       throw describeNetworkError(e, 'fetch');
     }
-    return;
-  }
-  const failures: string[] = [];
-  for (const r of remotes) {
-    try {
-      const args: string[] = [...(await remoteNetworkArgs(repoPath, r)), 'fetch', '--tags'];
+  });
+}
+
+export function fetchAll(repoPath: string, prune = false): Promise<void> {
+  return runExclusiveFetch(repoPath, async () => {
+    const git = getGit(repoPath);
+    // Fast path: no per-remote credentials configured → single `fetch --all`.
+    // With credentials we must fetch per remote (each remote may have its own
+    // Authorization header — a single `--all` run can only send one).
+    const remotes = ((await git.getRemotes(true)) as Array<{ name: string }>).map((r) => r.name);
+    const hasCreds = remotes.some((r) => !!getStoredCredential(repoPath, r));
+    if (!hasCreds) {
+      const args: string[] = ['fetch', '--all', '--tags'];
       if (prune) args.push('--prune');
-      args.push(r);
-      await git.raw(args);
-    } catch (e) {
-      failures.push(`${r}: ${describeNetworkError(e, 'fetch').message}`);
+      try {
+        await git.raw(args);
+      } catch (e) {
+        throw describeNetworkError(e, 'fetch');
+      }
+      return;
     }
-  }
-  if (failures.length === remotes.length && failures.length > 0) {
-    throw new Error(`Fetch failed for all remotes — ${failures.join('; ')}`);
-  }
-  // Partial failures are intentionally non-fatal (same semantics as --all,
-  // which reports per-remote errors but still updates the others).
+    const failures: string[] = [];
+    for (const r of remotes) {
+      try {
+        const args: string[] = [...(await remoteNetworkArgs(repoPath, r)), 'fetch', '--tags'];
+        if (prune) args.push('--prune');
+        args.push(r);
+        await git.raw(args);
+      } catch (e) {
+        failures.push(`${r}: ${describeNetworkError(e, 'fetch').message}`);
+      }
+    }
+    if (failures.length === remotes.length && failures.length > 0) {
+      throw new Error(`Fetch failed for all remotes — ${failures.join('; ')}`);
+    }
+    // Partial failures are intentionally non-fatal (same semantics as --all,
+    // which reports per-remote errors but still updates the others).
+  });
 }
 
 export async function log(

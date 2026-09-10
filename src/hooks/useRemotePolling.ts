@@ -36,6 +36,14 @@ export function useRemotePolling(): void {
   const repoListKeyRef = useRef(repoListKey);
   repoListKeyRef.current = repoListKey;
 
+  // StrictMode double-invocation guard: in dev React runs mount → cleanup →
+  // mount on the same component, which fired the initial checkNow() TWICE
+  // (duplicate `git fetch --all` per repo at every app start — user-reported).
+  // The ref persists across the double-invocation; the key (autoRefresh state
+  // + repo list) means a REAL re-subscription (list grew, auto refresh toggled)
+  // still performs its fresh initial check.
+  const lastInitialGateRef = useRef<string | null>(null);
+
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -68,9 +76,13 @@ export function useRemotePolling(): void {
     };
 
     // Initial check as soon as there is something to check — only with
-    // Auto refresh enabled. Re-run when the list grows so a freshly added
-    // repo is checked without waiting a tick.
-    if (autoRefreshRef.current) {
+    // Auto refresh enabled, and only once per (autoRefresh, repoList) state —
+    // the StrictMode remount replays the same state and must not re-check.
+    // Re-run when the list grows so a freshly added repo is checked without
+    // waiting a tick.
+    const gateKey = `${autoRefreshRef.current ? 'on' : 'off'}|${repoListKeyRef.current}`;
+    if (autoRefreshRef.current && lastInitialGateRef.current !== gateKey) {
+      lastInitialGateRef.current = gateKey;
       checkNow();
     }
     schedule();

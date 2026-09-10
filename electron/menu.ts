@@ -149,7 +149,9 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
         { type: 'separator' },
         {
           label: 'Go to Deep Link...',
-          accelerator: 'CmdOrCtrl+Shift+L',
+          // Was Ctrl+Shift+L — collides with Pull (Repository menu); one
+          // keystroke could dispatch BOTH items (duplicate accelerator).
+          accelerator: 'CmdOrCtrl+Shift+K',
           click: () => send('menu:goDeepLink'),
         },
         {
@@ -260,7 +262,9 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
     {
       label: 'Remote',
       submenu: [
-        { label: 'Push To...', accelerator: 'Shift+CmdOrCtrl+P', click: () => send('menu:pushTo') },
+        // No accelerator: Ctrl+Shift+P belongs to Push (Repository menu) —
+        // a duplicate here made one keystroke trigger both items.
+        { label: 'Push To...', click: () => send('menu:pushTo') },
         { label: 'Pull Options...', accelerator: 'CmdOrCtrl+Down', click: () => send('menu:pullOptions') },
         { label: 'Fetch All Remotes', click: () => send('menu:fetchAll') },
         { label: 'Fetch More...', click: () => send('menu:fetchMore') },
@@ -302,7 +306,9 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
       label: 'Tools',
       submenu: [
         { label: 'Open Terminal', click: () => send('menu:openTerminal') },
-        { label: 'Open Command Log', accelerator: 'CmdOrCtrl+Shift+U', click: () => send('menu:commandLog') },
+        // No accelerator: Ctrl+Shift+U belongs to View → Toggle Output Panel
+        // (same menu:commandLog event — two registrations fired it twice).
+        { label: 'Open Command Log', click: () => send('menu:commandLog') },
         { type: 'separator' },
         { label: 'Apply Patch...', click: () => send('menu:applyPatch') },
         { label: 'Format Patch...', click: () => send('menu:formatPatch') },

@@ -49,6 +49,34 @@ describe('useRemotePolling — Auto refresh gate', () => {
     expect(checkRemotes).toHaveBeenCalledWith(['/repo/a']);
   });
 
+  it('checks ONCE under StrictMode double-mount (no duplicate fetch --all at app start)', () => {
+    // React StrictMode (dev) runs mount → cleanup → mount on the same hook.
+    // Without the initial-check gate the first `git fetch --all` fired twice
+    // on every app start (user-reported double fetch).
+    renderHook(() => useRemotePolling(), { reactStrictMode: true });
+    expect(checkRemotes).toHaveBeenCalledTimes(1);
+    expect(checkRemotes).toHaveBeenCalledWith(['/repo/a']);
+  });
+
+  it('re-checks when the repo list grows (fresh repo checked without waiting a tick)', () => {
+    renderHook(() => useRemotePolling());
+    expect(checkRemotes).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      useRepositoryStore.setState({
+        repos: [
+          { path: '/repo/a', name: 'a', lastOpened: 1 },
+          { path: '/repo/b', name: 'b', lastOpened: 2 },
+        ],
+        currentRepo: null,
+        loading: false,
+        error: null,
+      });
+    });
+    expect(checkRemotes).toHaveBeenCalledTimes(2);
+    expect(checkRemotes).toHaveBeenLastCalledWith(['/repo/a', '/repo/b']);
+  });
+
   it('does NOT check when Auto refresh is off', () => {
     act(() => {
       useSettingsStore.setState({ settings: { autoRefresh: false }, theme: 'dark', loading: false });

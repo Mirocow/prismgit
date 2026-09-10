@@ -239,10 +239,14 @@ export function HistoryPage() {
   // Background fetch on History page load — silently fetch all remotes so
   // incoming (remote-only) commits show up in the graph with fresh data.
   // Non-blocking: runs after initial load, reloads history if new commits arrive.
-  const [remoteFetchDone, setRemoteFetchDone] = useState(false);
+  // Guarded by a REF keyed by repo path — a useState guard is stale during the
+  // second StrictMode effect invocation (dev), which fetched everything TWICE
+  // on every History open. A ref survives the double-invocation; keying by
+  // repo path re-arms the auto-fetch when another repository is opened.
+  const remoteFetchedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!repo || remoteFetchDone) return;
-    setRemoteFetchDone(true);
+    if (!repo || remoteFetchedForRef.current === repo.path) return;
+    remoteFetchedForRef.current = repo.path;
     api.git.fetchAll(repo.path, true).then(() => {
       // Reload history after fetch — incoming commits will now appear
       loadHistory();

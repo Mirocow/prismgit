@@ -816,15 +816,13 @@ export default function App() {
         setShowIRebase(true);
       }
       // Keyboard shortcuts overlay: Ctrl+? (Shift+/ produces ?) or Ctrl+/
+      // Idempotent OPEN (not toggle): the native menu accelerator
+      // (Keyboard Shortcuts..., Ctrl+/) also opens the dialog — a toggle here
+      // would open+close it in the same keystroke. (Bug class: renderer
+      // keydown duplicated native menu accelerators → double execution.)
       if ((e.ctrlKey || e.metaKey) && (e.key === '?' || e.key === '/')) {
         e.preventDefault();
-        setShowShortcuts(s => !s);
-      }
-      // Ctrl+Shift+U — toggle Output panel (command log)
-      // (J was taken by Pull, O by Clone — U is "Output" mnemonic, like VS Code uses Ctrl+Shift+U)
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'U' && !isInInput) {
-        e.preventDefault();
-        setShowCommandLog(s => !s);
+        setShowShortcuts(true);
       }
       // Alt+number navigation: Alt+1=Changes, Alt+2=History, Alt+3=Diff,
       // Alt+4=Branches, Alt+5=Tags, Alt+6=Stashes, Alt+, =Settings
@@ -846,39 +844,14 @@ export default function App() {
           navigate(target);
         }
       }
-      // Window style shortcuts: Ctrl+Shift+1/2/3
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && !isInInput) {
-        if (e.key === '1') { e.preventDefault(); setWindowStyle('standard'); }
-        if (e.key === '2') { e.preventDefault(); setWindowStyle('log'); }
-        if (e.key === '3') { e.preventDefault(); setWindowStyle('working-tree'); }
-      }
-      // Git operation shortcuts (promised by the shortcuts overlay) —
-      // push / pull / fetch / stage all, repo required
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && !isInInput) {
-        const repo = useRepositoryStore.getState().currentRepo;
-        const git = useGitStore.getState();
-        if (e.key === 'P' && repo) {
-          e.preventDefault();
-          git.push(repo.path).then(() => toast.success('Pushed successfully')).catch((err) => toast.error('Push failed', String(err)));
-        } else if (e.key === 'L' && repo) {
-          e.preventDefault();
-          git.pull(repo.path).then(() => toast.success('Pulled successfully')).catch((err) => toast.error('Pull failed', String(err)));
-        } else if (e.key === 'F' && repo) {
-          e.preventDefault();
-          git.fetch(repo.path).then(() => toast.success('Fetched successfully')).catch((err) => toast.error('Fetch failed', String(err)));
-        } else if (e.key === 'A' && repo) {
-          e.preventDefault();
-          git.stageAll(repo.path).then(() => toast.success('All changes staged')).catch((err) => toast.error('Stage failed', String(err)));
-        } else if (e.key === 'O') {
-          e.preventDefault();
-          setShowClone(true);
-        }
-      }
-      // Ctrl+O — open repository picker
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'o' && !isInInput) {
-        e.preventDefault();
-        useRepositoryStore.getState().openRepositoryPicker();
-      }
+      // NOTE — git-operation shortcuts (Ctrl+Shift+P/L/F/A), window style
+      // (Ctrl+Shift+1/2/3), Clone (Ctrl+Shift+O) and the Output panel
+      // (Ctrl+Shift+U) are handled by the NATIVE application menu
+      // (electron/menu.ts accelerators → menu:* events). Do NOT duplicate them
+      // here: on Windows/Linux Electron does NOT consume the keydown when a
+      // menu accelerator fires, so both handlers ran — e.g. Fetch downloaded
+      // everything TWICE per keystroke (user-reported bug). The menu is the
+      // single owner of these shortcuts.
       // Ctrl+1..9 — quick page navigation (only with an open repository)
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9' && !isInInput) {
         const path = Object.entries(NAV_SHORTCUTS).find(([, sc]) => sc === `Ctrl+${e.key}`)?.[0];
@@ -890,7 +863,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [setWindowStyle, navigate]);
+  }, [navigate]);
 
   // Shortcuts dialog can be opened from the Command Palette via this event
   useEffect(() => {
