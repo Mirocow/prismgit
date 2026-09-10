@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Settings as SettingsIcon, Github, LogOut, Sun, Moon, Folder, Plus, RefreshCw, Trash, Loader } from '../components/icons';
+import { Settings as SettingsIcon, Github, LogOut, Sun, Moon, Folder, Plus, RefreshCw, Trash, Loader, GitBranch } from '../components/icons';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
@@ -107,14 +107,26 @@ export function SettingsPage() {
   return (
     <div className="flex flex-col flex-1 overflow-y-auto bg-bg-primary">
       <div className="max-w-3xl mx-auto p-6 w-full">
-        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-border-default">
-          <div className="w-10 h-10 rounded-lg bg-accent-muted flex items-center justify-center">
-            <SettingsIcon size={20} className="text-accent" />
+        <div className="flex items-center justify-between gap-3 mb-6 pb-4 border-b border-border-default">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-accent-muted flex items-center justify-center">
+              <SettingsIcon size={20} className="text-accent" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-text-primary tracking-tight">Project Settings</h1>
+              <p className="text-xs text-text-tertiary">Configure appearance, Git, and integrations</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-text-primary tracking-tight">Project Settings</h1>
-            <p className="text-xs text-text-tertiary">Configure appearance, Git, and integrations</p>
-          </div>
+          {currentRepo && (
+            <button
+              className="btn btn-secondary text-xs flex-shrink-0"
+              title="Per-repository settings: remotes, authorization, metadata"
+              onClick={() => window.dispatchEvent(new CustomEvent('prismgit:repo-settings'))}
+            >
+              <GitBranch size={12} />
+              Repository Settings...
+            </button>
+          )}
         </div>
 
         {/* Appearance */}
