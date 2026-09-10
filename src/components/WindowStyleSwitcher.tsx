@@ -3,22 +3,16 @@ import { create } from 'zustand';
 type WindowStyle = 'standard' | 'log' | 'working-tree';
 
 const STORAGE_KEY = 'prismgit-window-style';
-const LEGACY_STORAGE_KEY = 'smartgit-window-style';
 
 interface WindowStyleState {
   style: WindowStyle;
   setStyle: (s: WindowStyle) => void;
 }
 
-// Initialize from localStorage (with legacy key migration)
+// Initialize from localStorage
 function getInitialStyle(): WindowStyle {
   try {
-    let saved = localStorage.getItem(STORAGE_KEY) as WindowStyle | null;
-    // Migrate from legacy 'smartgit-window-style' key
-    if (!saved && localStorage.getItem(LEGACY_STORAGE_KEY)) {
-      saved = localStorage.getItem(LEGACY_STORAGE_KEY) as WindowStyle;
-      localStorage.setItem(STORAGE_KEY, saved);
-    }
+    const saved = localStorage.getItem(STORAGE_KEY) as WindowStyle | null;
     return saved || 'standard';
   } catch {
     return 'standard';

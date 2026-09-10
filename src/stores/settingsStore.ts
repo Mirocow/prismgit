@@ -118,12 +118,7 @@ function applyContrastToDOM(contrast: number) {
 
 // Apply theme immediately on module load (prevents FOUC)
 try {
-  let saved = localStorage.getItem('prismgit-theme') as Theme | null;
-  // Migrate from legacy 'smartgit-theme' key
-  if (!saved && localStorage.getItem('smartgit-theme')) {
-    saved = localStorage.getItem('smartgit-theme') as Theme;
-    if (saved) localStorage.setItem('prismgit-theme', saved);
-  }
+  const saved = localStorage.getItem('prismgit-theme') as Theme | null;
   if (saved === 'dark' || saved === 'light') {
     applyThemeToDOM(saved);
   } else {
