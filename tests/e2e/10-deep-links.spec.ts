@@ -129,6 +129,13 @@ test.describe('Deep links', () => {
       await navigateTo(ctx.page, 'Settings');
       await ctx.page.waitForTimeout(1500);
 
+      // Git Config lives on the Project Settings tab since the settings
+      // split (5a73533). The fixture repo is pre-loaded, so the tab is enabled.
+      const projectTab = ctx.page.locator('button:has-text("Project Settings")').first();
+      await projectTab.waitFor({ state: 'visible', timeout: 5000 });
+      await projectTab.click();
+      await ctx.page.waitForTimeout(1000);
+
       // Switch the Git Config panel to the system scope
       const systemBtn = ctx.page.locator('section button:text-is("system")').first();
       await systemBtn.waitFor({ state: 'visible', timeout: 5000 });

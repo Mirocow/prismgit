@@ -1114,6 +1114,7 @@ export default function App() {
         onShowShortcuts={() => setShowShortcuts(true)}
         onShowClone={() => setShowClone(true)}
         onShowInit={() => setShowInit(true)}
+        onToggleCommandLog={() => setShowCommandLog(s => !s)}
       />
       <GitToolbar
         onGitFlow={() => setShowGitFlow(true)}

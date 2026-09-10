@@ -11,7 +11,7 @@ import { useToastStore } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { describePushResult } from '../lib/pushResult';
 import { confirmDialog } from './ConfirmDialog';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Package, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Tag as TagIcon, Trash, X } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Package, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Tag as TagIcon, Terminal, Trash, X } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -65,10 +65,11 @@ interface ToolbarProps {
   onRepoInfo?: () => void;
   onShowShortcuts?: () => void;
   onShowClone?: () => void;
+  onToggleCommandLog?: () => void;
   onShowInit?: () => void;
 }
 
-export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts, onShowClone, onShowInit }: ToolbarProps = {}) {
+export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts, onShowClone, onShowInit, onToggleCommandLog }: ToolbarProps = {}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const currentMetadata = useRepositoryStore((s) => s.currentMetadata);
   const status = useGitStore((s) => s.status);
@@ -362,6 +363,11 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
             <Divider />
           </>
         )}
+        <IconButton
+          icon={Terminal}
+          onClick={() => onToggleCommandLog && onToggleCommandLog()}
+          title="Command Log — raw git commands output (Ctrl+Shift+U)"
+        />
         <IconButton
           icon={Keyboard}
           onClick={() => onShowShortcuts && onShowShortcuts()}

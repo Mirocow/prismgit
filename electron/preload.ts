@@ -3,6 +3,7 @@ import type { GitApi } from './types/git-api.js';
 import type { GithubApi } from './types/github-api.js';
 import type { FsApi } from './types/fs-api.js';
 import type { SettingsApi } from './types/settings-api.js';
+import type { CommandLogEntry } from './types/command-log-api.js';
 
 const api = {
   // Git operations
@@ -439,6 +440,19 @@ const api = {
   ai: {
     generateCommitMessage: (cfg: { url: string; apiKey?: string; model: string; maxDiffSize?: number; prompt?: string }, diff: string, hint?: string) =>
       ipcRenderer.invoke('ai:generateCommitMessage', cfg, diff, hint),
+  },
+
+  // Raw git command log (Output panel → Commands tab)
+  commandLog: {
+    list: () => ipcRenderer.invoke('command-log:list'),
+    clear: () => ipcRenderer.invoke('command-log:clear'),
+    onEntry: (cb: (entry: CommandLogEntry) => void) => {
+      const listener = (_: unknown, entry: CommandLogEntry) => cb(entry);
+      ipcRenderer.on('command-log:entry', listener);
+      return () => {
+        ipcRenderer.removeListener('command-log:entry', listener);
+      };
+    },
   },
 
   // Menu events (one-way from main to renderer)
