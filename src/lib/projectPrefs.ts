@@ -9,7 +9,7 @@
  *
  * Solution:
  *   A tiny localStorage-backed store keyed by the repository path:
- *     `smartgit-ui-prefs:<repoPath>`
+ *     `prismgit-ui-prefs:<repoPath>`
  *
  *   - `loadProjectPrefs(repoPath)` returns the saved prefs (or {}).
  *   - `saveProjectPrefs(repoPath, partial)` merges and persists.
@@ -25,7 +25,6 @@
  */
 
 const PREFIX = 'prismgit-ui-prefs:';
-const LEGACY_PREFIX = 'smartgit-ui-prefs:';
 
 export type FileSortKey = 'name' | 'state' | 'dir';
 
@@ -60,17 +59,7 @@ export interface ProjectPrefs {
 
 export function loadProjectPrefs(repoPath: string): ProjectPrefs {
   try {
-    const key = PREFIX + repoPath;
-    let raw = localStorage.getItem(key);
-    // Migrate from legacy 'smartgit-ui-prefs:' prefix if the new key doesn't exist
-    if (!raw) {
-      const legacyKey = LEGACY_PREFIX + repoPath;
-      raw = localStorage.getItem(legacyKey);
-      if (raw) {
-        // Save under the new key so subsequent reads are fast
-        localStorage.setItem(key, raw);
-      }
-    }
+    const raw = localStorage.getItem(PREFIX + repoPath);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? (parsed as ProjectPrefs) : {};
