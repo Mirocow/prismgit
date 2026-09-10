@@ -71,6 +71,26 @@ export interface RemoteInfo {
   refs: { fetch: string; push: string };
 }
 
+/** Real remote properties for the "Properties..." context-menu dialog. */
+export interface RemoteProperties {
+  name: string;
+  fetchUrl: string;
+  pushUrl: string;
+  /** HEAD branch reported by the remote (may be undefined / "(unknown)"). */
+  headBranch?: string;
+  /** Number of remote-tracking branches (refs/remotes/<name>/*). */
+  trackingBranchCount: number;
+  /** First up-to-50 tracking branch names for display. */
+  trackingBranches: string[];
+  /** True when the repo is a shallow clone (.git/shallow exists). */
+  shallow: boolean;
+  /** remote.<name>.mirror */
+  mirror: boolean;
+  /** Full remote.<name>.* config section. */
+  config: { key: string; value: string }[];
+}
+
+
 export interface StashEntry {
   index: number;
   hash: string;
@@ -206,6 +226,12 @@ export interface GitApi {
   pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) => Promise<void>;
   fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) => Promise<void>;
   fetchAll: (repoPath: string, prune?: boolean) => Promise<void>;
+  /** Deepen a shallow clone by N commits (git fetch --deepen=N). */
+  fetchDeepen: (repoPath: string, remote?: string, commits?: number) => Promise<void>;
+  /** Set shallow fetch depth (git fetch --depth=N); depth <= 0 → --unshallow. */
+  setFetchDepth: (repoPath: string, remote?: string, depth?: number) => Promise<void>;
+  /** Read real remote properties (URLs, HEAD branch, tracking branches, config). */
+  remoteProperties: (repoPath: string, name: string) => Promise<RemoteProperties>;
   log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) => Promise<LogEntry[]>;
   /** Resolve a commit by full/abbreviated hash (prefix search) — null when not found. */
   findCommit: (repoPath: string, query: string) => Promise<LogEntry | null>;
@@ -241,6 +267,8 @@ export interface GitApi {
   stashApply: (repoPath: string, index?: number) => Promise<void>;
   stashDrop: (repoPath: string, index?: number) => Promise<void>;
   stashBranch: (repoPath: string, branch: string, index?: number) => Promise<void>;
+  /** Rename a stash entry (rebuild refs/stash with a replacement commit). */
+  stashRename: (repoPath: string, index: number, message: string) => Promise<void>;
   tags: (repoPath: string) => Promise<TagInfo[]>;
   createTag: (repoPath: string, name: string, message?: string, ref?: string, force?: boolean, annotated?: boolean) => Promise<void>;
   deleteTag: (repoPath: string, name: string, remote?: boolean) => Promise<void>;

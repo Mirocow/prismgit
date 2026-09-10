@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   GitBranch, Plus, RefreshCw, Trash, GitMerge, Check, ArrowUp, ArrowDown,
   ExternalLink, Upload, ChevronDown, ChevronRight, X, Pencil, CloudDownload,
-  Settings as Cog, Loader,
+  Settings as Cog, Loader, Tag as TagIcon, Package, Download,
 } from '../components/icons';
 import { MergePanel } from '../components/MergePanel';
 import { useRepositoryStore } from '../stores/repositoryStore';
@@ -10,12 +10,16 @@ import { useGitStore } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
-import { api, type BranchInfo, type RemoteInfo } from '../lib/api';
+import { api, type BranchInfo, type RemoteInfo, type TagInfo, type StashEntry, type RemoteProperties } from '../lib/api';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { cn, formatDate, shortHash } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { RenameDialog, RemoteConfigDialog } from '../components/RemoteDialogs';
+import {
+  ResetDialog, SetTrackedDialog, AddTagDialog, PullOptionsDialog,
+  SetDepthDialog, FetchMoreDialog, RemotePropertiesDialog, type ResetMode,
+} from '../components/BranchDialogs';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function BranchesPage() {
@@ -37,18 +41,56 @@ export function BranchesPage() {
   const [remoteBusy, setRemoteBusy] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [draggedBranch, setDraggedBranch] = useState<string | null>(null);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set(['tags', 'stashes']));
   const showContextMenu = useContextMenu();
+
+  // ===== Tags (Branches-page section, like Fork) =====
+  const [tags, setTags] = useState<TagInfo[]>([]);
+  const [showAddTag, setShowAddTag] = useState(false);
+  const [addTagDefaultRef, setAddTagDefaultRef] = useState('HEAD');
+  const [tagBusy, setTagBusy] = useState(false);
+
+  // ===== Stashes (Branches-page section, like Fork) =====
+  const [stashes, setStashes] = useState<StashEntry[]>([]);
+  const [showStashDialog, setShowStashDialog] = useState(false);
+  const [stashMsg, setStashMsg] = useState('');
+  const [stashUntracked, setStashUntracked] = useState(true);
+
+  // ===== Dialog targets for context-menu operations =====
+  const [resetTarget, setResetTarget] = useState<{ branch: string; ref: string; advanced?: boolean } | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [setTrackedTarget, setSetTrackedTarget] = useState<{ branch: string; current?: string } | null>(null);
+  const [setTrackedBusy, setSetTrackedBusy] = useState(false);
+  const [pullRemote, setPullRemote] = useState<string | null>(null);
+  const [pullBusy, setPullBusy] = useState(false);
+  const [depthRemote, setDepthRemote] = useState<string | null>(null);
+  const [depthBusy, setDepthBusy] = useState(false);
+  const [moreRemote, setMoreRemote] = useState<string | null>(null);
+  const [moreBusy, setMoreBusy] = useState(false);
+  const [propertiesRemote, setPropertiesRemote] = useState<RemoteProperties | null>(null);
+  const [propertiesLoading, setPropertiesLoading] = useState(false);
+  useEscapeKey(!!showAddTag, () => setShowAddTag(false));
+  useEscapeKey(!!showStashDialog, () => setShowStashDialog(false));
+  useEscapeKey(!!resetTarget, () => setResetTarget(null));
+  useEscapeKey(!!setTrackedTarget, () => setSetTrackedTarget(null));
+  useEscapeKey(!!pullRemote, () => setPullRemote(null));
+  useEscapeKey(!!depthRemote, () => setDepthRemote(null));
+  useEscapeKey(!!moreRemote, () => setMoreRemote(null));
+  useEscapeKey(!!propertiesRemote, () => setPropertiesRemote(null));
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [branchList, remoteList] = await Promise.all([
+      const [branchList, remoteList, tagList, stashList] = await Promise.all([
         api.git.branches(repo.path),
         api.git.remotes(repo.path).catch(() => [] as RemoteInfo[]),
+        api.git.tags(repo.path).catch(() => [] as TagInfo[]),
+        api.git.stashList(repo.path).catch(() => [] as StashEntry[]),
       ]);
       setBranches(branchList);
       setRemotesMap(Object.fromEntries(remoteList.map((r) => [r.name, r])));
+      setTags(tagList);
+      setStashes(stashList);
     } catch (e) {
       toast.error('Failed to load branches', String(e));
     } finally {
@@ -231,6 +273,314 @@ export function BranchesPage() {
     } catch (e) { toast.error('Failed', String(e)); }
   };
 
+  // ===== Reset dialog executor (Reset... / Reset Advanced... for local AND remote branches) =====
+  const executeReset = async (mode: ResetMode, ref: string) => {
+    if (!resetTarget) return;
+    setResetBusy(true);
+    try {
+      await useOperationLogStore.getState().logOperation(
+        `Reset --${mode} to ${ref}`, repo.path, `git reset --${mode} ${ref}`,
+        () => api.git.reset(repo.path, mode, ref)
+      );
+      toast.success(`Reset --${mode} to ${ref.substring(0, 7)}`);
+      setResetTarget(null);
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error('Reset failed', String(e));
+    } finally {
+      setResetBusy(false);
+    }
+  };
+
+  // ===== Set Tracked Branch executor =====
+  const executeSetTracking = async (tracking: string) => {
+    if (!setTrackedTarget) return;
+    setSetTrackedBusy(true);
+    try {
+      await useOperationLogStore.getState().logOperation(
+        `Set tracking ${setTrackedTarget.branch} → ${tracking}`, repo.path,
+        `git branch --set-upstream-to=${tracking} ${setTrackedTarget.branch}`,
+        () => api.git.raw(repo.path, ['branch', '--set-upstream-to', tracking, setTrackedTarget.branch])
+      );
+      toast.success(`Tracking of '${setTrackedTarget.branch}' set to ${tracking}`);
+      setSetTrackedTarget(null);
+      await load();
+    } catch (e) {
+      toast.error('Failed to set tracking', String(e));
+    } finally {
+      setSetTrackedBusy(false);
+    }
+  };
+
+  // ===== Tag operations (Branches-page Tags section) =====
+  const executeAddTag = async (data: { name: string; message: string; ref: string; force: boolean }) => {
+    setTagBusy(true);
+    try {
+      await api.git.createTag(repo.path, data.name, data.message || undefined, data.ref, data.force);
+      toast.success(`Tag '${data.name}' created${data.message ? ' (annotated)' : ''}`);
+      setShowAddTag(false);
+      setCollapsedGroups((prev) => { const n = new Set(prev); n.delete('tags'); return n; });
+      await load();
+    } catch (e) {
+      toast.error('Tag creation failed', String(e));
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
+  const handleDeleteTag = async (tag: TagInfo) => {
+    if (!(await confirmDialog({
+      title: `Delete tag '${tag.name}'`,
+      message: 'This removes the tag from the local repository. Remote tags are not affected.',
+      confirmLabel: 'Delete',
+      danger: true,
+    }))) return;
+    try {
+      await api.git.deleteTag(repo.path, tag.name);
+      toast.success(`Tag '${tag.name}' deleted`);
+      await load();
+    } catch (e) { toast.error('Delete tag failed', String(e)); }
+  };
+
+  const handlePushTag = async (tag: TagInfo) => {
+    const remoteName = await promptDialog({
+      title: `Push tag '${tag.name}'`,
+      message: 'Push the tag to a remote:',
+      confirmLabel: 'Push',
+      input: { initialValue: Object.keys(remotesMap)[0] || 'origin', placeholder: 'origin' },
+    });
+    if (!remoteName?.trim()) return;
+    try {
+      await useOperationLogStore.getState().logOperation(
+        `Push tag ${tag.name} to ${remoteName}`, repo.path, `git push ${remoteName} ${tag.name}`,
+        () => api.git.pushTag(repo.path, tag.name, remoteName.trim())
+      );
+      toast.success(`Tag '${tag.name}' pushed to ${remoteName}`);
+    } catch (e) { toast.error('Push tag failed', String(e)); }
+  };
+
+  const showTagContextMenu = (e: React.MouseEvent, tag: TagInfo) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu([
+      { label: 'Push To...', accelerator: 'CmdOrCtrl+Up', clickId: 'push-tag' },
+      { type: 'separator' },
+      { label: 'Show in Log', accelerator: 'CmdOrCtrl+L', clickId: 'tag-log' },
+      { type: 'separator' },
+      { label: 'Copy Name', accelerator: 'CmdOrCtrl+C', clickId: 'tag-copy' },
+      { label: 'Copy Hash', clickId: 'tag-copy-hash' },
+      { type: 'separator' },
+      { label: 'Delete...', clickId: 'tag-delete' },
+    ], (action) => {
+      if (action === 'push-tag') handlePushTag(tag);
+      else if (action === 'tag-log') {
+        useSelectionStore.getState().selectCommit(tag.hash);
+        window.location.hash = '#/history';
+      } else if (action === 'tag-copy') {
+        navigator.clipboard.writeText(tag.name).then(() => toast.success(`Copied '${tag.name}'`));
+      } else if (action === 'tag-copy-hash') {
+        navigator.clipboard.writeText(tag.hash).then(() => toast.success('Hash copied'));
+      } else if (action === 'tag-delete') handleDeleteTag(tag);
+    });
+  };
+
+  // ===== Remote operations: Pull / Fetch More / Set Depth / Properties / Copy URL =====
+  const executePull = async (opts: { rebase: boolean; noFF: boolean }) => {
+    if (!pullRemote) return;
+    setPullBusy(true);
+    try {
+      await useOperationLogStore.getState().logOperation(
+        `Pull from ${pullRemote}${opts.rebase ? ' (rebase)' : ''}`, repo.path,
+        `git pull${opts.rebase ? ' --rebase' : ''}${opts.noFF ? ' --no-ff' : ''} ${pullRemote}`,
+        () => api.git.pull(repo.path, pullRemote, undefined, opts.rebase, opts.noFF)
+      );
+      toast.success(`Pulled from '${pullRemote}'`);
+      setPullRemote(null);
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error(`Pull from '${pullRemote}' failed`, String(e));
+    } finally {
+      setPullBusy(false);
+    }
+  };
+
+  const executeFetchMore = async (commits: number) => {
+    if (!moreRemote) return;
+    setMoreBusy(true);
+    try {
+      await useOperationLogStore.getState().logOperation(
+        `Fetch more (+${commits}) from ${moreRemote}`, repo.path,
+        `git fetch ${moreRemote} --deepen=${commits}`,
+        () => api.git.fetchDeepen(repo.path, moreRemote, commits)
+      );
+      toast.success(`Fetched ${commits} more commits from '${moreRemote}'`);
+      setMoreRemote(null);
+      await load();
+    } catch (e) {
+      toast.error(`Fetch more failed for '${moreRemote}'`, String(e));
+    } finally {
+      setMoreBusy(false);
+    }
+  };
+
+  const executeSetDepth = async (depth: number) => {
+    if (!depthRemote) return;
+    setDepthBusy(true);
+    try {
+      await useOperationLogStore.getState().logOperation(
+        depth > 0 ? `Set fetch depth ${depth} for ${depthRemote}` : `Unshallow ${depthRemote}`, repo.path,
+        depth > 0 ? `git fetch ${depthRemote} --depth=${depth}` : `git fetch --unshallow ${depthRemote}`,
+        () => api.git.setFetchDepth(repo.path, depthRemote, depth)
+      );
+      toast.success(depth > 0 ? `Fetch depth of '${depthRemote}' set to ${depth}` : `'${depthRemote}' unshallowed — full history downloaded`);
+      setDepthRemote(null);
+      await load();
+    } catch (e) {
+      toast.error(`Set depth failed for '${depthRemote}'`, String(e));
+    } finally {
+      setDepthBusy(false);
+    }
+  };
+
+  const handleShowProperties = async (remoteName: string) => {
+    setPropertiesLoading(true);
+    try {
+      const props = await api.git.remoteProperties(repo.path, remoteName);
+      setPropertiesRemote(props);
+    } catch (e) {
+      toast.error(`Failed to read properties of '${remoteName}'`, String(e));
+    } finally {
+      setPropertiesLoading(false);
+    }
+  };
+
+  const handleCopyRemoteUrl = async (remoteName: string) => {
+    const url = remotesMap[remoteName]?.refs.fetch;
+    if (!url) { toast.warning('Remote has no URL'); return; }
+    navigator.clipboard.writeText(url).then(() => toast.success('URL copied to clipboard'));
+  };
+
+  // ===== Stash operations (Branches-page Stashes section) =====
+  const handleStashChanges = async () => {
+    try {
+      const out = await api.git.stashPush(repo.path, stashMsg.trim() || undefined, stashUntracked);
+      if (!out || !out.trim()) {
+        toast.info('No local changes to stash');
+        return;
+      }
+      toast.success('Changes stashed');
+      setShowStashDialog(false);
+      setStashMsg('');
+      setCollapsedGroups((prev) => { const n = new Set(prev); n.delete('stashes'); return n; });
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) { toast.error('Stash failed', String(e)); }
+  };
+
+  const handleApplyStash = async (s: StashEntry) => {
+    if (!(await confirmDialog({
+      title: `Apply stash@{${s.index}}`,
+      message: `Applies the stashed changes to the working tree and KEEPS the stash.\n\n"${s.message}"`,
+      confirmLabel: 'Apply',
+    }))) return;
+    try {
+      await useOperationLogStore.getState().logOperation(
+        `Apply stash@{${s.index}}`, repo.path, `git stash apply stash@{${s.index}}`,
+        () => api.git.stashApply(repo.path, s.index)
+      );
+      toast.success(`stash@{${s.index}} applied (stash kept)`);
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) { toast.error('Stash apply failed', String(e)); }
+  };
+
+  const handleRenameStash = async (s: StashEntry) => {
+    const newMessage = await promptDialog({
+      title: `Rename stash@{${s.index}}`,
+      message: 'Enter the new stash message:',
+      confirmLabel: 'Rename',
+      input: { initialValue: s.message, placeholder: 'WIP: ...' },
+      validate: (v) => (!v.trim() ? 'Message must not be empty' : null),
+    });
+    if (newMessage == null || !newMessage.trim() || newMessage === s.message) return;
+    try {
+      await useOperationLogStore.getState().logOperation(
+        `Rename stash@{${s.index}}`, repo.path,
+        `git stash rename (rebuild refs/stash)`,
+        () => api.git.stashRename(repo.path, s.index, newMessage.trim())
+      );
+      toast.success(`stash@{${s.index}} renamed`);
+      await load();
+    } catch (e) { toast.error('Stash rename failed', String(e)); }
+  };
+
+  const handleDropStash = async (s: StashEntry) => {
+    if (!(await confirmDialog({
+      title: `Drop stash@{${s.index}}`,
+      message: `This permanently deletes the stash.\n\n"${s.message}"`,
+      confirmLabel: 'Drop',
+      danger: true,
+    }))) return;
+    try {
+      await useOperationLogStore.getState().logOperation(
+        `Drop stash@{${s.index}}`, repo.path, `git stash drop stash@{${s.index}}`,
+        () => api.git.stashDrop(repo.path, s.index)
+      );
+      toast.success(`stash@{${s.index}} dropped`);
+      await load();
+    } catch (e) { toast.error('Stash drop failed', String(e)); }
+  };
+
+  const handleStashShowInLog = (s: StashEntry) => {
+    useSelectionStore.getState().selectCommit(s.hash);
+    window.location.hash = '#/history';
+  };
+
+  const showStashContextMenu = (e: React.MouseEvent, s: StashEntry) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu([
+      { label: 'Apply Stash...', accelerator: 'Shift+CmdOrCtrl+S', clickId: 'stash-apply' },
+      { label: 'Pop Stash (apply + drop)', clickId: 'stash-pop' },
+      { type: 'separator' },
+      { label: 'Show Content in Log', accelerator: 'CmdOrCtrl+L', clickId: 'stash-log' },
+      { type: 'separator' },
+      { label: 'Rename Stash...', accelerator: 'F2', clickId: 'stash-rename' },
+      { label: 'Drop Stash...', clickId: 'stash-drop' },
+      { type: 'separator' },
+      { label: 'Copy Message', clickId: 'stash-copy' },
+    ], (action) => {
+      if (action === 'stash-apply') handleApplyStash(s);
+      else if (action === 'stash-pop') {
+        confirmDialog({
+          title: `Pop stash@{${s.index}}`,
+          message: `Applies the stashed changes and REMOVES the stash.\n\n"${s.message}"`,
+          confirmLabel: 'Pop',
+        }).then(async (ok) => {
+          if (!ok) return;
+          try {
+            await useOperationLogStore.getState().logOperation(
+              `Pop stash@{${s.index}}`, repo.path, `git stash pop stash@{${s.index}}`,
+              () => api.git.stashPop(repo.path, s.index)
+            );
+            toast.success(`stash@{${s.index}} popped`);
+            await load();
+            await refreshStatus(repo.path);
+          } catch (e) { toast.error('Stash pop failed', String(e)); }
+        });
+      }
+      else if (action === 'stash-log') handleStashShowInLog(s);
+      else if (action === 'stash-rename') handleRenameStash(s);
+      else if (action === 'stash-drop') handleDropStash(s);
+      else if (action === 'stash-copy') {
+        navigator.clipboard.writeText(s.message).then(() => toast.success('Message copied'));
+      }
+    });
+  };
+
+
   // ===== Branch compare dialog =====
   // Compare an arbitrary branch against the CURRENT branch: ahead/behind counts,
   // changed file list, unified patch preview, and a jump into the Diff tool.
@@ -320,40 +670,53 @@ export function BranchesPage() {
     const items: ContextMenuItem[] = [];
 
     if (b.remote) {
-      // === REMOTE BRANCH CONTEXT MENU ===
-      items.push({ label: 'Check Out (create local tracking branch)...', clickId: 'checkout-remote' });
+      // === REMOTE BRANCH CONTEXT MENU (matches Fork: Check Out / Merge / Rebase /
+      //     Push (disabled) / Push To / Log / Reset / Reset Advanced / Delete / Copy) ===
+      items.push({ label: 'Check Out...', accelerator: 'CmdOrCtrl+G', clickId: 'checkout-remote' });
       items.push({ type: 'separator' });
-      items.push({ label: 'Merge into current', clickId: 'merge' });
+      items.push({ label: 'Merge...', clickId: 'merge' });
+      items.push({ label: 'Rebase...', accelerator: 'CmdOrCtrl+D', clickId: 'rebase' });
       items.push({ type: 'separator' });
+      // Push is meaningless for a remote-only branch — shown disabled like Fork does.
+      items.push({ label: 'Push', accelerator: 'CmdOrCtrl+Up', enabled: false, clickId: '_noop' });
+      items.push({ label: 'Push To...', accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to-remote' });
+      items.push({ type: 'separator' });
+      items.push({ label: 'Log', accelerator: 'CmdOrCtrl+L', clickId: 'log' });
+      items.push({ type: 'separator' });
+      items.push({ label: 'Reset...', accelerator: 'CmdOrCtrl+R', clickId: 'reset-remote' });
+      items.push({ label: 'Reset Advanced...', accelerator: 'Shift+CmdOrCtrl+R', clickId: 'reset-advanced-remote' });
+      items.push({ type: 'separator' });
+      items.push({ label: 'Delete...', clickId: 'delete-remote' });
+      items.push({ type: 'separator' });
+      items.push({ label: 'Copy', accelerator: 'CmdOrCtrl+C', clickId: 'copy' });
       items.push({ label: 'Open in Browser', clickId: 'browser' });
-      items.push({ label: 'Delete remote branch', clickId: 'delete-remote' });
     } else {
-      // === LOCAL BRANCH CONTEXT MENU (matches SmartGit ideal) ===
+      // === LOCAL BRANCH CONTEXT MENU (matches Fork) ===
 
       // Group 1: Checkout / Merge / Rebase
       if (!b.current) {
-        items.push({ label: 'Check Out...', clickId: 'checkout' });
+        items.push({ label: 'Check Out...', accelerator: 'CmdOrCtrl+G', clickId: 'checkout' });
+        items.push({ type: 'separator' });
         items.push({ label: 'Merge...', clickId: 'merge' });
-        items.push({ label: 'Rebase...', clickId: 'rebase' });
+        items.push({ label: 'Rebase...', accelerator: 'CmdOrCtrl+D', clickId: 'rebase' });
         items.push({ label: 'Fast-Forward Merge', clickId: 'ff-merge' });
         items.push({ type: 'separator' });
       }
 
       // Group 2: Push
-      items.push({ label: 'Push', clickId: 'push' });
-      items.push({ label: 'Push To...', clickId: 'push-to' });
+      items.push({ label: 'Push', accelerator: 'CmdOrCtrl+Up', clickId: 'push' });
+      items.push({ label: 'Push To...', accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to' });
       items.push({ type: 'separator' });
 
       // Group 3: Log / Reset
-      items.push({ label: 'Log', clickId: 'log' });
-      if (!b.current) {
-        items.push({ label: 'Reset...', clickId: 'reset' });
-        items.push({ label: 'Reset Advanced...', clickId: 'reset-advanced' });
-      }
+      items.push({ label: 'Log', accelerator: 'CmdOrCtrl+L', clickId: 'log' });
+      items.push({ type: 'separator' });
+      items.push({ label: 'Reset...', accelerator: 'CmdOrCtrl+R', clickId: 'reset' });
+      items.push({ label: 'Reset Advanced...', accelerator: 'Shift+CmdOrCtrl+R', clickId: 'reset-advanced' });
       items.push({ type: 'separator' });
 
       // Group 4: Rename / Delete
-      items.push({ label: 'Rename...', clickId: 'rename' });
+      items.push({ label: 'Rename...', accelerator: 'F2', clickId: 'rename' });
       if (!b.current) {
         items.push({ label: 'Delete...', clickId: 'delete' });
       }
@@ -362,14 +725,16 @@ export function BranchesPage() {
       // Group 5: Tracking
       if (b.tracking) {
         items.push({ label: `Tracking: ${b.tracking}`, clickId: '_noop', enabled: false });
+        items.push({ label: 'Set Tracked Branch...', clickId: 'set-tracking' });
         items.push({ label: 'Stop Tracking...', clickId: 'stop-tracking' });
       } else {
         items.push({ label: 'Set Tracked Branch...', clickId: 'set-tracking' });
+        items.push({ label: 'Stop Tracking...', enabled: false, clickId: '_noop' });
       }
       items.push({ type: 'separator' });
 
       // Group 6: Copy
-      items.push({ label: 'Copy', clickId: 'copy' });
+      items.push({ label: 'Copy', accelerator: 'CmdOrCtrl+C', clickId: 'copy' });
     }
 
     if (items.length > 0) {
@@ -442,40 +807,15 @@ export function BranchesPage() {
           window.location.hash = '#/history';
         }
 
-        // === Reset (reset current HEAD to this branch's commit) ===
-        else if (action === 'reset') {
-          if (!(await confirmDialog({
-            title: `Reset to '${b.name}'`,
-            message: `This will reset your current HEAD to match '${b.name}'.\n\nChoose reset mode in the next step.`,
-            confirmLabel: 'Reset...',
-          }))) return;
-          // Reset hard to this branch's last commit
-          const lastHash = b.lastCommit?.hash;
-          if (!lastHash) { toast.warning('Cannot determine commit hash'); return; }
-          if (!(await confirmDialog({
-            title: `Reset --hard to ${b.name}`,
-            message: `WARNING: This discards ALL uncommitted changes and moves HEAD to ${lastHash.substring(0, 7)}.\n\nThis cannot be undone.`,
-            confirmLabel: 'Reset --hard',
-          }))) return;
-          useOperationLogStore.getState().logOperation(
-            `Reset to ${b.name}`, repo.path, `git reset --hard ${lastHash}`,
-            () => api.git.reset(repo.path, 'hard', lastHash)
-          ).then(() => { toast.success(`Reset to ${b.name}`); refreshStatus(repo.path); })
-           .catch((e) => toast.error('Reset failed', String(e)));
+        // === Reset current branch to this branch's commit (mode dialog) ===
+        else if (action === 'reset' || action === 'reset-remote') {
+          if (!b.lastCommit?.hash) { toast.warning('Cannot determine commit hash'); return; }
+          setResetTarget({ branch: b.name, ref: b.lastCommit.hash });
         }
 
-        // === Reset Advanced (soft/mixed options) ===
-        else if (action === 'reset-advanced') {
-          const lastHash = b.lastCommit?.hash;
-          if (!lastHash) { toast.warning('Cannot determine commit hash'); return; }
-          // Use a simple prompt for now — a full dialog would be better
-          const mode = prompt(`Reset to ${b.name} (${lastHash.substring(0, 7)})\n\nEnter reset mode:\n  soft  — keep changes staged\n  mixed — keep changes unstaged (default)\n  hard  — discard all changes`, 'mixed');
-          if (!mode || !['soft', 'mixed', 'hard', 'keep'].includes(mode)) return;
-          useOperationLogStore.getState().logOperation(
-            `Reset --${mode} to ${b.name}`, repo.path, `git reset --${mode} ${lastHash}`,
-            () => api.git.reset(repo.path, mode as 'soft' | 'mixed' | 'hard' | 'keep', lastHash)
-          ).then(() => { toast.success(`Reset --${mode} to ${b.name}`); refreshStatus(repo.path); })
-           .catch((e) => toast.error('Reset failed', String(e)));
+        // === Reset Advanced (mode + editable ref) ===
+        else if (action === 'reset-advanced' || action === 'reset-advanced-remote') {
+          setResetTarget({ branch: b.name, ref: b.lastCommit?.hash || 'HEAD', advanced: true });
         }
 
         // === Rename ===
@@ -484,18 +824,9 @@ export function BranchesPage() {
         // === Delete ===
         else if (action === 'delete') handleDelete(b);
 
-        // === Set Tracked Branch ===
+        // === Set Tracked Branch (dialog with remote-branch picker) ===
         else if (action === 'set-tracking') {
-          // List remote branches for user to pick
-          const remoteBranches = branches.filter(br => br.remote).map(br => br.name);
-          const tracking = prompt(`Set tracked branch for '${b.name}'\n\nAvailable remote branches:\n${remoteBranches.slice(0, 20).join('\n')}\n\nEnter remote branch name:`, b.tracking || `origin/${b.name}`);
-          if (!tracking) return;
-          useOperationLogStore.getState().logOperation(
-            `Set tracking ${b.name} → ${tracking}`, repo.path,
-            `git branch --set-upstream-to=${tracking} ${b.name}`,
-            () => api.git.raw(repo.path, ['branch', '--set-upstream-to', tracking, b.name])
-          ).then(() => { toast.success(`Tracking set to ${tracking}`); load(); })
-           .catch((e) => toast.error('Failed to set tracking', String(e)));
+          setSetTrackedTarget({ branch: b.name, current: b.tracking });
         }
 
         // === Stop Tracking ===
@@ -527,6 +858,24 @@ export function BranchesPage() {
         // === Delete remote ===
         else if (action === 'delete-remote') handleDeleteRemote(b);
 
+        // === Push To... for a REMOTE branch: push current HEAD to that remote ===
+        else if (action === 'push-to-remote') {
+          const remoteName = b.name.split('/')[0];
+          if (!(await confirmDialog({
+            title: `Push current branch to '${remoteName}'`,
+            message: `This runs: git push ${remoteName} HEAD (with -u when the current branch has no upstream).`,
+            confirmLabel: 'Push',
+          }))) return;
+          const current = await api.git.currentBranch(repo.path);
+          const setUpstream = !branches.some((x) => x.current && x.tracking);
+          useOperationLogStore.getState().logOperation(
+            `Push ${current || 'HEAD'} to ${remoteName}`, repo.path,
+            `git push ${remoteName} HEAD`,
+            () => api.git.push(repo.path, remoteName, undefined, setUpstream)
+          ).then(() => { toast.success(`Pushed to ${remoteName}`); refreshStatus(repo.path); })
+           .catch((e) => toast.error('Push failed', String(e)));
+        }
+
         // === Create local from remote ===
         else if (action === 'create-local') {
           const name = b.name.replace(/^[^/]+\//, '');
@@ -540,6 +889,8 @@ export function BranchesPage() {
   };
 
   const filtered = branches.filter(b => b.name.toLowerCase().includes(search.toLowerCase()));
+  const filteredTags = tags.filter(t => t.name.toLowerCase().includes(search.toLowerCase()));
+  const filteredStashes = stashes.filter(s => s.message.toLowerCase().includes(search.toLowerCase()));
 
   // Group branches: Local, then by remote
   const localBranches = filtered.filter(b => !b.remote);
@@ -674,27 +1025,113 @@ export function BranchesPage() {
     );
   };
 
+  /** Header context menu for "Local Branches" (Fork-style: Add Branch... F7). */
+  const showLocalHeaderContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu([
+      { label: 'Add Branch...', accelerator: 'F7', clickId: 'add-branch' },
+    ], (action) => {
+      if (action === 'add-branch') setShowNewDialog(true);
+    });
+  };
+
   const showRemoteContextMenu = (e: React.MouseEvent, remoteName: string) => {
     e.preventDefault();
     e.stopPropagation();
     showContextMenu([
-      { label: `Fetch '${remoteName}'`, clickId: 'fetch' },
-      { label: 'Configure remote properties...', clickId: 'configure' },
+      { label: 'Push To...', accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'remote-push-to' },
+      { label: 'Pull...', accelerator: 'CmdOrCtrl+Down', clickId: 'remote-pull' },
       { type: 'separator' },
-      { label: 'Rename remote...', clickId: 'rename-remote' },
-      { label: 'Remove remote...', clickId: 'remove-remote' },
+      { label: 'Fetch', accelerator: 'Shift+CmdOrCtrl+Down', clickId: 'fetch' },
+      { label: 'Fetch More...', clickId: 'fetch-more' },
       { type: 'separator' },
+      { label: 'Rename...', accelerator: 'F2', clickId: 'rename-remote' },
+      { label: 'Delete...', clickId: 'remove-remote' },
+      { type: 'separator' },
+      { label: 'Copy URL', clickId: 'copy-url' },
+      { type: 'separator' },
+      { label: 'Set Depth...', clickId: 'set-depth' },
+      { label: 'Properties...', clickId: 'properties' },
+      { type: 'separator' },
+      { label: 'Configure remote...', clickId: 'configure' },
       { label: 'Add new remote...', clickId: 'add-remote' },
       { label: 'Manage all remotes (Remotes page)', clickId: 'manage' },
     ], (action) => {
-      if (action === 'fetch') handleFetchRemote(remoteName);
+      if (action === 'remote-push-to') {
+        // Push the CURRENT branch HEAD to this remote (Fork behavior).
+        confirmDialog({
+          title: `Push current branch to '${remoteName}'`,
+          message: `This runs: git push ${remoteName} HEAD`,
+          confirmLabel: 'Push',
+        }).then(async (ok) => {
+          if (!ok) return;
+          try {
+            await useOperationLogStore.getState().logOperation(
+              `Push current branch to ${remoteName}`, repo.path, `git push ${remoteName} HEAD`,
+              () => api.git.push(repo.path, remoteName, undefined, false)
+            );
+            toast.success(`Pushed current branch to ${remoteName}`);
+            refreshStatus(repo.path);
+          } catch (err) { toast.error('Push failed', String(err)); }
+        });
+      }
+      else if (action === 'remote-pull') setPullRemote(remoteName);
+      else if (action === 'fetch') handleFetchRemote(remoteName);
+      else if (action === 'fetch-more') setMoreRemote(remoteName);
       else if (action === 'configure') setConfigRemote({ mode: 'configure', name: remoteName });
       else if (action === 'rename-remote') setRenameTarget({ kind: 'remote', oldName: remoteName });
       else if (action === 'remove-remote') handleRemoveRemote(remoteName);
       else if (action === 'add-remote') setConfigRemote({ mode: 'add' });
+      else if (action === 'copy-url') handleCopyRemoteUrl(remoteName);
+      else if (action === 'set-depth') setDepthRemote(remoteName);
+      else if (action === 'properties') handleShowProperties(remoteName);
       else if (action === 'manage') window.location.hash = '#/remotes';
     });
   };
+
+  /** Header context menu for "Tags" (Fork-style: Add Tag... Shift+F7). */
+  const showTagsHeaderContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu([
+      { label: 'Add Tag...', accelerator: 'Shift+F7', clickId: 'add-tag' },
+    ], (action) => {
+      if (action === 'add-tag') {
+        setAddTagDefaultRef('HEAD');
+        setShowAddTag(true);
+      }
+    });
+  };
+
+  /** Header context menu for "Stashes" — create a new stash. */
+  const showStashesHeaderContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showContextMenu([
+      { label: 'Stash Changes (New Stash)...', accelerator: 'Shift+CmdOrCtrl+S', clickId: 'stash-new' },
+    ], (action) => {
+      if (action === 'stash-new') setShowStashDialog(true);
+    });
+  };
+
+  // F7 = Add Branch, Shift+F7 = Add Tag (only when this page is focused)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'F7') return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      e.preventDefault();
+      if (e.shiftKey) {
+        setAddTagDefaultRef('HEAD');
+        setShowAddTag(true);
+      } else {
+        setShowNewDialog(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const renderGroup = (
     label: React.ReactNode,
@@ -703,8 +1140,10 @@ export function BranchesPage() {
     groupKey: string,
     headerExtra?: React.ReactNode,
     onHeaderContextMenu?: (e: React.MouseEvent) => void,
+    renderRow?: (item: BranchInfo) => React.ReactNode,
   ) => {
     const collapsed = collapsedGroups.has(groupKey);
+    const rowRenderer: (item: BranchInfo) => React.ReactNode = renderRow ?? renderBranchRow;
     return (
       <div key={groupKey}>
         <div
@@ -724,7 +1163,7 @@ export function BranchesPage() {
             Showing first 200 of {items.length} · scroll for more
           </div>
         )}
-        {!collapsed && items.slice(0, 200).map(renderBranchRow)}
+        {!collapsed && items.slice(0, 200).map(rowRenderer)}
       </div>
     );
   };
@@ -773,6 +1212,72 @@ export function BranchesPage() {
     );
   };
 
+  const renderTagRow = (tag: TagInfo) => (
+    <div
+      key={tag.name}
+      className="group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover"
+      onClick={(e) => {
+        // Click: show the tagged commit in History
+        useSelectionStore.getState().selectCommit(tag.hash);
+        window.location.hash = '#/history';
+        e.stopPropagation();
+      }}
+      onContextMenu={(e) => showTagContextMenu(e, tag)}
+    >
+      <span className="w-3 flex-shrink-0" />
+      <TagIcon size={12} className="text-text-tertiary flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="truncate font-medium text-text-primary">{tag.name}</span>
+          {!tag.lightweight && tag.annotation && (
+            <span className="text-2xs text-text-tertiary truncate" style={{ maxWidth: 220 }} title={tag.annotation}>
+              {tag.annotation}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 flex-shrink-0">
+        <code className="font-mono">{tag.hashAbbrev}</code>
+        {tag.date && <span>· {formatDate(tag.date)}</span>}
+      </div>
+    </div>
+  );
+
+  /** Fork-style stash row: "07/25/2025 02:55 PM: WIP on remove-sync: ..." */
+  const renderStashRow = (s: StashEntry) => {
+    const dateLabel = s.date ? formatDate(s.date) : '';
+    return (
+      <div
+        key={`stash-${s.index}`}
+        className="group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover"
+        onClick={(e) => { handleStashShowInLog(s); e.stopPropagation(); }}
+        onContextMenu={(e) => showStashContextMenu(e, s)}
+        title="Click: show content in Log · Right-click: stash menu"
+      >
+        <span className="w-3 flex-shrink-0" />
+        <Package size={12} className="text-text-tertiary flex-shrink-0" />
+        <div className="flex-1 min-w-0 truncate">
+          {dateLabel && <span className="text-text-secondary">{dateLabel}: </span>}
+          <span className="text-text-primary">{s.message}</span>
+        </div>
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
+          <button className="icon-btn !w-5 !h-5" title="Apply Stash (keep stash)"
+            onClick={(e) => { e.stopPropagation(); handleApplyStash(s); }}>
+            <Check size={11} />
+          </button>
+          <button className="icon-btn !w-5 !h-5" title="Rename Stash"
+            onClick={(e) => { e.stopPropagation(); handleRenameStash(s); }}>
+            <Pencil size={11} />
+          </button>
+          <button className="icon-btn !w-5 !h-5 hover:!text-status-deleted" title="Drop Stash"
+            onClick={(e) => { e.stopPropagation(); handleDropStash(s); }}>
+            <Trash size={11} />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header */}
@@ -780,7 +1285,7 @@ export function BranchesPage() {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold">Branches</span>
           <span className="text-2xs text-text-tertiary">
-            {localBranches.length} local · {Object.values(remoteGroups).reduce((a, b) => a + b.length, 0)} remote
+            {localBranches.length} local · {Object.values(remoteGroups).reduce((a, b) => a + b.length, 0)} remote · {filteredTags.length} tags · {filteredStashes.length} stashes
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -799,14 +1304,14 @@ export function BranchesPage() {
       <div className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
-        ) : filtered.length === 0 ? (
+        ) : filtered.length === 0 && filteredTags.length === 0 && filteredStashes.length === 0 ? (
           <div className="p-8 text-center text-text-tertiary text-sm">
-            {search ? 'No branches match' : 'No branches'}
+            {search ? 'Nothing matches the filter' : 'No branches, tags or stashes'}
           </div>
         ) : (
           <>
-            {/* Local branches */}
-            {renderGroup('Local Branches', localBranches.length, localBranches, 'local')}
+            {/* Local branches — header right-click: Add Branch... (F7) */}
+            {renderGroup('Local Branches', localBranches.length, localBranches, 'local', undefined, showLocalHeaderContextMenu)}
 
             {/* Remote groups — SmartGit-style remote nodes with URL + management */}
             {Object.entries(remoteGroups).map(([remoteName, remoteBranches]) =>
@@ -823,6 +1328,12 @@ export function BranchesPage() {
                 </button>
               </div>
             )}
+
+            {/* Tags — header right-click: Add Tag... (Shift+F7) */}
+            {renderGroup('Tags', filteredTags.length, filteredTags as unknown as BranchInfo[], 'tags', undefined, showTagsHeaderContextMenu, (t) => renderTagRow(t as unknown as TagInfo))}
+
+            {/* Stashes — header right-click: Stash Changes... */}
+            {renderGroup('Stashes', filteredStashes.length, filteredStashes as unknown as BranchInfo[], 'stashes', undefined, showStashesHeaderContextMenu, (s) => renderStashRow(s as unknown as StashEntry))}
           </>
         )}
       </div>
@@ -871,6 +1382,110 @@ export function BranchesPage() {
       {/* Merge panel */}
       {mergeTarget && (
         <MergePanel targetBranch={mergeTarget} onClose={() => setMergeTarget(null)} />
+      )}
+
+      {/* Reset / Reset Advanced dialog (local + remote branches) */}
+      {resetTarget && (
+        <ResetDialog
+          branchName={resetTarget.branch}
+          defaultRef={resetTarget.ref}
+          advanced={resetTarget.advanced}
+          busy={resetBusy}
+          onSubmit={executeReset}
+          onClose={() => setResetTarget(null)}
+        />
+      )}
+
+      {/* Set Tracked Branch dialog (remote-branch picker) */}
+      {setTrackedTarget && (
+        <SetTrackedDialog
+          branchName={setTrackedTarget.branch}
+          remoteBranches={branches.filter((b) => b.remote).map((b) => b.name)}
+          current={setTrackedTarget.current}
+          busy={setTrackedBusy}
+          onSubmit={executeSetTracking}
+          onClose={() => setSetTrackedTarget(null)}
+        />
+      )}
+
+      {/* Add Tag dialog (Tags section header / Shift+F7) */}
+      {showAddTag && (
+        <AddTagDialog
+          defaultRef={addTagDefaultRef}
+          busy={tagBusy}
+          onSubmit={executeAddTag}
+          onClose={() => setShowAddTag(false)}
+        />
+      )}
+
+      {/* Pull options dialog (remote context menu) */}
+      {pullRemote && (
+        <PullOptionsDialog
+          remoteName={pullRemote}
+          busy={pullBusy}
+          onSubmit={executePull}
+          onClose={() => setPullRemote(null)}
+        />
+      )}
+
+      {/* Set Depth dialog (remote context menu) */}
+      {depthRemote && (
+        <SetDepthDialog
+          remoteName={depthRemote}
+          busy={depthBusy}
+          onSubmit={executeSetDepth}
+          onClose={() => setDepthRemote(null)}
+        />
+      )}
+
+      {/* Fetch More dialog (remote context menu) */}
+      {moreRemote && (
+        <FetchMoreDialog
+          remoteName={moreRemote}
+          busy={moreBusy}
+          onSubmit={executeFetchMore}
+          onClose={() => setMoreRemote(null)}
+        />
+      )}
+
+      {/* Remote properties dialog (remote context menu) */}
+      {propertiesRemote && (
+        <RemotePropertiesDialog props={propertiesRemote} onClose={() => setPropertiesRemote(null)} />
+      )}
+      {propertiesLoading && !propertiesRemote && (
+        <div className="fixed bottom-10 right-6 z-50 panel px-3 py-2 text-xs flex items-center gap-2">
+          <Loader size={12} className="animate-spin" /> Loading remote properties...
+        </div>
+      )}
+
+      {/* New stash dialog (Stashes section header menu) */}
+      {showStashDialog && (
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowStashDialog(false)}>
+          <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-medium mb-4 flex items-center gap-2">
+              <Package size={16} /> Stash Changes
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">Message (optional)</label>
+                <input type="text" className="w-full text-sm" placeholder="WIP: feature X"
+                  value={stashMsg} autoFocus
+                  onChange={(e) => setStashMsg(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleStashChanges()} />
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={stashUntracked} onChange={(e) => setStashUntracked(e.target.checked)} />
+                Include untracked files
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button className="btn btn-secondary" onClick={() => setShowStashDialog(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleStashChanges}>
+                <Download size={13} /> Stash
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Rename branch / remote dialog (SmartGit-style) */}

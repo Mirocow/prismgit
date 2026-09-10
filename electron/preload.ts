@@ -23,6 +23,12 @@ const api = {
     fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) =>
       ipcRenderer.invoke('git:fetch', repoPath, remote, prune, tags),
     fetchAll: (repoPath: string, prune?: boolean) => ipcRenderer.invoke('git:fetchAll', repoPath, prune),
+    fetchDeepen: (repoPath: string, remote?: string, commits?: number) =>
+      ipcRenderer.invoke('git:fetchDeepen', repoPath, remote, commits),
+    setFetchDepth: (repoPath: string, remote?: string, depth?: number) =>
+      ipcRenderer.invoke('git:setFetchDepth', repoPath, remote, depth),
+    remoteProperties: (repoPath: string, name: string) =>
+      ipcRenderer.invoke('git:remoteProperties', repoPath, name),
     log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) =>
       ipcRenderer.invoke('git:log', repoPath, options),
     findCommit: (repoPath: string, query: string) => ipcRenderer.invoke('git:findCommit', repoPath, query),
@@ -62,6 +68,8 @@ const api = {
     stashDrop: (repoPath: string, index?: number) => ipcRenderer.invoke('git:stashDrop', repoPath, index),
     stashBranch: (repoPath: string, branch: string, index?: number) =>
       ipcRenderer.invoke('git:stashBranch', repoPath, branch, index),
+    stashRename: (repoPath: string, index: number, message: string) =>
+      ipcRenderer.invoke('git:stashRename', repoPath, index, message),
     tags: (repoPath: string) => ipcRenderer.invoke('git:tags', repoPath),
     createTag: (repoPath: string, name: string, message?: string, ref?: string, force?: boolean, annotated?: boolean) =>
       ipcRenderer.invoke('git:createTag', repoPath, name, message, ref, force, annotated),

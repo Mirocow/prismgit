@@ -27,6 +27,9 @@ export function registerGitIpc(): void {
     gitService.fetch(p, r, pr, t)
   );
   ipcMain.handle('git:fetchAll', (_e, p: string, pr?: boolean) => gitService.fetchAll(p, pr));
+  ipcMain.handle('git:fetchDeepen', (_e, p: string, r?: string, c?: number) => gitService.fetchDeepen(p, r, c ?? 100));
+  ipcMain.handle('git:setFetchDepth', (_e, p: string, r?: string, d?: number) => gitService.setFetchDepth(p, r, d ?? 0));
+  ipcMain.handle('git:remoteProperties', (_e, p: string, n: string) => gitService.remoteProperties(p, n));
 
   // Log & history
   ipcMain.handle('git:log', (_e, p: string, o?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) =>
@@ -89,6 +92,7 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:stashApply', (_e, p: string, i?: number) => gitService.stashApply(p, i));
   ipcMain.handle('git:stashDrop', (_e, p: string, i?: number) => gitService.stashDrop(p, i));
   ipcMain.handle('git:stashBranch', (_e, p: string, b: string, i?: number) => gitService.stashBranch(p, b, i));
+  ipcMain.handle('git:stashRename', (_e, p: string, i: number, m: string) => gitService.renameStash(p, i, m));
 
   // Tags
   ipcMain.handle('git:tags', (_e, p: string) => gitService.tags(p));

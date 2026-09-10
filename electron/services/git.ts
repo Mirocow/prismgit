@@ -6,6 +6,7 @@ import type {
   LogEntry,
   BranchInfo,
   RemoteInfo,
+  RemoteProperties,
   StashEntry,
   TagInfo,
   SubmoduleInfo,
@@ -931,6 +932,167 @@ export async function stashDrop(repoPath: string, index = 0): Promise<void> {
 export async function stashBranch(repoPath: string, branch: string, index = 0): Promise<void> {
   const git = getGit(repoPath);
   await git.raw(['stash', 'branch', branch, `stash@{${index}}`]);
+}
+
+/**
+ * Rename a stash entry (stash@{index}) — real operation, no native git support.
+ *
+ * Technique (the same one SmartGit/Fork use under the hood):
+ *   1. Create a NEW commit with the SAME tree and SAME parents as the stash
+ *      commit, but carrying the new message (git commit-tree).
+ *      → stash content (worktree + index + optional untracked commit) untouched.
+ *   2. Rebuild refs/stash: delete the ref (its reflog goes with it), then
+ *      `git stash store -m <msg>` every entry back in chronological order,
+ *      substituting the target entry with the renamed commit.
+ *
+ * Result: identical stash list, same order, only the target message changed.
+ */
+export async function renameStash(repoPath: string, index: number, newMessage: string): Promise<void> {
+  if (!newMessage || !newMessage.trim()) throw new Error('Stash message must not be empty');
+  const git = getGit(repoPath);
+
+  // 1. Snapshot the stash reflog. stash list is newest-first (stash@{0} on top).
+  //    Separator: ASCII unit separator (\x1f) — a real char that never collides
+  //    with commit messages (git for-each-ref %xNN escapes are unreliable here).
+  const list = await git.raw(['stash', 'list', '--format=%H\u001f%gs']);
+  const lines = list.split('\n').filter((l) => l.trim() !== '');
+  if (index < 0 || index >= lines.length) {
+    throw new Error(`stash@{${index}} does not exist (0..${lines.length - 1})`);
+  }
+  // Convert to chronological order (oldest → newest) for reflog rebuild.
+  const entries = lines
+    .map((l) => {
+      const sep = l.indexOf('\u001f');
+      return { hash: l.slice(0, sep).trim(), message: l.slice(sep + 1) };
+    })
+    .reverse();
+
+  // stash@{index} counts from NEWEST (stash@{0} = last reflog entry).
+  // entries[] is chronological (oldest first) → invert the index.
+  const chronologicalIndex = entries.length - 1 - index;
+  const target = entries[chronologicalIndex];
+
+  // 2. Grab tree + parents of the stash commit (%T = tree, %P = parents).
+  const meta = await git.raw(['show', '-s', '--format=%T%n%P', target.hash]);
+  const [treeRaw, parentsRaw] = meta.trim().split('\n');
+  const tree = treeRaw.trim();
+  const parents = parentsRaw.trim().split(/\s+/).filter(Boolean);
+
+  // 3. Replacement commit: same tree, same parents, new message.
+  const args = ['commit-tree', tree];
+  for (const p of parents) args.push('-p', p);
+  args.push('-m', newMessage.trim());
+  const newHash = (await git.raw(args)).trim();
+  entries[chronologicalIndex] = { hash: newHash, message: newMessage.trim() };
+
+  // 4. Rebuild refs/stash: delete (reflog is deleted with it) then re-store
+  //    oldest → newest so stash@{0} is again the most recent entry.
+  await git.raw(['update-ref', '-d', 'refs/stash']);
+  for (const e of entries) {
+    await git.raw(['stash', 'store', '-m', e.message, e.hash]);
+  }
+  invalidateCache(repoPath);
+}
+
+/**
+ * "Fetch More..." — deepen a shallow clone by fetching N more commits of
+ * history beyond the current shallow boundary (git fetch --deepen=N).
+ * On a complete repository this is a cheap no-op fetch.
+ */
+export async function fetchDeepen(repoPath: string, remote = 'origin', commits = 100): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['fetch', remote, '--deepen', String(Math.max(1, commits))]);
+  invalidateCache(repoPath);
+}
+
+/**
+ * "Set Depth..." — set the fetch depth for a shallow clone
+ * (git fetch --depth=N). depth <= 0 means unshallow (download full history).
+ */
+export async function setFetchDepth(repoPath: string, remote = 'origin', depth: number): Promise<void> {
+  const git = getGit(repoPath);
+  if (depth > 0) {
+    await git.raw(['fetch', remote, '--depth', String(depth)]);
+  } else {
+    await git.raw(['fetch', '--unshallow', remote]);
+  }
+  invalidateCache(repoPath);
+}
+
+/**
+ * "Properties..." — collect real remote properties for the properties dialog.
+ * Everything is read locally: `git remote show -n` (no network), the repo
+ * config for remote.<name>.* entries, for-each-ref for tracking branches and
+ * the .git/shallow marker for shallow-clone state.
+ */
+export async function remoteProperties(repoPath: string, name: string): Promise<RemoteProperties> {
+  const git = getGit(repoPath);
+  // Validate the remote exists. NOTE: simple-git resolves `config --get`
+  // with exit code 1 + empty stderr to '' (it does NOT throw), and
+  // `git remote show -n` happily "shows" unknown remotes (echoing the name
+  // as URL) — so we must check the resolved VALUE ourselves.
+  const cfgUrl = await git
+    .raw(['config', '--get', `remote.${name}.url`])
+    .catch(() => '');
+  if (!cfgUrl.trim()) {
+    throw new Error(`Remote '${name}' is not configured in this repository`);
+  }
+  const show = await git.raw(['remote', 'show', '-n', name]).catch(() => '');
+  const configRaw = await git
+    // NOTE: --null must come BEFORE the pattern — after the pattern git
+    // treats it as an extra value-pattern and matches nothing (exit 1).
+    .raw(['config', '--null', '--get-regexp', `^remote\\.${name}\\.`])
+    .catch(() => '');
+  const trackingRaw = await git
+    .raw(['for-each-ref', '--format=%(refname:short)', `refs/remotes/${name}/`])
+    .catch(() => '');
+
+  const fetchUrl = /Fetch URL:\s*(.*)/.exec(show)?.[1]?.trim() ?? '';
+  const pushUrl = /Push\s+URL:\s*(.*)/.exec(show)?.[1]?.trim() ?? '';
+  // `remote show -n` cannot query HEAD ("(not queried)") — fall back to the
+  // locally cached refs/remotes/<name>/HEAD symbolic ref (set by clone/set-head).
+  const headShow = /HEAD branch:\s*(.*)/.exec(show)?.[1]?.trim() || '';
+  let headBranch = headShow && !headShow.startsWith('(') ? headShow : undefined;
+  if (!headBranch) {
+    const sym = await git
+      .raw(['symbolic-ref', '-q', '--short', `refs/remotes/${name}/HEAD`])
+      .catch(() => '');
+    const symShort = sym.trim();
+    if (symShort) {
+      headBranch = symShort.replace(new RegExp(`^${name}/`), '');
+    }
+  }
+
+  // Exclude the default-branch pointer: it shows up either as "<name>/HEAD"
+  // or — after `git remote set-head` — shortened to just "<name>". Neither is
+  // a real remote-tracking branch.
+  const trackingBranches = trackingRaw
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((b) => b !== name && !b.endsWith('/HEAD'));
+
+  const config: { key: string; value: string }[] = [];
+  for (const rec of configRaw.split('\u0000')) {
+    if (!rec.trim()) continue;
+    const nl = rec.indexOf('\n');
+    if (nl === -1) continue;
+    const key = rec.slice(0, nl);
+    const value = rec.slice(nl + 1);
+    if (key) config.push({ key, value });
+  }
+
+  return {
+    name,
+    fetchUrl,
+    pushUrl,
+    headBranch,
+    trackingBranchCount: trackingBranches.length,
+    trackingBranches: trackingBranches.slice(0, 50),
+    shallow: fs.existsSync(path.join(repoPath, '.git', 'shallow')),
+    mirror: config.some((c) => c.key.endsWith('.mirror') && c.value === 'true'),
+    config,
+  };
 }
 
 export async function tags(repoPath: string): Promise<TagInfo[]> {
