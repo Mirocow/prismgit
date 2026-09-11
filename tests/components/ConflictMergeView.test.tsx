@@ -18,7 +18,14 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import * as React from 'react';
 
 // ===== Mocks =====
+// Mock git.raw — returns non-empty for `ls-files -u` (conflict check) so the
+// panel knows the file IS in conflict state, and returns stage content for
+// `:1:`, `:2:`, `:3:` queries.
 const mockGitRaw = vi.fn(async (repoPath: string, args: string[]) => {
+  // `git ls-files -u -- file.ts` — returns unmerged entries (non-empty = conflicted)
+  if (args[0] === 'ls-files' && args.includes('-u')) {
+    return '100644 abc123 1\tfile.ts\n100644 def456 2\tfile.ts\n100644 ghi789 3\tfile.ts\n';
+  }
   const arg = args[args.length - 1];
   if (arg === ':1:file.ts') return 'base line';
   if (arg === ':2:file.ts') return 'ours line';

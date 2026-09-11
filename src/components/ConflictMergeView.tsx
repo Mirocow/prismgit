@@ -354,7 +354,23 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     setLoading(true);
     setDirty(false);
     try {
-      // Stage versions for the conflicted file:
+      // FIRST: check if the file is actually in conflict state.
+      // `git ls-files -u <file>` lists unmerged entries with their stages.
+      // If the output is empty, the file is NOT conflicted (it was either
+      // already resolved, or the status is stale, or the path doesn't match).
+      // Without this check, `git show :1:file.ts` / `:2:` / `:3:` would each
+      // throw "fatal: path 'file.ts' does not exist (neither on disk nor in
+      // the index)" — flooding the main-process console with error logs.
+      const lsOutput = await api.git.raw(repo.path, ['ls-files', '-u', '--', filePath]).catch(() => '');
+      if (!lsOutput.trim()) {
+        // File is not in conflict state — show a friendly message instead
+        // of trying to load non-existent stage versions.
+        toast.warning('File is not conflicted', 'This file may have been resolved already, or it is not in a conflict state.');
+        setLoading(false);
+        return;
+      }
+
+      // The file IS conflicted — safe to load the 3 stage versions:
       //   :1:filePath = BASE (common ancestor)
       //   :2:filePath = OURS (current branch / HEAD)
       //   :3:filePath = THEIRS (incoming branch)

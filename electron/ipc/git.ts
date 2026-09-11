@@ -129,7 +129,31 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:currentBranch', (_e, p: string) => gitService.currentBranch(p));
   ipcMain.handle('git:revParse', (_e, p: string, r: string) => gitService.revParse(p, r));
   ipcMain.handle('git:revParseArgs', (_e, p: string, a: string[]) => gitService.revParseArgs(p, a));
-  ipcMain.handle('git:raw', (_e, p: string, a: string[]) => gitService.raw(p, a));
+  // git:raw — suppress noisy "path does not exist" errors that flood the
+  // main-process console. ConflictMergeView intentionally probes stages
+  // :1/:2/:3 that may not exist (e.g. when a file is no longer conflicted).
+  // The renderer already handles rejections via .catch(() => '') — but
+  // Electron's ipcMain.handle logs every thrown error to stderr.
+  // Returning '' for known-benign errors avoids the console spam while
+  // still propagating real errors (network failures, bad git invocations).
+  ipcMain.handle('git:raw', async (_e, p: string, a: string[]) => {
+    try {
+      return await gitService.raw(p, a);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Benign errors that shouldn't flood the console:
+      //   - "path '...' does not exist (neither on disk nor in the index)"
+      //   - "pathspec '...' did not match any file(s) known to git"
+      // These happen when probing for stage versions (:1/:2/:3) that may
+      // not exist. Return empty string — same as what the renderer's
+      // .catch(() => '') would have produced.
+      if (/does not exist|did not match any file|not in the index/i.test(msg)) {
+        return '';
+      }
+      // Real error — re-throw so the renderer can handle it.
+      throw err;
+    }
+  });
   // New: full git CLI surface coverage (added per simple-git comprehensive test spec)
   ipcMain.handle('git:grep', (_e, p: string, pat: string, opts?: string[], pathspec?: string) => gitService.grep(p, pat, opts, pathspec));
   ipcMain.handle('git:applyPatch', (_e, p: string, patch: string | string[], opts?: Record<string, null> | string[]) => gitService.applyPatch(p, patch, opts));
