@@ -92,7 +92,7 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
         api.git.raw(repo.path, ['show', `:1:${filePath}`]).catch(() => ''),
         api.git.raw(repo.path, ['show', `:2:${filePath}`]).catch(() => ''),
         api.git.raw(repo.path, ['show', `:3:${filePath}`]).catch(() => ''),
-        api.git.raw(repo.path, ['show', `:${filePath}`]).catch(() => ''),
+        api.git.raw(repo.path, ['show', `:0:${filePath}`]).catch(() => ''),
       ]);
 
       setBaseContent(base);
@@ -100,12 +100,9 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
       setTheirsContent(theirs);
 
       // Read working tree file
-      const fs = await import('fs');
-      const path = await import('path');
-      const fullPath = path.join(repo.path, filePath);
-      const fileContent = fs.existsSync(fullPath)
-        ? fs.readFileSync(fullPath, 'utf-8')
-        : worktree || '';
+      const fullPath = `${repo.path}/${filePath}`.replace(/\/\+/g, "/");
+      let fileContent = "";
+      try { fileContent = await api.fs.readFile(fullPath); } catch { fileContent = worktree || ""; }
       setContent(fileContent);
       const parsed = parseConflicts(fileContent);
       setHunks(parsed);
@@ -178,13 +175,8 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
     setSaving(true);
     try {
       const resolved = buildResolvedContent();
-      const fs = await import('fs');
-      const path = await import('path');
-      const fullPath = path.join(repo.path, filePath);
-      fs.writeFileSync(fullPath, resolved, 'utf-8');
-      await api.git.add(repo.path, [filePath]);
-      toast.success(t('changes.conflictResolvedStaged'));
-      await refreshStatus(repo.path);
+      const fullPath = `${repo.path}/${filePath}`.replace(/\/\+/g, "/");
+      await api.fs.writeFile(fullPath, resolved);
       // Auto-advance: notify parent so it can open the next conflicted file
       // (platypusgit advance() pattern). If no onResolved callback, just close.
       if (onResolved) {

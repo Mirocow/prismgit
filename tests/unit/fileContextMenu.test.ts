@@ -132,9 +132,14 @@ describe('buildFileMenu — changes mode', () => {
     expect(items).not.toContain("Toggle 'Skip Worktree'");
   });
 
-  it('offers Resolve Conflict for conflicted files', () => {
-    const items = labels(buildFileMenu(baseCtx({ isConflict: true })));
-    expect(items).toContain('Resolve Conflict...');
+  it('offers Resolve submenu for conflicted files', () => {
+    const items = buildFileMenu(baseCtx({ isConflicted: true }));
+    const labels = items.map(i => i.label).filter(Boolean);
+    // After the SmartGit-style refactor, the menu has a "Resolve" submenu
+    // (Take Ours / Take Theirs / Open Diff Tool / Discard) instead of a
+    // flat "Resolve Conflict..." item.
+    expect(labels).toContain('Resolve');
+    expect(labels).toContain('Resolve Conflict...');
   });
 });
 

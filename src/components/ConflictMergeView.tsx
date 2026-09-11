@@ -90,15 +90,14 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         api.git.raw(repo.path, ['show', `:1:${filePath}`]).catch(() => ''),
         api.git.raw(repo.path, ['show', `:2:${filePath}`]).catch(() => ''),
         api.git.raw(repo.path, ['show', `:3:${filePath}`]).catch(() => ''),
-        api.git.raw(repo.path, ['show', `:${filePath}`]).catch(() => ''),
+        api.git.raw(repo.path, ['show', `:0:${filePath}`]).catch(() => ''),
       ]);
       setBaseContent(base);
       setOursContent(ours);
       setTheirsContent(theirs);
-      const fs = await import('fs');
-      const path = await import('path');
-      const fullPath = path.join(repo.path, filePath);
-      const fileContent = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf-8') : worktree || '';
+      const fullPath = `${repo.path}/${filePath}`.replace(/\/\+/g, "/");
+      let fileContent = "";
+      try { fileContent = await api.fs.readFile(fullPath); } catch { fileContent = worktree || ""; }
       setContent(fileContent);
       setHunks(parseConflicts(fileContent));
     } catch (e) {
@@ -153,10 +152,8 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     setSaving(true);
     try {
       const resolved = buildResolvedContent();
-      const fs = await import('fs');
-      const path = await import('path');
-      const fullPath = path.join(repo.path, filePath);
-      fs.writeFileSync(fullPath, resolved, 'utf-8');
+      const fullPath = `${repo.path}/${filePath}`.replace(/\/\+/g, "/");
+      await api.fs.writeFile(fullPath, resolved);
       await api.git.add(repo.path, [filePath]);
       toast.success(t('changes.conflictResolvedStaged'));
       await refreshStatus(repo.path);

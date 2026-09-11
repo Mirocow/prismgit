@@ -1,0 +1,438 @@
+import { useState, useEffect, useCallback } from 'react';
+import { X, AlertCircle, Check, RotateCcw, Loader, GitMerge, GitPullRequest, ArrowDown, ArrowUp, Sparkles } from '../components/icons';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useGitStore } from '../stores/gitStore';
+import { useToastStore } from '../stores/toastStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { api } from '../lib/api';
+import { confirmDialog, promptDialog } from './ConfirmDialog';
+import type { LLMProvider } from '../lib/aiCommitMessages';
+import type { AppSettings } from '../../electron/types/settings-api';
+import { useI18n } from '../lib/i18n';
+
+/** Build an LLMProvider from settings, or null if not configured. */
+function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvider | null {
+  if (!settings?.aiProvider) return null;
+  const type = settings.aiProvider as LLMProvider['type'];
+  const id = settings.aiProvider;
+  const url = settings.aiUrl || '';
+  const model = settings.aiModel || '';
+  if (!model) return null;
+  return {
+    id,
+    name: id,
+    type,
+    url,
+    apiKey: settings.aiApiKey,
+    model,
+  };
+}
+
+interface MergeState {
+  inProgress: boolean;
+  conflictedFiles: string[];
+}
+
+type MergeStrategy = 'merge' | 'squash' | 'rebase' | 'ff-only';
+
+type PreviewStatus =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'clean'; ahead: number; behind: number }
+  | { kind: 'conflicts'; files: string[]; ahead: number; behind: number }
+  | { kind: 'uptodate' }
+  | { kind: 'error'; message: string };
+
+export function MergePanel({
+  targetBranch,
+  onClose,
+}: {
+  targetBranch: string;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const repo = useRepositoryStore((s) => s.currentRepo)!;
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const toast = useToastStore();
+  const [state, setState] = useState<MergeState>({ inProgress: false, conflictedFiles: [] });
+  const [loading, setLoading] = useState(false);
+  const [strategy, setStrategy] = useState<MergeStrategy>('merge');
+  const [preview, setPreview] = useState<PreviewStatus>({ kind: 'idle' });
+  const [noFf, setNoFf] = useState(false);
+  const [squash, setSquash] = useState(false);
+  const [showConflicts, setShowConflicts] = useState(true);
+  // SmartGit Manual: Auto-stash — stash local changes before merge, pop after
+  const [autoStash, setAutoStash] = useState(false);
+
+  const loadState = useCallback(async () => {
+    try {
+      const s = await api.git.status(repo.path);
+      setState({
+        inProgress: s.isMerging,
+        conflictedFiles: s.conflicted,
+      });
+    } catch (e) {
+      toast.error(t('changes.mergeStateLoadFailed'), String(e));
+    }
+  }, [repo.path, toast]);
+
+  // Pre-merge preview using merge-tree + ahead/behind counts
+  const loadPreview = useCallback(async () => {
+    if (state.inProgress) {
+      setPreview({ kind: 'idle' });
+      return;
+    }
+    setPreview({ kind: 'loading' });
+    try {
+      // Get current branch HEAD SHA as "ours"
+      const oursSha = await api.git.revParse(repo.path, 'HEAD');
+      const theirsSha = await api.git.revParse(repo.path, targetBranch);
+      if (!oursSha || !theirsSha) {
+        setPreview({ kind: 'error', message: t('changes.cannotResolveRefs') });
+        return;
+      }
+      // If same SHA — already up to date
+      if (oursSha === theirsSha) {
+        setPreview({ kind: 'uptodate' });
+        return;
+      }
+      // Ahead/behind counts
+      const { ahead, behind } = await api.git.aheadBehind(repo.path, 'HEAD', targetBranch);
+      // merge-tree to detect conflicts without touching working tree
+      const result = await api.git.mergeTree(repo.path, oursSha, theirsSha);
+      if (result.clean) {
+        setPreview({ kind: 'clean', ahead, behind });
+      } else if (result.conflicts.length > 0) {
+        setPreview({ kind: 'conflicts', files: result.conflicts, ahead, behind });
+      } else {
+        // clean=false but no conflicts listed — probably unrelated histories or unsupported git
+        setPreview({ kind: 'error', message: t('changes.mergePreviewUnsupported') });
+      }
+    } catch (e) {
+      setPreview({ kind: 'error', message: String(e) });
+    }
+  }, [repo.path, targetBranch, state.inProgress]);
+
+  useEffect(() => {
+    loadState();
+  }, [loadState]);
+
+  useEffect(() => {
+    loadPreview();
+  }, [loadPreview]);
+
+  const handleMerge = async () => {
+    setLoading(true);
+    try {
+      // SmartGit Manual: Auto-stash — stash local changes before merge, pop after
+      const runMerge = async () => {
+        const opts: { noFf?: boolean; squash?: boolean; ffOnly?: boolean } = {};
+        if (strategy === 'squash' || squash) opts.squash = true;
+        if (strategy === 'ff-only') opts.ffOnly = true;
+        if (noFf && strategy === 'merge') opts.noFf = true;
+
+        if (strategy === 'rebase') {
+          // Rebase current branch onto target
+          await api.git.rebase(repo.path, targetBranch);
+          toast.success(t('changes.rebasedOnto', { branch: targetBranch }));
+          onClose();
+          await refreshStatus(repo.path);
+          return;
+        }
+
+        const result = await api.git.merge(repo.path, targetBranch, opts);
+        if (result.conflicts.length > 0) {
+          toast.warning(
+            t('changes.mergeConflictsNFiles', { count: result.conflicts.length }),
+            result.conflicts.join('\n')
+          );
+          await loadState();
+          await refreshStatus(repo.path);
+        } else if (result.fastForward) {
+          toast.success(t('changes.fastForwardDone'));
+          onClose();
+          await refreshStatus(repo.path);
+        } else if (result.alreadyUpToDate) {
+          toast.info(t('changes.alreadyUpToDate'));
+          onClose();
+        } else {
+          toast.success(t('status.mergeComplete'));
+          onClose();
+          await refreshStatus(repo.path);
+        }
+      };
+
+      if (autoStash) {
+        // Stash local changes, run merge, then pop stash
+        const status = await api.git.status(repo.path);
+        if (!status.isClean) {
+          toast.info(t('changes.autoStashing'));
+          await api.git.stashPush(repo.path, 'prismgit-autostash', true);
+          try {
+            await runMerge();
+          } finally {
+            try {
+              await api.git.stashPop(repo.path);
+              toast.success(t('changes.autoStashRestored'));
+            } catch (popErr) {
+              toast.warning(t('changes.autoStashPopFailed'), String(popErr));
+            }
+          }
+        } else {
+          await runMerge();
+        }
+      } else {
+        await runMerge();
+      }
+    } catch (e) {
+      toast.error(t('changes.mergeFailed'), String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAbort = async () => {
+    if (!(await confirmDialog({
+      title: t('changes.abortMerge'),
+      message: t('changes.abortMergeMessage'),
+      confirmLabel: t('changes.abortMerge'),
+      danger: true,
+    }))) return;
+    setLoading(true);
+    try {
+      await api.git.abortMerge(repo.path);
+      toast.success(t('changes.mergeAborted'));
+      await loadState();
+      await refreshStatus(repo.path);
+      onClose();
+    } catch (e) {
+      toast.error(t('changes.abortFailed'), String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleContinue = async () => {
+    setLoading(true);
+    try {
+      await api.git.continueMerge(repo.path);
+      toast.success(t('changes.mergeCompleted'));
+      await loadState();
+      await refreshStatus(repo.path);
+      onClose();
+    } catch (e) {
+      toast.error(t('changes.continueFailed'), String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-bg-elevated border-t border-border-strong shadow-lg z-40 animate-slide-up">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border-default">
+        <div className="flex items-center gap-2">
+          <GitMerge size={14} className="text-accent" />
+          <span className="text-sm font-medium">
+            {state.inProgress ? t('changes.mergeInProgress') : t('changes.mergeTitle', { branch: targetBranch })}
+          </span>
+          {state.inProgress && state.conflictedFiles.length > 0 && (
+            <span className="badge badge-conflict">
+              {t('changes.nConflictsBadge', { count: state.conflictedFiles.length })}
+            </span>
+          )}
+        </div>
+        <button className="icon-btn" onClick={onClose}>
+          <X size={14} />
+        </button>
+      </div>
+
+      <div className="p-4">
+        {state.inProgress ? (
+          <>
+            {state.conflictedFiles.length > 0 ? (
+              <div className="mb-3">
+                <div className="text-xs text-text-secondary mb-2 flex items-center gap-2">
+                  <AlertCircle size={12} className="text-status-conflict" />
+                  {t('changes.resolveConflictsHint')}
+                </div>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {state.conflictedFiles.map((f) => (
+                    <div key={f} className="flex items-center gap-2 text-xs px-2 py-1 bg-bg-tertiary rounded">
+                      <span className="text-status-conflict">●</span>
+                      <code className="mono flex-1 truncate">{f}</code>
+                      <button className="icon-btn !w-5 !h-5" title={t('changes.openFile')}
+                        onClick={() => api.git.openFile(`${repo.path}/${f}`.replace(/\/+/g, '/'))}>
+                        <Check size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-text-secondary mb-3">{t('changes.noConflictsHint')}</div>
+            )}
+            <div className="flex items-center gap-2">
+              <button className="btn btn-primary" onClick={handleContinue}
+                disabled={loading || state.conflictedFiles.length > 0}>
+                {loading ? <Loader size={13} className="spin" /> : <Check size={13} />}
+                {t('changes.continueButton')}
+              </button>
+              <button className="btn btn-danger" onClick={handleAbort} disabled={loading}>
+                <RotateCcw size={13} /> {t('changes.abort')}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Pre-merge preview */}
+            <div className="mb-3">
+              {preview.kind === 'loading' && (
+                <div className="text-xs text-text-tertiary flex items-center gap-2">
+                  <Loader size={12} className="spin" /> {t('changes.computingPreview')}
+                </div>
+              )}
+              {preview.kind === 'clean' && (
+                <div className="text-xs flex items-center gap-3 text-status-added">
+                  <Check size={12} />
+                  <span>{t('changes.cleanMerge')}</span>
+                  <span className="text-text-tertiary flex items-center gap-1">
+                    <ArrowUp size={9} />{preview.ahead}
+                    <ArrowDown size={9} />{preview.behind}
+                  </span>
+                </div>
+              )}
+              {preview.kind === 'conflicts' && (
+                <div>
+                  <div className="text-xs flex items-center gap-3 text-status-conflict mb-2">
+                    <AlertCircle size={12} />
+                    <span>{t('changes.filesWillConflict', { count: preview.files.length })}</span>
+                    <span className="text-text-tertiary flex items-center gap-1">
+                      <ArrowUp size={9} />{preview.ahead}
+                      <ArrowDown size={9} />{preview.behind}
+                    </span>
+                    <button className="text-2xs text-accent ml-auto" onClick={() => setShowConflicts(!showConflicts)}>
+                      {showConflicts ? t('changes.hide') : t('changes.show')}
+                    </button>
+                  </div>
+                  {showConflicts && (
+                    <div className="space-y-1 max-h-32 overflow-y-auto mb-2">
+                      {preview.files.map((f) => (
+                        <div key={f} className="flex items-center gap-2 text-xs px-2 py-1 bg-bg-tertiary rounded">
+                          <span className="text-status-conflict">●</span>
+                          <code className="mono flex-1 truncate">{f}</code>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {preview.kind === 'uptodate' && (
+                <div className="text-xs flex items-center gap-2 text-status-info">
+                  <Check size={12} />
+                  <span>{t('changes.upToDateDetail')}</span>
+                </div>
+              )}
+              {preview.kind === 'error' && (
+                <div className="text-xs flex items-center gap-2 text-status-modified">
+                  <AlertCircle size={12} />
+                  <span>{preview.message}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Strategy selector */}
+            <div className="flex items-center gap-4 mb-3">
+              <span className="text-xs text-text-tertiary">{t('changes.strategyLabel')}</span>
+              {([
+                { id: 'merge', label: t('changes.strategyMergeCommit') },
+                { id: 'squash', label: t('changes.strategySquash') },
+                { id: 'rebase', label: t('changes.strategyRebase') },
+                { id: 'ff-only', label: t('changes.strategyFfOnly') },
+              ] as const).map(opt => (
+                <label key={opt.id} className="flex items-center gap-1 text-xs cursor-pointer">
+                  <input type="radio" name="strategy" value={opt.id} checked={strategy === opt.id}
+                    onChange={() => setStrategy(opt.id)} />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            </div>
+
+            {/* Options for merge strategy */}
+            {strategy === 'merge' && (
+              <div className="flex items-center gap-4 mb-3">
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input type="checkbox" checked={noFf}
+                    onChange={(e) => setNoFf(e.target.checked)} />
+                  <span>{t('changes.noFfOption')}</span>
+                </label>
+              </div>
+            )}
+            {(strategy === 'merge' || strategy === 'rebase') && (
+              <div className="flex items-center gap-4 mb-3">
+                <label className="flex items-center gap-2 text-xs cursor-pointer" title={t('changes.autoStashTitle')}>
+                  <input type="checkbox" checked={autoStash}
+                    onChange={(e) => setAutoStash(e.target.checked)} />
+                  <span>{t('changes.autoStashOption')}</span>
+                </label>
+              </div>
+            )}
+            {strategy === 'squash' && (
+              <div className="text-xs text-text-tertiary mb-3">
+                {t('changes.squashHint', { branch: targetBranch })}
+              </div>
+            )}
+
+            {/* SmartGit Manual: AI for Merge descriptions — generate merge message */}
+            {strategy === 'merge' && (
+              <div className="mb-3">
+                <button
+                  className="btn btn-secondary text-xs"
+                  onClick={async () => {
+                    const settings = useSettingsStore.getState().settings;
+                    if (!settings?.aiCommitMessagesEnabled) {
+                      toast.warning(t('changes.aiDisabled'), t('changes.aiEnableHint'));
+                      return;
+                    }
+                    const provider = buildAIProvider(settings);
+                    if (!provider) {
+                      toast.warning(t('changes.aiNoProvider'));
+                      return;
+                    }
+                    try {
+                      const { generateMergeMessage } = await import('../lib/aiCommitMessages');
+                      // Get diff between current and target branch
+                      const diffResult = await api.git.diffBranches(repo.path, 'HEAD', targetBranch);
+                      const diffText = diffResult.hunks.map(h => h.header + '\n' + h.lines.map(l => l.content).join('\n')).join('\n').slice(0, 48000);
+                      const message = await generateMergeMessage({
+                        sourceBranch: targetBranch,
+                        targetBranch: 'current',
+                        diff: diffText,
+                        commitCount: preview.kind === 'clean' ? preview.ahead : 0,
+                        provider,
+                      });
+                      toast.success(t('changes.aiMergeMsgGenerated'), message.split('\n')[0]);
+                      // Copy to clipboard for user to paste
+                      navigator.clipboard.writeText(message);
+                    } catch (e) {
+                      toast.error(t('changes.aiGenerationFailed'), String(e));
+                    }
+                  }}
+                >
+                  <Sparkles size={11} /> {t('changes.aiMergeGenerate')}
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <button className="btn btn-primary" onClick={handleMerge} disabled={loading}>
+                {loading ? <Loader size={13} className="spin" /> : strategy === 'rebase' ? <GitPullRequest size={13} /> : <GitMerge size={13} />}
+                {strategy === 'rebase' ? t('changes.strategyRebase') : strategy === 'squash' ? t('changes.squashMergeButton') : t('changes.mergeButton')}
+              </button>
+              <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
