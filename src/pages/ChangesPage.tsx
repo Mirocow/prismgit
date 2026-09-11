@@ -1016,8 +1016,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     });
   };
 
-  // Multi-select status set helper
-  const matchesStatusSet = (file: FileStatus, isStaged: boolean): boolean => {
+  // Multi-select status set helper — wrapped in useCallback so useMemo
+  // dependencies are stable and the filter re-runs whenever fileStatusFilterSet changes.
+  const matchesStatusSet = useCallback((file: FileStatus, isStaged: boolean): boolean => {
     if (fileStatusFilterSet.size === 0) return true;
     const idx = file.index as string;
     const wd = file.working_dir as string;
@@ -1030,7 +1031,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     if (fileStatusFilterSet.has('renamed') && (code === 'R' || code === 'C')) return true;
     if (fileStatusFilterSet.has('untracked') && code === '?') return true;
     return false;
-  };
+  }, [fileStatusFilterSet]);
 
   // Memoize file lists to avoid re-sorting on every render (e.g. when
   // hovering over rows causes a re-render but status hasn't changed).
@@ -1058,7 +1059,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       if (fileStatusFilter === 'deleted') return code === 'D';
       if (fileStatusFilter === 'untracked') return code === '?';
       return true;
-    })), [status, sortFiles, fileStatusFilter, fileStatusFilterSet]);
+    })), [status, sortFiles, fileStatusFilter, matchesStatusSet]);
 
   const unstagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
     // Exclude conflicted files — they show in the Conflicts section only.
@@ -1086,7 +1087,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       if (fileStatusFilter === 'deleted') return code === 'D';
       if (fileStatusFilter === 'untracked') return code === '?';
       return true;
-    })), [status, sortFiles, fileStatusFilter, fileStatusFilterSet]);
+    })), [status, sortFiles, fileStatusFilter, matchesStatusSet]);
 
   // Conflicted files — shown in their OWN section (red accent) ABOVE staged.
   // These are files with index='U' or working_dir='U' in git porcelain.
@@ -1109,7 +1110,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     .filter(() => {
       if (fileStatusFilter === 'all' || fileStatusFilter === 'untracked') return true;
       return false;
-    })), [status, sortFiles, fileFilter, fileStatusFilter, fileStatusFilterSet, fileScopeDir]);
+    })), [status, sortFiles, fileFilter, fileStatusFilter, matchesStatusSet, fileScopeDir]);
 
   // Ctrl/Cmd+A: select all visible files in the file list
   // (placed after stagedFiles/unstagedFiles/untrackedFiles are declared)
