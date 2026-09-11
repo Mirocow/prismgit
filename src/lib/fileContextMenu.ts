@@ -203,7 +203,8 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
     });
     if (ctx.isConflicted) {
       items.push({ type: 'separator' });
-      // SmartGit-style "Resolve" submenu: Take Ours / Take Theirs / Open Diff tool / Discard
+      items.push({ label: 'Resolve Conflict...', clickId: 'resolve-conflict' });
+      // SmartGit-style "Resolve" submenu: Take Ours / Take Theirs
       items.push({
         label: 'Resolve',
         clickId: '_submenu_resolve',
@@ -211,13 +212,9 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
           { label: 'Take Ours', clickId: 'resolve-take-ours', title: 'git checkout --ours -- <file> + git add' },
           { label: 'Take Theirs', clickId: 'resolve-take-theirs', title: 'git checkout --theirs -- <file> + git add' },
           { type: 'separator' },
-          { label: 'Open Diff Tool...', clickId: 'resolve-open-diff-tool', title: 'Open the conflict solver (3-way merge view)' },
           { label: 'Use External Merge Tool', clickId: 'resolve-mergetool', title: 'git mergetool -- <file> (uses configured merge.tool)' },
-          { type: 'separator' },
-          { label: 'Discard File...', clickId: 'resolve-discard', title: 'git checkout -- <file> (discard all changes, keep conflict)' },
         ],
       });
-      items.push({ label: 'Resolve Conflict...', clickId: 'resolve-conflict' });
       items.push({ label: i18nT('vscode.resolveInVscode'), clickId: 'open-vscode-merge' });
     }
     items.push({ type: 'separator' });
@@ -562,10 +559,6 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
         refresh();
       } catch (e) { t.error('Take theirs failed', String(e)); }
       return true;
-    case 'resolve-open-diff-tool':
-      // Open the in-app ConflictSolver (3-way merge view)
-      window.dispatchEvent(new CustomEvent('smartgit:resolve-conflict', { detail: { file: ctx.path } }));
-      return true;
     case 'resolve-mergetool':
       // Run `git mergetool -- <file>` — uses the user's configured merge.tool
       try {
@@ -573,20 +566,6 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
         t.success('Merge tool completed');
         refresh();
       } catch (e) { t.error('Merge tool failed', String(e)); }
-      return true;
-    case 'resolve-discard':
-      // Discard all changes in this file — but keep it conflicted (git checkout --)
-      if (!(await confirmDialog({
-        title: 'Discard file changes?',
-        message: `Discard all changes in "${ctx.path}"?\n\nThe file stays conflicted — use Take Ours / Take Theirs / Open Diff tool to actually resolve it.`,
-        confirmLabel: 'Discard',
-        danger: true,
-      }))) return true;
-      try {
-        await api.git.raw(ctx.repoPath, ['checkout', '--', ctx.path]);
-        t.success(`Discarded: ${ctx.path}`);
-        refresh();
-      } catch (e) { t.error('Discard failed', String(e)); }
       return true;
 
     // --- Clipboard (multi-selection copies one path per line) ---------------------

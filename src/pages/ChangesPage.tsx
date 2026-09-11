@@ -1025,10 +1025,16 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // Memoize file lists to avoid re-sorting on every render (e.g. when
   // hovering over rows causes a re-render but status hasn't changed).
   const stagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
+    // Exclude conflicted files (UU/AU/UA/DD etc.) — they show in the
+    // Conflicts section, NOT in Staged. A conflicted file has index='U'
+    // or working_dir='U' in git porcelain status.
+    const idx = f.index as string;
+    const wd = f.working_dir as string;
+    if (idx === 'U' || wd === 'U') return false;
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) return false;
-    const idx = staged.index as string;
-    return idx !== ' ' && idx !== '?' && idx !== '!';
+    const stagedIdx = staged.index as string;
+    return stagedIdx !== ' ' && stagedIdx !== '?' && stagedIdx !== '!' && stagedIdx !== 'U';
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
@@ -1045,15 +1051,18 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     })), [status, sortFiles, fileStatusFilter, fileStatusFilterSet]);
 
   const unstagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
+    // Exclude conflicted files — they show in the Conflicts section only.
+    const idx = f.index as string;
+    const wd = f.working_dir as string;
+    if (idx === 'U' || wd === 'U') return false;
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) {
-      const wd = f.working_dir as string;
       // Exclude untracked ('??') — they render in their own Untracked section;
       // including them here duplicated every untracked file in both sections.
       return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');
     }
-    const wd = staged.working_dir as string;
-    return wd !== ' ' && wd !== '!';
+    const stagedWd = staged.working_dir as string;
+    return stagedWd !== ' ' && stagedWd !== '!' && stagedWd !== 'U';
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
@@ -1068,6 +1077,16 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       if (fileStatusFilter === 'untracked') return code === '?';
       return true;
     })), [status, sortFiles, fileStatusFilter, fileStatusFilterSet]);
+
+  // Conflicted files — shown in their OWN section (red accent) ABOVE staged.
+  // These are files with index='U' or working_dir='U' in git porcelain.
+  const conflictedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
+    const idx = f.index as string;
+    const wd = f.working_dir as string;
+    return idx === 'U' || wd === 'U';
+  }).filter((f) => matchesFileFilter(f.path))
+    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+    .filter((f) => matchesDirScope(f.path))), [status, sortFiles]);
 
   const untrackedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
     const idx = f.index as string;
@@ -1625,6 +1644,20 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             {/* === Staged / Changes / Untracked in separate lists === */}
             {(
               <>
+            {/* Conflicts — red accent, shown ABOVE staged when there are conflicted files */}
+            {conflictedFiles.length > 0 && (
+              <>
+                <div
+                  className="px-2 py-1 bg-status-conflict/8 text-2xs font-bold uppercase text-status-conflict border-b border-status-conflict/20 border-l-2 border-l-status-conflict/40 flex items-center justify-between"
+                >
+                  <span>{t('changes.conflictedCount', { count: conflictedFiles.length })}</span>
+                  <span className="text-text-tertiary normal-case font-normal">{t('changes.resolveHint')}</span>
+                </div>
+                <div className="border-l-2 border-l-status-conflict/20">
+                  <LazyFileList files={conflictedFiles} isStaged={false} renderRow={renderFileRow} />
+                </div>
+              </>
+            )}
             {/* Staged — green accent left border, clickable header to stage all/unstage all */}
             {stagedFiles.length > 0 && (
               <div

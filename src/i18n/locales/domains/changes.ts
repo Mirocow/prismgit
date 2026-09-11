@@ -56,6 +56,8 @@ export const en: Record<string, string> = {
   'changes.colState': 'State',
   'changes.colRelDir': 'Relative Directory',
   'changes.conflicted': 'Conflicted',
+  'changes.conflictedCount': 'Conflicted ({count})',
+  'changes.resolveHint': 'Resolved',
   'changes.clickToUnstageAll': 'Click to unstage all',
   'changes.stagedCount': 'Staged ({count})',
   'changes.clickToUnstageAllHint': 'click to unstage all',
