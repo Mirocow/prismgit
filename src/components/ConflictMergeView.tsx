@@ -223,13 +223,18 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       // the spinner instead of an empty pane.
       const finish = () => setLoading(false);
       setTimeout(() => {
-        if (!editorRef.current) { finish(); return; }
         const el = editorRef.current;
+        if (!el) { finish(); return; }
         if (fileContent.length > MAX_DISPLAY_CHARS) {
           // Truncate display — full content still in `content` state for save.
           const truncated = fileContent.slice(0, MAX_DISPLAY_CHARS) +
             '\n\n... [file truncated for display — full content preserved for save] ...';
           el.innerText = truncated;
+          // jsdom fallback: innerText is unimplemented in jsdom, so sync textContent
+          // as well — in real browsers innerText is preferred (respects line breaks).
+          if (!el.textContent || el.textContent.length === 0) {
+            el.textContent = truncated;
+          }
           finish();
         } else if (fileContent.length > 50_000) {
           // Chunked assignment: build up innerText in 50KB chunks via rAF
@@ -237,6 +242,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           let pos = 0;
           const CHUNK = 50_000;
           el.innerText = '';
+          el.textContent = '';
           const pump = () => {
             if (!el || pos >= fileContent.length) { finish(); return; }
             const slice = fileContent.slice(pos, pos + CHUNK);
@@ -252,6 +258,10 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         } else {
           // Small file — synchronous assignment is fast enough.
           el.innerText = fileContent;
+          // jsdom fallback (see comment above)
+          if (!el.textContent || el.textContent.length === 0) {
+            el.textContent = fileContent;
+          }
           finish();
         }
       }, 0);
@@ -259,7 +269,15 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       toast.error(t('changes.conflictLoadFailed'), String(e));
       setLoading(false);
     }
-  }, [repo.path, filePath, toast, t]);
+    // NOTE: `t` is intentionally excluded from deps. `useI18n()` returns a
+    // NEW `t` function on every render (it's an inline closure), so including
+    // it here would recreate `loadFile` on every render → `useEffect([loadFile])`
+    // would re-fire → infinite loop. This was the root cause of the
+    // "дёргается панель и не открывается" bug. `t` is only used for the error
+    // toast — the locale rarely changes, and if it does the user can re-trigger
+    // loadFile by switching files.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo.path, filePath, toast]);
 
   useEffect(() => { loadFile(); }, [loadFile]);
 
@@ -295,7 +313,8 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     if (parseTimerRef.current) clearTimeout(parseTimerRef.current);
     parseTimerRef.current = setTimeout(() => {
       if (editorRef.current) {
-        const text = editorRef.current.innerText;
+        // innerText may be undefined in jsdom — fall back to textContent
+        const text = editorRef.current.innerText ?? editorRef.current.textContent ?? '';
         const newHunks = parseConflicts(text);
         if (newHunks.length !== hunks.length) {
           setContent(text);
@@ -323,10 +342,19 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     } else {
       return;
     }
-    const allLines = editorRef.current.innerText.split('\n');
+    // Read current editor content — fall back to `content` state if
+    // innerText is unimplemented (jsdom in tests) or empty.
+    const currentText = editorRef.current.innerText ?? editorRef.current.textContent ?? content;
+    const allLines = currentText.split('\n');
     const newLines = [...allLines.slice(0, h.startLine), ...resolved, ...allLines.slice(h.endLine)];
     const newText = newLines.join('\n');
-    editorRef.current.innerText = newText;
+    // Try innerText first (real browsers — respects line breaks better),
+    // then textContent fallback for jsdom.
+    if (editorRef.current.innerText !== undefined) {
+      editorRef.current.innerText = newText;
+    } else {
+      editorRef.current.textContent = newText;
+    }
     setContent(newText);
     setDirty(true);
     toast.success(`Hunk ${currentHunkIdx + 1}: ${resolution.replace(/-/g, ' ')}`);
@@ -340,7 +368,8 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
   const resetHunk = useCallback(() => {
     if (!editorRef.current || hunks.length === 0) return;
     const h = hunks[currentHunkIdx];
-    const allLines = editorRef.current.innerText.split('\n');
+    const currentText = editorRef.current.innerText ?? editorRef.current.textContent ?? content;
+    const allLines = currentText.split('\n');
     const markers = [
       `<<<<<<< HEAD`,
       ...h.oursLines,
@@ -350,17 +379,25 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     ];
     const newLines = [...allLines.slice(0, h.startLine), ...markers, ...allLines.slice(h.endLine)];
     const newText = newLines.join('\n');
-    editorRef.current.innerText = newText;
+    if (editorRef.current.innerText !== undefined) {
+      editorRef.current.innerText = newText;
+    } else {
+      editorRef.current.textContent = newText;
+    }
     setContent(newText);
     setDirty(true);
-  }, [hunks, currentHunkIdx]);
+  }, [hunks, currentHunkIdx, content]);
 
   // ===== Save & Stage ======================================================
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const resolved = editorRef.current?.innerText ?? content;
+      // Prefer innerText (real Chromium — respects line breaks), fall back
+      // to textContent (jsdom in tests) and finally to `content` state.
+      const resolved = editorRef.current?.innerText
+        ?? editorRef.current?.textContent
+        ?? content;
       if (resolved.includes('<<<<<<<') || resolved.includes('>>>>>>>')) {
         toast.warning('Conflict markers remain', 'Save anyway? File will be staged but not resolvable.');
       }
