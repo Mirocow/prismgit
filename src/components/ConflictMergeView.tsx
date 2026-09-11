@@ -32,6 +32,9 @@ import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 import { useLazyList } from '../lib/useLazyList';
+import {
+  tokenizeLine, tokensToHtml, detectLang, type SupportedLang,
+} from '../lib/syntaxHighlight';
 
 type ConflictResolution = 'ours' | 'theirs' | 'base' | 'both-ours-first' | 'both-theirs-first' | 'manual';
 
@@ -59,49 +62,43 @@ const ROW_HEIGHT = 20;
 const MAX_DISPLAY_CHARS = 200_000;
 
 /**
- * Classify a single line for color highlighting in the middle pane.
+ * Classify a single line for BACKGROUND highlighting in the middle pane.
  *
- * Visual scheme matches the reference UI (Meld / SmartGit / VS Code merge):
- *   - All lines INSIDE a conflict block (markers + ours + theirs) get the
- *     SAME light red/salmon pink background — no distinction between ours
- *     and theirs by color. This is the git-merge convention.
- *   - 'marker' lines (<<<<<<< ======= >>>>>>>) get a slightly stronger red
- *     background + bold text so they stand out as the conflict boundaries.
- *   - 'context' lines (outside any conflict) get no highlight.
+ * Background colors show WHICH SIDE the line came from (the conflict-side
+ * indication), while the TEXT color is reserved for syntax highlighting
+ * (Python / Go / JSON / etc.). This keeps the two concerns separate:
+ *
+ *   - background = "where does this line come from?"
+ *      - .conflict-bg-ours   : green tint  (left side / current branch / HEAD)
+ *      - .conflict-bg-theirs  : red tint    (right side / incoming branch)
+ *      - .conflict-bg-marker  : strong pink (for <<<<<<< ======= >>>>>>>)
+ *      - (no class)           : context line (outside any conflict)
+ *   - text color = syntax tokens (tok-keyword, tok-string, etc.)
  *
  * State machine:
- *   outside-conflict → see '<<<<<<<' → marker-start, enter ours-side
- *   ours-side        → see '=======' → marker-sep,   enter theirs-side
- *   theirs-side      → see '>>>>>>>' → marker-end,    exit to context
+ *   outside-conflict → see '<<<<<<<' → marker, enter ours-side
+ *   ours-side        → see '=======' → marker, enter theirs-side
+ *   theirs-side      → see '>>>>>>>' → marker, exit to context
  */
 type LineKind = 'context' | 'marker-start' | 'ours' | 'marker-sep' | 'theirs' | 'marker-end';
 
 interface LineClass {
   kind: LineKind;
-  /** CSS class for the row background + text color */
-  className: string;
+  /** Background-only CSS class — text color comes from syntax highlighting */
+  bgClass: string;
   /** Whether the line is part of a conflict region (for side panes alignment) */
   inConflict: boolean;
 }
 
-// All conflict-region lines share the same pink background. Markers get a
-// slightly stronger tint + bold so the conflict boundaries are visible.
-// This matches the reference UI (Meld/SmartGit): one uniform color for the
-// entire conflict block, not separate green/red for ours/theirs.
 const LINE_CLASS: Record<LineKind, LineClass> = {
-  'context':      { kind: 'context',      className: '',                                                           inConflict: false },
-  'marker-start': { kind: 'marker-start', className: 'bg-status-conflict/25 text-status-conflict font-bold',      inConflict: true  },
-  'marker-sep':   { kind: 'marker-sep',   className: 'bg-status-conflict/25 text-status-conflict font-bold',      inConflict: true  },
-  'marker-end':   { kind: 'marker-end',   className: 'bg-status-conflict/25 text-status-conflict font-bold',      inConflict: true  },
-  'ours':         { kind: 'ours',         className: 'bg-status-conflict/15 text-text-primary',                    inConflict: true  },
-  'theirs':       { kind: 'theirs',       className: 'bg-status-conflict/15 text-text-primary',                    inConflict: true  },
+  'context':      { kind: 'context',      bgClass: '',                  inConflict: false },
+  'marker-start': { kind: 'marker-start', bgClass: 'conflict-bg-marker', inConflict: true  },
+  'marker-sep':   { kind: 'marker-sep',   bgClass: 'conflict-bg-marker', inConflict: true  },
+  'marker-end':   { kind: 'marker-end',   bgClass: 'conflict-bg-marker', inConflict: true  },
+  'ours':         { kind: 'ours',         bgClass: 'conflict-bg-ours',   inConflict: true  },
+  'theirs':       { kind: 'theirs',       bgClass: 'conflict-bg-theirs', inConflict: true  },
 };
 
-/**
- * Classify every line in `text` into a `LineKind`. Returns an array of
- * LineClass entries (one per line) — used by the middle pane to render
- * each line with the right background + text color.
- */
 function classifyLines(text: string): LineClass[] {
   const lines = text.split('\n');
   const result: LineClass[] = new Array(lines.length);
@@ -129,9 +126,42 @@ function classifyLines(text: string): LineClass[] {
 }
 
 /**
- * Escape a string for safe insertion into innerHTML. Conflict markers are
- * already plain ASCII, but the user's file content can contain <, >, &.
+ * Build the highlighted HTML for the middle pane. Each line becomes a <div>
+ * with:
+ *   - A line-number gutter on the left (grey, fixed width)
+ *   - The background class for conflict-side indication (green/red/pink)
+ *   - The line content with SYNTAX HIGHLIGHTING (tok-* spans)
+ *
+ * The language is detected from `filePath` (Python / Go / JSON / etc.).
+ * If the language is unknown, the line is rendered as plain text.
+ *
+ * Empty lines render as &nbsp; so the row height stays consistent.
  */
+function buildHighlightedHtml(text: string, lineClasses: LineClass[], lang: SupportedLang): string {
+  const lines = text.split('\n');
+  let html = '';
+  for (let i = 0; i < lines.length; i++) {
+    const lineCls = lineClasses[i];
+    const bgClass = lineCls?.bgClass || '';
+    const lineContent = lines[i] || '';
+    // Line number gutter (fixed width, right-aligned, grey, non-selectable)
+    const lineNum = `<span class="inline-block w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle mr-2" style="color: var(--text-tertiary)">${i + 1}</span>`;
+    // Tokenize the line content for syntax highlighting.
+    // Conflict markers (<<<<<<< ======= >>>>>>>) are rendered as plain text —
+    // they don't follow language syntax and shouldn't be tokenized.
+    let contentHtml: string;
+    if (lineContent.startsWith('<<<<<<<') || lineContent.startsWith('=======') || lineContent.startsWith('>>>>>>>')) {
+      contentHtml = escapeHtml(lineContent) || '&nbsp;';
+    } else {
+      const tokens = tokenizeLine(lineContent, lang);
+      contentHtml = tokensToHtml(tokens) || '&nbsp;';
+    }
+    html += `<div class="${bgClass} flex items-start" data-line="${i + 1}">${lineNum}<span class="flex-1 whitespace-pre-wrap">${contentHtml}</span></div>`;
+  }
+  return html;
+}
+
+/** Escape a string for safe insertion into innerHTML. */
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -141,51 +171,39 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Build the highlighted HTML for the middle pane. Each line becomes a <div>
- * with:
- *   - A line-number gutter on the left (grey, fixed width)
- *   - The right background color class (pink for conflict region)
- *   - The line content (escaped HTML, &nbsp; for empty lines)
- *
- * The gutter is rendered inside each line's <div> so the line numbers scroll
- * together with the content (no separate scroll container needed).
- */
-function buildHighlightedHtml(text: string, lineClasses: LineClass[]): string {
-  const lines = text.split('\n');
-  let html = '';
-  for (let i = 0; i < lines.length; i++) {
-    const cls = lineClasses[i]?.className || '';
-    const content = lines[i] || '&nbsp;';
-    // Line number gutter (fixed 4ch wide, right-aligned, grey, non-selectable)
-    const lineNum = `<span class="inline-block w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle mr-2" data-line="${i + 1}">${i + 1}</span>`;
-    html += `<div class="${cls} flex items-start" data-line="${i + 1}">${lineNum}<span class="flex-1 whitespace-pre-wrap">${escapeHtml(content) || '&nbsp;'}</span></div>`;
-  }
-  return html;
-}
-
-/**
  * Memoized side pane — renders a windowed slice of `lines`.
  * Separated as a component so React can skip re-rendering when its props
- * (lines, side, onTake, conflictMask) are stable across parent re-renders.
+ * (lines, side, onTake, conflictMask, lang) are stable across parent re-renders.
  *
  * `conflictMask` is a boolean array (one entry per line) — true means the
- * line is inside a conflict region in the middle pane and gets the pink
- * background. This synchronizes side pane highlighting with the middle pane
- * so the user can visually correlate which lines are in conflict.
+ * line is inside a conflict region in the middle pane and gets the side
+ * background (green for ours / red for theirs).
+ *
+ * `sideBgClass` is the CSS class applied to conflict-region lines —
+ * 'conflict-bg-ours' for the left pane, 'conflict-bg-theirs' for the right.
+ *
+ * `lang` is the detected programming language — used for syntax highlighting
+ * of code (tok-keyword, tok-string, etc.).
  */
 const SidePane = memo(function SidePane({
   title,
   lines,
   side,
   conflictMask,
+  sideBgClass,
+  lang,
   onTake,
   takeLabel,
 }: {
   title: string;
   lines: string[];
   side: 'ours' | 'theirs';
-  /** Per-line boolean: true = inside conflict region (pink bg) */
+  /** Per-line boolean: true = inside conflict region */
   conflictMask: boolean[];
+  /** Background CSS class to apply to conflict-region lines */
+  sideBgClass: string;
+  /** Programming language for syntax highlighting */
+  lang: SupportedLang;
   onTake: () => void;
   takeLabel: string;
 }) {
@@ -216,33 +234,33 @@ const SidePane = memo(function SidePane({
           <ArrowRight size={10} className="inline -mt-0.5" /> {side === 'ours' ? 'Take Left' : 'Take Right'}
         </button>
       </div>
-      {/* Pane content — windowed */}
+      {/* Pane content — windowed, with syntax highlighting */}
       <div ref={scrollRef} className="flex-1 overflow-auto">
         <div style={{ height: totalHeight, position: 'relative' }}>
           <div style={{ transform: `translateY(${offsetY}px)` }}>
             {visibleLines.map((line, i) => {
               const lineNum = visibleRange.start + i + 1;
               const inConflict = conflictMask[visibleRange.start + i] === true;
+              const bgClass = inConflict ? sideBgClass : '';
+              // Tokenize the line for syntax highlighting (tok-keyword, etc.)
+              const tokens = tokenizeLine(line || '', lang);
+              const contentHtml = tokensToHtml(tokens);
               return (
                 <div
                   key={lineNum}
                   className={cn(
                     'flex font-mono text-xs leading-5 px-1',
-                    // Pink background for lines inside a conflict region —
-                    // matches the middle pane highlighting (reference UI).
-                    inConflict ? 'bg-status-conflict/15' : '',
+                    bgClass,
                   )}
                   style={{ height: ROW_HEIGHT }}
                 >
                   <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle">
                     {lineNum}
                   </span>
-                  <pre
-                    className="flex-1 pl-2 whitespace-pre-wrap break-all m-0 text-text-primary"
-                    style={{ fontFamily: 'inherit' }}
-                  >
-                    {line || ' '}
-                  </pre>
+                  <span
+                    className="flex-1 pl-2 whitespace-pre-wrap break-all"
+                    dangerouslySetInnerHTML={{ __html: contentHtml || '&nbsp;' }}
+                  />
                 </div>
               );
             })}
@@ -315,6 +333,20 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
    */
   const [highlightedHtml, setHighlightedHtml] = useState<string>('');
   const editorRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * Detected programming language for syntax highlighting. Set once on
+   * file load from the file extension (Python, Go, JSON, etc.). Stored in a
+   * ref so applyResolution / resetHunk can access it without re-creating
+   * their callbacks on every render.
+   */
+  const langRef = useRef<SupportedLang>('text');
+
+  /** Rebuild highlighted HTML from the given text — shared by loadFile,
+   *  applyResolution and resetHunk so they all produce consistent output. */
+  const rebuildHighlight = useCallback((text: string): string => {
+    const lineClasses = classifyLines(text);
+    return buildHighlightedHtml(text, lineClasses, langRef.current);
+  }, []);
 
   // ===== Load file content + stage versions ================================
 
@@ -340,23 +372,23 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       let fileContent = '';
       try { fileContent = await api.fs.readFile(fullPath); } catch { fileContent = ''; }
       setContent(fileContent);
+      // Detect language for syntax highlighting (Python / Go / JSON / etc.).
+      // Stored in a ref so applyResolution / resetHunk can reuse it without
+      // re-creating their callbacks on every render.
+      langRef.current = detectLang(filePath);
       // Build the highlighted HTML once for the whole file. The middle pane
       // renders this via `dangerouslySetInnerHTML` so React owns the
       // innerHTML attribute — re-renders won't clobber our highlighting.
-      const buildHighlighted = (text: string) => {
-        const lineClasses = classifyLines(text);
-        return buildHighlightedHtml(text, lineClasses);
-      };
       const finish = () => setLoading(false);
       setTimeout(() => {
         if (fileContent.length > MAX_DISPLAY_CHARS) {
           // Truncate display — full content still in `content` state for save.
           const truncated = fileContent.slice(0, MAX_DISPLAY_CHARS) +
             '\n\n... [file truncated for display — full content preserved for save] ...';
-          setHighlightedHtml(buildHighlighted(truncated));
+          setHighlightedHtml(rebuildHighlight(truncated));
           finish();
         } else {
-          setHighlightedHtml(buildHighlighted(fileContent));
+          setHighlightedHtml(rebuildHighlight(fileContent));
           finish();
         }
       }, 0);
@@ -447,8 +479,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     const newText = newLines.join('\n');
     // Re-render with highlighted HTML so the remaining conflict markers stay
     // colored. Stored in state — React injects via dangerouslySetInnerHTML.
-    const lineClasses = classifyLines(newText);
-    setHighlightedHtml(buildHighlightedHtml(newText, lineClasses));
+    setHighlightedHtml(rebuildHighlight(newText));
     setContent(newText);
     setDirty(true);
     toast.success(`Hunk ${currentHunkIdx + 1}: ${resolution.replace(/-/g, ' ')}`);
@@ -457,7 +488,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     } else {
       setCurrentHunk(0);
     }
-  }, [hunks, currentHunkIdx, baseContent, toast]);
+  }, [hunks, currentHunkIdx, baseContent, toast, rebuildHighlight]);
 
   const resetHunk = useCallback(() => {
     if (!editorRef.current || hunks.length === 0) return;
@@ -475,11 +506,10 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     const newText = newLines.join('\n');
     // Re-render with highlighted HTML so the restored conflict markers show up
     // in their conflict colors (red bg, etc.).
-    const lineClasses = classifyLines(newText);
-    setHighlightedHtml(buildHighlightedHtml(newText, lineClasses));
+    setHighlightedHtml(rebuildHighlight(newText));
     setContent(newText);
     setDirty(true);
-  }, [hunks, currentHunkIdx, content]);
+  }, [hunks, currentHunkIdx, content, rebuildHighlight]);
 
   // ===== Save & Stage ======================================================
 
@@ -762,12 +792,14 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
 
       {/* 3-pane layout */}
       <div className="flex-1 overflow-hidden flex">
-        {/* Left: Ours (HEAD) — windowed */}
+        {/* Left: Ours (HEAD) — windowed, syntax highlighted, green bg for conflicts */}
         <SidePane
           title={`ours ("HEAD")`}
           lines={oursLines}
           side="ours"
           conflictMask={conflictMask}
+          sideBgClass="conflict-bg-ours"
+          lang={langRef.current}
           onTake={() => applyResolution('ours')}
           takeLabel="Take ours for this hunk"
         />
@@ -799,12 +831,14 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           />
         </div>
 
-        {/* Right: Theirs — windowed */}
+        {/* Right: Theirs — windowed, syntax highlighted, red bg for conflicts */}
         <SidePane
           title="theirs"
           lines={theirsLines}
           side="theirs"
           conflictMask={conflictMask}
+          sideBgClass="conflict-bg-theirs"
+          lang={langRef.current}
           onTake={() => applyResolution('theirs')}
           takeLabel="Take theirs for this hunk"
         />

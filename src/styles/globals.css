@@ -528,6 +528,30 @@ input[type="checkbox"], input[type="radio"] {
 .text-function { color: var(--accent-blue); }
 .text-type { color: var(--accent-cyan); }
 
+/* === ConflictMergeView syntax tokens (tok-* prefix) ===
+   Used by the 3-way merge view to highlight code WHILE keeping the conflict
+   background (pink for OURS region, red for THEIRS region) separate.
+   Colors mirror the existing .text-* palette so themes stay consistent. */
+.tok-keyword  { color: var(--accent-yellow); }
+.tok-string   { color: var(--status-added); }
+.tok-number   { color: var(--accent-purple); }
+.tok-comment  { color: var(--comment); font-style: italic; }
+.tok-function { color: var(--accent-blue); }
+.tok-type     { color: var(--accent-cyan); }
+.tok-operator { color: var(--accent-orange, var(--accent-yellow)); }
+.tok-punct    { color: var(--text-tertiary); }
+.tok-plain    { color: inherit; }
+
+/* === Conflict background colors (background-only — text color stays for
+   syntax highlighting, NOT conflict-side indication) ===
+   - .conflict-bg-ours    : light green tint  (matches the left pane)
+   - .conflict-bg-theirs  : light red tint    (matches the right pane)
+   - .conflict-bg-marker  : stronger pink/red  (for <<<<<<< ======= >>>>>>>)
+*/
+.conflict-bg-ours   { background-color: rgba(var(--status-added-rgb,   170 217 76) / 0.15); }
+.conflict-bg-theirs { background-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.15); }
+.conflict-bg-marker { background-color: rgba(var(--status-conflict-rgb, 255 143 111) / 0.30); font-weight: 600; }
+
 /* === Drag and drop === */
 .drag-over {
   background-color: var(--bg-active) !important;
