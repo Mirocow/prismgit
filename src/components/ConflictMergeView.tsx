@@ -60,17 +60,19 @@ const MAX_DISPLAY_CHARS = 200_000;
 
 /**
  * Classify a single line for color highlighting in the middle pane.
- * Mirrors how git / VS Code / IntelliJ color conflict markers:
- *   - 'marker-start' (<<<<<<<): red background, bold
- *   - 'marker-sep'   (=======):  red background, bold
- *   - 'marker-end'   (>>>>>>>):  red background, bold
- *   - 'ours':                    green-tinted background (the OURS side of the conflict)
- *   - 'theirs':                  red-tinted background   (the THEIRS side of the conflict)
- *   - 'context':                 normal background        (non-conflicting line)
  *
- * The classifier is stateful — it tracks whether the current line is inside
- * a conflict block and on which side (ours / theirs). State is encoded as
- * a small state machine over lines.
+ * Visual scheme matches the reference UI (Meld / SmartGit / VS Code merge):
+ *   - All lines INSIDE a conflict block (markers + ours + theirs) get the
+ *     SAME light red/salmon pink background — no distinction between ours
+ *     and theirs by color. This is the git-merge convention.
+ *   - 'marker' lines (<<<<<<< ======= >>>>>>>) get a slightly stronger red
+ *     background + bold text so they stand out as the conflict boundaries.
+ *   - 'context' lines (outside any conflict) get no highlight.
+ *
+ * State machine:
+ *   outside-conflict → see '<<<<<<<' → marker-start, enter ours-side
+ *   ours-side        → see '=======' → marker-sep,   enter theirs-side
+ *   theirs-side      → see '>>>>>>>' → marker-end,    exit to context
  */
 type LineKind = 'context' | 'marker-start' | 'ours' | 'marker-sep' | 'theirs' | 'marker-end';
 
@@ -78,26 +80,27 @@ interface LineClass {
   kind: LineKind;
   /** CSS class for the row background + text color */
   className: string;
+  /** Whether the line is part of a conflict region (for side panes alignment) */
+  inConflict: boolean;
 }
 
+// All conflict-region lines share the same pink background. Markers get a
+// slightly stronger tint + bold so the conflict boundaries are visible.
+// This matches the reference UI (Meld/SmartGit): one uniform color for the
+// entire conflict block, not separate green/red for ours/theirs.
 const LINE_CLASS: Record<LineKind, LineClass> = {
-  'context':      { kind: 'context',      className: '' },
-  'marker-start': { kind: 'marker-start', className: 'bg-status-conflict/20 text-status-conflict font-bold' },
-  'marker-sep':   { kind: 'marker-sep',   className: 'bg-status-conflict/20 text-status-conflict font-bold' },
-  'marker-end':   { kind: 'marker-end',  className: 'bg-status-conflict/20 text-status-conflict font-bold' },
-  'ours':         { kind: 'ours',         className: 'bg-status-added/10 text-status-added' },
-  'theirs':       { kind: 'theirs',      className: 'bg-status-deleted/10 text-status-deleted' },
+  'context':      { kind: 'context',      className: '',                                                           inConflict: false },
+  'marker-start': { kind: 'marker-start', className: 'bg-status-conflict/25 text-status-conflict font-bold',      inConflict: true  },
+  'marker-sep':   { kind: 'marker-sep',   className: 'bg-status-conflict/25 text-status-conflict font-bold',      inConflict: true  },
+  'marker-end':   { kind: 'marker-end',   className: 'bg-status-conflict/25 text-status-conflict font-bold',      inConflict: true  },
+  'ours':         { kind: 'ours',         className: 'bg-status-conflict/15 text-text-primary',                    inConflict: true  },
+  'theirs':       { kind: 'theirs',       className: 'bg-status-conflict/15 text-text-primary',                    inConflict: true  },
 };
 
 /**
  * Classify every line in `text` into a `LineKind`. Returns an array of
  * LineClass entries (one per line) — used by the middle pane to render
  * each line with the right background + text color.
- *
- * State machine:
- *   outside-conflict → see '<<<<<<<' → marker-start, enter ours-side
- *   ours-side        → see '=======' → marker-sep,   enter theirs-side
- *   theirs-side      → see '>>>>>>>' → marker-end,    exit to context
  */
 function classifyLines(text: string): LineClass[] {
   const lines = text.split('\n');
@@ -134,17 +137,18 @@ function escapeHtml(s: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/ /g, '&nbsp;'); // preserve leading/trailing spaces
+    .replace(/"/g, '&quot;');
 }
 
 /**
  * Build the highlighted HTML for the middle pane. Each line becomes a <div>
- * with the right background + text color class. Conflict markers, OURS lines
- * and THEIRS lines are visually distinguished — exactly how git/VSCode/IntelliJ
- * render the conflict file.
+ * with:
+ *   - A line-number gutter on the left (grey, fixed width)
+ *   - The right background color class (pink for conflict region)
+ *   - The line content (escaped HTML, &nbsp; for empty lines)
  *
- * Empty lines are rendered as '&nbsp;' so the row height stays consistent.
+ * The gutter is rendered inside each line's <div> so the line numbers scroll
+ * together with the content (no separate scroll container needed).
  */
 function buildHighlightedHtml(text: string, lineClasses: LineClass[]): string {
   const lines = text.split('\n');
@@ -152,8 +156,9 @@ function buildHighlightedHtml(text: string, lineClasses: LineClass[]): string {
   for (let i = 0; i < lines.length; i++) {
     const cls = lineClasses[i]?.className || '';
     const content = lines[i] || '&nbsp;';
-    // Use a data attribute for line index — used by tests / debugging.
-    html += `<div class="${cls}" data-line="${i + 1}">${escapeHtml(content) || '&nbsp;'}</div>`;
+    // Line number gutter (fixed 4ch wide, right-aligned, grey, non-selectable)
+    const lineNum = `<span class="inline-block w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle mr-2" data-line="${i + 1}">${i + 1}</span>`;
+    html += `<div class="${cls} flex items-start" data-line="${i + 1}">${lineNum}<span class="flex-1 whitespace-pre-wrap">${escapeHtml(content) || '&nbsp;'}</span></div>`;
   }
   return html;
 }
@@ -161,18 +166,26 @@ function buildHighlightedHtml(text: string, lineClasses: LineClass[]): string {
 /**
  * Memoized side pane — renders a windowed slice of `lines`.
  * Separated as a component so React can skip re-rendering when its props
- * (lines, side, onTake) are stable across parent re-renders.
+ * (lines, side, onTake, conflictMask) are stable across parent re-renders.
+ *
+ * `conflictMask` is a boolean array (one entry per line) — true means the
+ * line is inside a conflict region in the middle pane and gets the pink
+ * background. This synchronizes side pane highlighting with the middle pane
+ * so the user can visually correlate which lines are in conflict.
  */
 const SidePane = memo(function SidePane({
   title,
   lines,
   side,
+  conflictMask,
   onTake,
   takeLabel,
 }: {
   title: string;
   lines: string[];
   side: 'ours' | 'theirs';
+  /** Per-line boolean: true = inside conflict region (pink bg) */
+  conflictMask: boolean[];
   onTake: () => void;
   takeLabel: string;
 }) {
@@ -209,12 +222,15 @@ const SidePane = memo(function SidePane({
           <div style={{ transform: `translateY(${offsetY}px)` }}>
             {visibleLines.map((line, i) => {
               const lineNum = visibleRange.start + i + 1;
+              const inConflict = conflictMask[visibleRange.start + i] === true;
               return (
                 <div
                   key={lineNum}
                   className={cn(
                     'flex font-mono text-xs leading-5 px-1',
-                    'bg-status-conflict/10',
+                    // Pink background for lines inside a conflict region —
+                    // matches the middle pane highlighting (reference UI).
+                    inConflict ? 'bg-status-conflict/15' : '',
                   )}
                   style={{ height: ROW_HEIGHT }}
                 >
@@ -222,10 +238,7 @@ const SidePane = memo(function SidePane({
                     {lineNum}
                   </span>
                   <pre
-                    className={cn(
-                      'flex-1 pl-2 whitespace-pre-wrap break-all m-0',
-                      side === 'ours' ? 'text-status-added' : 'text-status-deleted',
-                    )}
+                    className="flex-1 pl-2 whitespace-pre-wrap break-all m-0 text-text-primary"
                     style={{ fontFamily: 'inherit' }}
                   >
                     {line || ' '}
@@ -369,23 +382,25 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
   const unresolvedCount = hunks.length;
   const currentHunkIdx = Math.min(currentHunk, Math.max(0, hunks.length - 1));
 
-  // ===== Side pane content: only conflict region + small context ===========
-  /**
-   * For the current conflict hunk, build the OURS/THEIRS pane lines.
-   * We render ONLY the conflict region plus a small context window around it
-   * (CONTEXT_LINES on each side). For most conflicts this is <100 lines per
-   * pane — keeping the DOM small even for 10k-line files.
-   */
+  // Classify middle pane lines once — reused for both the middle pane HTML
+  // (buildHighlightedHtml) and the side pane conflict masks.
+  const lineClasses = useMemo(() => classifyLines(content), [content]);
+
+  // Per-line "is this line inside a conflict region?" boolean arrays for the
+  // side panes. The side panes show the FULL ours/theirs file content, and
+  // lines that fall inside a conflict region in the middle pane get the pink
+  // background — visually correlating which lines are in conflict.
+  const conflictMask = useMemo(() => lineClasses.map((c) => c.inConflict), [lineClasses]);
+
+  // ===== Side pane content: full OURS / THEIRS file content ================
+  // The side panes show the FULL ours/theirs file content (not just the
+  // conflict region), matching the reference UI: line1, MAIN-BRANCH-CHANGE,
+  // line3, line4, line5 in the left pane; line1, FEATURE-CHANGE-HERE, line3
+  // in the right pane. Lines inside a conflict region get the pink background;
+  // context lines (line1, line3-5) get no highlight.
   const currentH = hunks[currentHunkIdx];
-  const oursLines = useMemo(() => {
-    if (currentH) return currentH.oursLines;
-    // Fallback when no hunk is selected (e.g. all resolved): show first 100 lines
-    return oursContent.split('\n').slice(0, 100);
-  }, [currentH, oursContent]);
-  const theirsLines = useMemo(() => {
-    if (currentH) return currentH.theirsLines;
-    return theirsContent.split('\n').slice(0, 100);
-  }, [currentH, theirsContent]);
+  const oursLines = useMemo(() => oursContent.split('\n'), [oursContent]);
+  const theirsLines = useMemo(() => theirsContent.split('\n'), [theirsContent]);
 
   // ===== Editor input handling (uncontrolled contentEditable) ==============
 
@@ -618,104 +633,79 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Top toolbar */}
-      <div className="flex items-center justify-between px-3 py-2 bg-bg-secondary border-b border-border-default flex-shrink-0 gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <AlertCircle size={14} className="text-status-conflict flex-shrink-0" />
-          <span className="text-xs font-medium truncate">
-            {t('changes.conflictSolverTitle')}
-          </span>
-          <code className="text-2xs font-mono text-text-tertiary truncate">{filePath}</code>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-2xs text-text-secondary tabular-nums">
-            <span className="text-status-conflict font-medium">{unresolvedCount}</span> conflicts
-          </span>
-          <div className="w-px h-4 bg-border-default" />
-          <button
-            className="icon-btn"
-            title="Previous conflict (Shift+F7)"
-            onClick={() => setCurrentHunk((h) => Math.max(0, h - 1))}
-            disabled={currentHunkIdx === 0}
-          >
-            <ChevronUp size={14} />
-          </button>
-          <span className="text-2xs mono text-text-secondary tabular-nums">
-            {hunks.length > 0 ? `${currentHunkIdx + 1} / ${hunks.length}` : '— / —'}
-          </span>
-          <button
-            className="icon-btn"
-            title="Next conflict (F7)"
-            onClick={() => setCurrentHunk((h) => Math.min(hunks.length - 1, h + 1))}
-            disabled={hunks.length === 0 || currentHunkIdx === hunks.length - 1}
-          >
-            <ChevronDown size={14} />
-          </button>
-          <div className="w-px h-4 bg-border-default" />
-          <button
-            className="btn btn-secondary text-2xs"
-            title="Open in VS Code 3-way merge editor"
-            onClick={async () => {
-              try {
-                const res = await api.vscode.openMerge(repo.path, filePath);
-                if (res.ok) toast.success('Opened in VS Code merge editor');
-                else toast.error('VS Code not found', res.detail || 'Install VS Code or configure path');
-              } catch (e) { toast.error('VS Code merge failed', String(e)); }
-            }}
-          >
-            <ExternalLink size={10} /> VS Code
-          </button>
-          <button
-            className="btn btn-primary text-2xs"
-            onClick={handleSave}
-            disabled={saving}
-            title="Save resolved content and stage the file (Ctrl+Enter)"
-          >
-            {saving ? <Loader size={11} className="spin" /> : <Check size={11} />}
-            {t('changes.saveStage')}
-            {dirty && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-status-modified inline-block" />}
-          </button>
-        </div>
-      </div>
-
-      {/* Merge action toolbar */}
-      <div className="flex items-center gap-1 px-3 py-1.5 bg-bg-tertiary border-b border-border-default flex-shrink-0 overflow-x-auto">
-        <span className="text-2xs text-text-tertiary mr-2">Resolve:</span>
+      {/* Top toolbar — file path, conflict counter, navigation, save
+          All merge actions live here (matches the reference UI layout:
+          one horizontal toolbar with all buttons). */}
+      <div className="flex items-center gap-1 px-3 py-1.5 bg-bg-secondary border-b border-border-default flex-shrink-0 overflow-x-auto">
+        {/* Left side: file info + conflict counter */}
+        <AlertCircle size={14} className="text-status-conflict flex-shrink-0" />
+        <span className="text-xs font-medium truncate">
+          {t('changes.conflictSolverTitle')}
+        </span>
+        <code className="text-2xs font-mono text-text-tertiary truncate">{filePath}</code>
+        <span className="text-2xs text-text-secondary tabular-nums ml-2">
+          <span className="text-status-conflict font-medium">{unresolvedCount}</span> conflicts
+        </span>
+        <div className="w-px h-4 bg-border-default mx-1" />
+        {/* Prev / Next conflict navigation */}
+        <button
+          className="icon-btn"
+          title="Previous conflict (Shift+F7)"
+          onClick={() => setCurrentHunk((h) => Math.max(0, h - 1))}
+          disabled={currentHunkIdx === 0}
+        >
+          <ChevronUp size={14} />
+        </button>
+        <span className="text-2xs mono text-text-secondary tabular-nums">
+          {hunks.length > 0 ? `${currentHunkIdx + 1} / ${hunks.length}` : '— / —'}
+        </span>
+        <button
+          className="icon-btn"
+          title="Next conflict (F7)"
+          onClick={() => setCurrentHunk((h) => Math.min(hunks.length - 1, h + 1))}
+          disabled={hunks.length === 0 || currentHunkIdx === hunks.length - 1}
+        >
+          <ChevronDown size={14} />
+        </button>
+        <div className="w-px h-4 bg-border-default mx-1" />
+        {/* Resolution actions — Take Left / Both (L→R) / Both (R→L) / Take Right
+            Matches the reference UI: "Take Left, Right" / "Take Left" / "Take Right" / "Take Right, Left" */}
+        <button
+          className="btn btn-secondary text-2xs !py-0.5 !px-2"
+          onClick={() => applyResolution('both-ours-first')}
+          title="Take Left, Right — ours first then theirs (concatenate)"
+        >
+          <Plus size={10} className="inline -mt-0.5" /> Take L,R
+        </button>
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
           onClick={() => applyResolution('ours')}
-          title="Use OURS for this hunk (Ctrl+1)"
+          title="Take Left — use OURS for this hunk (Ctrl+1)"
         >
           <ArrowLeft size={10} className="inline -mt-0.5" /> Take Left
         </button>
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
-          onClick={() => applyResolution('both-ours-first')}
-          title="Both: ours first, then theirs"
+          onClick={() => applyResolution('theirs')}
+          title="Take Right — use THEIRS for this hunk (Ctrl+2)"
         >
-          <Plus size={10} className="inline -mt-0.5" /> Both (L→R)
+          Take Right <ArrowRight size={10} className="inline -mt-0.5" />
         </button>
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
           onClick={() => applyResolution('both-theirs-first')}
-          title="Both: theirs first, then ours"
+          title="Take Right, Left — theirs first then ours"
         >
-          <Plus size={10} className="inline -mt-0.5" /> Both (R→L)
-        </button>
-        <button
-          className="btn btn-secondary text-2xs !py-0.5 !px-2"
-          onClick={() => applyResolution('theirs')}
-          title="Use THEIRS for this hunk (Ctrl+2)"
-        >
-          Take Right <ArrowRight size={10} className="inline -mt-0.5" />
+          Take R,L <Plus size={10} className="inline -mt-0.5" />
         </button>
         <div className="w-px h-4 bg-border-default mx-1" />
+        {/* Reset / External / Merge Tool */}
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
           onClick={resetHunk}
           title="Reset this hunk to raw conflict markers"
         >
-          <RotateCcw size={10} className="inline -mt-0.5" /> Reset Hunk
+          <RotateCcw size={10} className="inline -mt-0.5" /> Reset
         </button>
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
@@ -741,6 +731,33 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         >
           <GitMerge size={10} className="inline -mt-0.5" /> Merge Tool
         </button>
+        <div className="w-px h-4 bg-border-default mx-1" />
+        {/* VS Code integration */}
+        <button
+          className="btn btn-secondary text-2xs !py-0.5 !px-2"
+          title="Open in VS Code 3-way merge editor"
+          onClick={async () => {
+            try {
+              const res = await api.vscode.openMerge(repo.path, filePath);
+              if (res.ok) toast.success('Opened in VS Code merge editor');
+              else toast.error('VS Code not found', res.detail || 'Install VS Code or configure path');
+            } catch (e) { toast.error('VS Code merge failed', String(e)); }
+          }}
+        >
+          <ExternalLink size={10} className="inline -mt-0.5" /> VS Code
+        </button>
+        {/* Save & Stage (right-aligned) */}
+        <div className="flex-1" />
+        <button
+          className="btn btn-primary text-2xs !py-0.5 !px-2"
+          onClick={handleSave}
+          disabled={saving}
+          title="Save resolved content and stage the file (Ctrl+Enter)"
+        >
+          {saving ? <Loader size={11} className="spin" /> : <Check size={11} />}
+          {t('changes.saveStage')}
+          {dirty && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-status-modified inline-block" />}
+        </button>
       </div>
 
       {/* 3-pane layout */}
@@ -750,6 +767,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           title={`ours ("HEAD")`}
           lines={oursLines}
           side="ours"
+          conflictMask={conflictMask}
           onTake={() => applyResolution('ours')}
           takeLabel="Take ours for this hunk"
         />
@@ -774,7 +792,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
             suppressContentEditableWarning
             onInput={handleEditorInput}
             spellCheck={false}
-            className="flex-1 overflow-auto p-3 font-mono text-xs leading-5 outline-none focus:bg-bg-hover/20 whitespace-pre-wrap break-all"
+            className="flex-1 overflow-auto p-0 font-mono text-xs leading-5 outline-none focus:bg-bg-hover/20 whitespace-pre-wrap break-all"
             style={{ minHeight: 0 }}
             data-testid="conflict-editor"
             dangerouslySetInnerHTML={highlightedHtml ? { __html: highlightedHtml } : undefined}
@@ -786,6 +804,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           title="theirs"
           lines={theirsLines}
           side="theirs"
+          conflictMask={conflictMask}
           onTake={() => applyResolution('theirs')}
           takeLabel="Take theirs for this hunk"
         />
