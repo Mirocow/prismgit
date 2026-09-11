@@ -132,26 +132,26 @@ export function Sidebar() {
   const stagedCount = useGitStore((s) => s.status?.staged.length ?? 0);
   // Collapsible nav groups — click group header to collapse/expand
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  // Favorites — user-pinned tools shown at the top of the navigation
-  const [favoriteTools, setFavoriteTools] = useState<string[]>([]);
+  // Favorites — GLOBAL (shared across all repositories), not per-repo.
+  // Default: Changes, History, Diff — the 3 most-used tools.
+  const FAVORITES_KEY = 'prismgit-favorite-tools';
+  const DEFAULT_FAVORITES = ['/changes', '/history', '/diff'];
+  const [favoriteTools, setFavoriteTools] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(FAVORITES_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return DEFAULT_FAVORITES;
+  });
 
-  // Load favorite tools from project prefs when repo opens
+  // Save to global localStorage whenever favorites change
   useEffect(() => {
-    if (currentRepo) {
-      const prefs = loadProjectPrefs(currentRepo.path);
-      setFavoriteTools(prefs.favoriteTools || []);
-    }
-  }, [currentRepo?.path]);
+    try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(favoriteTools)); } catch { /* ignore */ }
+  }, [favoriteTools]);
 
   const toggleFavorite = useCallback((path: string) => {
-    setFavoriteTools(prev => {
-      const next = prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path];
-      if (currentRepo) {
-        saveProjectPrefs(currentRepo.path, { favoriteTools: next });
-      }
-      return next;
-    });
-  }, [currentRepo]);
+    setFavoriteTools(prev => prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]);
+  }, []);
 
   // Repository tree DnD state. dragPayload is mirrored in a ref because
   // dataTransfer.getData() is unavailable during dragover in Chromium.
