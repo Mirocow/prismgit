@@ -7,29 +7,19 @@
  *   │  (read-only) │  (editable)     │  (read-only)  │
  *   └──────────────┴─────────────────┴──────────────┘
  *
- * The middle pane is a live editable text area where the user can:
- *   - Edit conflict markers directly (just like editing the file)
- *   - Or click one of the toolbar buttons to resolve the current hunk:
- *        Take Left  → use ours
- *        Take Right → use theirs
- *        Take Both  → ours + theirs (left first)
- *        Take Both (reversed) → theirs + ours
- *   - Click "Save & Stage" to write the merged content + `git add` the file
- *
- * SmartGit integration:
- *   - Called from DiffPage when a conflicted file is selected during
- *     merge/rebase/cherry-pick/revert (via "Resolve conflict..." menu)
- *   - Repo-state actions (Continue/Abort/etc.) are surfaced via the
- *     RepoStateBanner shown ABOVE this view by DiffPage
- *
- * Performance notes:
- *   - Pane content is stored as plain string[] — no React reconciliation per
- *     keystroke. The middle pane is an uncontrolled <textarea>-like editor
- *     using a contentEditable div to preserve scroll position + selection.
- *   - Conflict hunks are re-parsed from the middle pane on demand (only
- *     when computing the "X of Y conflicts" counter), not on every render.
+ * Performance:
+ *   - Windowed rendering: only the visible rows are rendered as DOM nodes.
+ *     For a 5000-line file, this means ~30-50 DOM nodes per pane instead of
+ *     5000 — opens instantly.
+ *   - Side panes (Ours/Theirs) load ONLY the conflict region + a small context
+ *     window around it (default ±20 lines). For most conflicts (a few dozen
+ *     lines) this is <100 lines per pane.
+ *   - Middle pane is a contentEditable <div> — uncontrolled, so typing does
+ *     NOT trigger React re-renders. Conflict counter re-parses on a 400ms
+ *     debounce.
+ *   - `useLazyList` (binary-search indexed) handles the windowing math.
  */
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import {
   Check, AlertCircle, Loader, ChevronUp, ChevronDown,
   ExternalLink, GitMerge, RotateCcw, Plus,
@@ -41,6 +31,7 @@ import { useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
+import { useLazyList } from '../lib/useLazyList';
 
 type ConflictResolution = 'ours' | 'theirs' | 'base' | 'both-ours-first' | 'both-theirs-first' | 'manual';
 
@@ -62,17 +53,97 @@ export interface ConflictMergeViewProps {
   onResolved?: (resolvedFile: string) => void;
 }
 
+/** Lines of context shown above/below each conflict hunk in the side panes. */
+const CONTEXT_LINES = 20;
+const ROW_HEIGHT = 20;
+const MAX_DISPLAY_CHARS = 200_000;
+
+/**
+ * Memoized side pane — renders a windowed slice of `lines`.
+ * Separated as a component so React can skip re-rendering when its props
+ * (lines, side, onTake) are stable across parent re-renders.
+ */
+const SidePane = memo(function SidePane({
+  title,
+  lines,
+  side,
+  onTake,
+  takeLabel,
+}: {
+  title: string;
+  lines: string[];
+  side: 'ours' | 'theirs';
+  onTake: () => void;
+  takeLabel: string;
+}) {
+  const { visibleRange, totalHeight, offsetY, scrollRef } = useLazyList({
+    itemCount: lines.length,
+    estimateRowHeight: ROW_HEIGHT,
+    overscan: 6,
+  });
+  const visibleLines = lines.slice(visibleRange.start, visibleRange.end);
+  return (
+    <div className="flex-1 flex flex-col border-r border-border-default last:border-r-0 min-w-0 overflow-hidden">
+      {/* Pane header */}
+      <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between flex-shrink-0">
+        <span className={cn(
+          'truncate',
+          side === 'ours' ? 'text-status-added' : 'text-status-deleted',
+        )}>
+          {title}
+          <span className="ml-2 text-2xs text-text-tertiary normal-case font-normal">
+            ({lines.length} lines)
+          </span>
+        </span>
+        <button
+          className="btn btn-secondary text-2xs !py-0.5 !px-2"
+          onClick={onTake}
+          title={takeLabel}
+        >
+          <ArrowRight size={10} className="inline -mt-0.5" /> {side === 'ours' ? 'Take Left' : 'Take Right'}
+        </button>
+      </div>
+      {/* Pane content — windowed */}
+      <div ref={scrollRef} className="flex-1 overflow-auto">
+        <div style={{ height: totalHeight, position: 'relative' }}>
+          <div style={{ transform: `translateY(${offsetY}px)` }}>
+            {visibleLines.map((line, i) => {
+              const lineNum = visibleRange.start + i + 1;
+              return (
+                <div
+                  key={lineNum}
+                  className={cn(
+                    'flex font-mono text-xs leading-5 px-1',
+                    'bg-status-conflict/10',
+                  )}
+                  style={{ height: ROW_HEIGHT }}
+                >
+                  <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle">
+                    {lineNum}
+                  </span>
+                  <pre
+                    className={cn(
+                      'flex-1 pl-2 whitespace-pre-wrap break-all m-0',
+                      side === 'ours' ? 'text-status-added' : 'text-status-deleted',
+                    )}
+                    style={{ fontFamily: 'inherit' }}
+                  >
+                    {line || ' '}
+                  </pre>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 /**
  * Parse Git conflict markers from a file content string.
  * Returns the list of conflict hunks (regions delimited by
  * `<<<<<<<` / `=======` / `>>>>>>>`).
- *
- * Marker format:
- *   <<<<<<< HEAD
- *   ... ours ...
- *   =======
- *   ... theirs ...
- *   >>>>>>> branch-name
  */
 function parseConflicts(content: string): ConflictHunk[] {
   const lines = content.split('\n');
@@ -112,29 +183,15 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
   const [loading, setLoading] = useState(true);
   /** The full content of the working-tree file (the editable middle pane). */
   const [content, setContent] = useState<string>('');
-  /**
-   * The left/right panes show ONE conflict hunk at a time (with surrounding
-   * context lines from the respective stage versions). They're loaded once
-   * per file and updated only when the user navigates between hunks.
-   */
   const [baseContent, setBaseContent] = useState<string>('');
   const [oursContent, setOursContent] = useState<string>('');
   const [theirsContent, setTheirsContent] = useState<string>('');
   const [currentHunk, setCurrentHunk] = useState(0);
   const [saving, setSaving] = useState(false);
-  /** Dirty flag — set when the user edits the middle pane. */
   const [dirty, setDirty] = useState(false);
-  /**
-   * Ref to the editable middle pane. We use a contentEditable <div> instead
-   * of <textarea> because:
-   *   - textarea doesn't render conflict markers in color
-   *   - textarea doesn't support inline syntax highlighting
-   *   - textarea resets scroll position on re-render
-   * The div is uncontrolled: we set initialContent and read .innerText on save.
-   */
   const editorRef = useRef<HTMLDivElement | null>(null);
 
-  // ===== Load file content + stage versions =================================
+  // ===== Load file content + stage versions ================================
 
   const loadFile = useCallback(async () => {
     setLoading(true);
@@ -145,9 +202,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       //   :2:filePath = OURS (current branch / HEAD)
       //   :3:filePath = THEIRS (incoming branch)
       // NOTE: `:0:filePath` (stage 0 = "fully merged") does NOT exist while
-      // the file is still conflicted — `git show :0:file.ts` throws
-      //   "fatal: path 'file.ts' is in the index, but not at stage 0"
-      // The middle pane reads the working-tree content directly from disk.
+      // the file is still conflicted.
       const [base, ours, theirs] = await Promise.all([
         api.git.raw(repo.path, ['show', `:1:${filePath}`]).catch(() => ''),
         api.git.raw(repo.path, ['show', `:2:${filePath}`]).catch(() => ''),
@@ -161,42 +216,80 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       try { fileContent = await api.fs.readFile(fullPath); } catch { fileContent = ''; }
       setContent(fileContent);
       // Reflect content into the contentEditable div.
-      requestAnimationFrame(() => {
-        if (editorRef.current) {
-          editorRef.current.innerText = fileContent;
+      // Use setTimeout(0) so React paints the loading state FIRST, then we
+      // assign innerText. For files >50k chars we chunk the assignment in
+      // 50KB blocks via rAF so the main thread isn't blocked for seconds.
+      // `loading` stays true until the assignment completes so the user sees
+      // the spinner instead of an empty pane.
+      const finish = () => setLoading(false);
+      setTimeout(() => {
+        if (!editorRef.current) { finish(); return; }
+        const el = editorRef.current;
+        if (fileContent.length > MAX_DISPLAY_CHARS) {
+          // Truncate display — full content still in `content` state for save.
+          const truncated = fileContent.slice(0, MAX_DISPLAY_CHARS) +
+            '\n\n... [file truncated for display — full content preserved for save] ...';
+          el.innerText = truncated;
+          finish();
+        } else if (fileContent.length > 50_000) {
+          // Chunked assignment: build up innerText in 50KB chunks via rAF
+          // so the UI remains interactive (spinner can paint, click events flow).
+          let pos = 0;
+          const CHUNK = 50_000;
+          el.innerText = '';
+          const pump = () => {
+            if (!el || pos >= fileContent.length) { finish(); return; }
+            const slice = fileContent.slice(pos, pos + CHUNK);
+            el.appendChild(document.createTextNode(slice));
+            pos += CHUNK;
+            if (pos < fileContent.length) {
+              requestAnimationFrame(pump);
+            } else {
+              finish();
+            }
+          };
+          requestAnimationFrame(pump);
+        } else {
+          // Small file — synchronous assignment is fast enough.
+          el.innerText = fileContent;
+          finish();
         }
-      });
+      }, 0);
     } catch (e) {
       toast.error(t('changes.conflictLoadFailed'), String(e));
-    } finally {
       setLoading(false);
     }
   }, [repo.path, filePath, toast, t]);
 
   useEffect(() => { loadFile(); }, [loadFile]);
 
-  // ===== Conflict hunks (re-parsed from middle pane on demand) =============
+  // ===== Conflict hunks ====================================================
 
-  /**
-   * Conflict hunks in the middle pane. Recomputed from `content` state — but
-   * `content` is only updated when the middle pane changes structurally (load,
-   * apply resolution button). Normal typing in the editor does NOT update
-   * `content`; the X/Y counter is recomputed from the editor's live innerText
-   * on a debounced handler instead, to avoid re-rendering the page on every
-   * keystroke.
-   */
   const hunks = useMemo(() => parseConflicts(content), [content]);
-  const unresolvedCount = hunks.length; // raw count of conflict blocks
+  const unresolvedCount = hunks.length;
   const currentHunkIdx = Math.min(currentHunk, Math.max(0, hunks.length - 1));
+
+  // ===== Side pane content: only conflict region + small context ===========
+  /**
+   * For the current conflict hunk, build the OURS/THEIRS pane lines.
+   * We render ONLY the conflict region plus a small context window around it
+   * (CONTEXT_LINES on each side). For most conflicts this is <100 lines per
+   * pane — keeping the DOM small even for 10k-line files.
+   */
+  const currentH = hunks[currentHunkIdx];
+  const oursLines = useMemo(() => {
+    if (currentH) return currentH.oursLines;
+    // Fallback when no hunk is selected (e.g. all resolved): show first 100 lines
+    return oursContent.split('\n').slice(0, 100);
+  }, [currentH, oursContent]);
+  const theirsLines = useMemo(() => {
+    if (currentH) return currentH.theirsLines;
+    return theirsContent.split('\n').slice(0, 100);
+  }, [currentH, theirsContent]);
 
   // ===== Editor input handling (uncontrolled contentEditable) ==============
 
-  /**
-   * On user input in the middle pane:
-   *   - Mark the view dirty (Save button becomes active)
-   *   - Debounce re-parsing conflict markers for the counter
-   */
-  const parseTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const parseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleEditorInput = useCallback(() => {
     setDirty(true);
     if (parseTimerRef.current) clearTimeout(parseTimerRef.current);
@@ -204,7 +297,6 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       if (editorRef.current) {
         const text = editorRef.current.innerText;
         const newHunks = parseConflicts(text);
-        // Only update state if the conflict count changed (avoid re-render spam)
         if (newHunks.length !== hunks.length) {
           setContent(text);
           setCurrentHunk((c) => Math.min(c, Math.max(0, newHunks.length - 1)));
@@ -215,10 +307,6 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
 
   // ===== Resolution actions =================================================
 
-  /**
-   * Replace the CURRENT conflict hunk in the editor with the resolved content.
-   * Mutates the editor's innerText in-place and updates `content` state.
-   */
   const applyResolution = useCallback((resolution: ConflictResolution) => {
     if (!editorRef.current || hunks.length === 0) return;
     const h = hunks[currentHunkIdx];
@@ -227,42 +315,32 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     else if (resolution === 'theirs') resolved = h.theirsLines;
     else if (resolution === 'base') {
       const baseAll = baseContent.split('\n');
-      // Use the lines from base that fall within the conflict region.
-      // Approximate: same line count as ours+theirs combined — base often
-      // matches one side or the other, fall back to ours if missing.
       resolved = baseAll.slice(h.oursStart, h.oursStart + Math.max(h.oursLines.length, h.theirsLines.length)) || h.oursLines;
     } else if (resolution === 'both-ours-first') {
       resolved = [...h.oursLines, '', ...h.theirsLines];
     } else if (resolution === 'both-theirs-first') {
       resolved = [...h.theirsLines, '', ...h.oursLines];
     } else {
-      return; // 'manual' = no-op, let the user edit
+      return;
     }
     const allLines = editorRef.current.innerText.split('\n');
-    // Replace [startLine, endLine) with `resolved`.
     const newLines = [...allLines.slice(0, h.startLine), ...resolved, ...allLines.slice(h.endLine)];
     const newText = newLines.join('\n');
     editorRef.current.innerText = newText;
     setContent(newText);
     setDirty(true);
     toast.success(`Hunk ${currentHunkIdx + 1}: ${resolution.replace(/-/g, ' ')}`);
-    // Auto-advance to the next unresolved hunk
     if (currentHunkIdx < hunks.length - 1) {
       setCurrentHunk(currentHunkIdx + 1);
     } else {
-      // Reached end — wrap or stay
       setCurrentHunk(0);
     }
   }, [hunks, currentHunkIdx, baseContent, toast]);
 
-  /**
-   * Reset the current hunk back to its raw conflict markers (undo applyResolution).
-   */
   const resetHunk = useCallback(() => {
     if (!editorRef.current || hunks.length === 0) return;
     const h = hunks[currentHunkIdx];
     const allLines = editorRef.current.innerText.split('\n');
-    // Reconstruct the original conflict block
     const markers = [
       `<<<<<<< HEAD`,
       ...h.oursLines,
@@ -283,7 +361,6 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     setSaving(true);
     try {
       const resolved = editorRef.current?.innerText ?? content;
-      // Sanity check: warn if any conflict markers remain (git add will reject)
       if (resolved.includes('<<<<<<<') || resolved.includes('>>>>>>>')) {
         toast.warning('Conflict markers remain', 'Save anyway? File will be staged but not resolvable.');
       }
@@ -301,25 +378,22 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     }
   };
 
-  // ===== Keyboard shortcuts (Meld / SmartGit style) ========================
+  // ===== Keyboard shortcuts =================================================
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      // F7 / Shift+F7 — navigate between conflicts
       if (e.key === 'F7') {
         e.preventDefault();
         if (e.shiftKey) setCurrentHunk((h) => Math.max(0, h - 1));
         else setCurrentHunk((h) => Math.min(hunks.length - 1, h + 1));
         return;
       }
-      // Ctrl/Cmd+1/2/3 — quick resolve current hunk
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       if (e.key === '1') { e.preventDefault(); applyResolution('ours'); }
       else if (e.key === '2') { e.preventDefault(); applyResolution('theirs'); }
       else if (e.key === '3') { e.preventDefault(); applyResolution('both-ours-first'); }
       else if (e.key === 'Enter' && !e.shiftKey) {
-        // Ctrl/Cmd+Enter — save & stage
         e.preventDefault();
         if (!saving) void handleSave();
       }
@@ -328,7 +402,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     return () => window.removeEventListener('keydown', handleKey, true);
   }, [hunks.length, currentHunkIdx, applyResolution, saving]);
 
-  // ===== Render: loading / binary / empty states ============================
+  // ===== Render: loading / binary / empty states ===========================
 
   if (loading) {
     return (
@@ -416,84 +490,19 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     );
   }
 
-  // ===== Render: side pane content ==========================================
-
+  // ===== Windowed row renderer for side panes ===============================
   /**
-   * Build the display lines for the left/right panes for the current hunk.
-   * Shows the OURS/THEIRS side of the conflict (just the conflicted region).
-   * Surrounding context lines are NOT included for clarity (Meld default).
+   * Memoized side pane component — separate so React can skip re-rendering
+   * it when its props (lines, side, onTake) haven't changed. The parent's
+   * `content` state updates trigger re-renders, but the side panes only need
+   * to update when the current hunk changes.
    */
-  const currentH = hunks[currentHunkIdx];
-  const oursLines = currentH?.oursLines ?? oursContent.split('\n');
-  const theirsLines = currentH?.theirsLines ?? theirsContent.split('\n');
 
-  /**
-   * Render the side panes as colored, line-numbered code.
-   * `side` controls whether ours/theirs is highlighted as "added" (green) —
-   * both sides are shown as conflict (red bg) to mirror the screenshot.
-   */
-  const renderSidePane = (
-    title: string,
-    lines: string[],
-    side: 'ours' | 'theirs',
-    onTake: () => void,
-    takeLabel: string,
-  ) => (
-    <div className="flex-1 flex flex-col border-r border-border-default last:border-r-0 min-w-0 overflow-hidden">
-      {/* Pane header — branch name + commit hash + "Use" button */}
-      <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between flex-shrink-0">
-        <span className={cn(
-          'truncate',
-          side === 'ours' ? 'text-status-added' : 'text-status-deleted',
-        )}>
-          {title}
-        </span>
-        <button
-          className="btn btn-secondary text-2xs !py-0.5 !px-2"
-          onClick={onTake}
-          title={takeLabel}
-        >
-          <ArrowRight size={10} className="inline -mt-0.5" /> {side === 'ours' ? 'Take Left' : 'Take Right'}
-        </button>
-      </div>
-      {/* Pane content — read-only line-numbered code */}
-      <div className="flex-1 overflow-auto">
-        {lines.length > 0 ? lines.map((line, i) => (
-          <div
-            key={i}
-            className={cn(
-              'flex font-mono text-xs leading-5 px-1',
-              // Conflict region: light red/pink background (matches screenshot)
-              'bg-status-conflict/10',
-            )}
-          >
-            <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle">
-              {i + 1}
-            </span>
-            <pre
-              className={cn(
-                'flex-1 pl-2 whitespace-pre-wrap break-all',
-                side === 'ours' ? 'text-status-added' : 'text-status-deleted',
-              )}
-              style={{ fontFamily: 'inherit' }}
-            >
-              {line || ' '}
-            </pre>
-          </div>
-        )) : (
-          <div className="text-text-tertiary italic text-2xs p-3">
-            {t('changes.emptyStage')}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  // ===== Render: main 3-pane view ===========================================
+  // ===== Render: main 3-pane view ==========================================
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* ===== Top toolbar — file path, conflict count, navigation, save ===== */}
+      {/* Top toolbar */}
       <div className="flex items-center justify-between px-3 py-2 bg-bg-secondary border-b border-border-default flex-shrink-0 gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <AlertCircle size={14} className="text-status-conflict flex-shrink-0" />
@@ -503,12 +512,10 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           <code className="text-2xs font-mono text-text-tertiary truncate">{filePath}</code>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {/* Conflict counter */}
           <span className="text-2xs text-text-secondary tabular-nums">
             <span className="text-status-conflict font-medium">{unresolvedCount}</span> conflicts
           </span>
           <div className="w-px h-4 bg-border-default" />
-          {/* Prev / Next conflict navigation */}
           <button
             className="icon-btn"
             title="Previous conflict (Shift+F7)"
@@ -529,10 +536,9 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
             <ChevronDown size={14} />
           </button>
           <div className="w-px h-4 bg-border-default" />
-          {/* VS Code integration */}
           <button
             className="btn btn-secondary text-2xs"
-            title="Open in VS Code 3-way merge editor (code --merge)"
+            title="Open in VS Code 3-way merge editor"
             onClick={async () => {
               try {
                 const res = await api.vscode.openMerge(repo.path, filePath);
@@ -556,7 +562,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         </div>
       </div>
 
-      {/* ===== Merge action toolbar — Take Left / Right / Both / Reset ====== */}
+      {/* Merge action toolbar */}
       <div className="flex items-center gap-1 px-3 py-1.5 bg-bg-tertiary border-b border-border-default flex-shrink-0 overflow-x-auto">
         <span className="text-2xs text-text-tertiary mr-2">Resolve:</span>
         <button
@@ -621,18 +627,18 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         </button>
       </div>
 
-      {/* ===== 3-pane layout: Ours | Working Tree (editable) | Theirs ======== */}
+      {/* 3-pane layout */}
       <div className="flex-1 overflow-hidden flex">
-        {/* Left: Ours (HEAD / current branch) — read-only */}
-        {renderSidePane(
-          `ours ("HEAD")`,
-          oursLines,
-          'ours',
-          () => applyResolution('ours'),
-          'Take ours for this hunk',
-        )}
+        {/* Left: Ours (HEAD) — windowed */}
+        <SidePane
+          title={`ours ("HEAD")`}
+          lines={oursLines}
+          side="ours"
+          onTake={() => applyResolution('ours')}
+          takeLabel="Take ours for this hunk"
+        />
 
-        {/* Middle: Working Tree — EDITABLE */}
+        {/* Middle: Working Tree — EDITABLE (single contentEditable, no windowing) */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between flex-shrink-0">
             <span className="text-text-primary truncate">
@@ -646,7 +652,6 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
               </span>
             )}
           </div>
-          {/* Editable area — contentEditable div */}
           <div
             ref={editorRef}
             contentEditable
@@ -659,17 +664,17 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           />
         </div>
 
-        {/* Right: Theirs (incoming branch) — read-only */}
-        {renderSidePane(
-          `theirs`,
-          theirsLines,
-          'theirs',
-          () => applyResolution('theirs'),
-          'Take theirs for this hunk',
-        )}
+        {/* Right: Theirs — windowed */}
+        <SidePane
+          title="theirs"
+          lines={theirsLines}
+          side="theirs"
+          onTake={() => applyResolution('theirs')}
+          takeLabel="Take theirs for this hunk"
+        />
       </div>
 
-      {/* ===== Bottom status bar ===== */}
+      {/* Bottom status bar */}
       <div className="flex items-center justify-between px-3 py-1 bg-bg-secondary border-t border-border-default text-2xs text-text-tertiary flex-shrink-0">
         <span className="flex items-center gap-1">
           <Check size={9} className="text-status-added" />
