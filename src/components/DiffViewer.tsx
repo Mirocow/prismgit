@@ -6,6 +6,9 @@ import { cn } from '../lib/utils';
 import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader } from './icons';
 import { wordDiff, type WordSegment } from '../lib/wordDiff';
 import { useI18n } from '../lib/i18n';
+import {
+  tokenizeLine, tokensToHtml, detectLang, type SupportedLang,
+} from '../lib/syntaxHighlight';
 
 interface DiffViewerProps {
   diff: DiffResult | null;
@@ -25,87 +28,38 @@ interface DiffViewerProps {
 type ViewMode = 'unified' | 'split';
 type WhitespaceMode = 'normal' | 'ignore-all' | 'ignore-trailing';
 
-// Minimal syntax highlighting for common languages
-const KEYWORDS: Record<string, string[]> = {
-  ts: ['const', 'let', 'var', 'function', 'class', 'interface', 'type', 'enum', 'import', 'export', 'from', 'default', 'extends', 'implements', 'public', 'private', 'protected', 'readonly', 'static', 'async', 'await', 'new', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'throw', 'try', 'catch', 'finally', 'typeof', 'instanceof', 'in', 'of', 'void', 'delete', 'yield', 'this', 'super', 'null', 'undefined', 'true', 'false'],
-  js: ['const', 'let', 'var', 'function', 'class', 'import', 'export', 'from', 'default', 'extends', 'new', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'throw', 'try', 'catch', 'finally', 'typeof', 'instanceof', 'in', 'of', 'void', 'delete', 'yield', 'this', 'super', 'null', 'undefined', 'true', 'false'],
-  py: ['def', 'class', 'import', 'from', 'as', 'return', 'if', 'elif', 'else', 'for', 'while', 'break', 'continue', 'pass', 'try', 'except', 'finally', 'raise', 'with', 'lambda', 'yield', 'global', 'nonlocal', 'True', 'False', 'None', 'and', 'or', 'not', 'in', 'is', 'self'],
-  go: ['func', 'var', 'const', 'type', 'struct', 'interface', 'package', 'import', 'return', 'if', 'else', 'for', 'range', 'switch', 'case', 'default', 'break', 'continue', 'fallthrough', 'go', 'defer', 'select', 'chan', 'map', 'make', 'new', 'nil', 'true', 'false'],
-  rs: ['fn', 'let', 'mut', 'const', 'static', 'struct', 'enum', 'trait', 'impl', 'pub', 'use', 'mod', 'crate', 'self', 'super', 'as', 'return', 'if', 'else', 'for', 'while', 'loop', 'break', 'continue', 'match', 'true', 'false', 'Some', 'None', 'Ok', 'Err'],
-  java: ['public', 'private', 'protected', 'class', 'interface', 'extends', 'implements', 'static', 'final', 'void', 'int', 'long', 'double', 'float', 'boolean', 'char', 'byte', 'short', 'new', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'throw', 'throws', 'try', 'catch', 'finally', 'import', 'package', 'this', 'super', 'null', 'true', 'false'],
-  c: ['int', 'long', 'short', 'char', 'float', 'double', 'void', 'unsigned', 'signed', 'const', 'static', 'extern', 'register', 'volatile', 'struct', 'union', 'enum', 'typedef', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'goto', 'sizeof', '#include', '#define', '#ifndef', '#ifdef', '#endif'],
-  cpp: ['int', 'long', 'short', 'char', 'float', 'double', 'void', 'unsigned', 'signed', 'const', 'static', 'extern', 'struct', 'class', 'public', 'private', 'protected', 'virtual', 'override', 'namespace', 'using', 'template', 'typename', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'new', 'delete', 'try', 'catch', 'throw', 'true', 'false', 'nullptr'],
-  sh: ['if', 'then', 'else', 'elif', 'fi', 'for', 'in', 'do', 'done', 'while', 'case', 'esac', 'function', 'return', 'exit', 'echo', 'export', 'local', 'readonly', 'unset', 'shift', 'source', 'alias'],
-  yml: ['true', 'false', 'null', 'yes', 'no', 'on', 'off'],
-  json: ['true', 'false', 'null'],
-};
-
-function getLangFromFile(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() || '';
-  const map: Record<string, string> = {
-    ts: 'ts', tsx: 'ts', js: 'js', jsx: 'js', mjs: 'js', cjs: 'js',
-    py: 'py', go: 'go', rs: 'rs', java: 'java', kt: 'java',
-    c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp', cxx: 'cpp',
-    sh: 'sh', bash: 'sh', zsh: 'sh',
-    yml: 'yml', yaml: 'yml',
-    json: 'json',
-  };
-  return map[ext] || '';
-}
-
-function highlightLine(content: string, lang: string): React.ReactNode {
-  if (!lang || !KEYWORDS[lang]) return content;
-
-  // Tokenize: strings, comments, numbers, keywords
-  const tokens: React.ReactNode[] = [];
-  let remaining = content;
-  let keyCounter = 0;
-
-  const patterns: { regex: RegExp; className: string }[] = [
-    // Comments (// ... and /* ... */ and # ...)
-    { regex: /^(\/\/.*|#.*)/, className: 'text-comment' },
-    { regex: /^(\/\*[\s\S]*?\*\/)/, className: 'text-comment' },
-    // Strings (single, double, backtick)
-    { regex: /^("(?:[^"\\]|\\.)*")/, className: 'text-string' },
-    { regex: /^('(?:[^'\\]|\\.)*')/, className: 'text-string' },
-    { regex: /^(`(?:[^`\\]|\\.)*`)/, className: 'text-string' },
-    // Numbers
-    { regex: /^\b(\d+\.?\d*)\b/, className: 'text-number' },
-  ];
-
-  while (remaining.length > 0) {
-    let matched = false;
-    for (const { regex, className } of patterns) {
-      const m = remaining.match(regex);
-      if (m) {
-        tokens.push(<span key={keyCounter++} className={className}>{m[0]}</span>);
-        remaining = remaining.substring(m[0].length);
-        matched = true;
-        break;
-      }
-    }
-    if (!matched) {
-      // Try keyword
-      const kwRegex = new RegExp(`^\\b(${KEYWORDS[lang].join('|')})\\b`);
-      const kwMatch = remaining.match(kwRegex);
-      if (kwMatch) {
-        tokens.push(<span key={keyCounter++} className="text-keyword">{kwMatch[0]}</span>);
-        remaining = remaining.substring(kwMatch[0].length);
-      } else {
-        // Take one char
-        tokens.push(<span key={keyCounter++}>{remaining[0]}</span>);
-        remaining = remaining.substring(1);
-      }
-    }
-  }
-  return tokens;
-}
+// Minimal syntax highlighting is provided by src/lib/syntaxHighlight.ts —
+// shared with ConflictMergeView so both tools use the SAME tokenizer and
+// color scheme. Supports 13 languages: Python, Go, JSON, CSV, JS/TS, Java,
+// C/C++, Rust, YAML, Bash, Markdown.
+//
+// The DiffViewer uses detectLang() to identify the language from the file
+// extension, then tokenizeLine() + tokensToHtml() to produce the highlighted
+// HTML for each line.
 
 function shouldShowLine(line: DiffLine, wsMode: WhitespaceMode): boolean {
   if (wsMode === 'normal') return true;
   if (wsMode === 'ignore-all' && line.content.trim() === '') return false;
   if (wsMode === 'ignore-trailing' && line.content === line.content.trimEnd() === false) return true;
   return true;
+}
+
+/**
+ * Render a single line of code with syntax highlighting.
+ *
+ * Uses the shared `tokenizeLine` + `tokensToHtml` from src/lib/syntaxHighlight.ts
+ * so the DiffViewer and ConflictMergeView use the SAME tokenizer and color
+ * scheme. Returns a React node — for the DiffViewer we wrap the HTML in a
+ * <span dangerouslySetInnerHTML> because the token HTML contains nested
+ * <span class="tok-*"> elements.
+ *
+ * Falls back to plain text if the language is 'text' (unknown extension).
+ */
+function highlightLine(content: string, lang: SupportedLang): React.ReactNode {
+  if (lang === 'text' || !content) return content;
+  const tokens = tokenizeLine(content, lang);
+  const html = tokensToHtml(tokens);
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit', onStaged, onForceCompare }: DiffViewerProps) {
@@ -126,7 +80,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   const [currentHunkIdx, setCurrentHunkIdx] = useState(0);
   const diffScrollRef = useRef<HTMLDivElement>(null);
 
-  const lang = useMemo(() => (filePath ? getLangFromFile(filePath) : ''), [filePath]);
+  const lang = useMemo<SupportedLang>(() => (filePath ? detectLang(filePath) : 'text'), [filePath]);
 
   /**
    * Find the paired line for word-diff: for a 'del' line, look at the next line;
