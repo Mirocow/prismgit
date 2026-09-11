@@ -31,6 +31,7 @@ vi.mock('../../src/lib/api', () => ({
 // (useCallback dep) and re-trigger the load effect on every render.
 const toastMock = { error: vi.fn(), warning: vi.fn(), success: vi.fn(), info: vi.fn() };
 vi.mock('../../src/stores/toastStore', () => ({
+  useToastActions: () => toastMock,
   useToastStore: () => toastMock,
 }));
 

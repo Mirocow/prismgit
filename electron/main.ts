@@ -18,6 +18,23 @@ import { resolveResourceIcon } from './appIcons.js';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
+// Memory optimizations — applied BEFORE app.whenReady() so they take
+// effect during Chromium init.
+//
+// `--max-old-space-size=512` caps the V8 old-generation heap to 512MB. Without
+// this, the heap can balloon to several GB on long sessions (large diffs,
+// multi-thousand-commit histories) before GC kicks in. 512MB is well above
+// the steady-state working set (~150MB) but caps the worst-case spike.
+// `--expose-gc` exposes `global.gc()` so we can force a collection after
+// big operations (e.g. closing a repo, dropping a large diff) to return
+// memory to the OS sooner rather than waiting for the next idle GC.
+//
+// Note: We do NOT add `disable-background-timer-throttling` — Chromium's
+// default throttling of background tabs (~1Hz) is fine for a git client
+// whose background work is mostly a 2-minute remote poll. Allowing the
+// throttling saves CPU and battery when the user switches away.
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc');
+
 // Suppress the EGL/GL driver error:
 //   ERROR:gl_display.cc(497) EGL Driver message (Error) eglQueryDeviceAttribEXT: Bad attribute.
 // This is a known Chromium/Electron issue with certain GPU drivers — observed on

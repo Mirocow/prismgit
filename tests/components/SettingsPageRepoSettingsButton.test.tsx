@@ -5,9 +5,12 @@ import { SettingsPage } from '../../src/pages/SettingsPage';
 
 // Minimal store mocks: SettingsPage is a large page; here we only verify the
 // "Repository Settings..." header button (visibility + event dispatch).
-const toastMock = { error: vi.fn(), warning: vi.fn(), success: vi.fn(), info: vi.fn() };
+const toastMock = { error: vi.fn(), warning: vi.fn(), success: vi.fn(), info: vi.fn(), show: vi.fn(), dismiss: vi.fn() };
 
-vi.mock('../../src/stores/toastStore', () => ({ useToastStore: () => toastMock }));
+vi.mock('../../src/stores/toastStore', () => ({
+  useToastStore: () => toastMock,
+  useToastActions: () => toastMock,
+}));
 
 const settingsMock = {
   settings: {},

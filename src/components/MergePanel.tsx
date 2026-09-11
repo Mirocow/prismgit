@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, AlertCircle, Check, RotateCcw, Loader, GitMerge, GitPullRequest, ArrowDown, ArrowUp, Sparkles } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { api } from '../lib/api';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
@@ -53,7 +53,7 @@ export function MergePanel({
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [state, setState] = useState<MergeState>({ inProgress: false, conflictedFiles: [] });
   const [loading, setLoading] = useState(false);
   const [strategy, setStrategy] = useState<MergeStrategy>('merge');

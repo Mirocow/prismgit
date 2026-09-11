@@ -29,6 +29,7 @@ vi.mock('../../src/lib/api', () => ({
       status: vi.fn(),
       raw: vi.fn().mockResolvedValue(''),
       pollRemoteSummaries: vi.fn().mockResolvedValue({}),
+      invalidateCache: vi.fn().mockResolvedValue(undefined),
     },
     fs: {
       openRepositoryPicker: vi.fn(),

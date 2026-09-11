@@ -9,7 +9,7 @@ import { NAV_ITEMS, NAV_SHORTCUTS } from './navItems';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
@@ -64,7 +64,7 @@ export function CommandPalette({ open, onClose, triggers }: {
   const repos = useRepositoryStore((s) => s.repos);
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const theme = useSettingsStore((s) => s.theme);
-  const toast = useToastStore();
+  const toast = useToastActions();
 
   useEscapeKey(open, onClose);
 

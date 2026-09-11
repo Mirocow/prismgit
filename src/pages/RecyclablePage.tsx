@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { RotateCcw, RefreshCw, Trash, Copy, AlertCircle, GitBranch, Plus, X } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type RecyclableCommit } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { CommitHashLink } from '../components/StatusBar';
@@ -33,7 +33,7 @@ import { useI18n } from '../lib/i18n';
 export function RecyclablePage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const selectCommit = useSelectionStore((s) => s.selectCommit);
   const selectBranch = useSelectionStore((s) => s.selectBranch);

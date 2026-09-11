@@ -21,6 +21,7 @@ export default defineConfig({
               external: [
                 'electron',
                 'simple-git',
+                'chokidar',
                 'https',
                 'http',
                 'url',
@@ -53,12 +54,41 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // Production: never ship source maps — cuts bundle ~3x and avoids
+    // leaking original source to end users.
+    sourcemap: false,
+    // Vite 5 defaults to esbuild minify with target=modules. Make it explicit:
+    target: 'es2020',
+    cssCodeSplit: true,
+    // 500kB is the rollup default; we now split vendor code, so we can go
+    // back to the standard warning threshold and let the bundler surface
+    // accidental bloat regressions.
+    chunkSizeWarningLimit: 700,
     rollupOptions: {
       input: {
         index: resolve(__dirname, 'index.html'),
       },
+      output: {
+        // Split stable vendor code into separate chunks so app code changes
+        // don't invalidate the long-term cache for React/zustand/router.
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'zustand': ['zustand'],
+        },
+        // Use a content-based hash for long-term caching.
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash][extname]',
+      },
     },
-    chunkSizeWarningLimit: 1500,
+  },
+  // esbuild config — keep production builds small by stripping `debugger`
+  // statements. We do NOT drop console.* because the Command Log integration
+  // (electron/services/commandLog.ts) wraps child_process.spawn — it does
+  // not call console.* directly, but unrelated app code may legitimately
+  // use console.error/warn for runtime diagnostics.
+  esbuild: {
+    drop: process.env.NODE_ENV === 'production' ? ['debugger'] : [],
   },
   server: {
     port: 5173,

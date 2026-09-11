@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { GitPullRequest, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type LogEntry } from '../lib/api';
 import {
@@ -38,7 +38,7 @@ const SEVERITY_BADGES: Record<Severity, string> = {
 export function ReviewsPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [commits, setCommits] = useState<LogEntry[]>([]);

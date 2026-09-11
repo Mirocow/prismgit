@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { X, RefreshCw, ArrowRight, ArrowLeft, Pencil, Save, Loader } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type StatusResult, type DiffHunk } from '../lib/api';
 import { parseDiff } from '../lib/diffParser';
 import { cn } from '../lib/utils';
@@ -25,7 +25,7 @@ type PaneKey = 'head' | 'index' | 'wt';
 export function IndexEditorDialog({ filePath, onClose }: { filePath?: string | null; onClose: () => void }) {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [files, setFiles] = useState<string[]>([]);
   const [file, setFile] = useState<string>(filePath || '');
   const [head, setHead] = useState<PaneContent>({ text: '' });

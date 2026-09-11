@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, FileText, Loader, GitCommit, CornerDownRight, ExternalLink, Copy, History, FolderOpen, ChevronDown, ChevronRight } from '../components/icons';
 import { RefBadges } from '../lib/refBadge';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type LogEntry } from '../lib/api';
 import { cn, formatDate, shortHash } from '../lib/utils';
@@ -15,7 +15,7 @@ type Tab = 'commits' | 'files' | 'history' | 'grep' | 'revparse';
 export function InvestigatePage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('commits');
 

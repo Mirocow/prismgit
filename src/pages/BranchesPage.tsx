@@ -7,7 +7,7 @@ import {
 import { MergePanel } from '../components/MergePanel';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { api, type BranchInfo, type RemoteInfo, type TagInfo, type StashEntry, type RemoteProperties } from '../lib/api';
@@ -28,12 +28,13 @@ import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useI18n } from '../lib/i18n';
 export function BranchesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const { refreshStatus, status } = useGitStore();
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const status = useGitStore((s) => s.status);
   // In-progress operations (merge/rebase/cherry-pick/revert) block checkout,
   // push, pull — these would lose work or conflict with the sequencer state.
   // Fetch / Fetch All are still allowed (read-only on the working tree).
   const isInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const { t } = useI18n();
 
   // SmartGit: while a sequencer state (cherry-pick / revert / merge / rebase /

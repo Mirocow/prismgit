@@ -613,6 +613,13 @@ export interface GitApi {
   exportConfig: (repoPath: string | null) => Promise<ExportableConfig>;
   /** Import config from JSON blob into a repo. */
   importConfig: (repoPath: string, config: ExportableConfig) => Promise<void>;
+  /**
+   * Release the cached SimpleGit instance (and its child process pool) for
+   * the given repo. Pass undefined to clear the entire cache. Called by the
+   * renderer when a repo is closed to avoid leaking SimpleGit instances
+   * across the session.
+   */
+  invalidateCache: (repoPath?: string) => Promise<void>;
 }
 
 /** Recyclable commit (unreachable reflog commit). */

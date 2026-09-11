@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, Check, Trash, Plus, Star, RefreshCw, Loader, ExternalLink, GitBranch, Tag as TagIcon, FileText, Eye, EyeOff, KeyRound, Settings as SettingsIcon } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type RepositoryMetadata, type RemoteInfo } from '../lib/api';
 import { cn, formatDate, shortHash } from '../lib/utils';
 
@@ -20,7 +20,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
   useEscapeKey(open, onClose);
   const { t } = useI18n();
   const { currentRepo, currentMetadata, updateMetadata, toggleFavorite, addTag, removeTag, refreshStats } = useRepositoryStore();
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [description, setDescription] = useState('');
   const [notes, setNotes] = useState('');
   const [newTag, setNewTag] = useState('');

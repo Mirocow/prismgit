@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -69,3 +70,27 @@ export const useToastStore = create<ToastState>((set, get) => ({
   info: (m, d) => get().show('info', m, d),
   warning: (m, d) => get().show('warning', m, d, 5000),
 }));
+
+/**
+ * Stable selector for the action methods only.
+ *
+ * Components that ONLY call toast.success/error/info/warning don't need to
+ * re-render when a new toast is shown or dismissed — the action functions
+ * themselves are stable references defined once in the store. Using
+ * useShallow on the actions object lets the selector return the same
+ * reference on every state change, eliminating cascading re-renders
+ * across the ~44 components that consume toast actions.
+ *
+ * Previously `const toast = useToastStore()` subscribed to the ENTIRE
+ * state, so every toast shown triggered re-renders of 44 component trees.
+ */
+export function useToastActions() {
+  return useToastStore(useShallow((s) => ({
+    success: s.success,
+    error: s.error,
+    info: s.info,
+    warning: s.warning,
+    show: s.show,
+    dismiss: s.dismiss,
+  })));
+}

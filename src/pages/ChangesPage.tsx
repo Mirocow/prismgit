@@ -24,7 +24,7 @@ import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -120,9 +120,19 @@ function SortableHeader({
 export function ChangesPage({ onResolveConflict, onResolveConflictAction }: ChangesPageProps = {}) {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const { status, lastRefresh, refreshStatus, stageFiles, stageAll, commit, push, pull } = useGitStore();
+  // Granular selectors — previously destructured the whole store so any
+  // state change (e.g. clone progress, fetch metadata) re-rendered the
+  // entire 1969-line page. Now only `status` changes trigger re-render.
+  const status = useGitStore((s) => s.status);
+  const lastRefresh = useGitStore((s) => s.lastRefresh);
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const stageFiles = useGitStore((s) => s.stageFiles);
+  const stageAll = useGitStore((s) => s.stageAll);
+  const commit = useGitStore((s) => s.commit);
+  const push = useGitStore((s) => s.push);
+  const pull = useGitStore((s) => s.pull);
   const settings = useSettingsStore((s) => s.settings);
-  const toast = useToastStore();
+  const toast = useToastActions();
 
   // Listen for conflict resolution requests from GitToolbar
   useEffect(() => {

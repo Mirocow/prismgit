@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, Check, AlertCircle, Loader, ChevronLeft, ChevronRight, ExternalLink, GitMerge } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
@@ -72,7 +72,7 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [loading, setLoading] = useState(true);
   const [content, setContent] = useState<string>('');
   const [hunks, setHunks] = useState<ConflictHunk[]>([]);

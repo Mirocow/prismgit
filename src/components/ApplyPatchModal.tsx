@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { FileText, Loader, Check, X } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
@@ -26,7 +26,7 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [mode, setMode] = useState<Mode>('paste');
   const [patchFile, setPatchFile] = useState('');
   const [patchText, setPatchText] = useState('');

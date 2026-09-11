@@ -1659,35 +1659,55 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
       oldPath = parts[1];
       pathStr = parts[2];
     }
-    // Get additions/deletions — this inner call already has its own try/catch
-    // (the numstat is best-effort; if it fails we still want the file entry).
-    let additions = 0;
-    let deletions = 0;
-    let binary = false;
-    try {
-      const numstat = isMerge
-        ? await git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--numstat', `${hash}^1`, hash, '--', pathStr])
-        : await git.raw(['-c', 'core.quotePath=false', 'show', '--numstat', '--format=', hash, '--', pathStr]);
-      const numLine = numstat.split('\n').find((l) => l.includes(pathStr));
-      if (numLine) {
-        const parts2 = numLine.split('\t');
-        if (parts2[0] === '-') binary = true;
-        else additions = parseInt(parts2[0] || '0', 10) || 0;
-        if (parts2[1] === '-') binary = true;
-        else deletions = parseInt(parts2[1] || '0', 10) || 0;
-      }
-    } catch {
-      /* ignore — numstat is best-effort */
-    }
+    // Initial entry — additions/deletions/binary will be filled in from
+    // the batched numstat call below (single git spawn for ALL files,
+    // previously this was an N+1: one `git show --numstat <file>` per file).
     result.push({
       path: pathStr,
       status: statusCode,
       oldPath,
-      additions,
-      deletions,
-      binary,
+      additions: 0,
+      deletions: 0,
+      binary: false,
       mode: '',
     });
+  }
+
+  // Batched numstat: single git call for ALL files in this commit.
+  // Previously each file triggered its own `git show --numstat <file>` spawn,
+  // which on a 200-file merge commit meant 200 sequential git invocations
+  // (~2-6 seconds on Windows). Now: 1 call, O(lines) parse.
+  try {
+    const numstatRaw = isMerge
+      ? await git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--numstat', `${hash}^1`, hash])
+      : await git.raw(['-c', 'core.quotePath=false', 'show', '--numstat', '--format=', hash]);
+    // Build a path → stat lookup. numstat format: "<add>\t<del>\t<path>"
+    // (for renames: "<add>\t<del>\t<old>\t<new>" — but the last column is
+    // always the resulting path, matching `result[i].path`).
+    const statByPath = new Map<string, { add: number; del: number; binary: boolean }>();
+    for (const line of numstatRaw.split('\n')) {
+      if (!line.trim()) continue;
+      const cols = line.split('\t');
+      if (cols.length < 3) continue;
+      const last = cols[cols.length - 1];
+      const addCol = cols[0];
+      const delCol = cols[1];
+      statByPath.set(unquoteGitPath(last), {
+        add: addCol === '-' ? 0 : (parseInt(addCol || '0', 10) || 0),
+        del: delCol === '-' ? 0 : (parseInt(delCol || '0', 10) || 0),
+        binary: addCol === '-' || delCol === '-',
+      });
+    }
+    for (const f of result) {
+      const s = statByPath.get(f.path);
+      if (s) {
+        f.additions = s.add;
+        f.deletions = s.del;
+        f.binary = s.binary;
+      }
+    }
+  } catch {
+    /* ignore — numstat is best-effort */
   }
   return result;
 }

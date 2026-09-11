@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { GitBranch, Tag, AlertCircle, Loader, Plus, GitMerge, Check, RefreshCw } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { GitFlowDialog } from '../components/GitFlowDialog';
 import { listFlowBranches, type GitFlowConfig } from '../lib/gitflow';
@@ -15,7 +15,7 @@ type Action = 'start' | 'finish';
 export function GitFlowPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [config, setConfig] = useState<GitFlowConfig | null>(null);
   const [features, setFeatures] = useState<any[]>([]);
   const [releases, setReleases] = useState<any[]>([]);

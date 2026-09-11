@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { FolderGit, FolderGitOpen, Plus, X, Check, Loader } from './icons';
@@ -39,7 +39,7 @@ export function DragDropHandler() {
   const [results, setResults] = useState<DropResult[] | null>(null);
   const openRepository = useRepositoryStore((s) => s.openRepository);
   const loadRepos = useRepositoryStore((s) => s.loadRepos);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const { t } = useI18n();
 
   // A file drag lists the special 'Files' type. Some sources (synthetic events,

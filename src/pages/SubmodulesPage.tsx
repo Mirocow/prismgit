@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Package, RefreshCw, GitBranch, CheckCircle, AlertCircle, Loader, Plus } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type SubmoduleInfo } from '../lib/api';
 
@@ -13,7 +13,7 @@ export function SubmodulesPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [submodules, setSubmodules] = useState<SubmoduleInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);

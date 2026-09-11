@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { RotateCcw, RefreshCw, CornerDownRight, Copy, GitCommit } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type ReflogEntry } from '../lib/api';
@@ -15,7 +15,7 @@ export function JournalPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const showContextMenu = useContextMenu();
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const [entries, setEntries] = useState<ReflogEntry[]>([]);

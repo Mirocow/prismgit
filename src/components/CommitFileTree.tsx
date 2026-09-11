@@ -2,6 +2,7 @@
  * CommitFileTree — tree view for commit files with collapsible folders.
  * Used in History detail panel as an alternative to the flat list view.
  */
+import { useMemo } from 'react';
 import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText } from './icons';
 import type { CommitFile } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -128,15 +129,20 @@ export function CommitFileTree({
   onFileContextMenu,
 }: CommitFileTreeProps) {
   const { t } = useI18n();
+  // Memoize the tree build + sort — previously this ran on EVERY render
+  // (parent HistoryPage re-renders on every commit selection change), and
+  // for a 500-file commit that was 500 Map insertions + a full sort each time.
+  const tree = useMemo(() => buildTree(files), [files]);
+  const rootNodes = useMemo(() => {
+    return Array.from(tree.children.values()).sort((a, b) => {
+      if (a.isFile !== b.isFile) return a.isFile ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [tree]);
+
   if (files.length === 0) {
     return <div className="text-2xs text-text-tertiary">{t('history.noFiles')}</div>;
   }
-
-  const tree = buildTree(files);
-  const rootNodes = Array.from(tree.children.values()).sort((a, b) => {
-    if (a.isFile !== b.isFile) return a.isFile ? 1 : -1;
-    return a.name.localeCompare(b.name);
-  });
 
   // Auto-expand first level
   const effectiveExpanded = new Set(expandedDirs);

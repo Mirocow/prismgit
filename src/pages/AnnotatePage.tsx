@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronRight, Tag as TagIcon, Search,
 } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type LogEntry, type CommitFile } from '../lib/api';
@@ -23,7 +23,7 @@ const GRAPH_PAD = 6;
 export function AnnotatePage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const showContextMenu = useContextMenu();
   // Global selection — sync with History and other tools
   const selectCommit = useSelectionStore((s) => s.selectCommit);

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, GitBranch, Tag, AlertCircle, Loader, GitMerge, CornerDownRight } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useI18n } from '../lib/i18n';
@@ -40,7 +40,7 @@ export function GitFlowDialog({
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [flow, setFlow] = useState<FlowType>(initialFlow);
   const [action, setAction] = useState<Action>(initialAction);
   const [name, setName] = useState(initialName);

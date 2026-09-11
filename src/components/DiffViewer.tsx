@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
 import { type DiffResult, type DiffHunk, type DiffLine } from '../lib/api';
 import { api } from '../lib/api';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { cn } from '../lib/utils';
 import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader } from './icons';
 import { wordDiff, type WordSegment } from '../lib/wordDiff';
@@ -109,7 +109,7 @@ function shouldShowLine(line: DiffLine, wsMode: WhitespaceMode): boolean {
 }
 
 export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit', onStaged, onForceCompare }: DiffViewerProps) {
-  const toast = useToastStore();
+  const toast = useToastActions();
   const { t } = useI18n();
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
   const [wsMode, setWsMode] = useState<WhitespaceMode>('normal');
@@ -127,40 +127,6 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   const diffScrollRef = useRef<HTMLDivElement>(null);
 
   const lang = useMemo(() => (filePath ? getLangFromFile(filePath) : ''), [filePath]);
-
-  /**
-   * Render a diff line with word-level highlighting.
-   * For paired del+add lines (a common pattern in unified diffs), we compute the word diff
-   * between them and highlight only the changed words.
-   */
-  const renderLineWithWordDiff = useCallback(
-    (line: DiffLine, pairedLine: DiffLine | null): React.ReactNode => {
-      const content = line.content || ' ';
-      if (!useWordDiff || !pairedLine) {
-        return lang ? highlightLine(content, lang) : content;
-      }
-      // Compute word diff against the paired line
-      const oldContent = line.type === 'del' ? content : (pairedLine.content || '');
-      const newContent = line.type === 'add' ? content : (pairedLine.content || '');
-      const { old: oldSegs, new: newSegs } = wordDiff(oldContent, newContent);
-      const segs = line.type === 'del' ? oldSegs : newSegs;
-
-      return segs.map((seg, i) => {
-        if (seg.kind === 'equal') {
-          return <span key={i}>{seg.text}</span>;
-        }
-        // Highlight added/removed word with a stronger background — theme-aware via CSS variables
-        const highlightClass = seg.kind === 'added'
-          ? 'rounded-sm'
-          : 'rounded-sm line-through';
-        const highlightStyle = seg.kind === 'added'
-          ? { backgroundColor: 'var(--diff-added-word)' }
-          : { backgroundColor: 'var(--diff-removed-word)' };
-        return <span key={i} className={highlightClass} style={highlightStyle}>{seg.text}</span>;
-      });
-    },
-    [useWordDiff, lang]
-  );
 
   /**
    * Find the paired line for word-diff: for a 'del' line, look at the next line;
@@ -184,6 +150,70 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
     }
     return null;
   }, []);
+
+  /**
+   * Pre-compute word-diff segments ONCE per diff/hunk content (NOT per render).
+   * Previously `renderLineWithWordDiff` was called inside `rendered` useMemo
+   * which depended on `selectedLines` — so EVERY line click triggered
+   * wordDiff() re-computation for ALL visible lines. wordDiff is O(m·n) LCS
+   * and allocates a Uint32Array up to 2MB per call. For a 1000-line diff this
+   * was 1000 wordDiff() calls on every click = 1-5s of frozen UI.
+   *
+   * Now: wordDiff is computed once and cached by line identity. Clicking a
+   * line only triggers a cheap JSX re-render (Set.has lookup) — no LCS.
+   */
+  const wordDiffCache = useMemo(() => {
+    if (!diff || !useWordDiff) return null;
+    // Key: `${hunkIdx}:${lineIdx}` → WordSegment[] for that line
+    const cache = new Map<string, { segs: WordSegment[]; isDel: boolean }>();
+    diff.hunks.forEach((hunk, hi) => {
+      hunk.lines.forEach((line, li) => {
+        if (line.type !== 'add' && line.type !== 'del') return;
+        const paired = findPairedLine(hunk.lines, li);
+        if (!paired) return;
+        const content = line.content || '';
+        const oldContent = line.type === 'del' ? content : (paired.content || '');
+        const newContent = line.type === 'add' ? content : (paired.content || '');
+        const { old: oldSegs, new: newSegs } = wordDiff(oldContent, newContent);
+        cache.set(`${hi}:${li}`, {
+          segs: line.type === 'del' ? oldSegs : newSegs,
+          isDel: line.type === 'del',
+        });
+      });
+    });
+    return cache;
+  }, [diff, useWordDiff, findPairedLine]);
+
+  /**
+   * Render a diff line with word-level highlighting.
+   * Reads from `wordDiffCache` instead of recomputing — see comment above.
+   */
+  const renderLineWithWordDiff = useCallback(
+    (line: DiffLine, pairedLine: DiffLine | null, hunkIdx: number, lineIdx: number): React.ReactNode => {
+      const content = line.content || ' ';
+      if (!useWordDiff || !pairedLine) {
+        return lang ? highlightLine(content, lang) : content;
+      }
+      const cached = wordDiffCache?.get(`${hunkIdx}:${lineIdx}`);
+      if (!cached) {
+        return lang ? highlightLine(content, lang) : content;
+      }
+      return cached.segs.map((seg, i) => {
+        if (seg.kind === 'equal') {
+          return <span key={i}>{seg.text}</span>;
+        }
+        // Highlight added/removed word with a stronger background — theme-aware via CSS variables
+        const highlightClass = seg.kind === 'added'
+          ? 'rounded-sm'
+          : 'rounded-sm line-through';
+        const highlightStyle = seg.kind === 'added'
+          ? { backgroundColor: 'var(--diff-added-word)' }
+          : { backgroundColor: 'var(--diff-removed-word)' };
+        return <span key={i} className={highlightClass} style={highlightStyle}>{seg.text}</span>;
+      });
+    },
+    [useWordDiff, lang, wordDiffCache]
+  );
 
   const toggleHunk = useCallback((idx: number) => {
     setCollapsedHunks(prev => {
@@ -337,7 +367,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                     className={cn('flex-1 pl-2 whitespace-pre-wrap break-all', color)}
                     style={{ fontFamily: 'inherit' }}
                   >
-                    {renderLineWithWordDiff(line, paired)}
+                    {renderLineWithWordDiff(line, paired, hi, li)}
                   </pre>
                 </div>
               );

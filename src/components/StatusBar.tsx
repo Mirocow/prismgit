@@ -1,7 +1,7 @@
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -88,7 +88,7 @@ export function StatusBar({
   // Global selected commit — visible from anywhere in the app
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const selectCommit = useSelectionStore((s) => s.selectCommit);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const { t } = useI18n();
   // Running operations — show a spinner + progress in the status bar
   const runningIds = useOperationLogStore((s) => s.runningIds);

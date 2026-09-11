@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { GitMerge, RefreshCw, Plus, Trash, CloudDownload, CloudUpload, SplitSquareHorizontal, Folder, History } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type SubtreeInfo, type RemoteInfo } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -15,7 +15,7 @@ import { useI18n } from '../lib/i18n';
 export function SubtreesPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
 
   const [subtrees, setSubtrees] = useState<SubtreeInfo[]>([]);
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);

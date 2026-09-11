@@ -309,6 +309,10 @@ const api = {
       ipcRenderer.invoke('git:exportConfig', repoPath),
     importConfig: (repoPath: string, config: any) =>
       ipcRenderer.invoke('git:importConfig', repoPath, config),
+    // Memory management: release the cached SimpleGit instance for a repo
+    // (closes its child process pool). Called by repositoryStore.closeRepository.
+    invalidateCache: (repoPath?: string) =>
+      ipcRenderer.invoke('git:invalidateCache', repoPath),
   } as GitApi,
 
   // GitHub integration
