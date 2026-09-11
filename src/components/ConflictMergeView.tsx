@@ -145,6 +145,8 @@ function buildHighlightedHtml(text: string, lineClasses: LineClass[], lang: Supp
     const bgClass = lineCls?.bgClass || '';
     const lineContent = lines[i] || '';
     // Line number gutter (fixed width, right-aligned, grey, non-selectable)
+    // IMPORTANT: line height + height must match SidePane exactly (ROW_HEIGHT = 20px)
+    // so that lines align across all three panes.
     const lineNum = `<span class="inline-block w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle mr-2" style="color: var(--text-tertiary)">${i + 1}</span>`;
     // Tokenize the line content for syntax highlighting.
     // Conflict markers (<<<<<<< ======= >>>>>>>) are rendered as plain text —
@@ -156,7 +158,9 @@ function buildHighlightedHtml(text: string, lineClasses: LineClass[], lang: Supp
       const tokens = tokenizeLine(lineContent, lang);
       contentHtml = tokensToHtml(tokens) || '&nbsp;';
     }
-    html += `<div class="${bgClass} flex items-start" data-line="${i + 1}">${lineNum}<span class="flex-1 whitespace-pre-wrap">${contentHtml}</span></div>`;
+    // Fixed ROW_HEIGHT (20px) + leading-5 — EXACTLY matches SidePane so
+    // line N in the middle pane aligns visually with line N in left/right panes.
+    html += `<div class="${bgClass} flex items-start font-mono text-xs leading-5 px-1" style="height: ${ROW_HEIGHT}px" data-line="${i + 1}">${lineNum}<span class="flex-1 whitespace-pre-wrap">${contentHtml}</span></div>`;
   }
   return html;
 }
@@ -840,7 +844,10 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
             suppressContentEditableWarning
             onInput={handleEditorInput}
             spellCheck={false}
-            className="flex-1 overflow-auto p-0 font-mono text-xs leading-5 outline-none focus:bg-bg-hover/20 whitespace-pre-wrap break-all"
+            // Padding 0 — each line is a <div> with its own padding (px-1)
+            // to match SidePane exactly. break-all removed — line wraps should
+            // use whitespace-pre-wrap (preserve all spaces, wrap on overflow).
+            className="flex-1 overflow-auto p-0 font-mono text-xs leading-5 outline-none focus:bg-bg-hover/20"
             style={{ minHeight: 0 }}
             data-testid="conflict-editor"
             dangerouslySetInnerHTML={highlightedHtml ? { __html: highlightedHtml } : undefined}

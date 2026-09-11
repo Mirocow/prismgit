@@ -285,13 +285,22 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               return (
                 <>
                   {linesToShow.map((line, li) => {
+                    // Background colors match the 3-way conflict panel:
+                    //   - add (incoming) lines  → green tint (bg-status-added/10)
+                    //   - del (removed) lines  → red tint   (bg-status-deleted/10)
+                    //   - context lines        → no background
+                    // Text color comes from SYNTAX HIGHLIGHTING (tok-* classes),
+                    // NOT from the diff status — so 'const' is yellow, strings
+                    // are green, etc., regardless of whether the line is add/del.
                     const bg =
                       line.type === 'add' ? 'bg-status-added/10' :
                       line.type === 'del' ? 'bg-status-deleted/10' : '';
-                    const color =
+                    // The +/- marker color still reflects add/del — that's the
+                    // visual cue for which side the line came from.
+                    const markerColor =
                       line.type === 'add' ? 'text-status-added' :
                       line.type === 'del' ? 'text-status-deleted' :
-                      'text-text-primary';
+                      'text-text-tertiary';
                     const key = `${hi}:${li}`;
                     const isSelected = selectedLines.has(key);
                     const paired = findPairedLine(visibleLines, li);
@@ -299,7 +308,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                 <div
                   key={li}
                   className={cn(
-                    'flex hover:bg-bg-hover cursor-pointer group',
+                    'flex hover:bg-bg-hover cursor-pointer group font-mono text-xs',
                     bg,
                     isSelected && 'ring-1 ring-accent'
                   )}
@@ -313,12 +322,15 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                     {line.newLineNumber ?? ''}
                   </span>
                   <span
-                    className={cn('w-6 flex-shrink-0 text-center select-none font-bold', color)}
+                    className={cn('w-6 flex-shrink-0 text-center select-none font-bold', markerColor)}
                   >
                     {line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '}
                   </span>
                   <pre
-                    className={cn('flex-1 pl-2 whitespace-pre-wrap break-all', color)}
+                    // NO color class here — let syntax highlighting (tok-*)
+                    // decide the text color. Background tint already shows
+                    // whether the line is add/del/context.
+                    className="flex-1 pl-2 whitespace-pre-wrap m-0"
                     style={{ fontFamily: 'inherit' }}
                   >
                     {renderLineWithWordDiff(line, paired, hi, li)}
@@ -362,25 +374,26 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                 {visibleLines.map((line, li) => {
                   if (line.type === 'add') {
                     return (
-                      <div key={li} className="flex hover:bg-bg-hover" style={{ lineHeight: '20px', minHeight: '20px' }}>
+                      <div key={li} className="flex hover:bg-bg-hover font-mono text-xs" style={{ lineHeight: '20px', minHeight: '20px' }}>
                         <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
-                        <pre className="flex-1 pl-2 whitespace-pre-wrap text-text-tertiary" style={{ fontFamily: 'inherit', background: 'var(--diff-added-line)' }}> </pre>
+                        <pre className="flex-1 pl-2 whitespace-pre-wrap m-0 text-text-tertiary" style={{ fontFamily: 'inherit', background: 'var(--diff-added-line)' }}> </pre>
                       </div>
                     );
                   }
+                  // Background tint shows del (red) vs context (none).
+                  // Text color comes from syntax highlighting (tok-*).
                   const bg = line.type === 'del' ? 'bg-status-deleted/10' : '';
-                  const color = line.type === 'del' ? 'text-status-deleted' : 'text-text-primary';
                   const key = `${hi}:${li}`;
                   const isSelected = selectedLines.has(key);
                   return (
                     <div
                       key={li}
-                      className={cn('flex hover:bg-bg-hover cursor-pointer', bg, isSelected && 'ring-1 ring-accent')}
+                      className={cn('flex hover:bg-bg-hover cursor-pointer group font-mono text-xs', bg, isSelected && 'ring-1 ring-accent')}
                       style={{ lineHeight: '20px', minHeight: '20px' }}
                       onClick={() => line.type === 'del' && toggleLineSelection(hi, li)}
                     >
                       <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
-                      <pre className={cn('flex-1 pl-2 whitespace-pre-wrap', color)} style={{ fontFamily: 'inherit' }}>{line.content || ' '}</pre>
+                      <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit' }}>{lang ? highlightLine(line.content || ' ', lang) : (line.content || ' ')}</pre>
                     </div>
                   );
                 })}
@@ -390,25 +403,26 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                 {visibleLines.map((line, li) => {
                   if (line.type === 'del') {
                     return (
-                      <div key={li} className="flex hover:bg-bg-hover" style={{ lineHeight: '20px', minHeight: '20px' }}>
+                      <div key={li} className="flex hover:bg-bg-hover font-mono text-xs" style={{ lineHeight: '20px', minHeight: '20px' }}>
                         <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.newLineNumber ?? ''}</span>
-                        <pre className="flex-1 pl-2 whitespace-pre-wrap text-text-tertiary" style={{ fontFamily: 'inherit', background: 'var(--diff-removed-line)' }}> </pre>
+                        <pre className="flex-1 pl-2 whitespace-pre-wrap m-0 text-text-tertiary" style={{ fontFamily: 'inherit', background: 'var(--diff-removed-line)' }}> </pre>
                       </div>
                     );
                   }
+                  // Background tint shows add (green) vs context (none).
+                  // Text color comes from syntax highlighting (tok-*).
                   const bg = line.type === 'add' ? 'bg-status-added/10' : '';
-                  const color = line.type === 'add' ? 'text-status-added' : 'text-text-primary';
                   const key = `${hi}:${li}`;
                   const isSelected = selectedLines.has(key);
                   return (
                     <div
                       key={li}
-                      className={cn('flex hover:bg-bg-hover cursor-pointer group', bg, isSelected && 'ring-1 ring-accent')}
+                      className={cn('flex hover:bg-bg-hover cursor-pointer group font-mono text-xs', bg, isSelected && 'ring-1 ring-accent')}
                       style={{ lineHeight: '20px', minHeight: '20px' }}
                       onClick={() => line.type === 'add' && toggleLineSelection(hi, li)}
                     >
                       <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none group-hover:bg-bg-hover">{line.newLineNumber ?? ''}</span>
-                      <pre className={cn('flex-1 pl-2 whitespace-pre-wrap', color)} style={{ fontFamily: 'inherit' }}>
+                      <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit' }}>
                         {lang ? highlightLine(line.content || ' ', lang) : (line.content || ' ')}
                       </pre>
                     </div>
