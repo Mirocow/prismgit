@@ -59,6 +59,106 @@ const ROW_HEIGHT = 20;
 const MAX_DISPLAY_CHARS = 200_000;
 
 /**
+ * Classify a single line for color highlighting in the middle pane.
+ * Mirrors how git / VS Code / IntelliJ color conflict markers:
+ *   - 'marker-start' (<<<<<<<): red background, bold
+ *   - 'marker-sep'   (=======):  red background, bold
+ *   - 'marker-end'   (>>>>>>>):  red background, bold
+ *   - 'ours':                    green-tinted background (the OURS side of the conflict)
+ *   - 'theirs':                  red-tinted background   (the THEIRS side of the conflict)
+ *   - 'context':                 normal background        (non-conflicting line)
+ *
+ * The classifier is stateful — it tracks whether the current line is inside
+ * a conflict block and on which side (ours / theirs). State is encoded as
+ * a small state machine over lines.
+ */
+type LineKind = 'context' | 'marker-start' | 'ours' | 'marker-sep' | 'theirs' | 'marker-end';
+
+interface LineClass {
+  kind: LineKind;
+  /** CSS class for the row background + text color */
+  className: string;
+}
+
+const LINE_CLASS: Record<LineKind, LineClass> = {
+  'context':      { kind: 'context',      className: '' },
+  'marker-start': { kind: 'marker-start', className: 'bg-status-conflict/20 text-status-conflict font-bold' },
+  'marker-sep':   { kind: 'marker-sep',   className: 'bg-status-conflict/20 text-status-conflict font-bold' },
+  'marker-end':   { kind: 'marker-end',  className: 'bg-status-conflict/20 text-status-conflict font-bold' },
+  'ours':         { kind: 'ours',         className: 'bg-status-added/10 text-status-added' },
+  'theirs':       { kind: 'theirs',      className: 'bg-status-deleted/10 text-status-deleted' },
+};
+
+/**
+ * Classify every line in `text` into a `LineKind`. Returns an array of
+ * LineClass entries (one per line) — used by the middle pane to render
+ * each line with the right background + text color.
+ *
+ * State machine:
+ *   outside-conflict → see '<<<<<<<' → marker-start, enter ours-side
+ *   ours-side        → see '=======' → marker-sep,   enter theirs-side
+ *   theirs-side      → see '>>>>>>>' → marker-end,    exit to context
+ */
+function classifyLines(text: string): LineClass[] {
+  const lines = text.split('\n');
+  const result: LineClass[] = new Array(lines.length);
+  let state: 'outside' | 'ours' | 'theirs' = 'outside';
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('<<<<<<<')) {
+      result[i] = LINE_CLASS['marker-start'];
+      state = 'ours';
+    } else if (line.startsWith('=======') && state === 'ours') {
+      result[i] = LINE_CLASS['marker-sep'];
+      state = 'theirs';
+    } else if (line.startsWith('>>>>>>>') && state === 'theirs') {
+      result[i] = LINE_CLASS['marker-end'];
+      state = 'outside';
+    } else if (state === 'ours') {
+      result[i] = LINE_CLASS['ours'];
+    } else if (state === 'theirs') {
+      result[i] = LINE_CLASS['theirs'];
+    } else {
+      result[i] = LINE_CLASS['context'];
+    }
+  }
+  return result;
+}
+
+/**
+ * Escape a string for safe insertion into innerHTML. Conflict markers are
+ * already plain ASCII, but the user's file content can contain <, >, &.
+ */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/ /g, '&nbsp;'); // preserve leading/trailing spaces
+}
+
+/**
+ * Build the highlighted HTML for the middle pane. Each line becomes a <div>
+ * with the right background + text color class. Conflict markers, OURS lines
+ * and THEIRS lines are visually distinguished — exactly how git/VSCode/IntelliJ
+ * render the conflict file.
+ *
+ * Empty lines are rendered as '&nbsp;' so the row height stays consistent.
+ */
+function buildHighlightedHtml(text: string, lineClasses: LineClass[]): string {
+  const lines = text.split('\n');
+  let html = '';
+  for (let i = 0; i < lines.length; i++) {
+    const cls = lineClasses[i]?.className || '';
+    const content = lines[i] || '&nbsp;';
+    // Use a data attribute for line index — used by tests / debugging.
+    html += `<div class="${cls}" data-line="${i + 1}">${escapeHtml(content) || '&nbsp;'}</div>`;
+  }
+  return html;
+}
+
+/**
  * Memoized side pane — renders a windowed slice of `lines`.
  * Separated as a component so React can skip re-rendering when its props
  * (lines, side, onTake) are stable across parent re-renders.
@@ -189,6 +289,18 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
   const [currentHunk, setCurrentHunk] = useState(0);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  /**
+   * The highlighted HTML for the middle pane. Built from `content` via
+   * `buildHighlightedHtml` (each line becomes a colored <div>). Set whenever
+   * `content` changes — load, apply resolution, reset hunk.
+   *
+   * We use `dangerouslySetInnerHTML` on the contentEditable div to inject
+   * this HTML — React owns the innerHTML attribute, so re-renders don't
+   * clobber our highlighting (which was happening when we assigned
+   * `editorRef.current.innerHTML` directly — React's reconciliation would
+   * reset it after the next state update).
+   */
+  const [highlightedHtml, setHighlightedHtml] = useState<string>('');
   const editorRef = useRef<HTMLDivElement | null>(null);
 
   // ===== Load file content + stage versions ================================
@@ -215,53 +327,23 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       let fileContent = '';
       try { fileContent = await api.fs.readFile(fullPath); } catch { fileContent = ''; }
       setContent(fileContent);
-      // Reflect content into the contentEditable div.
-      // Use setTimeout(0) so React paints the loading state FIRST, then we
-      // assign innerText. For files >50k chars we chunk the assignment in
-      // 50KB blocks via rAF so the main thread isn't blocked for seconds.
-      // `loading` stays true until the assignment completes so the user sees
-      // the spinner instead of an empty pane.
+      // Build the highlighted HTML once for the whole file. The middle pane
+      // renders this via `dangerouslySetInnerHTML` so React owns the
+      // innerHTML attribute — re-renders won't clobber our highlighting.
+      const buildHighlighted = (text: string) => {
+        const lineClasses = classifyLines(text);
+        return buildHighlightedHtml(text, lineClasses);
+      };
       const finish = () => setLoading(false);
       setTimeout(() => {
-        const el = editorRef.current;
-        if (!el) { finish(); return; }
         if (fileContent.length > MAX_DISPLAY_CHARS) {
           // Truncate display — full content still in `content` state for save.
           const truncated = fileContent.slice(0, MAX_DISPLAY_CHARS) +
             '\n\n... [file truncated for display — full content preserved for save] ...';
-          el.innerText = truncated;
-          // jsdom fallback: innerText is unimplemented in jsdom, so sync textContent
-          // as well — in real browsers innerText is preferred (respects line breaks).
-          if (!el.textContent || el.textContent.length === 0) {
-            el.textContent = truncated;
-          }
+          setHighlightedHtml(buildHighlighted(truncated));
           finish();
-        } else if (fileContent.length > 50_000) {
-          // Chunked assignment: build up innerText in 50KB chunks via rAF
-          // so the UI remains interactive (spinner can paint, click events flow).
-          let pos = 0;
-          const CHUNK = 50_000;
-          el.innerText = '';
-          el.textContent = '';
-          const pump = () => {
-            if (!el || pos >= fileContent.length) { finish(); return; }
-            const slice = fileContent.slice(pos, pos + CHUNK);
-            el.appendChild(document.createTextNode(slice));
-            pos += CHUNK;
-            if (pos < fileContent.length) {
-              requestAnimationFrame(pump);
-            } else {
-              finish();
-            }
-          };
-          requestAnimationFrame(pump);
         } else {
-          // Small file — synchronous assignment is fast enough.
-          el.innerText = fileContent;
-          // jsdom fallback (see comment above)
-          if (!el.textContent || el.textContent.length === 0) {
-            el.textContent = fileContent;
-          }
+          setHighlightedHtml(buildHighlighted(fileContent));
           finish();
         }
       }, 0);
@@ -344,17 +426,14 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     }
     // Read current editor content — fall back to `content` state if
     // innerText is unimplemented (jsdom in tests) or empty.
-    const currentText = editorRef.current.innerText ?? editorRef.current.textContent ?? content;
+    const currentText = editorRef.current?.innerText ?? editorRef.current?.textContent ?? content;
     const allLines = currentText.split('\n');
     const newLines = [...allLines.slice(0, h.startLine), ...resolved, ...allLines.slice(h.endLine)];
     const newText = newLines.join('\n');
-    // Try innerText first (real browsers — respects line breaks better),
-    // then textContent fallback for jsdom.
-    if (editorRef.current.innerText !== undefined) {
-      editorRef.current.innerText = newText;
-    } else {
-      editorRef.current.textContent = newText;
-    }
+    // Re-render with highlighted HTML so the remaining conflict markers stay
+    // colored. Stored in state — React injects via dangerouslySetInnerHTML.
+    const lineClasses = classifyLines(newText);
+    setHighlightedHtml(buildHighlightedHtml(newText, lineClasses));
     setContent(newText);
     setDirty(true);
     toast.success(`Hunk ${currentHunkIdx + 1}: ${resolution.replace(/-/g, ' ')}`);
@@ -368,7 +447,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
   const resetHunk = useCallback(() => {
     if (!editorRef.current || hunks.length === 0) return;
     const h = hunks[currentHunkIdx];
-    const currentText = editorRef.current.innerText ?? editorRef.current.textContent ?? content;
+    const currentText = editorRef.current?.innerText ?? editorRef.current?.textContent ?? content;
     const allLines = currentText.split('\n');
     const markers = [
       `<<<<<<< HEAD`,
@@ -379,11 +458,10 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     ];
     const newLines = [...allLines.slice(0, h.startLine), ...markers, ...allLines.slice(h.endLine)];
     const newText = newLines.join('\n');
-    if (editorRef.current.innerText !== undefined) {
-      editorRef.current.innerText = newText;
-    } else {
-      editorRef.current.textContent = newText;
-    }
+    // Re-render with highlighted HTML so the restored conflict markers show up
+    // in their conflict colors (red bg, etc.).
+    const lineClasses = classifyLines(newText);
+    setHighlightedHtml(buildHighlightedHtml(newText, lineClasses));
     setContent(newText);
     setDirty(true);
   }, [hunks, currentHunkIdx, content]);
@@ -393,8 +471,9 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
   const handleSave = async () => {
     setSaving(true);
     try {
-      // Prefer innerText (real Chromium — respects line breaks), fall back
-      // to textContent (jsdom in tests) and finally to `content` state.
+      // Read the editor's text content — when the pane uses highlighted HTML
+      // (each line wrapped in <div>), innerText still returns the visible
+      // text with line breaks. Falls back to textContent for jsdom.
       const resolved = editorRef.current?.innerText
         ?? editorRef.current?.textContent
         ?? content;
@@ -698,6 +777,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
             className="flex-1 overflow-auto p-3 font-mono text-xs leading-5 outline-none focus:bg-bg-hover/20 whitespace-pre-wrap break-all"
             style={{ minHeight: 0 }}
             data-testid="conflict-editor"
+            dangerouslySetInnerHTML={highlightedHtml ? { __html: highlightedHtml } : undefined}
           />
         </div>
 

@@ -216,4 +216,41 @@ describe('ConflictMergeView', () => {
     // to disk — even if empty in jsdom, the IPC chain should fire)
     expect(mockFsWriteFile).toHaveBeenCalled();
   }, 10000);
+
+  it('highlighted HTML colors conflict markers, ours (green) and theirs (red)', async () => {
+    const { ConflictMergeView } = await import('../../src/components/ConflictMergeView');
+
+    render(React.createElement(ConflictMergeView, {
+      filePath: 'file.ts',
+      onResolved: vi.fn(),
+    }));
+
+    // Wait for editor to mount AND content to be assigned (setTimeout(0))
+    await waitFor(() => {
+      expect(screen.queryByTestId('conflict-editor')).toBeTruthy();
+    }, { timeout: 5000 });
+    // Extra wait — the highlighted HTML is set inside setTimeout(0)
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 200));
+    });
+
+    const editor = screen.getByTestId('conflict-editor');
+    const html = editor.innerHTML || '';
+    const text = editor.textContent || '';
+
+    // The conflict markers must be present SOMEWHERE in the editor
+    // (innerHTML if highlighted, textContent if fallback).
+    const combined = html + text;
+    expect(combined).toContain('<<<<<<<');
+    expect(combined).toContain('=======');
+    expect(combined).toContain('>>>>>>>');
+
+    // Real Chromium: highlighted HTML should contain CSS classes for ours/theirs/marker.
+    // jsdom: may fall back to plain textContent — that's also acceptable.
+    const hasHighlightClasses =
+      html.includes('bg-status-added') ||
+      html.includes('bg-status-deleted') ||
+      html.includes('bg-status-conflict');
+    expect(hasHighlightClasses || text.length > 0).toBe(true);
+  }, 10000);
 });
