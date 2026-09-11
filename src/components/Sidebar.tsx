@@ -698,8 +698,10 @@ export function Sidebar() {
                 const showBadge = item.path === '/changes' && changedCount > 0;
                 const shortcut = NAV_SHORTCUTS[item.path];
                 return (
-                  <button
+                  <div
                     key={`fav-${item.path}`}
+                    role="button"
+                    tabIndex={0}
                     className={cn(
                       'group w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors cursor-pointer',
                       isActive
@@ -707,6 +709,11 @@ export function Sidebar() {
                         : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary border-l-2 border-transparent'
                     )}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate(item.path); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault(); e.stopPropagation(); handleNavigate(item.path);
+                      }
+                    }}
                     title={NAV_DESCRIPTIONS[item.path] || item.label}
                   >
                     <Icon size={15} />
@@ -730,7 +737,7 @@ export function Sidebar() {
                     >
                       <Star size={10} className="text-status-modified fill-current" />
                     </button>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -764,8 +771,10 @@ export function Sidebar() {
                 const shortcut = NAV_SHORTCUTS[item.path];
                 const isFavorite = favoriteTools.includes(item.path);
                 return (
-                  <button
+                  <div
                     key={item.path}
+                    role="button"
+                    tabIndex={0}
                     className={cn(
                       'group w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors cursor-pointer',
                       isActive
@@ -773,6 +782,11 @@ export function Sidebar() {
                         : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary border-l-2 border-transparent'
                     )}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate(item.path); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault(); e.stopPropagation(); handleNavigate(item.path);
+                      }
+                    }}
                     title={NAV_DESCRIPTIONS[item.path] || item.label}
                     aria-current={isActive ? 'page' : undefined}
                     aria-label={item.label}
@@ -807,7 +821,7 @@ export function Sidebar() {
                     >
                       <Star size={10} className={cn(isFavorite ? 'text-status-modified fill-current' : 'text-text-tertiary')} />
                     </button>
-                  </button>
+                  </div>
                 );
               })}
             </div>
