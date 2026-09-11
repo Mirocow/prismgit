@@ -22,6 +22,7 @@ import {
   FolderGit, FolderGitOpen,
   FolderOpen,
   FolderPlus,
+  GitBranch,
   Moon,
   Pin, PinOff,
   Plus,
@@ -573,6 +574,18 @@ export function Sidebar() {
           >
             {showRepoList ? <FolderGitOpen size={15} className="text-accent" /> : <FolderGit size={15} className="text-text-secondary" />}
             <span className="truncate">{currentRepo ? currentRepo.name : t('sidebar.repositories')}</span>
+            {/* Current branch name next to repo name — SmartGit shows it in the sidebar header */}
+            {currentRepo && status?.current && !status?.detached && (
+              <span className="text-2xs text-text-tertiary font-mono truncate">
+                <GitBranch size={10} className="inline -mt-0.5 mr-0.5" />
+                {status.current}
+              </span>
+            )}
+            {currentRepo && status?.detached && (
+              <span className="text-2xs text-status-modified font-mono truncate">
+                (detached)
+              </span>
+            )}
             {currentRepo && metadata[currentRepo.path]?.favorite && (
               <Star size={11} className="text-status-modified fill-current" />
             )}
