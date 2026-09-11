@@ -3,7 +3,7 @@ import type { AppSettings } from '../../electron/types/settings-api';
 import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CornerDownRight, Download, EyeOff, FileText, Folder, FolderOpen, FolderTree, GitCommit, GitPullRequest, Lock, Minus, Package, Plus, RefreshCw, RotateCcw, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
 import { LazyFileList } from '../components/LazyFileList';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
@@ -1422,24 +1422,26 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           >
             .*
           </button>
-          {/* File display flags — SmartGit-style toggle buttons.
+          {/* File display flags — SmartGit-style toggle buttons (icons only).
               Default: Subdir + Unver ON. Changed files always visible.
               Flags ADD categories (union). Staged files go to their own section. */}
           <div className="flex items-center gap-0.5">
             {([
-              { id: 'subdirectories' as const, label: 'Dir', title: 'Files From Subdirectories' },
-              { id: 'unchanged' as const, label: 'Unch', title: 'Show Unchanged Files' },
-              { id: 'unversioned' as const, label: 'Unver', title: 'Show Unversioned Files' },
-              { id: 'ignored' as const, label: 'Ign', title: 'Show Ignored Files' },
-              { id: 'assumeUnchanged' as const, label: '?', title: 'Show Assume-Unchanged Files' },
-              { id: 'skipped' as const, label: 'Skip', title: 'Show Skipped Files' },
-              { id: 'movedRename' as const, label: 'Move', title: 'Show Rename Source Files' },
-              { id: 'submodules' as const, label: 'Subm', title: 'Show Files From Submodules' },
-            ]).map(opt => (
+              { id: 'subdirectories' as const, icon: FolderTree, title: 'Files From Subdirectories' },
+              { id: 'unchanged' as const, icon: FileText, title: 'Show Unchanged Files' },
+              { id: 'unversioned' as const, icon: Plus, title: 'Show Unversioned Files' },
+              { id: 'ignored' as const, icon: X, title: 'Show Ignored Files' },
+              { id: 'assumeUnchanged' as const, icon: Lock, title: 'Show Assume-Unchanged Files' },
+              { id: 'skipped' as const, icon: SkipForward, title: 'Show Skipped Files' },
+              { id: 'movedRename' as const, icon: CornerDownRight, title: 'Show Rename Source Files' },
+              { id: 'submodules' as const, icon: Package, title: 'Show Files From Submodules' },
+            ]).map(opt => {
+              const Icon = opt.icon;
+              return (
               <button
                 key={opt.id}
                 className={cn(
-                  'text-2xs px-1.5 h-5 rounded flex items-center justify-center font-mono font-bold transition-colors',
+                  'w-5 h-5 rounded flex items-center justify-center transition-colors',
                   hasFlag(opt.id)
                     ? 'bg-accent-muted text-accent'
                     : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'
@@ -1447,9 +1449,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 title={opt.title}
                 onClick={() => toggleFileDisplayFlag(opt.id)}
               >
-                {opt.label}
+                <Icon size={11} />
               </button>
-            ))}
+              );
+            })}
           </div>
           {/* Extension filter */}
           <input
@@ -1605,8 +1608,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               light yellow = name-filtered, gray = unchanged files shown by name match */}
           <div className={cn(
             'flex-1 overflow-y-auto transition-colors',
-            // Light red: committable files (untracked/modified) are being hidden by state filter
-            !hasFlag('unversioned') ? 'bg-red-50 dark:bg-red-950/10' : '',
             // Light yellow: files are being name-filtered
             (fileFilter.trim().length > 0) ? 'bg-yellow-50 dark:bg-yellow-950/10' : '',
           )}>
