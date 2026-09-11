@@ -84,6 +84,18 @@ function PageLoader() {
   );
 }
 
+
+// When a conflict file is clicked in Changes, redirect to Diff tool
+// (not a modal). The Diff tool's ConflictMergeView handles resolution.
+function ConflictRedirect({ file, onDone }: { file: string; onDone: () => void }) {
+  useEffect(() => {
+    useSelectionStore.getState().selectFile(file);
+    window.location.hash = '#/diff';
+    onDone();
+  }, [file, onDone]);
+  return null;
+}
+
 export default function App() {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const loadRepos = useRepositoryStore((s) => s.loadRepos);
@@ -1228,30 +1240,11 @@ export default function App() {
           <RepoSettingsDialog onClose={() => setShowRepoSettings(false)} />
         </Suspense>
       )}
+      {/* Conflict resolution happens IN the Diff tool (ConflictMergeView),
+          NOT in a modal popup. When onResolveConflict fires from ChangesPage,
+          we select the file globally and navigate to #/diff. */}
       {conflictFile && (
-        <Suspense fallback={null}>
-          <ConflictSolver
-            filePath={conflictFile}
-            onClose={() => setConflictFile(null)}
-            onResolved={async (_resolvedFile) => {
-              // Auto-advance to the next conflicted file (platypusgit pattern).
-              const repo = useRepositoryStore.getState().currentRepo;
-              if (!repo) { setConflictFile(null); return; }
-              try {
-                const st = await api.git.status(repo.path);
-                const next = st.conflicted.find((f: string) => f !== _resolvedFile);
-                if (next) {
-                  setConflictFile(next);
-                } else {
-                  setConflictFile(null);
-                  toast.success('All conflicts resolved', 'You can now Continue the merge / cherry-pick / rebase.');
-                }
-              } catch {
-                setConflictFile(null);
-              }
-            }}
-          />
-        </Suspense>
+        <ConflictRedirect file={conflictFile} onDone={() => setConflictFile(null)} />
       )}
       <CommandPalette
         open={showPalette}
