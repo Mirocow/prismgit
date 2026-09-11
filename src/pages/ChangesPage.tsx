@@ -1025,14 +1025,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // Memoize file lists to avoid re-sorting on every render (e.g. when
   // hovering over rows causes a re-render but status hasn't changed).
   const stagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
-    // Exclude conflicted files (UU/AU/UA/DD) — they show ONLY in Conflicts section.
-    const idx = f.index as string;
-    const wd = f.working_dir as string;
-    if (idx === 'U' || wd === 'U') return false;
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) return false;
-    const stagedIdx = staged.index as string;
-    return stagedIdx !== ' ' && stagedIdx !== '?' && stagedIdx !== '!' && stagedIdx !== 'U';
+    const idx = staged.index as string;
+    return idx !== ' ' && idx !== '?' && idx !== '!';
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
@@ -1049,17 +1045,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     })), [status, sortFiles, fileStatusFilter, fileStatusFilterSet]);
 
   const unstagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
-    // Exclude conflicted files — they show ONLY in Conflicts section.
-    const idx = f.index as string;
-    const wd = f.working_dir as string;
-    if (idx === 'U' || wd === 'U') return false;
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) {
-      // Exclude untracked ('??') — they render in their own Untracked section.
+      const wd = f.working_dir as string;
+      // Exclude untracked ('??') — they render in their own Untracked section;
+      // including them here duplicated every untracked file in both sections.
       return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');
     }
-    const stagedWd = staged.working_dir as string;
-    return stagedWd !== ' ' && stagedWd !== '!' && stagedWd !== 'U';
+    const wd = staged.working_dir as string;
+    return wd !== ' ' && wd !== '!';
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))

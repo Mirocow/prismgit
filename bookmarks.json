@@ -1,6 +1,6 @@
 {
   "version": "3.1.1",
-  "lastModified": "2026-09-11T02:34:23.256Z",
+  "lastModified": "2026-09-11T14:38:14.200Z",
   "folders": [],
   "bookmarks": [
     {
@@ -20,6 +20,51 @@
       "character": 24,
       "lineContent": "onContextMenu={(e) => {",
       "sortOrder": 1
+    },
+    {
+      "id": "mtx10wama8zrlve915t",
+      "name": "return wd !== ' ' && wd !== '!';",
+      "file": "src/pages/ChangesPage.tsx",
+      "line": 1055,
+      "character": 36,
+      "lineContent": "return wd !== ' ' && wd !== '!';",
+      "sortOrder": 2
+    },
+    {
+      "id": "mtx10zjhizwbxjc8a1h",
+      "name": "return idx !== ' ' && idx !== '?' && idx !== '!';",
+      "file": "src/pages/ChangesPage.tsx",
+      "line": 1030,
+      "character": 50,
+      "lineContent": "return idx !== ' ' && idx !== '?' && idx !== '!';",
+      "sortOrder": 3
+    },
+    {
+      "id": "mtx11ackx7ac6guslf",
+      "name": "return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');",
+      "file": "src/pages/ChangesPage.tsx",
+      "line": 1052,
+      "character": 50,
+      "lineContent": "return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');",
+      "sortOrder": 4
+    },
+    {
+      "id": "mtx29b83kjl831df5c",
+      "name": "{showBisectBadge && !showInProgressBadge && (",
+      "file": "src/components/Sidebar.tsx",
+      "line": 454,
+      "character": 26,
+      "lineContent": "{showBisectBadge && !showInProgressBadge && (",
+      "sortOrder": 5
+    },
+    {
+      "id": "mtx29prs1ea67zwvmh5",
+      "name": "const currentBisecting = !!status?.isBisecting;",
+      "file": "src/components/Sidebar.tsx",
+      "line": 406,
+      "character": 7,
+      "lineContent": "const currentBisecting = !!status?.isBisecting;",
+      "sortOrder": 6
     }
   ]
 }

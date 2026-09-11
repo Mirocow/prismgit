@@ -1,26 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  Settings as SettingsIcon, FolderPlus, FolderGit, FolderGitOpen, Folder, FolderOpen,
-  Plus, Pin, PinOff, X, Sun, Moon, Star, ChevronDown, ChevronRight, RefreshCw, AlertCircle,
-} from './icons';
-import { NAV_ITEMS, NAV_SHORTCUTS, NAV_DESCRIPTIONS, type NavItem } from './navItems';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useSettingsStore } from '../stores/settingsStore';
-import { useGitStore } from '../stores/gitStore';
-import { ResizableSplitter, useResizableWidth, useResizableHeight } from './ResizableSplitter';
-import { cn } from '../lib/utils';
-import { confirmDialog, promptDialog } from './ConfirmDialog';
-import { useContextMenu } from '../lib/useContextMenu';
+import { useLocation, useNavigate } from 'react-router-dom';
+import type { RemoteCheckSummary } from '../lib/api';
+import { api } from '../lib/api';
+import { useI18n } from '../lib/i18n';
+import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import {
   buildRepoTree, canMoveGroup, flattenGroupOptions,
   type RepoGroupNode, type RepoItemNode,
 } from '../lib/repoTree';
-import type { RemoteCheckSummary } from '../lib/api';
-import { api } from '../lib/api';
+import { useContextMenu } from '../lib/useContextMenu';
+import { cn } from '../lib/utils';
+import { useGitStore } from '../stores/gitStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore } from '../stores/toastStore';
-import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
-import { useI18n } from '../lib/i18n';
+import { confirmDialog, promptDialog } from './ConfirmDialog';
+import {
+  AlertCircle,
+  ChevronDown, ChevronRight,
+  Folder,
+  FolderGit, FolderGitOpen,
+  FolderOpen,
+  FolderPlus,
+  Moon,
+  Pin, PinOff,
+  Plus,
+  RefreshCw,
+  Settings as SettingsIcon,
+  Star,
+  Sun,
+  X,
+} from './icons';
+import { NAV_DESCRIPTIONS, NAV_ITEMS, NAV_SHORTCUTS, type NavItem } from './navItems';
+import { ResizableSplitter, useResizableHeight, useResizableWidth } from './ResizableSplitter';
 
 /**
  * Drag-and-drop payload for the repository tree. Chromium lowercases custom
@@ -431,13 +443,12 @@ export function Sidebar() {
         {isActive ? <FolderGitOpen size={13} className="text-accent flex-shrink-0" /> : <FolderGit size={13} className="text-text-tertiary flex-shrink-0" />}
         <span className={cn('flex-1 truncate', isActive && 'text-accent font-medium')}>{repo.name}</span>
         {/* In-progress state badge — only on the active repo, only when one
-            of the sequencer flags is true. Clicking opens Changes where the
-            SequencerPanel / MergePanel / RebasePanel banners live. */}
+            of the sequencer flags is true. */}
         {showInProgressBadge && (
           <a
             href="#/changes"
             onClick={(e) => e.stopPropagation()}
-            className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning inline-block animate-pulse"
+            className="flex-shrink-0 w-1.5 h-1.5"
             title={`Working tree is in ${status?.isMerging ? 'merging' : status?.isRebasing ? 'rebasing' : status?.isCherryPicking ? 'cherry-picking' : 'reverting'} state. Click to open Changes.`}
           />
         )}
