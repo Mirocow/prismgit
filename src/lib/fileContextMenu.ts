@@ -21,13 +21,13 @@
  *   Copy Name / Path / Full  → clipboard
  *   Select Directory / Root  → scopes the Changes dir tree
  */
-import { api } from './api';
-import type { ContextMenuItem } from './useContextMenu';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
-import { copyToClipboard } from './utils';
-import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useToastStore } from '../stores/toastStore';
+import { api } from './api';
 import { t as i18nT } from './i18n';
+import type { ContextMenuItem } from './useContextMenu';
+import { copyToClipboard } from './utils';
 
 export interface IndexFlags {
   assumeUnchanged: boolean;
@@ -54,7 +54,7 @@ export interface FileMenuCtx {
   /** Changes-page working-tree state. */
   isStaged?: boolean;
   isUntracked?: boolean;
-  isConflict?: boolean;
+  isConflicted?: boolean;
   /** Live index flags (fetched before the menu opens, changes-mode only). */
   indexFlags?: IndexFlags;
   /** Load this file's diff into the Changes split view. */
@@ -201,7 +201,7 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
       label: `${tracked ? 'Remove...' : 'Delete File...'}${bulk}`,
       clickId: 'delete-file',
     });
-    if (ctx.isConflict) {
+    if (ctx.isConflicted) {
       items.push({ type: 'separator' });
       // SmartGit-style "Resolve" submenu: Take Ours / Take Theirs / Open Diff tool / Discard
       items.push({

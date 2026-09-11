@@ -3,23 +3,22 @@ import type { AppSettings } from '../../electron/types/settings-api';
 import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
 import { LazyFileList } from '../components/LazyFileList';
+import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
-import { RepoStateBanner } from '../components/RepoStateBanner';
-import { ConflictList } from '../components/ConflictList';
 import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, type LLMProvider } from '../lib/aiCommitMessages';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { buildFileMenu, getIndexFlagsAsync, runFileAction, type IndexFlags } from '../lib/fileContextMenu';
+import { useI18n } from '../lib/i18n';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { describePushResult } from '../lib/pushResult';
 import { RefBadges } from '../lib/refBadge';
 import { isCommitBlocked } from '../lib/repoState';
 import { useContextMenu } from '../lib/useContextMenu';
 import { cn, getStatusColor } from '../lib/utils';
-import { useI18n } from '../lib/i18n';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
@@ -138,8 +137,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }, [onResolveConflict]);
   // Global UI state for file filtering and tree mode
   const fileViewMode = useSelectionStore((s) => s.fileViewMode);
-  const separateStagedView = useSelectionStore((s) => s.separateStagedView);
-  const setSeparateStagedView = useSelectionStore((s) => s.setSeparateStagedView);
   const groupByState = useSelectionStore((s) => s.groupByState);
   const setGroupByState = useSelectionStore((s) => s.setGroupByState);
   const compressFilePaths = useSelectionStore((s) => s.compressFilePaths);
@@ -1151,7 +1148,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     const code = idx !== ' ' && idx !== '?' ? idx : wd;
     const statusCode =
       code === '?' ? 'untracked' :
-      code === 'U' ? 'conflict' :
+      code === 'U' ? 'conflicted' :
       code === 'M' ? 'modified' :
       code === 'A' ? 'added' :
       code === 'D' ? 'deleted' :
@@ -1159,10 +1156,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       code === 'C' ? 'copied' :
       'modified';
     const isUntracked = idx === '?' && wd === '?';
-    const isConflict = code === 'U' || idx === 'U' || wd === 'U';
+    const isConflicted = code === 'U' || idx === 'U' || wd === 'U';
     const stateKeys: Record<string, string> = {
       untracked: 'changes.statusUntracked',
-      conflict: 'changes.conflict',
+      conflicted: 'changes.conflicted',
       modified: 'changes.statusModified',
       added: 'changes.stateAdded',
       deleted: 'changes.statusDeleted',
@@ -1243,7 +1240,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             mode: 'changes' as const,
             isStaged,
             isUntracked,
-            isConflict,
+            isConflicted,
             indexFlags,
             onShowChanges: () => {
               setSelectedFile(file.path);
@@ -1303,15 +1300,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         )}
         {/* Actions — fixed width so all rows stay column-aligned */}
         <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0 overflow-hidden" style={{ width: 92 }}>
-          {isConflict && onResolveConflict && (
-            <button
-              className="btn btn-primary text-2xs !py-0.5 !px-2"
-              title={t('changes.openConflictSolver')}
-              onClick={(e) => { e.stopPropagation(); onResolveConflict(file.path); }}
-            >
-              {t('changes.resolve')}
-            </button>
-          )}
           {isStaged ? (
             <button className="icon-btn !w-5 !h-5" title={t('changes.unstage')} onClick={(e) => { e.stopPropagation(); handleUnstageFile(file.path); }}>
               <Minus size={11} />
@@ -1495,14 +1483,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           >
             <SplitSquareHorizontal size={11} />
           </button>
-          {/* Separate Staged/Unstaged view toggle (SmartGit 20.1) */}
-          <button
-            className={cn('icon-btn !w-5 !h-5', separateStagedView && 'active')}
-            title={separateStagedView ? t('changes.combinedViewTitle') : t('changes.groupByStateTitle')}
-            onClick={() => setSeparateStagedView(!separateStagedView)}
-          >
-            <ChevronsUpDown size={11} />
-          </button>
           <button className="icon-btn !w-5 !h-5" title={t('common.refresh')} onClick={handleRefresh}>
             <RefreshCw size={11} />
           </button>
@@ -1642,27 +1622,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <span style={{ width: 92 }}></span>
             </div>
 
-            {/* Conflicts — scalable ConflictList handles dozens of files:
-                filter, group-by-dir, mass Take All Ours/Theirs, collapse, virtualized scroll. */}
-            {status?.conflicted && status.conflicted.length > 0 && (
-              <ConflictList
-                conflicts={status.conflicted}
-                finishAction={status.isMerging ? t('changes.commit') : status.isRebasing ? 'Continue the rebase' : status.isCherryPicking ? 'Continue the cherry-pick' : t('changes.commit')}
-                finishLabel={status.isMerging ? t('changes.merge') : status.isRebasing ? 'rebase' : status.isCherryPicking ? 'cherry-pick' : status.isReverting ? 'revert' : 'operation'}
-                onResolveAction={onResolveConflictAction}
-                onOpenSolver={(file) => onResolveConflict?.(file)}
-                onResolveAll={(mode) => {
-                  // Batch: call onResolveConflictAction for each conflicted file.
-                  if (!onResolveConflictAction) return;
-                  for (const f of status.conflicted) {
-                    onResolveConflictAction(f, mode);
-                  }
-                }}
-              />
-            )}
-
-            {/* === SEPARATE VIEW (SmartGit 20.1): Staged / Changes / Untracked in separate lists === */}
-            {separateStagedView ? (
+            {/* === Staged / Changes / Untracked in separate lists === */}
+            {(
               <>
             {/* Staged — green accent left border, clickable header to stage all/unstage all */}
             {stagedFiles.length > 0 && (
@@ -1728,13 +1689,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <LazyFileList files={untrackedFiles} isStaged={false} renderRow={renderFileRow} />
             </div>
               </>
-            ) : (
-              /* === COMBINED VIEW: all files in one list === */
-              <LazyFileList
-                files={[...stagedFiles, ...unstagedFiles, ...untrackedFiles]}
-                isStaged={false}
-                renderRow={renderFileRow}
-              />
             )}
 
             {totalChanged === 0 && (

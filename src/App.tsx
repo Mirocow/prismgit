@@ -1,25 +1,41 @@
-import { useEffect, useState, Suspense, lazy, useCallback, useRef } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { Sidebar } from './components/Sidebar';
-import { Toolbar, GitToolbar } from './components/Toolbar';
-import { StatusBar } from './components/StatusBar';
-import { ToastContainer } from './components/ToastContainer';
-import { ConfirmDialogHost } from './components/ConfirmDialog';
-import { WelcomeScreen } from './components/WelcomeScreen';
-import { RebasePanel } from './components/RebasePanel';
-import { FindObjectDialog } from './components/FindObjectDialog';
-import { SequencerPanel } from './components/SequencerPanel';
-import { MergeInProgressPanel } from './components/MergeInProgressPanel';
-import { CommandPalette } from './components/CommandPalette';
-import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { CommandLogPanel } from './components/CommandLogPanel';
-import { DragDropHandler } from './components/DragDropHandler';
+import { CommandPalette } from './components/CommandPalette';
+import { ConfirmDialogHost, confirmDialog, promptDialog } from './components/ConfirmDialog';
 import { DeepLinkHandler } from './components/DeepLinkHandler';
+import { DragDropHandler } from './components/DragDropHandler';
+import { FindObjectDialog } from './components/FindObjectDialog';
 import { HelpBanner } from './components/HelpBanner';
-import { ResizableSplitter } from './components/ResizableSplitter';
+import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
 import { NAV_SHORTCUTS } from './components/navItems';
 import { RefActionDialog, type RefAction } from './components/RefActionDialog';
+import { ResizableSplitter } from './components/ResizableSplitter';
+import { Sidebar } from './components/Sidebar';
+import { StatusBar } from './components/StatusBar';
+import { ToastContainer } from './components/ToastContainer';
+import { GitToolbar, Toolbar } from './components/Toolbar';
+import { WelcomeScreen } from './components/WelcomeScreen';
+import { useWindowStyleStore } from './components/WindowStyleSwitcher';
+import { useBackgroundFetch } from './hooks/useBackgroundFetch';
 import { useChunkPreload } from './hooks/useChunkPreload';
+import { useRemotePolling } from './hooks/useRemotePolling';
+import { api } from './lib/api';
+import {
+  buildCurrentDeepLink,
+  clearPendingDeepLinkPage,
+  currentHashPath,
+  isValidDeepLinkPath,
+  takePendingDeepLinkPage,
+} from './lib/deepLinks';
+import { t as i18nT, useI18nStore } from './lib/i18n';
+import { clearProjectPrefs, loadProjectPrefs, saveProjectPrefs } from './lib/projectPrefs';
+import { useAuthStore } from './stores/authStore';
+import { useGitStore } from './stores/gitStore';
+import { useRepositoryStore } from './stores/repositoryStore';
+import { useSelectionStore } from './stores/selectionStore';
+import { useSettingsStore } from './stores/settingsStore';
+import { useToastStore } from './stores/toastStore';
 
 // Heavy dialogs are code-split: they are never needed for first paint, and
 // pulling them out of the initial bundle makes the app window show faster.
@@ -34,27 +50,6 @@ const RepoInfoDialog = lazy(() => import('./components/RepoInfoDialog').then(m =
 const ApplyPatchModal = lazy(() => import('./components/ApplyPatchModal').then(m => ({ default: m.ApplyPatchModal })));
 const IndexEditorDialog = lazy(() => import('./components/IndexEditorDialog').then(m => ({ default: m.IndexEditorDialog })));
 const RepoSettingsDialog = lazy(() => import('./components/RepoSettingsDialog').then(m => ({ default: m.RepoSettingsDialog })));
-import { promptDialog, confirmDialog } from './components/ConfirmDialog';
-import { t as i18nT, useI18nStore } from './lib/i18n';
-import { clearProjectPrefs } from './lib/projectPrefs';
-import { useWindowStyleStore } from './components/WindowStyleSwitcher';
-import { useRepositoryStore } from './stores/repositoryStore';
-import { useSettingsStore } from './stores/settingsStore';
-import { useAuthStore } from './stores/authStore';
-import { useToastStore } from './stores/toastStore';
-import { useGitStore } from './stores/gitStore';
-import { useSelectionStore } from './stores/selectionStore';
-import { useBackgroundFetch } from './hooks/useBackgroundFetch';
-import { useRemotePolling } from './hooks/useRemotePolling';
-import { api } from './lib/api';
-import { loadProjectPrefs, saveProjectPrefs } from './lib/projectPrefs';
-import {
-  buildCurrentDeepLink,
-  clearPendingDeepLinkPage,
-  currentHashPath,
-  isValidDeepLinkPath,
-  takePendingDeepLinkPage,
-} from './lib/deepLinks';
 
 // Lazy-load pages for smaller initial bundle
 const ChangesPage = lazy(() => import('./pages/ChangesPage').then(m => ({ default: m.ChangesPage })));
@@ -1060,26 +1055,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRepo?.path]);
 
-  const showRebasePanel = currentRepo && status?.isRebasing && !dismissRebase;
-  // Cherry-pick / revert sequences used to have NO visible continuation UI
-  // (the SequencerPanel existed but was never rendered) — mount it the same
-  // way RebasePanel is mounted, driven by git status flags.
-  const sequencerKind: 'cherry-pick' | 'revert' | null =
-    status?.isCherryPicking ? 'cherry-pick' : status?.isReverting ? 'revert' : null;
-  const [dismissSequencer, setDismissSequencer] = useState(false);
-  const showSequencerPanel = currentRepo && sequencerKind && !dismissSequencer;
-  useEffect(() => {
-    setDismissSequencer(false);
-  }, [currentRepo?.path, status?.isCherryPicking, status?.isReverting]);
-  // Merge in progress: auto-mount a MergeInProgressPanel (the full MergePanel
-  // is a START dialog and requires a targetBranch). This surfaces
-  // Continue/Abort + conflicted-file list for merges started from terminal.
-  const [dismissMerge, setDismissMerge] = useState(false);
-  const showMergePanel = currentRepo && status?.isMerging && !dismissMerge;
-  useEffect(() => {
-    setDismissMerge(false);
-  }, [currentRepo?.path, status?.isMerging]);
-
   const handleFind = useCallback(() => setShowFind(true), []);
 
   // ===== Deep links (View → Go to / Copy Deep Link, Command Palette) =====
@@ -1293,22 +1268,6 @@ export default function App() {
           onCopyDeepLink: handleCopyDeepLink,
         }}
       />
-      {showRebasePanel && (
-        <RebasePanel onClose={() => setDismissRebase(true)} />
-      )}
-      {showSequencerPanel && sequencerKind && (
-        <SequencerPanel
-          kind={sequencerKind}
-          repoPath={currentRepo.path}
-          onClose={() => setDismissSequencer(true)}
-        />
-      )}
-      {showMergePanel && (
-        <MergeInProgressPanel
-          repoPath={currentRepo.path}
-          onClose={() => setDismissMerge(true)}
-        />
-      )}
     </div>
   );
 }

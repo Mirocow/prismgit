@@ -1,0 +1,25 @@
+{
+  "version": "3.1.1",
+  "lastModified": "2026-09-11T02:34:23.256Z",
+  "folders": [],
+  "bookmarks": [
+    {
+      "id": "mtwcdk2bur23j46yt7",
+      "name": "const renderFileRow = (file: FileStatus, isStaged: boolean) => {",
+      "file": "src/pages/ChangesPage.tsx",
+      "line": 1143,
+      "character": 20,
+      "lineContent": "const renderFileRow = (file: FileStatus, isStaged: boolean) => {",
+      "sortOrder": 0
+    },
+    {
+      "id": "mtwceu8ovtd0ayzxbgl",
+      "name": "onContextMenu={(e) => {",
+      "file": "src/pages/ChangesPage.tsx",
+      "line": 1207,
+      "character": 24,
+      "lineContent": "onContextMenu={(e) => {",
+      "sortOrder": 1
+    }
+  ]
+}
