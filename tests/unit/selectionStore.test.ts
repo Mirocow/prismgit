@@ -89,27 +89,29 @@ describe('selectionStore', () => {
     expect(s.fileExtensionFilter).toBe('.ts');
   });
 
-  it('fileStatusFilter single-select works', () => {
-    useSelectionStore.getState().setFileStatusFilter('modified');
-    expect(useSelectionStore.getState().fileStatusFilter).toBe('modified');
-  });
+  it('file display flags: toggle adds, removes, and clears to defaults', () => {
+    // Default: subdirectories + unversioned
+    expect(useSelectionStore.getState().fileDisplayFlags.has('subdirectories')).toBe(true);
+    expect(useSelectionStore.getState().fileDisplayFlags.has('unversioned')).toBe(true);
+    expect(useSelectionStore.getState().fileDisplayFlags.has('unchanged')).toBe(false);
 
-  it('toggleFileStatusFilter adds, removes and clears multi-status set', () => {
-    useSelectionStore.getState().toggleFileStatusFilter('staged');
-    useSelectionStore.getState().toggleFileStatusFilter('untracked');
-    let set = useSelectionStore.getState().fileStatusFilterSet;
-    expect(set.has('staged')).toBe(true);
-    expect(set.has('untracked')).toBe(true);
-    useSelectionStore.getState().toggleFileStatusFilter('staged');
-    set = useSelectionStore.getState().fileStatusFilterSet;
-    expect(set.has('staged')).toBe(false);
-    useSelectionStore.getState().clearFileStatusFilterSet();
-    // clearFileStatusFilterSet now resets to MADS default (Modified, Added, Deleted, Staged)
-    expect(useSelectionStore.getState().fileStatusFilterSet.size).toBe(4);
-    expect(useSelectionStore.getState().fileStatusFilterSet.has('modified')).toBe(true);
-    expect(useSelectionStore.getState().fileStatusFilterSet.has('added')).toBe(true);
-    expect(useSelectionStore.getState().fileStatusFilterSet.has('deleted')).toBe(true);
-    expect(useSelectionStore.getState().fileStatusFilterSet.has('staged')).toBe(true);
+    // Toggle 'unchanged' ON
+    useSelectionStore.getState().toggleFileDisplayFlag('unchanged');
+    expect(useSelectionStore.getState().fileDisplayFlags.has('unchanged')).toBe(true);
+
+    // Toggle 'unchanged' OFF
+    useSelectionStore.getState().toggleFileDisplayFlag('unchanged');
+    expect(useSelectionStore.getState().fileDisplayFlags.has('unchanged')).toBe(false);
+
+    // Toggle 'unversioned' OFF
+    useSelectionStore.getState().toggleFileDisplayFlag('unversioned');
+    expect(useSelectionStore.getState().fileDisplayFlags.has('unversioned')).toBe(false);
+
+    // Clear resets to defaults
+    useSelectionStore.getState().clearFileDisplayFlags();
+    expect(useSelectionStore.getState().fileDisplayFlags.has('subdirectories')).toBe(true);
+    expect(useSelectionStore.getState().fileDisplayFlags.has('unversioned')).toBe(true);
+    expect(useSelectionStore.getState().fileDisplayFlags.size).toBe(2);
   });
 
   it('file scope, sort, regex flag, dir tree visibility', () => {

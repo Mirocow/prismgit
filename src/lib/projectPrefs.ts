@@ -33,8 +33,6 @@ export interface ProjectPrefs {
   fileViewMode?: 'tree' | 'flat';
   commitViewMode?: 'tree' | 'flat';
   compressFilePaths?: boolean;
-  fileStatusFilter?: 'all' | 'modified' | 'added' | 'deleted' | 'untracked';
-  fileStatusFilterSet?: Array<'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed'>;
   fileSort?: { key: FileSortKey; dir: 1 | -1 };
   fileFilterRegex?: boolean;
   dirTreeVisible?: boolean;

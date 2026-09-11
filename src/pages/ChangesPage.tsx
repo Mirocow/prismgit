@@ -22,7 +22,7 @@ import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useSelectionStore } from '../stores/selectionStore';
+import { useSelectionStore, type FileDisplayFlag } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 
@@ -151,11 +151,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const setGroupByState = useSelectionStore((s) => s.setGroupByState);
   const compressFilePaths = useSelectionStore((s) => s.compressFilePaths);
   const setCompressFilePaths = useSelectionStore((s) => s.setCompressFilePaths);
-  const fileStatusFilter = useSelectionStore((s) => s.fileStatusFilter);
-  const setFileStatusFilter = useSelectionStore((s) => s.setFileStatusFilter);
-  const fileStatusFilterSet = useSelectionStore((s) => s.fileStatusFilterSet);
-  const toggleFileStatusFilter = useSelectionStore((s) => s.toggleFileStatusFilter);
-  const clearFileStatusFilterSet = useSelectionStore((s) => s.clearFileStatusFilterSet);
+  const fileDisplayFlags = useSelectionStore((s) => s.fileDisplayFlags);
+  const toggleFileDisplayFlag = useSelectionStore((s) => s.toggleFileDisplayFlag);
   const fileScopeDir = useSelectionStore((s) => s.fileScopeDir);
   const setFileScopeDir = useSelectionStore((s) => s.setFileScopeDir);
   const fileSort = useSelectionStore((s) => s.fileSort);
@@ -1016,25 +1013,14 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     });
   };
 
-  // Multi-select status set helper — wrapped in useCallback so useMemo
-  // dependencies are stable and the filter re-runs whenever fileStatusFilterSet changes.
-  const matchesStatusSet = useCallback((file: FileStatus, isStaged: boolean): boolean => {
-    if (fileStatusFilterSet.size === 0) return true;
-    const idx = file.index as string;
-    const wd = file.working_dir as string;
-    const code = idx !== ' ' && idx !== '?' ? idx : wd;
-    if (fileStatusFilterSet.has('staged') && isStaged) return true;
-    if (fileStatusFilterSet.has('unstaged') && !isStaged) return true;
-    if (fileStatusFilterSet.has('modified') && (code === 'M' || code === 'R' || code === 'C' || code === 'T')) return true;
-    if (fileStatusFilterSet.has('added') && code === 'A') return true;
-    if (fileStatusFilterSet.has('deleted') && code === 'D') return true;
-    if (fileStatusFilterSet.has('renamed') && (code === 'R' || code === 'C')) return true;
-    if (fileStatusFilterSet.has('untracked') && code === '?') return true;
-    return false;
-  }, [fileStatusFilterSet]);
+  // File display flags — SmartGit-style toggles.
+  // Default: subdirectories (flat list) + unversioned (show new files).
+  // Changed files are ALWAYS shown. Flags ADD categories (union).
+  const hasFlag = useCallback((flag: FileDisplayFlag) => fileDisplayFlags.has(flag), [fileDisplayFlags]);
 
   // Memoize file lists to avoid re-sorting on every render (e.g. when
   // hovering over rows causes a re-render but status hasn't changed).
+  // Staged files go to their own section — NOT affected by display flags.
   const stagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
     // Exclude conflicted files (UU/AU/UA/DD etc.) — they show in the
     // Conflicts section, NOT in Staged. A conflicted file has index='U'
@@ -1049,18 +1035,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
-    .filter(f => matchesStatusSet(f, true))
-    .filter(f => {
-      if (fileStatusFilter === 'all') return true;
-      const idx = f.index as string;
-      const code = idx !== ' ' && idx !== '?' ? idx : (f.working_dir as string);
-      if (fileStatusFilter === 'modified') return code === 'M' || code === 'R' || code === 'C' || code === 'T';
-      if (fileStatusFilter === 'added') return code === 'A';
-      if (fileStatusFilter === 'deleted') return code === 'D';
-      if (fileStatusFilter === 'untracked') return code === '?';
-      return true;
-    })), [status, sortFiles, fileStatusFilter, matchesStatusSet]);
+    ), [status, sortFiles, fileDisplayFlags]);
 
+  // Unstaged (changed, non-staged) files — always visible (default).
   const unstagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
     // Exclude conflicted files — they show in the Conflicts section only.
     const idx = f.index as string;
@@ -1068,8 +1045,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     if (idx === 'U' || wd === 'U') return false;
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) {
-      // Exclude untracked ('??') — they render in their own Untracked section;
-      // including them here duplicated every untracked file in both sections.
+      // Exclude untracked ('??') from the unstaged list — they render in
+      // their own Untracked section (if 'unversioned' flag is ON).
       return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');
     }
     const stagedWd = staged.working_dir as string;
@@ -1077,20 +1054,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
-    .filter(f => matchesStatusSet(f, false))
-    .filter(f => {
-      if (fileStatusFilter === 'all') return true;
-      const idx = f.index as string;
-      const code = idx !== ' ' && idx !== '?' ? idx : (f.working_dir as string);
-      if (fileStatusFilter === 'modified') return code === 'M' || code === 'R' || code === 'C' || code === 'T';
-      if (fileStatusFilter === 'added') return code === 'A';
-      if (fileStatusFilter === 'deleted') return code === 'D';
-      if (fileStatusFilter === 'untracked') return code === '?';
-      return true;
-    })), [status, sortFiles, fileStatusFilter, matchesStatusSet]);
+    ), [status, sortFiles, fileDisplayFlags]);
 
   // Conflicted files — shown in their OWN section (red accent) ABOVE staged.
-  // These are files with index='U' or working_dir='U' in git porcelain.
   const conflictedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
     const idx = f.index as string;
     const wd = f.working_dir as string;
@@ -1099,18 +1065,17 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))), [status, sortFiles]);
 
-  const untrackedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
-    const idx = f.index as string;
-    const wd = f.working_dir as string;
-    return idx === '?' && wd === '?';
-  }).filter((f) => matchesFileFilter(f.path))
-    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-    .filter((f) => matchesDirScope(f.path))
-    .filter((f) => matchesStatusSet(f, false))
-    .filter(() => {
-      if (fileStatusFilter === 'all' || fileStatusFilter === 'untracked') return true;
-      return false;
-    })), [status, sortFiles, fileFilter, fileStatusFilter, matchesStatusSet, fileScopeDir]);
+  // Untracked files — shown only when 'unversioned' flag is ON.
+  const untrackedFiles: FileStatus[] = useMemo(() => {
+    if (!hasFlag('unversioned')) return [];
+    return sortFiles((status?.files || []).filter((f) => {
+      const idx = f.index as string;
+      const wd = f.working_dir as string;
+      return idx === '?' && wd === '?';
+    }).filter((f) => matchesFileFilter(f.path))
+      .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+      .filter((f) => matchesDirScope(f.path)));
+  }, [status, sortFiles, hasFlag, fileFilter, fileScopeDir]);
 
   // Ctrl/Cmd+A: select all visible files in the file list
   // (placed after stagedFiles/unstagedFiles/untrackedFiles are declared)
@@ -1375,17 +1340,11 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               {t('changes.stagedUnstagedCounts', { staged: stagedFiles.length, unstaged: unstagedFiles.length + untrackedFiles.length })}
             </span>
           )}
-          {hiddenCount > 0 && (
+          {hiddenCount > 0 && !hasFlag('unchanged') && (
             <button
               className="clickable-text text-2xs"
-              title={t('changes.hiddenFilesTitle')}
-              onClick={() => {
-                // Toggle showing all tracked files (even unchanged).
-                // We piggyback on the file status filter — when ALL is set,
-                // the file list includes unchanged tracked files too.
-                const store = useSelectionStore.getState();
-                store.setFileStatusFilter(store.fileStatusFilter === 'all' ? 'modified' : 'all');
-              }}
+              title="Show unchanged files"
+              onClick={() => toggleFileDisplayFlag('unchanged')}
             >
               {t('changes.filesHidden', { count: hiddenCount.toLocaleString() })}
             </button>
@@ -1409,76 +1368,34 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           >
             .*
           </button>
-          {/* Multi-select status filter — SmartGit-style icon toolbar buttons + dropdown */}
+          {/* File display flags — SmartGit-style toggle buttons.
+              Default: Subdir + Unver ON. Changed files always visible.
+              Flags ADD categories (union). Staged files go to their own section. */}
           <div className="flex items-center gap-0.5">
-            {/* Quick toggle buttons — SmartGit uses small icon buttons above the table */}
             {([
-              { id: 'modified', label: 'M', title: t('changes.showModifiedFiles'), color: 'text-status-modified' },
-              { id: 'added', label: 'A', title: t('changes.showAddedFiles'), color: 'text-status-added' },
-              { id: 'deleted', label: 'D', title: t('changes.showDeletedFiles'), color: 'text-status-deleted' },
-              { id: 'untracked', label: 'U', title: t('changes.showUntrackedFiles'), color: 'text-status-untracked' },
-              { id: 'staged', label: 'S', title: t('changes.showStagedFiles'), color: 'text-status-added' },
-              { id: 'unstaged', label: 'U2', title: t('changes.showUnstagedFiles'), color: 'text-status-modified' },
-            ] as const).map(opt => (
+              { id: 'subdirectories' as const, label: 'Dir', title: 'Files From Subdirectories' },
+              { id: 'unchanged' as const, label: 'Unch', title: 'Show Unchanged Files' },
+              { id: 'unversioned' as const, label: 'Unver', title: 'Show Unversioned Files' },
+              { id: 'ignored' as const, label: 'Ign', title: 'Show Ignored Files' },
+              { id: 'assumeUnchanged' as const, label: '?', title: 'Show Assume-Unchanged Files' },
+              { id: 'skipped' as const, label: 'Skip', title: 'Show Skipped Files' },
+              { id: 'movedRename' as const, label: 'Move', title: 'Show Rename Source Files' },
+              { id: 'submodules' as const, label: 'Subm', title: 'Show Files From Submodules' },
+            ]).map(opt => (
               <button
                 key={opt.id}
                 className={cn(
-                  'text-2xs w-5 h-5 rounded flex items-center justify-center font-mono font-bold transition-colors',
-                  fileStatusFilterSet.has(opt.id)
+                  'text-2xs px-1.5 h-5 rounded flex items-center justify-center font-mono font-bold transition-colors',
+                  hasFlag(opt.id)
                     ? 'bg-accent-muted text-accent'
                     : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'
                 )}
                 title={opt.title}
-                onClick={() => toggleFileStatusFilter(opt.id)}
+                onClick={() => toggleFileDisplayFlag(opt.id)}
               >
                 {opt.label}
               </button>
             ))}
-          </div>
-          {/* Dropdown for more options */}
-          <div className="relative">
-            <button
-              className={cn('text-2xs px-2 py-0.5 border rounded flex items-center gap-1',
-                fileStatusFilterSet.size > 0
-                  ? 'border-accent bg-accent-muted text-accent'
-                  : 'border-border-default bg-bg-tertiary text-text-secondary')}
-              onClick={() => setShowStatusPicker(!showStatusPicker)}
-              title={t('changes.filterByStatusTitle')}
-            >
-              <span>{t('changes.statusLabel')}</span>
-              <span>{fileStatusFilterSet.size > 0 ? t('changes.nFilters', { count: fileStatusFilterSet.size }) : t('common.all')}</span>
-              <ChevronDown size={9} />
-            </button>
-            {showStatusPicker && (
-              <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-56">
-                <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs border-b border-border-subtle">
-                  <input type="checkbox"
-                    checked={fileStatusFilterSet.size === 4 && fileStatusFilterSet.has('modified') && fileStatusFilterSet.has('added') && fileStatusFilterSet.has('deleted') && fileStatusFilterSet.has('staged')}
-                    onChange={() => clearFileStatusFilterSet()}
-                  />
-                  <span className="font-medium">{t('changes.defaultMads')}</span>
-                </label>
-                {([
-                  { id: 'staged', label: t('changes.statusStaged') },
-                  { id: 'unstaged', label: t('changes.statusUnstaged') },
-                  { id: 'modified', label: t('changes.statusModified') },
-                  { id: 'added', label: t('changes.statusAddedNew') },
-                  { id: 'deleted', label: t('changes.statusDeleted') },
-                  { id: 'renamed', label: t('changes.statusRenamed') },
-                  { id: 'untracked', label: t('changes.statusUntracked') },
-                ] as const).map(opt => (
-                  <label key={opt.id} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
-                    <input type="checkbox" checked={fileStatusFilterSet.has(opt.id)}
-                      onChange={() => toggleFileStatusFilter(opt.id)} />
-                    <span>{opt.label}</span>
-                  </label>
-                ))}
-                <div className="px-3 py-1 border-t border-border-subtle flex justify-between">
-                  <button className="text-2xs text-accent" onClick={() => clearFileStatusFilterSet()}>{t('common.clear')}</button>
-                  <button className="text-2xs btn btn-primary !py-0.5 !px-2" onClick={() => setShowStatusPicker(false)}>{t('changes.done')}</button>
-                </div>
-              </div>
-            )}
           </div>
           {/* Extension filter */}
           <input
@@ -1635,7 +1552,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           <div className={cn(
             'flex-1 overflow-y-auto transition-colors',
             // Light red: committable files (untracked/modified) are being hidden by state filter
-            (fileStatusFilterSet.size > 0 && !fileStatusFilterSet.has('untracked') && !fileStatusFilterSet.has('modified')) ? 'bg-red-50 dark:bg-red-950/10' : '',
+            !hasFlag('unversioned') ? 'bg-red-50 dark:bg-red-950/10' : '',
             // Light yellow: files are being name-filtered
             (fileFilter.trim().length > 0) ? 'bg-yellow-50 dark:bg-yellow-950/10' : '',
           )}>

@@ -27,6 +27,38 @@
 import { create } from 'zustand';
 import type { ProjectPrefs } from '../lib/projectPrefs';
 
+/**
+ * File display flags — SmartGit-style toggles that control which categories of
+ * files appear in the Changes file list.
+ *
+ * Default: only 'subdirectories' + 'unversioned' are ON.
+ *   - 'subdirectories' ON → flat list (show files from all subdirectories)
+ *   - 'unversioned' ON → show untracked files (new files not yet added to git)
+ *
+ * All other flags are OFF by default:
+ *   - 'unchanged' OFF → don't show unchanged tracked files (only changed)
+ *   - 'ignored' OFF → don't show .gitignore'd files
+ *   - 'assumeUnchanged' OFF → don't show files with --assume-unchanged flag
+ *   - 'skipped' OFF → don't show files with --skip-worktree flag
+ *   - 'movedRename' OFF → don't show rename source (old path) for renamed files
+ *   - 'submodules' OFF → show submodules as single entries, not expanded
+ *
+ * Flags work by UNION — each active flag ADDS its category to the file list.
+ * Staged files always go to their own section and are NOT affected by flags.
+ */
+export type FileDisplayFlag =
+  | 'subdirectories'   // Files From Subdirectories (flat list vs tree)
+  | 'unchanged'        // Show Unchanged Files (tracked, not modified)
+  | 'unversioned'      // Show Unversioned Files (untracked, ??)
+  | 'ignored'          // Show Ignored Files (.gitignore'd)
+  | 'assumeUnchanged'  // Show Assume-Unchanged Files (--assume-unchanged)
+  | 'skipped'          // Show Skipped Files (--skip-worktree)
+  | 'movedRename'      // Show Rename Source Files (old path for renames)
+  | 'submodules';      // Show Files From Submodules (expanded, not single entry)
+
+/** Default flags: 'subdirectories' (flat list) + 'unversioned' (show new files). */
+const DEFAULT_FILE_DISPLAY_FLAGS = new Set<FileDisplayFlag>(['subdirectories', 'unversioned']);
+
 export interface GlobalSelectionState {
   /** Currently selected commit hash (across History, Tags, Reflog, Annotate). */
   selectedCommitHash: string | null;
@@ -56,10 +88,13 @@ export interface GlobalSelectionState {
   compressFilePaths: boolean;
   /** File extension filter — null = all, otherwise e.g. '.ts'. */
   fileExtensionFilter: string | null;
-  /** Status filter for file lists: 'all' | 'modified' | 'added' | 'deleted' | 'untracked'. */
-  fileStatusFilter: 'all' | 'modified' | 'added' | 'deleted' | 'untracked';
-  /** Multi-select file status filter — empty set means all statuses visible. */
-  fileStatusFilterSet: Set<'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed'>;
+  /**
+   * File display flags — SmartGit-style toggles controlling which file categories
+   * are visible in the Changes file list. Flags are UNION'd: each active flag
+   * ADDS its category. Default: subdirectories + unversioned.
+   * NOT persisted to projectPrefs (runtime only, resets on repo open).
+   */
+  fileDisplayFlags: Set<FileDisplayFlag>;
   /** File scope: 'all' = include nested directories, 'top' = current directory only. */
   fileScope: 'all' | 'top';
   /** Directory scope for the Changes file list (absolute-relative dir path, null = whole repo). */
@@ -102,9 +137,10 @@ export interface GlobalSelectionState {
   setCommitViewMode: (mode: 'tree' | 'flat') => void;
   setCompressFilePaths: (compress: boolean) => void;
   setFileExtensionFilter: (ext: string | null) => void;
-  setFileStatusFilter: (filter: 'all' | 'modified' | 'added' | 'deleted' | 'untracked') => void;
-  toggleFileStatusFilter: (status: 'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed') => void;
-  clearFileStatusFilterSet: () => void;
+  /** Toggle a file display flag (subdirectories / unchanged / unversioned / etc). */
+  toggleFileDisplayFlag: (flag: FileDisplayFlag) => void;
+  /** Reset all file display flags to defaults (subdirectories + unversioned). */
+  clearFileDisplayFlags: () => void;
   setFileScope: (scope: 'all' | 'top') => void;
   setFileScopeDir: (dir: string | null) => void;
   setFileSort: (sort: { key: 'name' | 'state' | 'dir'; dir: 1 | -1 }) => void;
@@ -118,6 +154,10 @@ export interface GlobalSelectionState {
    * Apply per-project UI preferences (loaded from projectPrefs).
    * Keys absent from the prefs object fall back to defaults, so switching
    * repositories never leaks the previous repo's view modes or filters.
+   *
+   * NOTE: fileDisplayFlags is NOT restored from prefs — always uses the default
+   * (subdirectories + unversioned) so the user sees a consistent view on every
+   * repo open.
    */
   applyProjectPrefs: (prefs: ProjectPrefs) => void;
   /** Clear all selections (e.g. when switching repos). */
@@ -139,9 +179,9 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   commitViewMode: 'tree',
   compressFilePaths: true,
   fileExtensionFilter: null,
-  fileStatusFilter: 'all',
-  // MADS active by default: Modified, Added, Deleted, Staged
-  fileStatusFilterSet: new Set(['modified', 'added', 'deleted', 'staged'] as Array<'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed'>),
+  // Default: subdirectories (flat list) + unversioned (show new files).
+  // All other flags OFF — only Changed files are shown by default.
+  fileDisplayFlags: new Set(DEFAULT_FILE_DISPLAY_FLAGS),
   fileScope: 'all',
   fileScopeDir: null,
   fileSort: { key: 'name', dir: 1 },
@@ -153,21 +193,18 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   selectCommit: (hash) => set({ selectedCommitHash: hash }),
   selectBranch: (name) => set({
     selectedBranch: name,
-    // Clear multi-select when picking a single branch
     selectedBranches: new Set(),
   }),
   selectFile: (path) => set({ selectedFilePath: path }),
   selectTag: (name) => set({ selectedTag: name }),
   selectStash: (index, hash) => set({
     selectedStashIndex: index,
-    // Keep hash consistent with index: null index → null hash
     selectedStashHash: index == null ? null : (hash ?? get().selectedStashHash),
   }),
   toggleBranch: (name) => {
     const next = new Set(get().selectedBranches);
     if (next.has(name)) next.delete(name);
     else next.add(name);
-    // Clear single-branch filter when using multi-select
     set({ selectedBranches: next, selectedBranch: next.size > 0 ? null : get().selectedBranch });
   },
   clearBranches: () => set({ selectedBranches: new Set(), selectedBranch: null }),
@@ -178,14 +215,13 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   setCommitViewMode: (mode) => set({ commitViewMode: mode }),
   setCompressFilePaths: (compress) => set({ compressFilePaths: compress }),
   setFileExtensionFilter: (ext) => set({ fileExtensionFilter: ext }),
-  setFileStatusFilter: (filter) => set({ fileStatusFilter: filter }),
-  toggleFileStatusFilter: (status) => {
-    const next = new Set(get().fileStatusFilterSet);
-    if (next.has(status)) next.delete(status);
-    else next.add(status);
-    set({ fileStatusFilterSet: next });
+  toggleFileDisplayFlag: (flag) => {
+    const next = new Set(get().fileDisplayFlags);
+    if (next.has(flag)) next.delete(flag);
+    else next.add(flag);
+    set({ fileDisplayFlags: next });
   },
-  clearFileStatusFilterSet: () => set({ fileStatusFilterSet: new Set(['modified', 'added', 'deleted', 'staged'] as Array<'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed'>) }),
+  clearFileDisplayFlags: () => set({ fileDisplayFlags: new Set(DEFAULT_FILE_DISPLAY_FLAGS) }),
   setFileScope: (scope) => set({ fileScope: scope }),
   setFileScopeDir: (dir) => set({ fileScopeDir: dir }),
   setFileSort: (sort) => set({ fileSort: sort }),
@@ -197,12 +233,11 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
     fileViewMode: prefs.fileViewMode ?? 'flat',
     commitViewMode: prefs.commitViewMode ?? 'tree',
     compressFilePaths: prefs.compressFilePaths ?? true,
-    fileStatusFilter: prefs.fileStatusFilter ?? 'all',
-    fileStatusFilterSet: new Set(prefs.fileStatusFilterSet ?? ['modified', 'added', 'deleted', 'staged']),
     fileSort: prefs.fileSort ?? { key: 'name', dir: 1 },
     fileFilterRegex: prefs.fileFilterRegex ?? false,
     dirTreeVisible: prefs.dirTreeVisible ?? false,
     colWidths: prefs.colWidths ?? { state: 70, dir: 120 },
+    // fileDisplayFlags is NOT restored from prefs — always use defaults.
   }),
   clearAll: () => set({
     selectedCommitHash: null,

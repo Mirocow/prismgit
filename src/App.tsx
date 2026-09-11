@@ -199,12 +199,11 @@ export default function App() {
     if (!repoPath) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const unsub = useSelectionStore.subscribe((state, prev) => {
+      // fileDisplayFlags is NOT persisted — runtime only.
       const changed =
         state.fileViewMode !== prev.fileViewMode ||
         state.commitViewMode !== prev.commitViewMode ||
         state.compressFilePaths !== prev.compressFilePaths ||
-        state.fileStatusFilter !== prev.fileStatusFilter ||
-        state.fileStatusFilterSet !== prev.fileStatusFilterSet ||
         state.fileSort !== prev.fileSort ||
         state.fileFilterRegex !== prev.fileFilterRegex ||
         state.dirTreeVisible !== prev.dirTreeVisible ||
@@ -217,8 +216,6 @@ export default function App() {
           fileViewMode: s.fileViewMode,
           commitViewMode: s.commitViewMode,
           compressFilePaths: s.compressFilePaths,
-          fileStatusFilter: s.fileStatusFilter,
-          fileStatusFilterSet: Array.from(s.fileStatusFilterSet),
           fileSort: s.fileSort,
           fileFilterRegex: s.fileFilterRegex,
           dirTreeVisible: s.dirTreeVisible,
