@@ -20,6 +20,7 @@ import {
 } from '../components/icons';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
+import { RepoStateBanner } from '../components/RepoStateBanner';
 import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
 import { api, type BranchInfo, type CommitFile, type LogEntry, type RecyclableCommit, type StashEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
@@ -31,6 +32,7 @@ import { RefBadges } from '../lib/refBadge';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { useLazyList } from '../lib/useLazyList';
 import { cn, copyToClipboard, shortHash } from '../lib/utils';
+import { buildRepoStateHandlers } from '../lib/repoState';
 import { useAuthStore } from '../stores/authStore';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
@@ -1065,6 +1067,20 @@ export function HistoryPage() {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      {/* RepoStateBanner — same as in DiffPage and ChangesPage: surfaces the
+          Continue/Abort/Mark HEAD/etc. actions for any in-progress git state
+          (merge / rebase / cherry-pick / revert / bisect). Renders nothing
+          when the working tree is idle. */}
+      <RepoStateBanner
+        status={status}
+        busy={false}
+        handlers={buildRepoStateHandlers(
+          repo.path,
+          (args) => api.git.raw(repo.path, args),
+          () => refreshStatus(repo.path),
+          toast,
+        )}
+      />
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default bg-bg-tertiary" style={{ height: 32 }}>
         <div className="flex items-center gap-2">

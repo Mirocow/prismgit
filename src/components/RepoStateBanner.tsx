@@ -1,51 +1,61 @@
 import type { StatusResult } from '../lib/api';
 import { getRepoInProgressState } from '../lib/repoState';
 import { shortHash } from '../lib/utils';
-import { AlertTriangle, Check, X, SkipForward, Undo, Package } from './icons';
+import { AlertTriangle, Check, X, Undo } from './icons';
 
 /**
  * Per-state resolution actions. Every group is optional so callers can wire
  * only the states they support — the banner renders buttons for the ACTIVE
  * state only.
+ *
+ * Button set per state (strict — NO other buttons are rendered):
+ *   cherry-picking  → Continue, Abort
+ *   reverting        → Continue, Abort
+ *   merging          → Abort
+ *   rebasing         → Continue, Abort
+ *   bisecting        → Mark HEAD as Bad, Mark HEAD as Good, Abort
+ *
+ * (bisect-multi, cherry-pick-empty, multi-conflict, rebase-multi-step are
+ *  variations of the same underlying git state and surface the SAME button
+ *  set as their base state.)
  */
 export interface RepoStateHandlers {
   cherryPick?: {
     onContinue: () => void;
-    onSkip: () => void;
+    onSkip?: () => void;
     /** Finalize the empty pick as an empty commit (git commit --allow-empty). */
-    onCommitEmpty: () => void;
+    onCommitEmpty?: () => void;
     onAbort: () => void;
   };
-  revert?: { onContinue: () => void; onSkip: () => void; onAbort: () => void };
+  revert?: { onContinue: () => void; onSkip?: () => void; onAbort: () => void };
   merge?: { onAbort: () => void };
-  rebase?: { onContinue: () => void; onSkip: () => void; onAbort: () => void };
-  bisect?: { onGood: () => void; onBad: () => void; onSkip: () => void; onReset: () => void };
-  /**
-   * Stash ALL local changes (including untracked) and abort the in-progress
-   * operation. SmartGit pattern: when conflicts are overwhelming, stash
-   * everything away and start fresh. The stash is recoverable later.
-   * Runs: git stash push -u -m "auto-stash before abort" → then abort.
-   */
-  onStashAll?: () => void;
+  rebase?: { onContinue: () => void; onSkip?: () => void; onAbort: () => void };
+  bisect?: {
+    onGood: () => void;
+    onBad: () => void;
+    onSkip?: () => void;
+    /** End the bisect session — wired to the "Abort" button (git bisect reset). */
+    onReset: () => void;
+  };
 }
 
 export interface RepoStateBannerProps {
-  status: StatusResult;
+  status: StatusResult | null;
   busy?: boolean;
   handlers: RepoStateHandlers;
 }
 
 const FOOTERS: Record<string, string> = {
   'cherry-picking':
-    'Only Abort / Continue are allowed — Pull, Checkout and Commit would lead to loss of the picked commit. Fetch is still available.',
+    'Only Continue / Abort are allowed — Pull, Checkout and Commit would lead to loss of the picked commit. Fetch is still available.',
   'reverting':
-    'Only Abort / Continue are allowed — Pull, Checkout and Commit would lead to loss of the revert. Fetch is still available.',
+    'Only Continue / Abort are allowed — Pull, Checkout and Commit would lead to loss of the revert. Fetch is still available.',
   'merging':
-    'Resolve conflicts and Commit to complete the merge, or Abort Merge — Pull, Checkout and Reset would discard the merge. Fetch is still available.',
+    'Resolve conflicts and Commit to complete the merge, or Abort — Pull, Checkout and Reset would discard the merge. Fetch is still available.',
   'rebasing':
-    'Only Continue / Skip / Abort are allowed — Pull, Checkout and Commit would discard the rebase. Fetch is still available.',
+    'Only Continue / Abort are allowed — Pull, Checkout and Commit would discard the rebase. Fetch is still available.',
   'bisecting':
-    'HEAD is detached at the bisect candidate — mark it Good / Bad or Reset the bisect. Pull, Checkout and Commit would interfere with the search. Fetch is still available.',
+    'HEAD is detached at the bisect candidate — mark it Good / Bad or Abort the bisect. Pull, Checkout and Commit would interfere with the search. Fetch is still available.',
 };
 
 /**
@@ -56,10 +66,21 @@ const FOOTERS: Record<string, string> = {
  * state-resolving actions enabled. Everything else (Pull, Checkout, Merge,
  * Reset) is blocked until the state resolves, because those operations would
  * discard the unfinished work.
+ *
+ * Button set is STRICT per the spec:
+ *   cherry-picking / reverting / rebasing → Continue, Abort
+ *   merging → Abort
+ *   bisecting → Mark HEAD as Bad, Mark HEAD as Good, Abort
+ * No other buttons (no Skip, no Commit Empty, no Reset, no Stash All) are
+ * rendered — those handlers exist in the interface for caller convenience
+ * but are intentionally not surfaced in the banner.
  */
 export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps) {
   const state = getRepoInProgressState(status);
-  if (!state) return null;
+  // If status is null or no in-progress state is active, render nothing.
+  // After this guard, status is guaranteed non-null because getRepoInProgressState
+  // returns null for null status.
+  if (!state || !status) return null;
 
   const detail = (() => {
     switch (state.key) {
@@ -100,13 +121,6 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
     }
   })();
 
-  const emptyHint =
-    state.key === 'cherry-picking' && status.cherryPick?.empty ? (
-      <span className="text-2xs text-status-modified" data-testid="cherry-pick-empty-hint">
-        The previous cherry-pick is now empty (nothing to commit) — use Skip or Commit Empty.
-      </span>
-    ) : null;
-
   const cp = handlers.cherryPick;
   const rv = handlers.revert;
   const mg = handlers.merge;
@@ -125,25 +139,11 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
             {state.bannerText}
           </span>
           {detail}
-          {emptyHint}
         </div>
         <div className="text-2xs text-text-tertiary mt-0.5">{FOOTERS[state.key]}</div>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
-        {/* Stash all local changes — SmartGit escape hatch when conflicts are
-            overwhelming. Stashes everything (incl. untracked) then aborts
-            the in-progress operation. The stash is recoverable via Stashes page. */}
-        {handlers.onStashAll && (
-          <button
-            className="btn btn-secondary text-2xs !py-0.5 !px-2"
-            onClick={handlers.onStashAll}
-            disabled={busy}
-            title="Stash ALL local changes (including untracked) and abort the current operation. The stash is recoverable via the Stashes page."
-          >
-            <Package size={9} /> Stash All
-          </button>
-        )}
-        {/* cherry-picking: Continue / Commit Empty / Skip / Abort */}
+        {/* cherry-picking (incl. empty & conflict): Continue, Abort */}
         {state.key === 'cherry-picking' && cp && (
           <>
             <button
@@ -153,24 +153,6 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
               title="Finish the cherry-pick: commit the picked changes into the current branch"
             >
               <Check size={9} /> Continue
-            </button>
-            {status.cherryPick?.empty && (
-              <button
-                className="btn btn-secondary text-2xs !py-0.5 !px-2"
-                onClick={cp.onCommitEmpty}
-                disabled={busy}
-                title="Commit the pick as an EMPTY commit (git commit --allow-empty)"
-              >
-                Commit Empty
-              </button>
-            )}
-            <button
-              className="btn btn-secondary text-2xs !py-0.5 !px-2"
-              onClick={cp.onSkip}
-              disabled={busy}
-              title="Skip this commit and continue with the next one in the sequence (git cherry-pick --skip)"
-            >
-              <SkipForward size={9} /> Skip
             </button>
             <button
               className="btn btn-danger text-2xs !py-0.5 !px-2"
@@ -182,7 +164,7 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
             </button>
           </>
         )}
-        {/* reverting: Continue / Skip / Abort */}
+        {/* reverting: Continue, Abort */}
         {state.key === 'reverting' && rv && (
           <>
             <button
@@ -194,14 +176,6 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
               <Check size={9} /> Continue
             </button>
             <button
-              className="btn btn-secondary text-2xs !py-0.5 !px-2"
-              onClick={rv.onSkip}
-              disabled={busy}
-              title="Skip this commit and continue with the next one in the sequence (git revert --skip)"
-            >
-              <SkipForward size={9} /> Skip
-            </button>
-            <button
               className="btn btn-danger text-2xs !py-0.5 !px-2"
               onClick={rv.onAbort}
               disabled={busy}
@@ -211,7 +185,7 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
             </button>
           </>
         )}
-        {/* merging: Abort Merge (commit completes the merge — stays available) */}
+        {/* merging (incl. multi-conflict): Abort */}
         {state.key === 'merging' && mg && (
           <button
             className="btn btn-danger text-2xs !py-0.5 !px-2"
@@ -219,10 +193,10 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
             disabled={busy}
             title="Cancel the merge and restore the pre-merge state (git merge --abort)"
           >
-            <X size={9} /> Abort Merge
+            <X size={9} /> Abort
           </button>
         )}
-        {/* rebasing: Continue / Skip / Abort */}
+        {/* rebasing (incl. multi-step): Continue, Abort */}
         {state.key === 'rebasing' && rb && (
           <>
             <button
@@ -234,14 +208,6 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
               <Check size={9} /> Continue
             </button>
             <button
-              className="btn btn-secondary text-2xs !py-0.5 !px-2"
-              onClick={rb.onSkip}
-              disabled={busy}
-              title="Skip this commit and continue with the next one (git rebase --skip)"
-            >
-              <SkipForward size={9} /> Skip
-            </button>
-            <button
               className="btn btn-danger text-2xs !py-0.5 !px-2"
               onClick={rb.onAbort}
               disabled={busy}
@@ -251,32 +217,24 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
             </button>
           </>
         )}
-        {/* bisecting: Mark Good / Mark Bad / Skip / Reset */}
+        {/* bisecting (incl. multi): Mark HEAD as Bad, Mark HEAD as Good, Abort */}
         {state.key === 'bisecting' && bs && (
           <>
-            <button
-              className="btn btn-primary text-2xs !py-0.5 !px-2"
-              onClick={bs.onGood}
-              disabled={busy}
-              title="The current revision works correctly (git bisect good)"
-            >
-              <Check size={9} /> Mark Good
-            </button>
             <button
               className="btn btn-secondary text-2xs !py-0.5 !px-2"
               onClick={bs.onBad}
               disabled={busy}
-              title="The current revision is broken (git bisect bad)"
+              title="Mark HEAD as bad — the current revision is broken (git bisect bad)"
             >
-              <X size={9} /> Mark Bad
+              <X size={9} /> Mark HEAD as Bad
             </button>
             <button
-              className="btn btn-secondary text-2xs !py-0.5 !px-2"
-              onClick={bs.onSkip}
+              className="btn btn-primary text-2xs !py-0.5 !px-2"
+              onClick={bs.onGood}
               disabled={busy}
-              title="This revision cannot be tested (git bisect skip)"
+              title="Mark HEAD as good — the current revision works correctly (git bisect good)"
             >
-              <SkipForward size={9} /> Skip
+              <Check size={9} /> Mark HEAD as Good
             </button>
             <button
               className="btn btn-danger text-2xs !py-0.5 !px-2"
@@ -284,7 +242,7 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
               disabled={busy}
               title="End the bisect session and return to the original branch (git bisect reset)"
             >
-              <Undo size={9} /> Reset
+              <Undo size={9} /> Abort
             </button>
           </>
         )}

@@ -58,8 +58,8 @@ describe('RepoStateBanner — SmartGit working-tree states (5 states)', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  // ===== cherry-picking =====
-  it('cherry-picking: banner text, pick info, Continue / Skip / Abort (no Commit Empty when not empty)', () => {
+  // ===== cherry-picking (incl. conflict & empty): Continue, Abort =====
+  it('cherry-picking: banner text, pick info, Continue / Abort (NO Skip, NO Commit Empty)', () => {
     renderBanner(makeStatus({
       isCherryPicking: true,
       cherryPick: { commit: '8962174c9225524cd57921f1150428aead800f21', subject: 'Add feature', empty: false },
@@ -68,40 +68,37 @@ describe('RepoStateBanner — SmartGit working-tree states (5 states)', () => {
       'The working tree is in cherry-picking-state.'
     );
     expect(screen.getByTestId('cherry-pick-commit')).toHaveTextContent('8962174');
-    expect(screen.queryByTestId('cherry-pick-empty-hint')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Skip' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Abort' })).toBeInTheDocument();
+    // NO Skip / Commit Empty buttons (strict spec)
+    expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Commit Empty' })).not.toBeInTheDocument();
   });
 
-  it('cherry-picking: empty pick shows the hint and the Commit Empty button', () => {
+  it('cherry-picking: empty pick ALSO shows only Continue / Abort (no Commit Empty button)', () => {
     renderBanner(makeStatus({
       isCherryPicking: true,
       cherryPick: { commit: '8962174c9225524cd57921f1150428aead800f21', subject: 'Add feature', empty: true },
     }));
-    expect(screen.getByTestId('cherry-pick-empty-hint')).toHaveTextContent(
-      'The previous cherry-pick is now empty'
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Commit Empty' }));
-    expect(handlers.cherryPick.onCommitEmpty).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Abort' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Commit Empty' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
   });
 
-  it('cherry-picking: buttons fire the right callbacks', () => {
+  it('cherry-picking: buttons fire Continue / Abort callbacks', () => {
     renderBanner(makeStatus({
       isCherryPicking: true,
       cherryPick: { commit: 'abc', subject: '', empty: false },
     }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
     fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
     expect(handlers.cherryPick.onContinue).toHaveBeenCalledTimes(1);
-    expect(handlers.cherryPick.onSkip).toHaveBeenCalledTimes(1);
     expect(handlers.cherryPick.onAbort).toHaveBeenCalledTimes(1);
   });
 
-  // ===== reverting =====
-  it('reverting: banner text, revert info, Continue / Skip / Abort', () => {
+  // ===== reverting: Continue, Abort =====
+  it('reverting: banner text, revert info, Continue / Abort (NO Skip)', () => {
     renderBanner(makeStatus({
       isReverting: true,
       revert: { commit: 'aaaabbbbccccddddeeeeffff0000111122223333', subject: 'Buggy change' },
@@ -113,16 +110,14 @@ describe('RepoStateBanner — SmartGit working-tree states (5 states)', () => {
     expect(screen.getByTestId('revert-commit')).toHaveTextContent('Buggy change');
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(handlers.revert.onContinue).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
-    expect(handlers.revert.onSkip).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
     expect(handlers.revert.onAbort).toHaveBeenCalledTimes(1);
-    // cherry-pick buttons must NOT be rendered
-    expect(handlers.cherryPick.onContinue).not.toHaveBeenCalled();
+    // NO Skip button
+    expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
   });
 
-  // ===== merging =====
-  it('merging: banner text, merge message and ONLY Abort Merge (commit completes the merge)', () => {
+  // ===== merging (incl. multi-conflict): Abort only =====
+  it('merging: banner text, merge message and ONLY Abort (no Continue, no Skip)', () => {
     renderBanner(makeStatus({
       isMerging: true,
       merge: { message: "Merge branch 'feature/x'" },
@@ -131,16 +126,17 @@ describe('RepoStateBanner — SmartGit working-tree states (5 states)', () => {
       'The working tree is in merging-state.'
     );
     expect(screen.getByTestId('merge-message')).toHaveTextContent("Merge branch 'feature/x'");
-    expect(screen.getByRole('button', { name: 'Abort Merge' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Abort' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Abort Merge' }));
+    expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
     expect(handlers.merge.onAbort).toHaveBeenCalledTimes(1);
     // A plain Commit is the way to COMPLETE a merge — not blocked
     expect(isCommitBlocked(makeStatus({ isMerging: true }))).toBe(false);
   });
 
-  // ===== rebasing =====
-  it('rebasing: banner text, progress and Continue / Skip / Abort', () => {
+  // ===== rebasing (incl. multi-step): Continue, Abort =====
+  it('rebasing: banner text, progress and Continue / Abort (NO Skip, but Step X of Y)', () => {
     renderBanner(makeStatus({
       isRebasing: true,
       rebase: { step: 2, total: 5 },
@@ -151,14 +147,14 @@ describe('RepoStateBanner — SmartGit working-tree states (5 states)', () => {
     expect(screen.getByTestId('rebase-progress')).toHaveTextContent('Step 2 of 5');
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(handlers.rebase.onContinue).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
-    expect(handlers.rebase.onSkip).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
     expect(handlers.rebase.onAbort).toHaveBeenCalledTimes(1);
+    // NO Skip button
+    expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
   });
 
-  // ===== bisecting =====
-  it('bisecting: banner text, candidate rev, Good / Bad / Skip / Reset', () => {
+  // ===== bisecting (incl. multi): Mark HEAD as Bad, Mark HEAD as Good, Abort =====
+  it('bisecting: banner text, candidate rev, Mark HEAD as Bad / Good / Abort (NO Skip, NO Reset button)', () => {
     renderBanner(makeStatus({
       isBisecting: true,
       bisect: { rev: '1111222233334444555566667777888899990000' },
@@ -168,14 +164,16 @@ describe('RepoStateBanner — SmartGit working-tree states (5 states)', () => {
       'The working tree is in bisecting-state.'
     );
     expect(screen.getByTestId('bisect-rev')).toHaveTextContent('Testing 1111222');
-    fireEvent.click(screen.getByRole('button', { name: 'Mark Good' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark HEAD as Good' }));
     expect(handlers.bisect.onGood).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Mark Bad' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark HEAD as Bad' }));
     expect(handlers.bisect.onBad).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
-    expect(handlers.bisect.onSkip).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    // The "Abort" button is wired to onReset (git bisect reset ends the session)
+    fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
     expect(handlers.bisect.onReset).toHaveBeenCalledTimes(1);
+    // NO Skip / Reset buttons (the Reset action is labeled "Abort")
+    expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
   });
 
   // ===== busy =====
@@ -184,7 +182,7 @@ describe('RepoStateBanner — SmartGit working-tree states (5 states)', () => {
       isCherryPicking: true,
       cherryPick: { commit: 'abc', subject: '', empty: true },
     }), true);
-    for (const name of ['Continue', 'Commit Empty', 'Skip', 'Abort']) {
+    for (const name of ['Continue', 'Abort']) {
       expect(screen.getByRole('button', { name })).toBeDisabled();
     }
   });

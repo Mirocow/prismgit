@@ -14,6 +14,7 @@ import { cn, shortHash } from '../lib/utils';
 import { useLazyList } from '../lib/useLazyList';
 import { useContextMenu } from '../lib/useContextMenu';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
+import { buildRepoStateHandlers } from '../lib/repoState';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { useI18n } from '../lib/i18n';
 
@@ -521,119 +522,12 @@ export function DiffPage() {
             <RepoStateBanner
               status={status}
               busy={false}
-              handlers={{
-                cherryPick: {
-                  onContinue: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['cherry-pick', '--continue']);
-                      toast.success('Cherry-pick continued');
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Cherry-pick continue failed', String(e)); }
-                  },
-                  onSkip: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['cherry-pick', '--skip']);
-                      toast.success('Skipped');
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Skip failed', String(e)); }
-                  },
-                  onCommitEmpty: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['commit', '--allow-empty', '--no-edit']);
-                      await api.git.raw(repo.path, ['cherry-pick', '--continue']);
-                      toast.success('Committed empty');
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Commit empty failed', String(e)); }
-                  },
-                  onAbort: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['cherry-pick', '--abort']);
-                      toast.success('Cherry-pick aborted');
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Abort failed', String(e)); }
-                  },
-                },
-                revert: {
-                  onContinue: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['revert', '--continue']);
-                      toast.success('Revert continued');
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Revert continue failed', String(e)); }
-                  },
-                  onSkip: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['revert', '--skip']);
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Skip failed', String(e)); }
-                  },
-                  onAbort: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['revert', '--abort']);
-                      toast.success('Revert aborted');
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Abort failed', String(e)); }
-                  },
-                },
-                merge: {
-                  onAbort: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['merge', '--abort']);
-                      toast.success('Merge aborted');
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Abort failed', String(e)); }
-                  },
-                },
-                rebase: {
-                  onContinue: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['rebase', '--continue']);
-                      toast.success('Rebase continued');
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Rebase continue failed', String(e)); }
-                  },
-                  onSkip: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['rebase', '--skip']);
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Skip failed', String(e)); }
-                  },
-                  onAbort: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['rebase', '--abort']);
-                      toast.success('Rebase aborted');
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Abort failed', String(e)); }
-                  },
-                },
-                bisect: {
-                  onGood: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['bisect', 'good']);
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Bisect good failed', String(e)); }
-                  },
-                  onBad: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['bisect', 'bad']);
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Bisect bad failed', String(e)); }
-                  },
-                  onSkip: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['bisect', 'skip']);
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Skip failed', String(e)); }
-                  },
-                  onReset: async () => {
-                    try {
-                      await api.git.raw(repo.path, ['bisect', 'reset']);
-                      toast.success('Bisect reset');
-                      await refreshStatus(repo.path);
-                    } catch (e) { toast.error('Bisect reset failed', String(e)); }
-                  },
-                },
-              }}
+              handlers={buildRepoStateHandlers(
+                repo.path,
+                (args) => api.git.raw(repo.path, args),
+                () => refreshStatus(repo.path),
+                toast,
+              )}
             />
           )}
           {showMergeView ? (

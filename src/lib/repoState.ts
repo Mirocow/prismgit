@@ -1,4 +1,5 @@
 import type { StatusResult } from './api';
+import type { RepoStateHandlers } from '../components/RepoStateBanner';
 
 /**
  * Central model of the git "sequencer" / in-progress repository states —
@@ -159,4 +160,70 @@ export function blockedOperationToast(status?: StatusResult | null): {
   const state = getRepoInProgressState(status);
   if (!state) return null;
   return { title: state.blockedTitle, hint: state.blockedHint };
+}
+
+/**
+ * Build the action handlers for RepoStateBanner that issue raw git commands
+ * against the given repo + path. Shared by DiffPage, HistoryPage, ChangesPage
+ * so the banner behaves identically in every tool where it appears.
+ *
+ * The button set per state is strict (see RepoStateBanner doc):
+ *   cherry-picking / reverting / rebasing → Continue, Abort
+ *   merging                                → Abort
+ *   bisecting                              → Mark HEAD as Bad, Mark HEAD as Good, Abort
+ *
+ * `runGit` is a thin wrapper that fires a toast on success or failure and
+ * triggers `refreshStatus` afterward — so the banner collapses as soon as
+ * the in-progress state resolves.
+ *
+ * @param repoPath  Absolute path to the repository
+ * @param runGit    Function that takes git args and returns a Promise (typically
+ *                  `(args) => api.git.raw(repoPath, args)`)
+ * @param refresh   Callback to refresh the working-tree status after a state change
+ * @param toast     Toast actions for user feedback
+ */
+export function buildRepoStateHandlers(
+  repoPath: string,
+  runGit: (args: string[]) => Promise<unknown>,
+  refresh: () => Promise<void> | void,
+  toast: {
+    success: (msg: string, detail?: string) => void;
+    error: (msg: string, detail?: string) => void;
+  },
+): RepoStateHandlers {
+  const run = async (
+    args: string[],
+    successMsg: string | undefined,
+    errMsg: string,
+  ) => {
+    try {
+      await runGit(args);
+      if (successMsg) toast.success(successMsg);
+      await refresh();
+    } catch (e) {
+      toast.error(errMsg, String(e));
+    }
+  };
+  return {
+    cherryPick: {
+      onContinue: () => run(['cherry-pick', '--continue'], 'Cherry-pick continued', 'Cherry-pick continue failed'),
+      onAbort: () => run(['cherry-pick', '--abort'], 'Cherry-pick aborted', 'Abort failed'),
+    },
+    revert: {
+      onContinue: () => run(['revert', '--continue'], 'Revert continued', 'Revert continue failed'),
+      onAbort: () => run(['revert', '--abort'], 'Revert aborted', 'Abort failed'),
+    },
+    merge: {
+      onAbort: () => run(['merge', '--abort'], 'Merge aborted', 'Abort failed'),
+    },
+    rebase: {
+      onContinue: () => run(['rebase', '--continue'], 'Rebase continued', 'Rebase continue failed'),
+      onAbort: () => run(['rebase', '--abort'], 'Rebase aborted', 'Abort failed'),
+    },
+    bisect: {
+      onGood: () => run(['bisect', 'good'], undefined, 'Bisect good failed'),
+      onBad: () => run(['bisect', 'bad'], undefined, 'Bisect bad failed'),
+      onReset: () => run(['bisect', 'reset'], 'Bisect ended', 'Bisect reset failed'),
+    },
+  };
 }

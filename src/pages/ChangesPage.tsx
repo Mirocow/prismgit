@@ -1570,7 +1570,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             merge: { onAbort: handleMergeAbort },
             rebase: { onContinue: handleRbContinue, onSkip: handleRbSkip, onAbort: handleRbAbort },
             bisect: { onGood: handleBsGood, onBad: handleBsBad, onSkip: handleBsSkip, onReset: handleBsReset },
-            onStashAll: handleStashAll,
           }}
         />
       )}

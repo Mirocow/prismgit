@@ -5,24 +5,25 @@ const mockAbortMerge = vi.fn(async () => {});
 const mockCherryPickAbort = vi.fn(async () => {});
 const mockRevertAbort = vi.fn(async () => {});
 const mockBisectReset = vi.fn(async () => {});
-const mockCherryPickSkip = vi.fn(async () => {});
-const mockRevertSkip = vi.fn(async () => {});
+const mockCherryPickContinue = vi.fn(async () => {});
+const mockRevertContinue = vi.fn(async () => {});
+const mockRebaseContinue = vi.fn(async () => {});
+const mockRebaseAbort = vi.fn(async () => {});
 const mockBisectGood = vi.fn(async () => {});
 const mockBisectBad = vi.fn(async () => {});
-const mockStashPush = vi.fn(async () => {});
 
 vi.mock('../../src/lib/api', () => ({ api: { git: {
   abortMerge: (...a: unknown[]) => mockAbortMerge(...a),
   cherryPickAbort: (...a: unknown[]) => mockCherryPickAbort(...a),
   revertAbort: (...a: unknown[]) => mockRevertAbort(...a),
   bisectReset: (...a: unknown[]) => mockBisectReset(...a),
-  cherryPickSkip: (...a: unknown[]) => mockCherryPickSkip(...a),
-  revertSkip: (...a: unknown[]) => mockRevertSkip(...a),
+  cherryPickContinue: (...a: unknown[]) => mockCherryPickContinue(...a),
+  revertContinue: (...a: unknown[]) => mockRevertContinue(...a),
+  rebase: (...a: unknown[]) => mockRebaseContinue(...a),
   bisectGood: (...a: unknown[]) => mockBisectGood(...a),
   bisectBad: (...a: unknown[]) => mockBisectBad(...a),
-  stashPush: (...a: unknown[]) => mockStashPush(...a),
-  raw: vi.fn(), add: vi.fn(), rebase: vi.fn(),
-  cherryPickContinue: vi.fn(), revertContinue: vi.fn(), continueMerge: vi.fn(), bisectSkip: vi.fn(),
+  raw: vi.fn(), add: vi.fn(),
+  rebaseAbort: (...a: unknown[]) => mockRebaseAbort(...a),
 }, fs: { readFile: vi.fn(), writeFile: vi.fn() },
 contextMenu: { show: vi.fn().mockResolvedValue(undefined), onClick: vi.fn(() => () => {}) } } }));
 
@@ -55,92 +56,103 @@ const makeStatus = (o: Partial<StatusResult> = {}): StatusResult => ({
   ...o,
 } as StatusResult);
 
-describe('Conflict Resolution — ALL 5 States', () => {
+/**
+ * Strict button-set spec per repo state (NO other buttons rendered):
+ *   cherry-picking (incl. conflict & empty) → Continue, Abort
+ *   reverting                                   → Continue, Abort
+ *   merging (incl. multi-conflict)            → Abort
+ *   rebasing (incl. multi-step)                → Continue, Abort
+ *   bisecting (incl. multi)                    → Mark HEAD as Bad, Mark HEAD as Good, Abort
+ */
+describe('Conflict Resolution — ALL 5 States (strict button set)', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  describe('isMerging', () => {
-    it('shows merging-state + Abort Merge + Stash All', () => {
-      render(<RepoStateBanner status={makeStatus({ isMerging: true, conflicted: ['f.ts'] })} handlers={{ merge: { onAbort: mockAbortMerge }, onStashAll: mockStashPush }} />);
+  describe('isMerging (incl. multi-conflict): Abort only', () => {
+    it('shows merging-state + Abort (no Continue, no Skip, no Stash All)', () => {
+      render(<RepoStateBanner status={makeStatus({ isMerging: true, conflicted: ['f.ts'] })} handlers={{ merge: { onAbort: mockAbortMerge } }} />);
       expect(screen.getByText(/merging/i)).toBeInTheDocument();
-      expect(screen.getByText('Abort Merge')).toBeInTheDocument();
-      expect(screen.getByText('Stash All')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Abort' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
+      // Stash All is intentionally NOT rendered per spec
+      expect(screen.queryByText('Stash All')).not.toBeInTheDocument();
     });
-    it('Abort Merge calls git merge --abort', async () => {
-      render(<RepoStateBanner status={makeStatus({ isMerging: true })} handlers={{ merge: { onAbort: mockAbortMerge }, onStashAll: vi.fn() }} />);
-      fireEvent.click(screen.getByText('Abort Merge'));
+    it('Abort calls git merge --abort', async () => {
+      render(<RepoStateBanner status={makeStatus({ isMerging: true })} handlers={{ merge: { onAbort: mockAbortMerge } }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
       await waitFor(() => expect(mockAbortMerge).toHaveBeenCalled());
     });
   });
 
-  describe('isCherryPicking', () => {
-    it('shows cherry-picking-state + Continue/Skip/Abort', () => {
-      render(<RepoStateBanner status={makeStatus({ isCherryPicking: true, cherryPick: { commit: 'a', subject: 's', empty: false } as any })} handlers={{ cherryPick: { onContinue: vi.fn(), onSkip: mockCherryPickSkip, onCommitEmpty: vi.fn(), onAbort: mockCherryPickAbort }, onStashAll: vi.fn() }} />);
+  describe('isCherryPicking (incl. conflict & empty): Continue, Abort', () => {
+    it('shows cherry-picking-state + Continue/Abort (NO Skip, NO Commit Empty, NO Stash All)', () => {
+      render(<RepoStateBanner status={makeStatus({ isCherryPicking: true, cherryPick: { commit: 'a', subject: 's', empty: false } as any })} handlers={{ cherryPick: { onContinue: mockCherryPickContinue, onAbort: mockCherryPickAbort } }} />);
       expect(screen.getByText(/cherry-picking/i)).toBeInTheDocument();
-      expect(screen.getByText('Continue')).toBeInTheDocument();
-      expect(screen.getByText('Skip')).toBeInTheDocument();
-      expect(screen.getByText('Abort')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Abort' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Commit Empty' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Stash All')).not.toBeInTheDocument();
     });
-    it('Skip calls git cherry-pick --skip', async () => {
-      render(<RepoStateBanner status={makeStatus({ isCherryPicking: true, cherryPick: { commit: 'a', subject: 's', empty: false } as any })} handlers={{ cherryPick: { onContinue: vi.fn(), onSkip: mockCherryPickSkip, onCommitEmpty: vi.fn(), onAbort: vi.fn() }, onStashAll: vi.fn() }} />);
-      fireEvent.click(screen.getByText('Skip'));
-      await waitFor(() => expect(mockCherryPickSkip).toHaveBeenCalled());
+    it('empty pick ALSO shows only Continue/Abort (no Commit Empty)', () => {
+      render(<RepoStateBanner status={makeStatus({ isCherryPicking: true, cherryPick: { commit: 'a', subject: 's', empty: true } as any })} handlers={{ cherryPick: { onContinue: vi.fn(), onAbort: vi.fn() } }} />);
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Abort' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Commit Empty' })).not.toBeInTheDocument();
     });
     it('Abort calls git cherry-pick --abort', async () => {
-      render(<RepoStateBanner status={makeStatus({ isCherryPicking: true, cherryPick: { commit: 'a', subject: 's' } as any })} handlers={{ cherryPick: { onContinue: vi.fn(), onSkip: vi.fn(), onCommitEmpty: vi.fn(), onAbort: mockCherryPickAbort }, onStashAll: vi.fn() }} />);
-      fireEvent.click(screen.getByText('Abort'));
+      render(<RepoStateBanner status={makeStatus({ isCherryPicking: true, cherryPick: { commit: 'a', subject: 's' } as any })} handlers={{ cherryPick: { onContinue: vi.fn(), onAbort: mockCherryPickAbort } }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
       await waitFor(() => expect(mockCherryPickAbort).toHaveBeenCalled());
     });
   });
 
-  describe('isReverting', () => {
-    it('shows reverting-state + Continue/Skip/Abort', () => {
-      render(<RepoStateBanner status={makeStatus({ isReverting: true, revert: { commit: 'a', subject: 's' } as any })} handlers={{ revert: { onContinue: vi.fn(), onSkip: mockRevertSkip, onAbort: mockRevertAbort }, onStashAll: vi.fn() }} />);
+  describe('isReverting: Continue, Abort', () => {
+    it('shows reverting-state + Continue/Abort (NO Skip)', () => {
+      render(<RepoStateBanner status={makeStatus({ isReverting: true, revert: { commit: 'a', subject: 's' } as any })} handlers={{ revert: { onContinue: mockRevertContinue, onAbort: mockRevertAbort } }} />);
       expect(screen.getAllByText(/reverting/i).length).toBeGreaterThan(0);
-      expect(screen.getByText('Skip')).toBeInTheDocument();
-      expect(screen.getByText('Abort')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Abort' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
     });
-    it('Skip calls git revert --skip', async () => {
-      render(<RepoStateBanner status={makeStatus({ isReverting: true, revert: { commit: 'a', subject: 's' } as any })} handlers={{ revert: { onContinue: vi.fn(), onSkip: mockRevertSkip, onAbort: vi.fn() }, onStashAll: vi.fn() }} />);
-      fireEvent.click(screen.getByText('Skip'));
-      await waitFor(() => expect(mockRevertSkip).toHaveBeenCalled());
+    it('Continue calls git revert --continue', async () => {
+      render(<RepoStateBanner status={makeStatus({ isReverting: true, revert: { commit: 'a', subject: 's' } as any })} handlers={{ revert: { onContinue: mockRevertContinue, onAbort: vi.fn() } }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+      await waitFor(() => expect(mockRevertContinue).toHaveBeenCalled());
     });
   });
 
-  describe('isRebasing', () => {
-    it('shows rebasing-state + Step progress + Continue/Skip/Abort', () => {
-      render(<RepoStateBanner status={makeStatus({ isRebasing: true, rebase: { step: 2, total: 5 } as any })} handlers={{ rebase: { onContinue: vi.fn(), onSkip: vi.fn(), onAbort: vi.fn() }, onStashAll: vi.fn() }} />);
+  describe('isRebasing (incl. multi-step): Continue, Abort', () => {
+    it('shows rebasing-state + Step progress + Continue/Abort (NO Skip)', () => {
+      render(<RepoStateBanner status={makeStatus({ isRebasing: true, rebase: { step: 2, total: 5 } as any })} handlers={{ rebase: { onContinue: mockRebaseContinue, onAbort: mockRebaseAbort } }} />);
       expect(screen.getByText(/rebasing/i)).toBeInTheDocument();
       expect(screen.getByText(/Step 2 of 5/)).toBeInTheDocument();
-      expect(screen.getByText('Continue')).toBeInTheDocument();
-      expect(screen.getByText('Skip')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Abort' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
     });
   });
 
-  describe('isBisecting', () => {
-    it('shows bisecting-state + Good/Bad/Skip/Reset', () => {
-      render(<RepoStateBanner status={makeStatus({ isBisecting: true, bisect: { rev: 'abc' } as any })} handlers={{ bisect: { onGood: mockBisectGood, onBad: mockBisectBad, onSkip: vi.fn(), onReset: mockBisectReset }, onStashAll: vi.fn() }} />);
+  describe('isBisecting (incl. multi): Mark HEAD as Bad, Mark HEAD as Good, Abort', () => {
+    it('shows bisecting-state + Mark HEAD as Bad/Good + Abort (NO Skip, NO Reset button)', () => {
+      render(<RepoStateBanner status={makeStatus({ isBisecting: true, bisect: { rev: 'abc' } as any })} handlers={{ bisect: { onGood: mockBisectGood, onBad: mockBisectBad, onReset: mockBisectReset } }} />);
       expect(screen.getByText(/bisecting/i)).toBeInTheDocument();
-      expect(screen.getByText('Mark Good')).toBeInTheDocument();
-      expect(screen.getByText('Mark Bad')).toBeInTheDocument();
-      expect(screen.getByText('Reset')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Mark HEAD as Good' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Mark HEAD as Bad' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Abort' })).toBeInTheDocument();
+      // NO Skip / Reset buttons (Reset action is labeled "Abort")
+      expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
     });
-    it('Mark Good calls git bisect good', async () => {
-      render(<RepoStateBanner status={makeStatus({ isBisecting: true, bisect: { rev: 'abc' } as any })} handlers={{ bisect: { onGood: mockBisectGood, onBad: vi.fn(), onSkip: vi.fn(), onReset: vi.fn() }, onStashAll: vi.fn() }} />);
-      fireEvent.click(screen.getByText('Mark Good'));
+    it('Mark HEAD as Good calls git bisect good', async () => {
+      render(<RepoStateBanner status={makeStatus({ isBisecting: true, bisect: { rev: 'abc' } as any })} handlers={{ bisect: { onGood: mockBisectGood, onBad: vi.fn(), onReset: vi.fn() } }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Mark HEAD as Good' }));
       await waitFor(() => expect(mockBisectGood).toHaveBeenCalled());
     });
-    it('Reset calls git bisect reset', async () => {
-      render(<RepoStateBanner status={makeStatus({ isBisecting: true, bisect: { rev: 'abc' } as any })} handlers={{ bisect: { onGood: vi.fn(), onBad: vi.fn(), onSkip: vi.fn(), onReset: mockBisectReset }, onStashAll: vi.fn() }} />);
-      fireEvent.click(screen.getByText('Reset'));
+    it('Abort (labeled) calls git bisect reset', async () => {
+      render(<RepoStateBanner status={makeStatus({ isBisecting: true, bisect: { rev: 'abc' } as any })} handlers={{ bisect: { onGood: vi.fn(), onBad: vi.fn(), onReset: mockBisectReset } }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
       await waitFor(() => expect(mockBisectReset).toHaveBeenCalled());
     });
-  });
-
-  describe('Stash All visible for all states', () => {
-    it('merge', () => { render(<RepoStateBanner status={makeStatus({ isMerging: true })} handlers={{ merge: { onAbort: vi.fn() }, onStashAll: vi.fn() }} />); expect(screen.getByText('Stash All')).toBeInTheDocument(); });
-    it('cherry-pick', () => { render(<RepoStateBanner status={makeStatus({ isCherryPicking: true, cherryPick: { commit: 'a', subject: 's' } as any })} handlers={{ cherryPick: { onContinue: vi.fn(), onSkip: vi.fn(), onCommitEmpty: vi.fn(), onAbort: vi.fn() }, onStashAll: vi.fn() }} />); expect(screen.getByText('Stash All')).toBeInTheDocument(); });
-    it('revert', () => { render(<RepoStateBanner status={makeStatus({ isReverting: true, revert: { commit: 'a', subject: 's' } as any })} handlers={{ revert: { onContinue: vi.fn(), onSkip: vi.fn(), onAbort: vi.fn() }, onStashAll: vi.fn() }} />); expect(screen.getByText('Stash All')).toBeInTheDocument(); });
-    it('rebase', () => { render(<RepoStateBanner status={makeStatus({ isRebasing: true, rebase: { step: 1, total: 3 } as any })} handlers={{ rebase: { onContinue: vi.fn(), onSkip: vi.fn(), onAbort: vi.fn() }, onStashAll: vi.fn() }} />); expect(screen.getByText('Stash All')).toBeInTheDocument(); });
-    it('bisect', () => { render(<RepoStateBanner status={makeStatus({ isBisecting: true, bisect: { rev: 'a' } as any })} handlers={{ bisect: { onGood: vi.fn(), onBad: vi.fn(), onSkip: vi.fn(), onReset: vi.fn() }, onStashAll: vi.fn() }} />); expect(screen.getByText('Stash All')).toBeInTheDocument(); });
   });
 });

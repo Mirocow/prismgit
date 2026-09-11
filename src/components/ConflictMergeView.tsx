@@ -140,18 +140,25 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     setLoading(true);
     setDirty(false);
     try {
-      const [base, ours, theirs, worktree] = await Promise.all([
+      // Stage versions for the conflicted file:
+      //   :1:filePath = BASE (common ancestor)
+      //   :2:filePath = OURS (current branch / HEAD)
+      //   :3:filePath = THEIRS (incoming branch)
+      // NOTE: `:0:filePath` (stage 0 = "fully merged") does NOT exist while
+      // the file is still conflicted — `git show :0:file.ts` throws
+      //   "fatal: path 'file.ts' is in the index, but not at stage 0"
+      // The middle pane reads the working-tree content directly from disk.
+      const [base, ours, theirs] = await Promise.all([
         api.git.raw(repo.path, ['show', `:1:${filePath}`]).catch(() => ''),
         api.git.raw(repo.path, ['show', `:2:${filePath}`]).catch(() => ''),
         api.git.raw(repo.path, ['show', `:3:${filePath}`]).catch(() => ''),
-        api.git.raw(repo.path, ['show', `:0:${filePath}`]).catch(() => ''),
       ]);
       setBaseContent(base);
       setOursContent(ours);
       setTheirsContent(theirs);
       const fullPath = `${repo.path}/${filePath}`.replace(/\/\+/g, '/');
       let fileContent = '';
-      try { fileContent = await api.fs.readFile(fullPath); } catch { fileContent = worktree || ''; }
+      try { fileContent = await api.fs.readFile(fullPath); } catch { fileContent = ''; }
       setContent(fileContent);
       // Reflect content into the contentEditable div.
       requestAnimationFrame(() => {
