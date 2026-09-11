@@ -27,6 +27,16 @@ interface DiffViewerProps {
 
 type ViewMode = 'unified' | 'split';
 type WhitespaceMode = 'normal' | 'ignore-all' | 'ignore-trailing';
+/**
+ * Diff highlight mode:
+ *   - 'background'  : diff lines get a background tint (green=add, red=del).
+ *                     Text color comes from syntax highlighting (tok-*).
+ *                     Matches the 3-way conflict panel exactly. No +/- markers.
+ *   - 'text'        : classic diff style — +/- markers in the gutter +
+ *                     text colored green (add) / red (del). No syntax highlighting
+ *                     on the text (the whole line is one color).
+ */
+type HighlightMode = 'background' | 'text';
 
 // Minimal syntax highlighting is provided by src/lib/syntaxHighlight.ts —
 // shared with ConflictMergeView so both tools use the SAME tokenizer and
@@ -67,6 +77,9 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   const { t } = useI18n();
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
   const [wsMode, setWsMode] = useState<WhitespaceMode>('normal');
+  // Highlight mode: 'background' (3-way panel style) or 'text' (classic + / - style).
+  // Default 'background' to match the 3-way conflict panel.
+  const [highlightMode, setHighlightMode] = useState<HighlightMode>('background');
   // Lazy loading: show first N lines per hunk, expand on demand
   const [expandedHunks, setExpandedHunks] = useState<Set<number>>(new Set());
   const MAX_LINES_PER_HUNK = 100;
@@ -141,6 +154,13 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   /**
    * Render a diff line with word-level highlighting.
    * Reads from `wordDiffCache` instead of recomputing — see comment above.
+   *
+   * When word-diff is active, the line is split into segments (equal / added /
+   * removed). 'equal' segments are rendered with SYNTAX HIGHLIGHTING (so
+   * 'const', 'function', strings etc. keep their colors). 'added'/'removed'
+   * segments get a background highlight (var(--diff-added-word) /
+   * var(--diff-removed-word)) — matching the 3-way panel style where
+   * background indicates the diff status, NOT text color.
    */
   const renderLineWithWordDiff = useCallback(
     (line: DiffLine, pairedLine: DiffLine | null, hunkIdx: number, lineIdx: number): React.ReactNode => {
@@ -154,9 +174,15 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       }
       return cached.segs.map((seg, i) => {
         if (seg.kind === 'equal') {
+          // Apply syntax highlighting to 'equal' segments so keywords/strings
+          // keep their colors even when word-diff is active.
+          if (lang) {
+            return <span key={i} dangerouslySetInnerHTML={{ __html: tokensToHtml(tokenizeLine(seg.text, lang)) }} />;
+          }
           return <span key={i}>{seg.text}</span>;
         }
-        // Highlight added/removed word with a stronger background — theme-aware via CSS variables
+        // Highlight added/removed word with a BACKGROUND color (not text color) —
+        // matches the 3-way conflict panel where background shows diff status.
         const highlightClass = seg.kind === 'added'
           ? 'rounded-sm'
           : 'rounded-sm line-through';
@@ -285,22 +311,25 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               return (
                 <>
                   {linesToShow.map((line, li) => {
-                    // Background colors match the 3-way conflict panel:
-                    //   - add (incoming) lines  → green tint (bg-status-added/10)
-                    //   - del (removed) lines  → red tint   (bg-status-deleted/10)
-                    //   - context lines        → no background
-                    // Text color comes from SYNTAX HIGHLIGHTING (tok-* classes),
-                    // NOT from the diff status — so 'const' is yellow, strings
-                    // are green, etc., regardless of whether the line is add/del.
-                    const bg =
-                      line.type === 'add' ? 'bg-status-added/10' :
-                      line.type === 'del' ? 'bg-status-deleted/10' : '';
-                    // The +/- marker color still reflects add/del — that's the
-                    // visual cue for which side the line came from.
-                    const markerColor =
-                      line.type === 'add' ? 'text-status-added' :
-                      line.type === 'del' ? 'text-status-deleted' :
-                      'text-text-tertiary';
+                    // Two highlight modes — selectable via the toolbar:
+                    //
+                    // 'background' (default, matches 3-way conflict panel):
+                    //   - Row background: green tint (add) / red tint (del) / none (context)
+                    //   - Text color: syntax highlighting (tok-* spans)
+                    //   - No +/- marker in the gutter
+                    //
+                    // 'text' (classic diff style):
+                    //   - No row background
+                    //   - Text color: green (add) / red (del) / normal (context)
+                    //   - +/- marker in the gutter, colored to match
+                    const isAdd = line.type === 'add';
+                    const isDel = line.type === 'del';
+                    const bg = highlightMode === 'background'
+                      ? (isAdd ? 'bg-status-added/10' : isDel ? 'bg-status-deleted/10' : '')
+                      : '';
+                    const textColor = highlightMode === 'text'
+                      ? (isAdd ? 'text-status-added' : isDel ? 'text-status-deleted' : 'text-text-primary')
+                      : '';
                     const key = `${hi}:${li}`;
                     const isSelected = selectedLines.has(key);
                     const paired = findPairedLine(visibleLines, li);
@@ -313,7 +342,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                     isSelected && 'ring-1 ring-accent'
                   )}
                   style={{ lineHeight: '20px', minHeight: '20px' }}
-                  onClick={() => (line.type === 'add' || line.type === 'del') && toggleLineSelection(hi, li)}
+                  onClick={() => (isAdd || isDel) && toggleLineSelection(hi, li)}
                 >
                   <span className="w-12 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
                     {line.oldLineNumber ?? ''}
@@ -321,19 +350,25 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                   <span className="w-12 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
                     {line.newLineNumber ?? ''}
                   </span>
-                  <span
-                    className={cn('w-6 flex-shrink-0 text-center select-none font-bold', markerColor)}
-                  >
-                    {line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '}
-                  </span>
+                  {highlightMode === 'text' && (
+                    <span
+                      className={cn(
+                        'w-6 flex-shrink-0 text-center select-none font-bold',
+                        isAdd ? 'text-status-added' : isDel ? 'text-status-deleted' : 'text-text-tertiary'
+                      )}
+                    >
+                      {isAdd ? '+' : isDel ? '-' : ' '}
+                    </span>
+                  )}
                   <pre
-                    // NO color class here — let syntax highlighting (tok-*)
-                    // decide the text color. Background tint already shows
-                    // whether the line is add/del/context.
-                    className="flex-1 pl-2 whitespace-pre-wrap m-0"
+                    // 'background' mode: no color class → syntax highlighting (tok-*) decides.
+                    // 'text' mode: whole-line color override (green/red) → classic diff.
+                    className={cn('flex-1 pl-2 whitespace-pre-wrap m-0', textColor)}
                     style={{ fontFamily: 'inherit' }}
                   >
-                    {renderLineWithWordDiff(line, paired, hi, li)}
+                    {highlightMode === 'text'
+                      ? (line.content || ' ')
+                      : renderLineWithWordDiff(line, paired, hi, li)}
                   </pre>
                 </div>
               );
@@ -376,13 +411,17 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                     return (
                       <div key={li} className="flex hover:bg-bg-hover font-mono text-xs" style={{ lineHeight: '20px', minHeight: '20px' }}>
                         <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
-                        <pre className="flex-1 pl-2 whitespace-pre-wrap m-0 text-text-tertiary" style={{ fontFamily: 'inherit', background: 'var(--diff-added-line)' }}> </pre>
+                        {/* Empty placeholder for 'add' line in the OLD pane —
+                            background tint (not text color) for both modes. */}
+                        <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit', background: 'var(--diff-added-line)' }}> </pre>
                       </div>
                     );
                   }
-                  // Background tint shows del (red) vs context (none).
-                  // Text color comes from syntax highlighting (tok-*).
-                  const bg = line.type === 'del' ? 'bg-status-deleted/10' : '';
+                  const isDel = line.type === 'del';
+                  // Background mode: red tint for del lines.
+                  // Text mode: red text for del lines.
+                  const bg = highlightMode === 'background' && isDel ? 'bg-status-deleted/10' : '';
+                  const textColor = highlightMode === 'text' && isDel ? 'text-status-deleted' : '';
                   const key = `${hi}:${li}`;
                   const isSelected = selectedLines.has(key);
                   return (
@@ -390,10 +429,14 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                       key={li}
                       className={cn('flex hover:bg-bg-hover cursor-pointer group font-mono text-xs', bg, isSelected && 'ring-1 ring-accent')}
                       style={{ lineHeight: '20px', minHeight: '20px' }}
-                      onClick={() => line.type === 'del' && toggleLineSelection(hi, li)}
+                      onClick={() => isDel && toggleLineSelection(hi, li)}
                     >
                       <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
-                      <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit' }}>{lang ? highlightLine(line.content || ' ', lang) : (line.content || ' ')}</pre>
+                      <pre className={cn('flex-1 pl-2 whitespace-pre-wrap m-0', textColor)} style={{ fontFamily: 'inherit' }}>
+                        {highlightMode === 'background' && lang
+                          ? highlightLine(line.content || ' ', lang)
+                          : (line.content || ' ')}
+                      </pre>
                     </div>
                   );
                 })}
@@ -405,13 +448,17 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                     return (
                       <div key={li} className="flex hover:bg-bg-hover font-mono text-xs" style={{ lineHeight: '20px', minHeight: '20px' }}>
                         <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.newLineNumber ?? ''}</span>
-                        <pre className="flex-1 pl-2 whitespace-pre-wrap m-0 text-text-tertiary" style={{ fontFamily: 'inherit', background: 'var(--diff-removed-line)' }}> </pre>
+                        {/* Empty placeholder for 'del' line in the NEW pane —
+                            background tint (not text color) for both modes. */}
+                        <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit', background: 'var(--diff-removed-line)' }}> </pre>
                       </div>
                     );
                   }
-                  // Background tint shows add (green) vs context (none).
-                  // Text color comes from syntax highlighting (tok-*).
-                  const bg = line.type === 'add' ? 'bg-status-added/10' : '';
+                  const isAdd = line.type === 'add';
+                  // Background mode: green tint for add lines.
+                  // Text mode: green text for add lines.
+                  const bg = highlightMode === 'background' && isAdd ? 'bg-status-added/10' : '';
+                  const textColor = highlightMode === 'text' && isAdd ? 'text-status-added' : '';
                   const key = `${hi}:${li}`;
                   const isSelected = selectedLines.has(key);
                   return (
@@ -419,11 +466,13 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                       key={li}
                       className={cn('flex hover:bg-bg-hover cursor-pointer group font-mono text-xs', bg, isSelected && 'ring-1 ring-accent')}
                       style={{ lineHeight: '20px', minHeight: '20px' }}
-                      onClick={() => line.type === 'add' && toggleLineSelection(hi, li)}
+                      onClick={() => isAdd && toggleLineSelection(hi, li)}
                     >
                       <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none group-hover:bg-bg-hover">{line.newLineNumber ?? ''}</span>
-                      <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit' }}>
-                        {lang ? highlightLine(line.content || ' ', lang) : (line.content || ' ')}
+                      <pre className={cn('flex-1 pl-2 whitespace-pre-wrap m-0', textColor)} style={{ fontFamily: 'inherit' }}>
+                        {highlightMode === 'background' && lang
+                          ? highlightLine(line.content || ' ', lang)
+                          : (line.content || ' ')}
                       </pre>
                     </div>
                   );
@@ -434,7 +483,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
         </div>
       );
     });
-  }, [diff, viewMode, wsMode, collapsedHunks, selectedLines, lang, toggleHunk, toggleLineSelection, useWordDiff, renderLineWithWordDiff, findPairedLine]);
+  }, [diff, viewMode, wsMode, collapsedHunks, selectedLines, lang, highlightMode, toggleHunk, toggleLineSelection, useWordDiff, renderLineWithWordDiff, findPairedLine]);
 
   if (loading) {
     return (
@@ -533,6 +582,27 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
           >
             {t('diff.wordDiffButton')}
           </button>
+          {/* Highlight mode toggle: 'background' (3-way panel style) ↔ 'text' (classic +/- style) */}
+          <div className="flex items-center gap-0.5 ml-1">
+            <button
+              className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', highlightMode === 'background'
+                ? 'bg-accent text-text-inverse border-accent'
+                : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover')}
+              onClick={() => setHighlightMode('background')}
+              title="Background highlight — diff lines get a green/red background tint; text uses syntax highlighting (matches 3-way conflict panel)"
+            >
+              BG
+            </button>
+            <button
+              className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', highlightMode === 'text'
+                ? 'bg-accent text-text-inverse border-accent'
+                : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover')}
+              onClick={() => setHighlightMode('text')}
+              title="Text highlight — classic diff style with +/- markers and green/red text"
+            >
+              +/-
+            </button>
+          </div>
           {/* SmartGit manual: Compact mode — hide unchanged sections */}
           <button
             className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', compactMode
