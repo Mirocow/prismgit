@@ -1037,8 +1037,42 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     .filter((f) => matchesDirScope(f.path))
     ), [status, sortFiles, fileDisplayFlags]);
 
+  // Detect unstaged renames: `git diff --name-status --find-renames` returns
+  // R<score>\told_path\tnew_path for detected renames. We use this to:
+  //   1. Remove the old_path from the Deleted list (show as Rename Source)
+  //   2. Remove the new_path from the Untracked list (show as Renamed)
+  //   3. Show a single Renamed row with old_path → new_path
+  const [detectedRenames, setDetectedRenames] = useState<{ oldPath: string; newPath: string }[]>([]);
+  useEffect(() => {
+    if (!repo?.path) return;
+    api.git.raw(repo.path, ['diff', '--name-status', '--find-renames', '--diff-filter=R']).then(out => {
+      const renames: { oldPath: string; newPath: string }[] = [];
+      for (const line of out.split('\n').filter(Boolean)) {
+        // Format: R100\told_path\tnew_path  (R<similarity score 0-100>)
+        const parts = line.split('\t');
+        if (parts.length >= 3 && parts[0].startsWith('R')) {
+          renames.push({ oldPath: parts[1], newPath: parts[2] });
+        }
+      }
+      setDetectedRenames(renames);
+    }).catch(() => setDetectedRenames([]));
+  }, [repo?.path, status]);
+
+  // Sets of old/new paths for detected renames — used to filter out the
+  // individual delete + untracked entries and show a single renamed entry.
+  const renamedOldPaths = useMemo(() => new Set(detectedRenames.map(r => r.oldPath)), [detectedRenames]);
+  const renamedNewPaths = useMemo(() => new Set(detectedRenames.map(r => r.newPath)), [detectedRenames]);
+
   // Unstaged (changed, non-staged) files — always visible (default).
+  // Exclude files that are part of a detected rename (old path = delete,
+  // new path = untracked) — they'll be shown as a single Renamed entry.
   const unstagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
+    // Skip files that are the OLD path of a detected rename — they show as
+    // a Renamed row instead of a Deleted row.
+    if (renamedOldPaths.has(f.path)) return false;
+    // Skip files that are the NEW path of a detected rename — they show as
+    // a Renamed row instead of an Untracked row.
+    if (renamedNewPaths.has(f.path)) return false;
     // Exclude conflicted files — they show in the Conflicts section only.
     const idx = f.index as string;
     const wd = f.working_dir as string;
@@ -1054,7 +1088,18 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
-    ), [status, sortFiles, fileDisplayFlags]);
+    ), [status, sortFiles, fileDisplayFlags, renamedOldPaths, renamedNewPaths]);
+
+  // Detected rename entries — shown in the unstaged section as Renamed rows.
+  // Each entry has the new path as the file path and old_path set.
+  const renamedFiles: FileStatus[] = useMemo(() => {
+    return detectedRenames.map(r => ({
+      path: r.newPath,
+      index: 'renamed' as FileStatus['index'],
+      working_dir: 'unmodified' as FileStatus['working_dir'],
+      old_path: r.oldPath,
+    }));
+  }, [detectedRenames]);
 
   // Conflicted files — shown in their OWN section (red accent) ABOVE staged.
   const conflictedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
@@ -1066,16 +1111,21 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     .filter((f) => matchesDirScope(f.path))), [status, sortFiles]);
 
   // Untracked files — shown only when 'unversioned' flag is ON.
+  // Exclude files that are the NEW path of a detected rename — they show
+  // as Renamed rows in the unstaged list, not as Untracked.
   const untrackedFiles: FileStatus[] = useMemo(() => {
     if (!hasFlag('unversioned')) return [];
     return sortFiles((status?.files || []).filter((f) => {
       const idx = f.index as string;
       const wd = f.working_dir as string;
-      return idx === '?' && wd === '?';
+      if (idx !== '?' || wd !== '?') return false;
+      // Skip new paths of detected renames — shown as Renamed instead.
+      if (renamedNewPaths.has(f.path)) return false;
+      return true;
     }).filter((f) => matchesFileFilter(f.path))
       .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
       .filter((f) => matchesDirScope(f.path)));
-  }, [status, sortFiles, hasFlag, fileFilter, fileScopeDir]);
+  }, [status, sortFiles, hasFlag, fileFilter, fileScopeDir, renamedNewPaths]);
 
   // Ctrl/Cmd+A: select all visible files in the file list
   // (placed after stagedFiles/unstagedFiles/untrackedFiles are declared)
@@ -1147,8 +1197,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       code === 'M' ? 'modified' :
       code === 'A' ? 'added' :
       code === 'D' ? 'deleted' :
-      code === 'R' ? 'renamed' :
-      code === 'C' ? 'copied' :
+      (code === 'R' || code === 'renamed') ? 'renamed' :
+      (code === 'C' || code === 'copied') ? 'copied' :
       'modified';
     const isUntracked = idx === '?' && wd === '?';
     const isConflicted = code === 'U' || idx === 'U' || wd === 'U';
@@ -1169,6 +1219,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       ? file.path.slice(file.path.lastIndexOf('/', file.path.length - 2) + 1)
       : getFileName(file.path);
     const relDir = getRelativeDir(isDirEntry ? file.path.slice(0, -1) : file.path);
+    // For renamed files (detected via --find-renames), show old_path → new_path
+    const isRenamed = statusCode === 'renamed' && file.old_path;
+    const renameLabel = isRenamed ? `${getFileName(file.old_path!)} → ${displayName}` : displayName;
+    const renameTitle = isRenamed ? `${file.old_path} → ${file.path}` : file.path;
     // Line-change counts (+N -M) from numstat; untracked files have none.
     const stats = isUntracked ? undefined : (isStaged ? numstat.staged : numstat.unstaged).get(file.path);
 
@@ -1271,7 +1325,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           {code}
         </span>
         {/* Name */}
-        <span className="flex-1 truncate font-mono whitespace-nowrap" title={file.path}>{displayName}</span>
+        <span className="flex-1 truncate font-mono whitespace-nowrap" title={renameTitle}>{renameLabel}</span>
         {/* Line-change counts (+N -M) — reserved width keeps columns aligned */}
         <span
           className="text-2xs flex-shrink-0 text-right tabular-nums whitespace-nowrap overflow-hidden"
@@ -1625,8 +1679,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 <span className="text-text-tertiary normal-case font-normal">{t('changes.clickToStageAllHint')}</span>
               </div>
             )}
-            <div className={unstagedFiles.length > 0 ? 'border-l-2 border-l-status-modified/20' : ''}>
-              <LazyFileList files={unstagedFiles} isStaged={false} renderRow={renderFileRow} />
+            <div className={(unstagedFiles.length > 0 || renamedFiles.length > 0) ? 'border-l-2 border-l-status-modified/20' : ''}>
+              <LazyFileList files={[...unstagedFiles, ...renamedFiles]} isStaged={false} renderRow={renderFileRow} />
             </div>
 
             {/* Untracked — cyan accent */}
