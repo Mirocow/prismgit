@@ -39,6 +39,14 @@ vi.mock('../../src/lib/api', () => ({
 }));
 
 vi.mock('../../src/stores/toastStore', () => ({
+  useToastActions: () => ({
+    error: vi.fn(),
+    warning: vi.fn(),
+    success: vi.fn(),
+    info: vi.fn(),
+    show: vi.fn(),
+    dismiss: vi.fn(),
+  }),
   useToastStore: () => ({
     error: vi.fn(),
     warning: vi.fn(),

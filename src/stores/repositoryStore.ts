@@ -155,11 +155,14 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     if (cur) {
       // Stop watcher (no-op if not running)
       api.watcher.stop(cur.path).catch(() => { /* ignore */ });
+      // Invalidate the cached SimpleGit instance — closes its child-process
+      // pool. Previously the cache retained a SimpleGit instance per repo
+      // ever opened, leaking memory across the session. With this call the
+      // main process releases the git subprocess pipeline immediately.
+      api.git.invalidateCache(cur.path).catch(() => { /* ignore */ });
     }
-    // Clear all state — the git cache in the main process will be
-    // invalidated when the next repo is opened (getGit creates a new
-    // SimpleGit instance per repo path, and old ones are GC'd when
-    // no longer referenced).
+    // Clear all state — the git cache in the main process was just
+    // invalidated above, so the next repo open will create a fresh instance.
     set({ currentRepo: null, currentMetadata: null });
     // Clear global selections too — they were specific to this repo
     // (import here would create a cycle, so we use a window event)
@@ -168,6 +171,9 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
 
   removeRepo: async (path: string) => {
     await api.settings.removeRepo(path);
+    // Invalidate git cache for the removed repo — its SimpleGit instance
+    // and child process pool are no longer needed.
+    api.git.invalidateCache(path).catch(() => { /* ignore */ });
     await get().loadRepos();
     await get().loadMetadata();
     if (get().currentRepo?.path === path) {

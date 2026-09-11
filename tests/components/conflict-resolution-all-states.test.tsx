@@ -32,7 +32,15 @@ vi.mock('../../src/stores/repositoryStore', () => ({
 vi.mock('../../src/stores/gitStore', () => ({
   useGitStore: (s?: any) => s ? s({ refreshStatus: vi.fn(), status: null }) : { refreshStatus: vi.fn(), status: null },
 }));
-vi.mock('../../src/stores/toastStore', () => ({ useToastStore: () => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn(), info: vi.fn() }) }));
+vi.mock('../../src/stores/toastStore', () => ({ useToastActions: () => ({
+    error: vi.fn(),
+    warning: vi.fn(),
+    success: vi.fn(),
+    info: vi.fn(),
+    show: vi.fn(),
+    dismiss: vi.fn(),
+  }),
+  useToastStore: () => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn(), info: vi.fn() }) }));
 vi.mock('../../src/stores/selectionStore', () => ({ useSelectionStore: (s?: any) => s ? s({ selectedFilePath: null, selectFile: vi.fn() }) : { selectedFilePath: null, selectFile: vi.fn() } }));
 vi.mock('../../src/lib/i18n', () => ({ useI18n: () => ({ t: (k: string, p?: any) => p ? Object.entries(p).reduce((s, [k2, v]) => s.replace(`{${k2}}`, String(v)), k) : k }) }));
 vi.mock('../../src/components/ConfirmDialog', () => ({ confirmDialog: vi.fn(() => Promise.resolve(true)), promptDialog: vi.fn(() => Promise.resolve(null)) }));

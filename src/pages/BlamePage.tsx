@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Search, FileText, Loader, RefreshCw, GitCommit, History } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type BlameResult } from '../lib/api';
 import { shortHash } from '../lib/utils';
@@ -11,7 +11,7 @@ import { useI18n } from '../lib/i18n';
 export function BlamePage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const showContextMenu = useContextMenu();
   const [filePath, setFilePath] = useState('');
   const globalBranch = useSelectionStore((s) => s.selectedBranch);

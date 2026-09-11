@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Folder, X, Loader } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 
@@ -15,7 +15,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
   useEscapeKey(open, onClose);
   const { t } = useI18n();
   const initRepository = useRepositoryStore((s) => s.initRepository);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [path, setPath] = useState('');
   const [bare, setBare] = useState(false);
   const [loading, setLoading] = useState(false);

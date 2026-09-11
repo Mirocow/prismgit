@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, X, GitBranch, Tag, CornerDownRight } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
@@ -20,7 +20,7 @@ interface FindObjectDialogProps {
 
 export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogProps) {
   const repo = useRepositoryStore((s) => s.currentRepo);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoundRef[]>([]);
   const [loading, setLoading] = useState(false);

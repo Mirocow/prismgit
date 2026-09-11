@@ -137,8 +137,10 @@ export function CommandLogPanel({
   const [showSystem, setShowSystem] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const { t } = useI18n();
-  const settings = useSettingsStore((s) => s.settings);
-  const maxCommands = settings.commandLogLimit ?? 20;
+  // Select only the specific field we need, not the entire settings object —
+  // avoids re-rendering this 80-row panel on every unrelated settings tweak
+  // (font size drag, contrast slider, theme toggle, etc.).
+  const maxCommands = useSettingsStore((s) => s.settings.commandLogLimit ?? 20);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const entries = useCommandLogStore((s) => s.entries);

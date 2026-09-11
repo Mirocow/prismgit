@@ -36,7 +36,7 @@ import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -49,7 +49,7 @@ export { BRANCH_COLORS };
 
 export function HistoryPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const status = useGitStore((s) => s.status);
   const [entries, setEntries] = useState<LogEntry[]>([]);
@@ -227,8 +227,13 @@ export function HistoryPage() {
       }
       // SmartGit Log groups — stashes and (opt-in) recyclable commits load
       // alongside the graph; failures degrade to empty sections.
+      // Stashes are shown by default — load eagerly.
       api.git.stashList(repo.path).then((s) => setStashes(s)).catch(() => setStashes([]));
-      api.git.recyclableCommits(repo.path).then((r) => setRecyclable(r)).catch(() => setRecyclable([]));
+      // Recyclable commits are opt-in (showRecyclable=false by default) —
+      // defer the expensive `git reflog --all` + `git rev-list --all` calls
+      // until the user actually expands that section.
+      // (Previously fired on every History page open, blocking UI for seconds
+      //  on large repos for data the user wasn't viewing.)
       setSelectedIdx(0);
       // Preserve an existing global selection when it is still visible in the
       // (re)loaded log — clobbering it with the first commit broke other tools
@@ -247,6 +252,21 @@ export function HistoryPage() {
     } catch (e) { toast.error('Failed to load history', String(e)); }
     finally { setLoading(false); }
   }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit]);
+
+  // Recyclable commits are opt-in — only load `git reflog --all` + `git rev-list --all`
+  // when the user expands the section. Previously this fired on every History
+  // page open and could block the UI for seconds on large repos.
+  useEffect(() => {
+    if (!showRecyclable) {
+      setRecyclable([]);
+      return;
+    }
+    let cancelled = false;
+    api.git.recyclableCommits(repo.path)
+      .then((r) => { if (!cancelled) setRecyclable(r); })
+      .catch(() => { if (!cancelled) setRecyclable([]); });
+    return () => { cancelled = true; };
+  }, [showRecyclable, repo.path]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 

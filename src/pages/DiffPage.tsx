@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, FileText, GitBranch, GitCommit, ChevronDown, Search, AlertCircle } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type DiffResult, type LogEntry, type BranchInfo, type CommitFile } from '../lib/api';
 import { DiffViewer } from '../components/DiffViewer';
 import { ConflictMergeView } from '../components/ConflictMergeView';
+import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { cn, shortHash } from '../lib/utils';
 import { useLazyList } from '../lib/useLazyList';
@@ -37,7 +38,7 @@ import { useI18n } from '../lib/i18n';
  */
 export function DiffPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const status = useGitStore((s) => s.status);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const { t } = useI18n();
@@ -509,10 +510,132 @@ export function DiffPage() {
 
         {/* Diff viewer OR 3-way ConflictMergeView — when a conflicted file is
             selected during a merge/rebase/cherry-pick/revert, the Diff tool
-            switches to a 3-way merge view (Base | Ours | Theirs) instead of
+            switches to a 3-way merge view (Ours | Working Tree | Theirs) instead of
             the normal 2-way diff. This is the SmartGit pattern: conflict
-            resolution happens IN the Diff tool, not in a separate modal. */}
+            resolution happens IN the Diff tool, not in a separate modal.
+            The RepoStateBanner above the merge view surfaces the same
+            Continue/Abort/etc. actions the user gets on the Changes page,
+            so they can finish the operation without leaving the Diff tool. */}
         <div className="flex-1 overflow-hidden flex flex-col">
+          {showMergeView && (
+            <RepoStateBanner
+              status={status}
+              busy={false}
+              handlers={{
+                cherryPick: {
+                  onContinue: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['cherry-pick', '--continue']);
+                      toast.success('Cherry-pick continued');
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Cherry-pick continue failed', String(e)); }
+                  },
+                  onSkip: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['cherry-pick', '--skip']);
+                      toast.success('Skipped');
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Skip failed', String(e)); }
+                  },
+                  onCommitEmpty: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['commit', '--allow-empty', '--no-edit']);
+                      await api.git.raw(repo.path, ['cherry-pick', '--continue']);
+                      toast.success('Committed empty');
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Commit empty failed', String(e)); }
+                  },
+                  onAbort: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['cherry-pick', '--abort']);
+                      toast.success('Cherry-pick aborted');
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Abort failed', String(e)); }
+                  },
+                },
+                revert: {
+                  onContinue: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['revert', '--continue']);
+                      toast.success('Revert continued');
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Revert continue failed', String(e)); }
+                  },
+                  onSkip: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['revert', '--skip']);
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Skip failed', String(e)); }
+                  },
+                  onAbort: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['revert', '--abort']);
+                      toast.success('Revert aborted');
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Abort failed', String(e)); }
+                  },
+                },
+                merge: {
+                  onAbort: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['merge', '--abort']);
+                      toast.success('Merge aborted');
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Abort failed', String(e)); }
+                  },
+                },
+                rebase: {
+                  onContinue: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['rebase', '--continue']);
+                      toast.success('Rebase continued');
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Rebase continue failed', String(e)); }
+                  },
+                  onSkip: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['rebase', '--skip']);
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Skip failed', String(e)); }
+                  },
+                  onAbort: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['rebase', '--abort']);
+                      toast.success('Rebase aborted');
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Abort failed', String(e)); }
+                  },
+                },
+                bisect: {
+                  onGood: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['bisect', 'good']);
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Bisect good failed', String(e)); }
+                  },
+                  onBad: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['bisect', 'bad']);
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Bisect bad failed', String(e)); }
+                  },
+                  onSkip: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['bisect', 'skip']);
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Skip failed', String(e)); }
+                  },
+                  onReset: async () => {
+                    try {
+                      await api.git.raw(repo.path, ['bisect', 'reset']);
+                      toast.success('Bisect reset');
+                      await refreshStatus(repo.path);
+                    } catch (e) { toast.error('Bisect reset failed', String(e)); }
+                  },
+                },
+              }}
+            />
+          )}
           {showMergeView ? (
             <ConflictMergeView
               filePath={activeFile}

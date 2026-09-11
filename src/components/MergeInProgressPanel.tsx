@@ -3,7 +3,7 @@ import { AlertCircle, Check, Loader, RotateCcw, GitMerge, X } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { confirmDialog } from './ConfirmDialog';
 
@@ -24,7 +24,7 @@ interface MergeInProgressPanelProps {
  */
 export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanelProps) {
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [conflicted, setConflicted] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 

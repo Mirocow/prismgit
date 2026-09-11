@@ -35,7 +35,7 @@ import { useGitStore } from './stores/gitStore';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSelectionStore } from './stores/selectionStore';
 import { useSettingsStore } from './stores/settingsStore';
-import { useToastStore } from './stores/toastStore';
+import { useToastStore, useToastActions } from './stores/toastStore';
 
 // Heavy dialogs are code-split: they are never needed for first paint, and
 // pulling them out of the initial bundle makes the app window show faster.
@@ -104,7 +104,7 @@ export default function App() {
   const loadAuth = useAuthStore((s) => s.loadAuthState);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const status = useGitStore((s) => s.status);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const windowStyle = useWindowStyleStore((s) => s.style);
   const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
   const navigate = useNavigate();

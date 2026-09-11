@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Package, RefreshCw, Download, Upload, Plus, Loader, AlertCircle, Check, Lock, Unlock, History } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type LfsLock } from '../lib/api';
 import { useI18n } from '../lib/i18n';
@@ -16,7 +16,7 @@ interface LfsFile {
 export function LfsPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [installed, setInstalled] = useState(false);
   const [files, setFiles] = useState<LfsFile[]>([]);
   const [tracked, setTracked] = useState<string[]>([]);

@@ -3,7 +3,7 @@ import { Folder, X, Github, Loader, Download } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useAuthStore } from '../stores/authStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type GithubRepository } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
@@ -20,7 +20,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
   const cloneRepository = useRepositoryStore((s) => s.cloneRepository);
   const { authenticated, user } = useAuthStore();
   const settings = useSettingsStore((s) => s.settings);
-  const toast = useToastStore();
+  const toast = useToastActions();
 
   const [url, setUrl] = useState('');
   const [targetPath, setTargetPath] = useState('');

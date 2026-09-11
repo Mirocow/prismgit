@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { CloudDownload, RefreshCw, Plus, Trash, Pencil, ExternalLink, Loader, GitBranch, ChevronDown, ChevronRight, Check, Eye, EyeOff, Settings } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type RemoteInfo } from '../lib/api';
 import { cn, copyToClipboard } from '../lib/utils';
@@ -18,7 +18,7 @@ import { useI18n } from '../lib/i18n';
 export function RemotesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const { t } = useI18n();
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
   const [loading, setLoading] = useState(false);

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Tag as TagIcon, Plus, Trash, RefreshCw, Check, Pencil, ChevronDown, ChevronRight, FolderTree } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { CommitHashLink } from '../components/StatusBar';
@@ -50,7 +50,7 @@ function groupTagsByPattern(tags: TagInfo[]): TagGroup[] {
 
 export function TagsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const { t } = useI18n();
   const showContextMenu = useContextMenu();
   const [tags, setTags] = useState<TagInfo[]>([]);

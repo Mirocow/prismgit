@@ -3,7 +3,7 @@ import { X, RefreshCw, AlertCircle, Loader, ChevronUp, ChevronDown, GitCommit, C
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type LogEntry } from '../lib/api';
 import { cn } from '../lib/utils';
 
@@ -46,7 +46,7 @@ export function InteractiveRebaseDialog({
   useEscapeKey(open, onClose);
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   // SmartGit linkage: without an explicit prop, the rebase target defaults to
   // the globally selected branch, then the current HEAD — the dialog used to
   // be unusable (always warning "Target branch is required") when opened from

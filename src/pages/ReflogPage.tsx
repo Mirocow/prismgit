@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { History, RefreshCw, Trash, ChevronDown, ChevronRight } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type ReflogEntry } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -15,7 +15,7 @@ const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
 export function ReflogPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const showContextMenu = useContextMenu();
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const [entries, setEntries] = useState<ReflogEntry[]>([]);

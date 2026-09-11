@@ -17,7 +17,11 @@ const COLORS = {
 };
 
 export function ToastContainer() {
-  const { toasts, dismiss } = useToastStore();
+  // Use granular selectors so that ONLY the ToastContainer re-renders when a
+  // toast is added/dismissed — other consumers of the toast store (which
+  // only need action methods) use `useToastActions` and don't re-render.
+  const toasts = useToastStore((s) => s.toasts);
+  const dismiss = useToastStore((s) => s.dismiss);
 
   if (toasts.length === 0) return null;
 

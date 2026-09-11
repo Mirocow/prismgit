@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { StickyNote, RefreshCw, Plus, Trash, Copy, GitCommit, CloudDownload, CloudUpload } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type NoteCategory, type CommitNote, type LogEntry } from '../lib/api';
@@ -17,7 +17,7 @@ import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 export function NotesPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const selectCommit = useSelectionStore((s) => s.selectCommit);
   // The commit a new note will attach to (selected in History/Tags/Branches, else HEAD).
   // Shown explicitly so the user sees WHERE the note lands — and can jump to it.

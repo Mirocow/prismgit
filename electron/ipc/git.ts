@@ -400,4 +400,11 @@ export function registerGitIpc(): void {
   );
   ipcMain.handle('git:exportConfig', (_e, p: string | null) => gitService.exportConfig(p));
   ipcMain.handle('git:importConfig', (_e, p: string, config: any) => gitService.importConfig(p, config));
+
+  // Memory: invalidate the cached SimpleGit instance for a repo. Called by
+  // the renderer when a repo is closed (repositoryStore.closeRepository) —
+  // previously the cache retained a SimpleGit instance (with its child
+  // process pool) per repo ever opened for the entire session, leaking
+  // memory on every repo switch.
+  ipcMain.handle('git:invalidateCache', (_e, p?: string) => gitService.invalidateCache(p));
 }

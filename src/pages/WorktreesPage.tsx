@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { FolderTree, RefreshCw, Plus, Trash, Folder, GitBranch, AlertCircle, Loader, CheckCircle, CornerDownRight } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type WorktreeInfo } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
@@ -12,7 +12,7 @@ import { useI18n } from '../lib/i18n';
 export function WorktreesPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAdd, setShowAdd] = useState(false);

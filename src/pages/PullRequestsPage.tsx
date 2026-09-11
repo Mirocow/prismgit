@@ -3,7 +3,7 @@ import { GitPullRequest, Plus, RefreshCw, ExternalLink, Loader, X, CloudDownload
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useAuthStore } from '../stores/authStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type GithubPullRequest } from '../lib/api';
 import { resolveDefaultRemote } from '../lib/remotes';
@@ -16,7 +16,7 @@ export function PullRequestsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { authenticated, user } = useAuthStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [prs, setPRs] = useState<GithubPullRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<'fetch' | 'pull' | null>(null);

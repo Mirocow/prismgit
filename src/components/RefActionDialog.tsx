@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { X, Search, Loader } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type BranchInfo } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
@@ -33,7 +33,7 @@ const ACTION_META: Record<RefAction, { titleKey: string; targetKey: string; conf
 export function RefActionDialog({ action, onClose }: { action: RefAction; onClose: () => void }) {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const meta = ACTION_META[action];
 
   const [branches, setBranches] = useState<BranchInfo[]>([]);

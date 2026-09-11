@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Package, RefreshCw, Plus, Trash, Download, Upload, Check, FileText, ChevronDown, ChevronRight, X, GitBranch } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type StashEntry, type DiffResult } from '../lib/api';
 import { formatDate, shortHash, copyToClipboard } from '../lib/utils';
@@ -17,7 +17,7 @@ import { useI18n } from '../lib/i18n';
 export function StashesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const { t } = useI18n();
   const showContextMenu = useContextMenu();
   const navigate = useNavigate();

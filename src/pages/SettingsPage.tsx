@@ -6,14 +6,14 @@ import { cn } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useI18n, LOCALES } from '../lib/i18n';
 
 export function SettingsPage() {
   const { settings, theme, setSetting, toggleTheme } = useSettingsStore();
   const { user, authenticated, loginWithPAT, logout, loadAuthState } = useAuthStore();
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const { repos, removeRepo, loadRepos } = useRepositoryStore();
   const { t, locale, setLocale } = useI18n();
   const [pat, setPat] = useState('');

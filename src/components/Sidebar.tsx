@@ -13,7 +13,7 @@ import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
 import {
   AlertCircle,
@@ -91,12 +91,29 @@ function RemoteBadges({ check }: { check: RemoteCheckSummary | undefined }) {
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const {
-    repos, groups, metadata, remoteChecks, checkingRemotes, currentRepo,
-    openRepository, removeRepo, pinRepo, checkRemotes, loadRepos,
-    createGroup, renameGroup, deleteGroup, moveGroup, toggleGroupExpanded, assignRepoGroup,
-  } = useRepositoryStore();
-  const toast = useToastStore();
+  // Granular selectors — previously the entire store was destructured, so any
+  // state change (e.g. remoteChecks updated by the 2-min poll) re-rendered the
+  // entire sidebar tree including all repo rows, drag handlers, badges, etc.
+  const repos = useRepositoryStore((s) => s.repos);
+  const groups = useRepositoryStore((s) => s.groups);
+  const metadata = useRepositoryStore((s) => s.metadata);
+  const remoteChecks = useRepositoryStore((s) => s.remoteChecks);
+  const checkingRemotes = useRepositoryStore((s) => s.checkingRemotes);
+  const currentRepo = useRepositoryStore((s) => s.currentRepo);
+  // Actions are stable references in zustand — selecting them via separate
+  // calls doesn't cause re-renders on state changes.
+  const openRepository = useRepositoryStore((s) => s.openRepository);
+  const removeRepo = useRepositoryStore((s) => s.removeRepo);
+  const pinRepo = useRepositoryStore((s) => s.pinRepo);
+  const checkRemotes = useRepositoryStore((s) => s.checkRemotes);
+  const loadRepos = useRepositoryStore((s) => s.loadRepos);
+  const createGroup = useRepositoryStore((s) => s.createGroup);
+  const renameGroup = useRepositoryStore((s) => s.renameGroup);
+  const deleteGroup = useRepositoryStore((s) => s.deleteGroup);
+  const moveGroup = useRepositoryStore((s) => s.moveGroup);
+  const toggleGroupExpanded = useRepositoryStore((s) => s.toggleGroupExpanded);
+  const assignRepoGroup = useRepositoryStore((s) => s.assignRepoGroup);
+  const toast = useToastActions();
   const { t } = useI18n();
   const favoritePaths = useMemo(
     () => new Set(Object.entries(metadata).filter(([, m]) => m.favorite).map(([p]) => p)),

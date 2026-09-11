@@ -8,7 +8,7 @@ import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
 import { getRepoInProgressState, isRepoBusy } from '../lib/repoState';
@@ -80,7 +80,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
   const push = useGitStore((s) => s.push);
   const pull = useGitStore((s) => s.pull);
   const fetch = useGitStore((s) => s.fetch);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
   // Read global selection — show file-history chip in header if set
@@ -375,7 +375,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
  */
 function PushDropdown({ disabled }: { disabled: boolean }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -597,7 +597,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
  */
 function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason Pull is blocked (in-progress repo state) — undefined when allowed */ pullBlocked?: string }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const settings = useSettingsStore((s) => s.settings);
   const { t } = useI18n();
@@ -893,7 +893,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   const push = useGitStore((s) => s.push);
   const pull = useGitStore((s) => s.pull);
   const fetch = useGitStore((s) => s.fetch);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const settings = useSettingsStore((s) => s.settings);
   const navigate = useNavigate();
   const location = useLocation();

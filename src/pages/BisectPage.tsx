@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { GitBranch, Loader, Check, X, SkipForward, RotateCcw, FileText, AlertTriangle, Search, RefreshCw } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
@@ -20,7 +20,7 @@ export function BisectPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const [bisect, setBisect] = useState<BisectState>({ state: 'none' });
   const [loading, setLoading] = useState(false);

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, Loader, Settings as SettingsIcon } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
@@ -16,7 +16,7 @@ type Tab = (typeof TABS)[number];
 
 export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => void; remoteName?: string }) {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [tab, setTab] = useState<Tab>('User');
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
