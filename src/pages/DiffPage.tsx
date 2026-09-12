@@ -562,8 +562,6 @@ export function DiffPage() {
           <div className="px-3 py-1 border-b border-status-conflict/30 bg-status-conflict/10 text-2xs text-status-conflict flex items-center gap-2 flex-shrink-0">
             <AlertCircle size={11} className="flex-shrink-0" />
             <span className="font-medium">{conflicted.length} conflict{conflicted.length === 1 ? '' : 's'}</span>
-            {showMergeView && <span className="text-text-tertiary">— 3-way merge view active for {activeFile}</span>}
-            {!showMergeView && <span className="text-text-tertiary">— select a conflicted file to resolve it here</span>}
           </div>
         )}
       </div>
