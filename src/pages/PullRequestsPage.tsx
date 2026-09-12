@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { GitPullRequest, Plus, RefreshCw, ExternalLink, Loader, X, CloudDownload, ArrowDown } from '../components/icons';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { GitPullRequest, Plus, RefreshCw, ExternalLink, Loader, X, CloudDownload, ArrowDown, Search } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useAuthStore } from '../stores/authStore';
@@ -22,6 +22,9 @@ export function PullRequestsPage() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<'fetch' | 'pull' | null>(null);
   const [state, setState] = useState<'open' | 'closed' | 'all'>('open');
+  // PR search filter — match title, PR number, head/base branch, or author.
+  // Memory-only; not persisted (matches the pattern in Tags/Stashes/etc).
+  const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeKey(showCreate, () => setShowCreate(false));
   const [repoInfo, setRepoInfo] = useState<{ owner?: string; repo?: string; provider?: string }>({});
@@ -168,6 +171,28 @@ export function PullRequestsPage() {
 
   const isGitHubRepo = repoInfo.provider === 'github' && repoInfo.owner && repoInfo.repo;
 
+  // Filtered PRs — title, PR number, head/base branch, or author match the
+  // search query. The search is case-insensitive and accepts `#123` syntax
+  // for direct PR-number lookup.
+  const filteredPRs = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return prs;
+    // `#123` → match exact PR number
+    const directNumMatch = q.match(/^#(\d+)$/);
+    if (directNumMatch) {
+      const n = parseInt(directNumMatch[1], 10);
+      return prs.filter(pr => pr.number === n);
+    }
+    const numQ = /^\d+$/.test(q) ? parseInt(q, 10) : null;
+    return prs.filter(pr =>
+      pr.title.toLowerCase().includes(q) ||
+      pr.user.login.toLowerCase().includes(q) ||
+      pr.head.ref.toLowerCase().includes(q) ||
+      pr.base.ref.toLowerCase().includes(q) ||
+      (numQ != null && pr.number === numQ)
+    );
+  }, [prs, search]);
+
   // Request fresh data from the remote server — plain git operations, they work
   // regardless of GitHub auth (this is what the tool was missing entirely).
   const handleFetchAll = async () => {
@@ -263,8 +288,36 @@ export function PullRequestsPage() {
           <GitPullRequest size={14} />
           <span className="text-sm font-medium">{t('nav.pulls')}</span>
           <span className="text-2xs text-text-tertiary">{repoInfo.owner}/{repoInfo.repo}</span>
+          {/* Live count — visible count / total. When the search is active,
+              shows "5 / 12" so the user knows there are hidden matches. */}
+          {search && prs.length > 0 && (
+            <span className="text-2xs text-text-tertiary ml-1">
+              {filteredPRs.length} / {prs.length}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          {/* PR search — title, #number, head/base branch, or author */}
+          <div className="relative">
+            <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+            <input
+              type="text"
+              className="text-xs w-44 pl-7 pr-2 py-0.5 bg-bg-tertiary border border-border-default rounded"
+              placeholder={t('pages.prSearchPlaceholder')}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              title={t('pages.prSearchTooltip')}
+            />
+            {search && (
+              <button
+                className="absolute right-1 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary"
+                onClick={() => setSearch('')}
+                title={t('common.clear')}
+              >
+                <X size={10} />
+              </button>
+            )}
+          </div>
           {syncButtons}
           <div className="flex bg-bg-tertiary rounded">
             {(['open', 'closed', 'all'] as const).map(s => (
@@ -310,8 +363,16 @@ export function PullRequestsPage() {
             <GitPullRequest size={32} className="mb-2 opacity-50" />
             <div className="text-sm">{t('pages.prNone', { state })}</div>
           </div>
+        ) : filteredPRs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
+            <Search size={32} className="mb-2 opacity-50" />
+            <div className="text-sm">{t('pages.prNoMatches')}</div>
+            <button className="text-xs text-accent mt-2 hover:underline" onClick={() => setSearch('')}>
+              {t('common.clear')}
+            </button>
+          </div>
         ) : (
-          prs.map(pr => (
+          filteredPRs.map(pr => (
             <div
               key={pr.number}
               className="group flex items-start gap-3 px-3 py-3 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
