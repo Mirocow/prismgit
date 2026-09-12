@@ -136,6 +136,28 @@ async function writeSettingsFile(data: Record<string, unknown>): Promise<void> {
   await writeTextFile(path, JSON.stringify(data, null, 2));
 }
 
+/** Write a patch string to a temp file in the system temp dir.
+ *  Returns the full path so it can be passed to `git apply --cached`. */
+async function writeTempPatch(repoPath: string, patch: string, prefix: string): Promise<string> {
+  const { tempDir } = await import('@tauri-apps/api/path');
+  const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+  const tmp = await tempDir();
+  const filename = `prismgit-${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.patch`;
+  const fullPath = `${tmp}/${filename}`;
+  await writeTextFile(fullPath, patch);
+  return fullPath;
+}
+
+/** Remove a temp file — silently ignores errors (file may not exist). */
+async function removeTempFile(path: string): Promise<void> {
+  try {
+    const { remove } = await import('@tauri-apps/plugin-fs');
+    await remove(path);
+  } catch {
+    // ignore — file may not exist or already cleaned up
+  }
+}
+
 // --- Minimal types matching the Electron-side contracts ---
 interface RawBranchInfo {
   name: string;
@@ -476,8 +498,40 @@ export const tauriApi = {
 
     // --- Methods that still need full Rust impl (status bar / context
     //     menu / GitHub integration) — left as stubs.
-    stageLines: async (): Promise<never> => { throw new Error('git.stageLines not yet wired in Tauri backend'); },
-    unstageLines: async (): Promise<never> => { throw new Error('git.unstageLines not yet wired in Tauri backend'); },
+    stageLines: async (repoPath: string, file: string, lineRanges: { start: number; end: number }[]): Promise<void> => {
+      // Get the unstaged diff for this file with zero context
+      const diffOut = await callGit('git_raw', repoPath, ['diff', '--unified=0', '--no-color', '--', file]);
+      if (!diffOut.trim()) {
+        // Untracked or unchanged — stage the whole file
+        await callGit('git_raw', repoPath, ['add', '--', file]);
+        return;
+      }
+      const { buildFilteredPatch } = await import('./patchStaging');
+      const patch = buildFilteredPatch(diffOut, lineRanges);
+      if (!patch) return;
+      // Write patch to temp file and apply via git apply --cached
+      const tmpPath = await writeTempPatch(repoPath, patch, 'stage');
+      try {
+        await callGit('git_raw', repoPath, ['apply', '--cached', '--unidiff-zero', '--whitespace=nowarn', tmpPath]);
+      } finally {
+        await removeTempFile(tmpPath);
+      }
+    },
+    unstageLines: async (repoPath: string, file: string, lineRanges: { start: number; end: number }[]): Promise<void> => {
+      // Get the staged diff for this file with zero context
+      const diffOut = await callGit('git_raw', repoPath, ['diff', '--cached', '--unified=0', '--no-color', '--', file]);
+      if (!diffOut.trim()) return;
+      const { buildFilteredPatch } = await import('./patchStaging');
+      const patch = buildFilteredPatch(diffOut, lineRanges);
+      if (!patch) return;
+      // Write patch to temp file and apply in reverse
+      const tmpPath = await writeTempPatch(repoPath, patch, 'unstage');
+      try {
+        await callGit('git_raw', repoPath, ['apply', '--cached', '--reverse', '--unidiff-zero', '--whitespace=nowarn', tmpPath]);
+      } finally {
+        await removeTempFile(tmpPath);
+      }
+    },
   },
 
   fs: {
