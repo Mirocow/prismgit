@@ -5,6 +5,16 @@
  * `src/lib/api.ts` delegates to this module instead of `window.smartgit`
  * (the Electron preload binding).
  *
+ * IMPORTANT: All Tauri imports use DYNAMIC import() so Vite's static
+ * analysis doesn't try to resolve `@tauri-apps/api/core` etc. when the
+ * packages aren't installed (e.g. in pure Electron dev mode, the user
+ * may not have run `npm install` after pulling the new Tauri deps).
+ * The static `import { invoke } from '@tauri-apps/api/core'` would
+ * break Vite build with "Failed to resolve import" — even though
+ * `isTauri()` returns false at runtime. Dynamic import() defers
+ * resolution to the moment the function is actually called, which
+ * only happens under Tauri.
+ *
  * Currently wired up:
  *   - api.git.raw(repoPath, args)        → invoke('git_raw', ...)
  *   - api.git.status(repoPath)            → invoke('git_status', ...) + porcelain parser
@@ -23,13 +33,7 @@
  *   - api.git.diff / stageLines / unstageLines (need git2-rs or shelled out)
  *   - api.settings.* (need Tauri storage plugin + JSON persistence)
  *   - api.contextMenu.* (need Tauri window menu API)
- *
- * The frontend gracefully degrades — pages that need unsupported
- * features show an empty state with a hint to use the Electron build.
  */
-
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 /** Result of a Rust-side git command (matches Rust struct in src-tauri/src/lib.rs). */
 interface GitCommandResult {
@@ -39,8 +43,26 @@ interface GitCommandResult {
   exit_code: number;
 }
 
+// --- Type stubs for Tauri APIs (avoid static imports of @tauri-apps/api) ---
+type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+type ListenFn = <T>(event: string, handler: (event: { payload: T }) => void) => Promise<() => void>;
+type UnlistenFn = () => void;
+
+/** Lazy-loaded Tauri `invoke` — only resolved when actually called under Tauri. */
+async function getInvoke(): Promise<InvokeFn> {
+  const mod = await import('@tauri-apps/api/core');
+  return mod.invoke;
+}
+
+/** Lazy-loaded Tauri `listen` — for subscribing to events emitted by Rust. */
+async function getListen(): Promise<ListenFn> {
+  const mod = await import('@tauri-apps/api/event');
+  return mod.listen;
+}
+
 /** Call a Rust-side git command. */
 async function callGit(cmd: string, repoPath: string, args?: unknown[]): Promise<string> {
+  const invoke = await getInvoke();
   const res = await invoke<GitCommandResult>(cmd, { repoPath, args: args ?? [] });
   if (!res.ok) {
     const err = new Error(res.stderr || `git ${cmd} failed (exit ${res.exit_code})`);
@@ -51,10 +73,6 @@ async function callGit(cmd: string, repoPath: string, args?: unknown[]): Promise
 }
 
 // --- Minimal types matching the Electron-side contracts ---
-// (Trimmed down — full types live in electron/types/*.ts. We import
-// them re-export via api.ts so the rest of the frontend doesn't need
-// to know whether it's running under Electron or Tauri.)
-
 interface RawBranchInfo {
   name: string;
   remote: boolean;
@@ -194,26 +212,28 @@ export const tauriApi = {
 
   fs: {
     openRepositoryPicker: async (): Promise<string | null> => {
+      const invoke = await getInvoke();
       return invoke<string | null>('open_repo_picker');
     },
   },
 
   watcher: {
     start: async (repoPath: string): Promise<UnlistenFn> => {
-      // Tauri backend emits 'repo:changed' on every fs event; the
-      // frontend subscribes via listen(). Return an unsubscriber.
+      const invoke = await getInvoke();
       await invoke('watch_repo', { repoPath });
       // The unlisten function for the EVENT subscription (kept separate
       // so the caller can stop listening without stopping the watcher).
       return () => { /* no-op — caller can invoke unwatch_repo to stop */ };
     },
     stop: async (repoPath: string): Promise<void> => {
+      const invoke = await getInvoke();
       await invoke('unwatch_repo', { repoPath });
     },
   },
 
   // Listen to fs change events emitted by the Rust watcher.
-  onRepoChanged: (cb: (path: string) => void): Promise<UnlistenFn> => {
+  onRepoChanged: async (cb: (path: string) => void): Promise<UnlistenFn> => {
+    const listen = await getListen();
     return listen<string>('repo:changed', (event) => {
       cb(event.payload);
     });
@@ -221,10 +241,10 @@ export const tauriApi = {
 
   // Stubbed methods — frontend should disable these features in Tauri.
   app: {
-    openExternal: async (_url: string): Promise<void> => {
-      // Use the shell plugin for this once wired in capabilities.
-      const { open } = await import('@tauri-apps/plugin-shell');
-      await open(_url);
+    openExternal: async (url: string): Promise<void> => {
+      // Lazy-load the shell plugin — only resolved if this fn is actually called.
+      const mod = await import('@tauri-apps/plugin-shell');
+      await mod.open(url);
     },
   },
 
