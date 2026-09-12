@@ -3,6 +3,8 @@
  * Matches SmartGit's colored author badge style.
  */
 
+import { formatDate, formatAbsoluteDate } from './formatDate';
+
 const BADGE_COLORS = [
   { bg: '#5B9BD5', text: '#ffffff' }, // Steel Blue
   { bg: '#C65911', text: '#ffffff' }, // Brown/Orange
@@ -43,7 +45,12 @@ export function getAuthorColor(name: string): { bg: string; text: string } {
 }
 
 /**
- * Format time for the Journal/commit list (12-hour format like SmartGit).
+ * Format time for the Journal/commit list — locale-aware.
+ *
+ * QW-6: previously hardcoded English ("now", "5m ago", "Yesterday")
+ * and forced 'en-US' for absolute dates. Non-English users still saw
+ * English text. Now delegates to formatDate / formatAbsoluteDate in
+ * lib/formatDate which read the active locale from useI18nStore.
  */
 export function formatTime(dateStr: string): string {
   if (!dateStr) return '';
@@ -54,11 +61,13 @@ export function formatTime(dateStr: string): string {
   const mins = Math.floor(diff / (1000 * 60));
   const hours = Math.floor(diff / (1000 * 60 * 60));
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  if (mins < 1) return 'now';
-  if (mins < 60) return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days === 1) return 'Yesterday';
-  if (days < 7) return `${days}d ago`;
-  if (days < 365) return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  // Re-use formatDate's relative-time strings for short ranges so we
+  // share translations across the Journal and the rest of the app.
+  if (mins < 1) return formatDate(dateStr);
+  if (mins < 60) return formatDate(dateStr);
+  if (hours < 24) return formatDate(dateStr);
+  if (days === 1) return formatDate(dateStr);
+  if (days < 7) return formatDate(dateStr);
+  if (days < 365) return formatAbsoluteDate(dateStr, undefined, { month: 'short', day: 'numeric' });
+  return formatAbsoluteDate(dateStr, undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }

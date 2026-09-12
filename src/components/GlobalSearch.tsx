@@ -9,6 +9,7 @@ import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
+import { formatAbsoluteDate } from '../lib/formatDate';
 import { api, type LogEntry, type BranchInfo, type TagInfo, type StashEntry } from '../lib/api';
 
 /**
@@ -91,7 +92,7 @@ const GROUP_ORDER: ResultKind[] = ['repo', 'commit', 'branch', 'tag', 'file', 's
 
 export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const toast = useToastActions();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -239,7 +240,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
           kind: 'tag',
           label: tg.name,
           secondary: tg.hashAbbrev || '',
-          tertiary: tg.date || '',
+          tertiary: tg.date ? formatAbsoluteDate(tg.date, locale) : '',
           score: s,
           action: () => {
             useSelectionStore.getState().selectTag(tg.name);
@@ -263,7 +264,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
           kind: 'commit',
           label: c.subject || '(no subject)',
           secondary: `${c.hashAbbrev} · ${c.author?.name || ''}`,
-          tertiary: c.author?.date || '',
+          tertiary: c.author?.date ? formatAbsoluteDate(c.author.date, locale) : '',
           score: s,
           action: () => {
             // Navigate to History with this commit selected — selectionStore
