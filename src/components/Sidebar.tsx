@@ -129,6 +129,13 @@ export function Sidebar() {
   // Live change counters for the Changes badge
   const changedCount = useGitStore((s) => s.status?.files.length ?? 0);
   const stagedCount = useGitStore((s) => s.status?.staged.length ?? 0);
+  // Unstaged count = total changes - staged changes. Shows in the accent
+  // badge to make the badge meaning unambiguous: green = staged, accent =
+  // unstaged. Previously the badge displayed `changedCount` (total) in
+  // both color states, which made users think the green badge was showing
+  // stagedCount erroneously (since green suggests "staged" but the number
+  // was the total).
+  const unstagedCount = Math.max(0, changedCount - stagedCount);
   // Collapsible nav groups — click group header to collapse/expand
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   // Favorites — GLOBAL (shared across all repositories), not per-repo.
@@ -731,14 +738,27 @@ export function Sidebar() {
                     <Icon size={15} />
                     <span>{item.label}</span>
                     {showBadge ? (
-                      <span
-                        className={cn(
-                          'ml-auto text-2xs font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center',
-                          stagedCount > 0 ? 'badge badge-added' : 'bg-accent-muted text-accent'
+                      <>
+                        {stagedCount > 0 && (
+                          <span
+                            className="ml-auto text-2xs font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center badge badge-added"
+                            title={t('shell.changesBadgeStaged', { count: changedCount, staged: stagedCount })}
+                          >
+                            {stagedCount}
+                          </span>
                         )}
-                      >
-                        {changedCount}
-                      </span>
+                        {unstagedCount > 0 && (
+                          <span
+                            className={cn(
+                              'text-2xs font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center bg-accent-muted text-accent',
+                              stagedCount === 0 && 'ml-auto'
+                            )}
+                            title={t('shell.changesBadge', { count: unstagedCount })}
+                          >
+                            {unstagedCount}
+                          </span>
+                        )}
+                      </>
                     ) : shortcut ? (
                       <kbd className="ml-auto text-2xs text-text-tertiary border border-border-subtle rounded px-1 opacity-60">{shortcut}</kbd>
                     ) : null}
@@ -806,17 +826,27 @@ export function Sidebar() {
                     <Icon size={15} />
                     <span>{item.label}</span>
                     {showBadge ? (
-                      <span
-                        className={cn(
-                          'ml-auto text-2xs font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center',
-                          stagedCount > 0 ? 'badge badge-added' : 'bg-accent-muted text-accent'
+                      <>
+                        {stagedCount > 0 && (
+                          <span
+                            className="ml-auto text-2xs font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center badge badge-added"
+                            title={t('shell.changesBadgeStaged', { count: changedCount, staged: stagedCount })}
+                          >
+                            {stagedCount}
+                          </span>
                         )}
-                        title={stagedCount > 0
-                          ? t('shell.changesBadgeStaged', { count: changedCount, staged: stagedCount })
-                          : t('shell.changesBadge', { count: changedCount })}
-                      >
-                        {changedCount}
-                      </span>
+                        {unstagedCount > 0 && (
+                          <span
+                            className={cn(
+                              'text-2xs font-semibold px-1.5 py-0.5 rounded-full min-w-[18px] text-center bg-accent-muted text-accent',
+                              stagedCount === 0 && 'ml-auto'
+                            )}
+                            title={t('shell.changesBadge', { count: unstagedCount })}
+                          >
+                            {unstagedCount}
+                          </span>
+                        )}
+                      </>
                     ) : shortcut ? (
                       <kbd className="ml-auto text-2xs text-text-tertiary border border-border-subtle rounded px-1 opacity-60">{shortcut}</kbd>
                     ) : null}
