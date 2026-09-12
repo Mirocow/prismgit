@@ -270,6 +270,14 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   /** Git-ignored files (from git status --porcelain --ignored). Used for
    *  the 'ignored' display flag. */
   const [ignoredFiles, setIgnoredFiles] = useState<string[]>([]);
+  /** Assume-unchanged files (from git ls-files -v). Used for the
+   *  'assumeUnchanged' display flag. */
+  const [assumeUnchangedFiles, setAssumeUnchangedFiles] = useState<string[]>([]);
+  /** Skip-worktree files (from git ls-files -v). Used for the
+   *  'skipped' display flag. */
+  const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
+  /** Submodule change entries. Used for the 'submodules' display flag. */
+  const [submoduleChanges, setSubmoduleChanges] = useState<string[]>([]);
   // Per-file line-change counts for the Changes table (+N -M), like History.
   const [numstat, setNumstat] = useState<{ staged: Map<string, { add: number; del: number; binary: boolean }>; unstaged: Map<string, { add: number; del: number; binary: boolean }> }>({
     staged: new Map(),
@@ -392,7 +400,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const loadIgnored = useCallback(async () => {
     try {
       const out = await api.git.raw(repo.path, ['status', '--porcelain', '--ignored']);
-      // Format: '!! path' for ignored entries
       const list = out.split('\n')
         .filter(l => l.startsWith('!! '))
         .map(l => l.slice(3).trim())
@@ -400,6 +407,58 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       setIgnoredFiles(list);
     } catch {
       setIgnoredFiles([]);
+    }
+  }, [repo.path]);
+
+  /** Load assume-unchanged + skip-worktree files via `git ls-files -v`.
+   *  Lines starting with lowercase letter (h,k,l,m,n) = assume-unchanged.
+   *  Lines starting with 'S' = skip-worktree. */
+  const loadIndexFlags = useCallback(async () => {
+    try {
+      const out = await api.git.raw(repo.path, ['ls-files', '-v']);
+      const assumeUnchanged: string[] = [];
+      const skipped: string[] = [];
+      for (const line of out.split('\n').filter(Boolean)) {
+        const tag = line[0];
+        const path = line.slice(1).trim();
+        if (!path) continue;
+        // Lowercase tags = assume-unchanged (h, k, l, m, n)
+        if (tag === 'h' || tag === 'k' || tag === 'l' || tag === 'm' || tag === 'n') {
+          assumeUnchanged.push(path);
+        }
+        // 'S' = skip-worktree
+        if (tag === 'S') {
+          skipped.push(path);
+        }
+      }
+      setAssumeUnchangedFiles(assumeUnchanged);
+      setSkippedFiles(skipped);
+    } catch {
+      setAssumeUnchangedFiles([]);
+      setSkippedFiles([]);
+    }
+  }, [repo.path]);
+
+  /** Load submodule changes via `git submodule summary`. */
+  const loadSubmoduleChanges = useCallback(async () => {
+    try {
+      const out = await api.git.raw(repo.path, ['submodule', 'summary']);
+      // Format: '* <hash> <name> <commits>
+      //          <commit lines>
+      // Lines starting with '* ' are submodule entries with changes
+      const list: string[] = [];
+      for (const line of out.split('\n')) {
+        if (line.startsWith('* ') || line.startsWith(' * ')) {
+          // Extract submodule path: '* <hash> <path> <count>'
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 3) {
+            list.push(parts[2]); // path is the 3rd element
+          }
+        }
+      }
+      setSubmoduleChanges(list);
+    } catch {
+      setSubmoduleChanges([]);
     }
   }, [repo.path]);
 
@@ -436,8 +495,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     loadDirTree();
     loadTrackedCount();
     loadIgnored();
+    loadIndexFlags();
+    loadSubmoduleChanges();
     loadNumstat();
-  }, [loadDirTree, loadTrackedCount, loadIgnored, loadNumstat, lastRefresh, status]);
+  }, [loadDirTree, loadTrackedCount, loadIgnored, loadIndexFlags, loadSubmoduleChanges, loadNumstat, lastRefresh, status]);
 
   // Reset folder scope and tree expansion when switching repositories
   useEffect(() => {
@@ -1030,7 +1091,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
 
   // File filter helper: substring, or regular expression when .* mode is on.
   // Invalid regexes never hide files.
-  const matchesFileFilter = (path: string): boolean => {
+  const matchesFileFilter = useCallback((path: string): boolean => {
     const q = fileFilter.trim();
     if (!q) return true;
     if (fileFilterRegex) {
@@ -1041,7 +1102,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       }
     }
     return path.toLowerCase().includes(q.toLowerCase());
-  };
+  }, [fileFilter, fileFilterRegex]);
 
   // Directory scope helper:
   //   fileScopeDir === null  → current dir is repo root
@@ -1320,6 +1381,47 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       }));
   }, [hasFlag, ignoredFiles, fileFilter, fileExtensionFilter, showSubdirs, fileScopeDir]);
 
+  // Assume-Unchanged files — shown only when 'assumeUnchanged' flag is ON.
+  const assumeUnchangedFileList: FileStatus[] = useMemo(() => {
+    if (!hasFlag('assumeUnchanged')) return [];
+    return assumeUnchangedFiles
+      .filter(p => matchesFileFilter(p))
+      .filter(p => !fileExtensionFilter || p.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+      .filter(p => matchesDirScope(p))
+      .map(p => ({
+        path: p,
+        index: 'modified' as FileStatus['index'],
+        working_dir: 'unmodified' as FileStatus['working_dir'],
+      }));
+  }, [hasFlag, assumeUnchangedFiles, fileFilter, fileExtensionFilter, showSubdirs, fileScopeDir]);
+
+  // Skipped (skip-worktree) files — shown only when 'skipped' flag is ON.
+  const skippedFileList: FileStatus[] = useMemo(() => {
+    if (!hasFlag('skipped')) return [];
+    return skippedFiles
+      .filter(p => matchesFileFilter(p))
+      .filter(p => !fileExtensionFilter || p.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+      .filter(p => matchesDirScope(p))
+      .map(p => ({
+        path: p,
+        index: 'modified' as FileStatus['index'],
+        working_dir: 'unmodified' as FileStatus['working_dir'],
+      }));
+  }, [hasFlag, skippedFiles, fileFilter, fileExtensionFilter, showSubdirs, fileScopeDir]);
+
+  // Submodule changes — shown only when 'submodules' flag is ON.
+  const submoduleFileList: FileStatus[] = useMemo(() => {
+    if (!hasFlag('submodules')) return [];
+    return submoduleChanges
+      .filter(p => matchesFileFilter(p))
+      .filter(p => matchesDirScope(p))
+      .map(p => ({
+        path: p,
+        index: 'modified' as FileStatus['index'],
+        working_dir: 'unmodified' as FileStatus['working_dir'],
+      }));
+  }, [hasFlag, submoduleChanges, fileFilter, showSubdirs, fileScopeDir]);
+
   // Ctrl/Cmd+A: select all visible files in the file list
   // (placed after stagedFiles/unstagedFiles/untrackedFiles are declared)
   useEffect(() => {
@@ -1385,7 +1487,12 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     const wd = file.working_dir as string;
 
     // Status letter shown in the gutter — single char for git porcelain codes,
-    // custom letters for our synthetic statuses (unchanged/ignored).
+    // custom letters for our synthetic statuses (unchanged/ignored/assumeUnchanged/skipped).
+    // Assume-unchanged and skip-worktree files have index='modified' wd='unmodified'
+    // in our synthetic FileStatus — we identify them by checking against the loaded lists.
+    const isAssumeUnchanged = assumeUnchangedFiles.includes(file.path);
+    const isSkipped = skippedFiles.includes(file.path);
+    const isSubmodule = submoduleChanges.includes(file.path);
     const isUntracked = idx === '?' && wd === '?';
     const isConflicted = idx === 'U' || wd === 'U';
     const isIgnored = idx === 'ignored' || wd === 'ignored';
@@ -1396,6 +1503,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       isUntracked ? 'untracked' :
       isConflicted ? 'conflicted' :
       isIgnored ? 'ignored' :
+      isAssumeUnchanged ? 'assumeUnchanged' :
+      isSkipped ? 'skipped' :
+      isSubmodule ? 'submodule' :
       isUnmodified ? 'unmodified' :
       idx === 'R' || idx === 'renamed' ? 'renamed' :
       idx === 'C' || idx === 'copied' ? 'copied' :
@@ -1411,6 +1521,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       isUntracked ? '?' :
       isConflicted ? 'U' :
       isIgnored ? 'I' :
+      isAssumeUnchanged ? 'L' :
+      isSkipped ? 'S' :
+      isSubmodule ? 'S' :
       isUnmodified ? '-' :
       statusCode === 'renamed' ? 'R' :
       statusCode === 'copied' ? 'C' :
@@ -1419,8 +1532,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       statusCode === 'modified' ? 'M' :
       '?';
 
-    // Row opacity — ignored and unchanged files are dimmed (grayed out)
-    const isDimmed = isIgnored || isUnmodified;
+    // Row opacity — ignored, unchanged, assume-unchanged, skipped files are dimmed
+    const isDimmed = isIgnored || isUnmodified || isAssumeUnchanged || isSkipped || isSubmodule;
     const stateKeys: Record<string, string> = {
       untracked: 'changes.statusUntracked',
       conflicted: 'changes.conflicted',
@@ -1431,6 +1544,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       copied: 'changes.stateCopied',
       unmodified: 'Unchanged',
       ignored: 'Ignored',
+      assumeUnchanged: 'Assume-Unch',
+      skipped: 'Skipped',
+      submodule: 'Submodule',
     };
     const stateLabel = t(stateKeys[statusCode] ?? 'changes.statusModified');
     // Untracked directories come from porcelain as 'dir/' — show the folder
@@ -1856,7 +1972,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             </div>
 
             {/* === Single flat file list (only Staged has its own group) === */}
-            {(totalChanged > 0 || unchangedFiles.length > 0 || ignoredFileList.length > 0 || untrackedFiles.length > 0) && (
+            {(totalChanged > 0 || unchangedFiles.length > 0 || ignoredFileList.length > 0 || untrackedFiles.length > 0 || assumeUnchangedFileList.length > 0 || skippedFileList.length > 0 || submoduleFileList.length > 0) && (
               <>
             {/* Conflicts — red accent, shown ABOVE staged when there are conflicted files */}
             {conflictedFiles.length > 0 && (
@@ -1905,6 +2021,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 ...renamedFiles,
                 ...untrackedFiles,
                 ...ignoredFileList,
+                ...assumeUnchangedFileList,
+                ...skippedFileList,
+                ...submoduleFileList,
                 ...unchangedFiles, // unchanged always last
               ];
               if (combined.length === 0) return null;
@@ -1913,7 +2032,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               </>
             )}
 
-            {totalChanged === 0 && unchangedFiles.length === 0 && ignoredFileList.length === 0 && untrackedFiles.length === 0 && (
+            {totalChanged === 0 && unchangedFiles.length === 0 && ignoredFileList.length === 0 && untrackedFiles.length === 0 && assumeUnchangedFileList.length === 0 && skippedFileList.length === 0 && submoduleFileList.length === 0 && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">
                 <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
                 {t('changes.workingTreeClean')}
