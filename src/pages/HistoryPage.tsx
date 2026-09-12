@@ -25,6 +25,7 @@ import { RepoStateBanner } from '../components/RepoStateBanner';
 import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
 import { api, type BranchInfo, type CommitFile, type LogEntry, type RecyclableCommit, type StashEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
+import { Avatar } from '../components/Avatar';
 import { linkifyCommitMessage } from '../lib/bugtraq';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGraph';
@@ -1540,10 +1541,11 @@ export function HistoryPage() {
                       className="text-text-tertiary/60 flex-shrink-0 truncate"
                     />
 
-                    <span className="flex-shrink-0 rounded author-badge text-center"
-                      style={{ backgroundColor: color.bg, width: 24, height: 16, fontSize: 8, lineHeight: '16px' }}>
-                      {initials}
-                    </span>
+                    {/* Author avatar — Gravatar image if the author's email
+                        is from a known provider (GitHub / GitLab noreply),
+                        otherwise the colored-initial fallback badge.
+                        QW-6 / Task (gravatar). */}
+                    <Avatar name={entry.author.name} email={entry.author.email} size={16} />
                     <span className="text-2xs text-text-tertiary flex-shrink-0" style={{ width: 70, textAlign: 'right' }}>
                       {formatTime(entry.author.date)}
                     </span>

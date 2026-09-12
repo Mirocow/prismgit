@@ -202,6 +202,11 @@ export const en: Record<string, string> = {
   'settings.commandLogLimit': 'Command log limit',
   'settings.commandLogLimitHint': "Maximum number of commands shown in the Output panel's Commands tab (default 20)",
 
+  'settings.sidebarModeTitle': 'Sidebar visual mode',
+  'settings.sidebarModeHint': 'Dim the left sidebar like Discord / Slack channel list.',
+  'settings.sidebarMode_default': 'Default',
+  'settings.sidebarMode_dim': 'Dim',
+  'settings.sidebarMode_light': 'Light',
   // Task 18 — footer visibility
   'settings.footerSectionTitle': 'STATUS BAR',
   'settings.footerSectionDesc': 'Choose which sections appear in the status bar footer.',
@@ -421,6 +426,11 @@ export const ru: Record<string, string> = {
   'settings.commandLogLimit': 'Лимит журнала команд',
   'settings.commandLogLimitHint': 'Максимум команд, показываемых на вкладке Commands панели вывода (по умолчанию 20)',
 
+  'settings.sidebarModeTitle': 'Визуальный режим сайдбара',
+  'settings.sidebarModeHint': 'Затемнить левый сайдбар как список каналов в Discord / Slack.',
+  'settings.sidebarMode_default': 'По умолчанию',
+  'settings.sidebarMode_dim': 'Затемнить',
+  'settings.sidebarMode_light': 'Осветлить',
   // Task 18 — footer visibility
   'settings.footerSectionTitle': 'СТРОКА СОСТОЯНИЯ',
   'settings.footerSectionDesc': 'Выберите, какие секции показывать в футере строки состояния.',
@@ -640,6 +650,11 @@ export const zh: Record<string, string> = {
   'settings.commandLogLimit': '命令日志上限',
   'settings.commandLogLimitHint': '输出面板 Commands 标签页中显示的最大命令数（默认 20）',
 
+  'settings.sidebarModeTitle': '侧栏视觉模式',
+  'settings.sidebarModeHint': '像 Discord / Slack 频道列表一样暗化左侧栏。',
+  'settings.sidebarMode_default': '默认',
+  'settings.sidebarMode_dim': '暗化',
+  'settings.sidebarMode_light': '亮化',
   // Task 18 — footer visibility
   'settings.footerSectionTitle': '状态栏',
   'settings.footerSectionDesc': '选择状态栏底部显示哪些分区。',
@@ -859,6 +874,11 @@ export const de: Record<string, string> = {
   'settings.commandLogLimit': 'Befehlsprotokoll-Limit',
   'settings.commandLogLimitHint': 'Maximale Anzahl der im Commands-Tab des Ausgabe-Panels angezeigten Befehle (Standard 20)',
 
+  'settings.sidebarModeTitle': 'Seitenleisten-Modus',
+  'settings.sidebarModeHint': 'Die linke Seitenleiste wie die Discord-/Slack-Kanalliste abdunkeln.',
+  'settings.sidebarMode_default': 'Standard',
+  'settings.sidebarMode_dim': 'Abgedunkelt',
+  'settings.sidebarMode_light': 'Aufgehellt',
   // Task 18 — footer visibility
   'settings.footerSectionTitle': 'STATUSLEISTE',
   'settings.footerSectionDesc': 'Wählen Sie, welche Abschnitte in der Fußleiste der Statusleiste erscheinen.',

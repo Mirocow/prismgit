@@ -55,6 +55,18 @@ function applyThemeToDOM(theme: Theme) {
  *   - High contrast target: black (light theme) / white (dark theme)
  *   - Low contrast target: the background color (fades text into bg)
  */
+function applySidebarModeToDOM(mode: 'default' | 'dim' | 'light') {
+  // Apply a CSS class on <html> so globals.css can override sidebar bg.
+  // Three modes:
+  //   default — no override (use the active theme's bg colors as-is)
+  //   dim     — sidebar gets a darker overlay (Discord/Slack channel-sidebar look)
+  //   light   — sidebar gets a lighter overlay (useful on very dark themes)
+  const html = document.documentElement;
+  html.classList.remove('sidebar-dim', 'sidebar-light');
+  if (mode === 'dim') html.classList.add('sidebar-dim');
+  else if (mode === 'light') html.classList.add('sidebar-light');
+}
+
 function applyContrastToDOM(contrast: number) {
   const clamped = Math.max(50, Math.min(150, contrast));
   const root = document.documentElement;
@@ -161,6 +173,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (settings.fontSizeMonospace) document.documentElement.style.setProperty('--font-size-mono', `${settings.fontSizeMonospace}px`);
       // Apply UI contrast on load (default to 100 = no filter)
       applyContrastToDOM(settings.contrast ?? 100);
+      // Apply sidebar dim mode (Discord/Slack-style channel sidebar)
+      applySidebarModeToDOM(settings.sidebarMode ?? 'default');
     } catch {
       set({ loading: false });
     }
@@ -198,6 +212,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     // Apply UI contrast live (slider drags will hit this rapidly — GPU-accelerated filter is cheap)
     if (key === 'contrast') {
       applyContrastToDOM(value as number);
+    }
+    // Apply sidebar visual mode live (Discord/Slack-style dim)
+    if (key === 'sidebarMode') {
+      applySidebarModeToDOM(value as 'default' | 'dim' | 'light');
     }
   },
 

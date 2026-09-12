@@ -164,16 +164,11 @@ export function SettingsPage() {
               </p>
             </div>
           </div>
-          {currentRepo && (
-            <button
-              className="btn btn-secondary text-xs flex-shrink-0"
-              title={t('settings.repoSettingsButtonTitle')}
-              onClick={() => window.dispatchEvent(new CustomEvent('prismgit:repo-settings'))}
-            >
-              <GitBranch size={12} />
-              {t('settings.repoSettingsButton')}
-            </button>
-          )}
+          {/* Task (Settings redesign) — removed the per-repo Settings button
+              from the top of the Settings page. Repository settings are now
+              accessed via right-click on the repo row in the Sidebar (the
+              'repo-settings' context-menu action), so duplicating the entry
+              point at the top of global Settings was redundant. */}
         </div>
 
         {/* Tab switcher */}
@@ -327,6 +322,30 @@ export function SettingsPage() {
                     onClick={() => setSetting('contrast', p.value)}
                   >
                     {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Sidebar visual mode — Discord/Slack-style dim sidebar. */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">{t('settings.sidebarModeTitle')}</div>
+                <div className="text-xs text-text-tertiary">{t('settings.sidebarModeHint')}</div>
+              </div>
+              <div className="flex items-center gap-1">
+                {(['default', 'dim', 'light'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    className={cn(
+                      'px-2 py-0.5 text-2xs rounded border transition-colors',
+                      (settings.sidebarMode ?? 'default') === mode
+                        ? 'bg-accent text-text-inverse border-accent'
+                        : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover',
+                    )}
+                    onClick={() => setSetting('sidebarMode', mode)}
+                    title={t(`settings.sidebarMode_${mode}`)}
+                  >
+                    {t(`settings.sidebarMode_${mode}`)}
                   </button>
                 ))}
               </div>

@@ -78,7 +78,19 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   const { t } = useI18n();
   const showContextMenu = useContextMenu();
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
-  const [wsMode, setWsMode] = useState<WhitespaceMode>('normal');
+  // Whitespace ignore options — independent flags (Task: whitespace as checkbox).
+  //   wsIgnoreAll      — drop entirely-blank lines from each hunk.
+  //   wsIgnoreTrailing — drop lines whose only change is trailing whitespace.
+  // Both can be on at the same time (they were a mutually-exclusive <select>
+  // before — confusing because 'ignore trailing' is a strict subset of
+  // 'ignore all', so additive flags make the UX clearer).
+  const [wsIgnoreAll, setWsIgnoreAll] = useState(false);
+  const [wsIgnoreTrailing, setWsIgnoreTrailing] = useState(false);
+  // Derived 'wsMode' for the existing shouldShowLine() helper:
+  //   ignore-all takes precedence (it's the broader filter)
+  //   ignore-trailing falls back when only that flag is on
+  //   'normal' when neither flag is on
+  const wsMode: WhitespaceMode = wsIgnoreAll ? 'ignore-all' : wsIgnoreTrailing ? 'ignore-trailing' : 'normal';
   // Highlight mode: 'background' (3-way panel style) or 'text' (classic + / - style).
   // Default 'background' to match the 3-way conflict panel.
   const [highlightMode, setHighlightMode] = useState<HighlightMode>('background');
@@ -620,16 +632,47 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
             </>
           )}
           <div className="w-px h-4 bg-border-default mx-1" />
-          <select
-            className="text-2xs bg-bg-tertiary border border-border-default rounded px-1.5 py-0.5"
-            value={wsMode}
-            onChange={(e) => setWsMode(e.target.value as WhitespaceMode)}
-            title={t('diff.wsModeTooltip')}
+          {/* Whitespace ignore options — Task (whitespace as checkbox).
+              Replaced the 3-way <select> (Normal / Ignore All / Ignore
+              Trailing) with two independent checkboxes so the user can
+              stack options (was mutually-exclusive before, which was
+              confusing — 'Ignore trailing' is a strict subset of
+              'Ignore all', so they're now additive flags instead of
+              competing modes). */}
+          <label
+            className={cn(
+              'flex items-center gap-1 px-2 py-0.5 text-2xs rounded border cursor-pointer transition-colors',
+              wsIgnoreAll
+                ? 'bg-accent-muted text-accent border-accent/50'
+                : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover',
+            )}
+            title={t('diff.wsIgnoreAll')}
           >
-            <option value="normal">{t('diff.wsNormal')}</option>
-            <option value="ignore-all">{t('diff.wsIgnoreAll')}</option>
-            <option value="ignore-trailing">{t('diff.wsIgnoreTrailing')}</option>
-          </select>
+            <input
+              type="checkbox"
+              className="w-2.5 h-2.5"
+              checked={wsIgnoreAll}
+              onChange={(e) => setWsIgnoreAll(e.target.checked)}
+            />
+            {t('diff.wsIgnoreAllShort')}
+          </label>
+          <label
+            className={cn(
+              'flex items-center gap-1 px-2 py-0.5 text-2xs rounded border cursor-pointer transition-colors',
+              wsIgnoreTrailing
+                ? 'bg-accent-muted text-accent border-accent/50'
+                : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover',
+            )}
+            title={t('diff.wsIgnoreTrailing')}
+          >
+            <input
+              type="checkbox"
+              className="w-2.5 h-2.5"
+              checked={wsIgnoreTrailing}
+              onChange={(e) => setWsIgnoreTrailing(e.target.checked)}
+            />
+            {t('diff.wsIgnoreTrailingShort')}
+          </label>
           <button
             className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', useWordDiff
               ? 'bg-accent text-text-inverse border-accent'

@@ -1856,3 +1856,30 @@ textarea:focus-visible,
 select:focus-visible {
   outline-offset: 0;
 }
+
+/* ===========================================================================
+ * Sidebar visual mode (Discord/Slack-style dim sidebar).
+ * The user requested a separate setting (independent of the active theme)
+ * to darken the left sidebar so it visually separates from the main
+ * content area, like Discord's channel sidebar.
+ *
+ * Three modes (set via AppSettings.sidebarMode):
+ *   'default' — no override, use the active theme's sidebar bg as-is.
+ *   'dim'     — overlay a semi-transparent black (rgba(0,0,0,.10)) on
+ *              the sidebar's bg-primary/bg-secondary/bg-tertiary.
+ *   'light'   — overlay a semi-transparent white (rgba(255,255,255,.04))
+ *              on the sidebar bg — useful on very dark themes where
+ *              the sidebar would otherwise be indistinguishable from
+ *              the main panel.
+ *
+ * Applied by adding a class to <html> (see applySidebarModeToDOM in
+ * settingsStore.ts). Selectors target the <aside> sidebar element so
+ * the dim doesn't bleed into panels with similar classes.
+ * ===========================================================================
+ */
+html.sidebar-dim aside {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.10), rgba(0, 0, 0, 0.10));
+}
+html.sidebar-light aside {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.04));
+}

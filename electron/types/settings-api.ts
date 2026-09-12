@@ -65,6 +65,16 @@ export interface AppSettings {
   fontSizeMonospace: number; // Monospace elements (hashes, paths)
   sidebarWidth: number;
   /**
+   * Sidebar visual mode — Discord/Slack-style dim sidebar.
+   *   'default' — sidebar uses the active theme's normal bg color.
+   *   'dim'      — sidebar gets a darker overlay (delta ~8% lightness)
+   *                so it visually separates from the main content area,
+   *                matching the channel-sidebar look in Discord/Slack.
+   *   'light'    — sidebar gets a lighter overlay (useful on dark themes
+   *                where the sidebar would otherwise disappear).
+   */
+  sidebarMode?: 'default' | 'dim' | 'light';
+  /**
    * UI contrast level — 100 = default, lower = softer, higher = punchier.
    * Range 50–150. Applied as `filter: contrast(N%)` on the root element via
    * a CSS variable. Useful for low-vision users or for high-glare environments.
