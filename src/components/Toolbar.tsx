@@ -262,7 +262,7 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
                 GlobalSearch falls back to repository-list search when
                 currentRepo is null (see GlobalSearch's empty-state
                 handling). */}
-            <span data-tour="toolbar-global-search">
+            <span data-tour="toolbar-global-search" style={{ display: 'inline-flex' }}>
               <IconButton icon={Search} onClick={() => onGlobalSearch && onGlobalSearch()} title={t('search.toolbarButtonTitle')} />
             </span>
             <IconButton icon={FileText} onClick={() => onFind && onFind()} disabled={disabled} title={t('shell.findObject')} />
@@ -279,7 +279,7 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
         {/* ONB-1 — spotlight this button as the entry-point for
             "press Ctrl+K anytime for command palette" tour step
             (the shortcuts dialog lists Ctrl+K as the first shortcut). */}
-        <span data-tour="toolbar-command-palette">
+        <span data-tour="toolbar-command-palette" style={{ display: 'inline-flex' }}>
           <IconButton
             icon={Keyboard}
             onClick={() => onShowShortcuts && onShowShortcuts()}

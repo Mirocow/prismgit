@@ -30,45 +30,81 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
   // Re-locate the target element whenever the step changes.
   useEffect(() => {
     if (!step) return;
+    let rafId: number | null = null;
     const findTarget = () => {
       const el = document.querySelector(step.selector);
       if (el) {
-        const rect = el.getBoundingClientRect();
-        setTargetRect(rect);
-        // Pick a popover position.
-        const placement = step.placement ?? 'auto';
-        const POPOVER_W = 360;
-        const POPOVER_H = 180;
-        const GAP = 12;
-        let top: number;
-        let left: number;
-        if (placement === 'bottom') {
-          top = rect.bottom + GAP;
-          left = rect.left + rect.width / 2 - POPOVER_W / 2;
-        } else if (placement === 'top') {
-          top = rect.top - POPOVER_H - GAP;
-          left = rect.left + rect.width / 2 - POPOVER_W / 2;
-        } else if (placement === 'left') {
-          top = rect.top + rect.height / 2 - POPOVER_H / 2;
-          left = rect.left - POPOVER_W - GAP;
-        } else if (placement === 'right') {
-          top = rect.top + rect.height / 2 - POPOVER_H / 2;
-          left = rect.right + GAP;
-        } else {
-          // 'auto' — pick the side with the most viewport space.
-          const viewportW = window.innerWidth;
-          if (rect.right + POPOVER_W + GAP < viewportW) {
+        // Use requestAnimationFrame for accurate layout measurement —
+        // getBoundingClientRect on a freshly-mounted element (e.g. after
+        // Suspense lazy-load) can return zeros if layout hasn't settled.
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          const rect = el.getBoundingClientRect();
+          // Skip zero-size rects (element hidden or not yet rendered).
+          if (rect.width === 0 || rect.height === 0) {
+            setTargetRect(null);
+            setPopoverPos(null);
+            return;
+          }
+          setTargetRect(rect);
+          // Pick a popover position.
+          const placement = step.placement ?? 'auto';
+          const POPOVER_W = 360;
+          const POPOVER_H = 200; // Slightly taller — some steps have long descriptions
+          const GAP = 16; // Increased from 12 → 16 so popover clears the spotlight border
+          let top: number;
+          let left: number;
+          if (placement === 'bottom') {
+            top = rect.bottom + GAP;
+            left = rect.left + rect.width / 2 - POPOVER_W / 2;
+          } else if (placement === 'top') {
+            top = rect.top - POPOVER_H - GAP;
+            left = rect.left + rect.width / 2 - POPOVER_W / 2;
+          } else if (placement === 'left') {
+            top = rect.top + rect.height / 2 - POPOVER_H / 2;
+            left = rect.left - POPOVER_W - GAP;
+          } else if (placement === 'right') {
             top = rect.top + rect.height / 2 - POPOVER_H / 2;
             left = rect.right + GAP;
           } else {
-            top = rect.bottom + GAP;
-            left = rect.left + rect.width / 2 - POPOVER_W / 2;
+            // 'auto' — pick the side with the most viewport space.
+            const viewportW = window.innerWidth;
+            const viewportH = window.innerHeight;
+            const spaceRight = viewportW - rect.right;
+            const spaceBottom = viewportH - rect.bottom;
+            if (spaceRight >= POPOVER_W + GAP) {
+              top = rect.top + rect.height / 2 - POPOVER_H / 2;
+              left = rect.right + GAP;
+            } else if (spaceBottom >= POPOVER_H + GAP) {
+              top = rect.bottom + GAP;
+              left = rect.left + rect.width / 2 - POPOVER_W / 2;
+            } else if (rect.left >= POPOVER_W + GAP) {
+              top = rect.top + rect.height / 2 - POPOVER_H / 2;
+              left = rect.left - POPOVER_W - GAP;
+            } else {
+              top = rect.top - POPOVER_H - GAP;
+              left = rect.left + rect.width / 2 - POPOVER_W / 2;
+            }
           }
-        }
-        // Clamp to viewport.
-        top = Math.max(8, Math.min(top, window.innerHeight - POPOVER_H - 8));
-        left = Math.max(8, Math.min(left, window.innerWidth - POPOVER_W - 8));
-        setPopoverPos({ top, left });
+          // Clamp to viewport — but NEVER let the popover overlap the
+          // target rect. If clamping would push it into the target, flip
+          // to the opposite side.
+          const clampedTop = Math.max(8, Math.min(top, window.innerHeight - POPOVER_H - 8));
+          const clampedLeft = Math.max(8, Math.min(left, window.innerWidth - POPOVER_W - 8));
+          // Check if clamped position overlaps the target — if so, flip.
+          const overlapsTarget =
+            clampedTop < rect.bottom + GAP &&
+            clampedTop + POPOVER_H > rect.top - GAP &&
+            clampedLeft < rect.right + GAP &&
+            clampedLeft + POPOVER_W > rect.left - GAP;
+          if (overlapsTarget && placement === 'bottom') {
+            // Flip to top instead.
+            top = Math.max(8, rect.top - POPOVER_H - GAP);
+            setPopoverPos({ top, left: clampedLeft });
+          } else {
+            setPopoverPos({ top: clampedTop, left: clampedLeft });
+          }
+        });
       } else {
         setTargetRect(null);
         setPopoverPos(null);
@@ -80,6 +116,7 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
     window.addEventListener('scroll', onScrollOrResize, true);
     window.addEventListener('resize', onScrollOrResize);
     return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('scroll', onScrollOrResize, true);
       window.removeEventListener('resize', onScrollOrResize);
     };

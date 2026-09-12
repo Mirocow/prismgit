@@ -5,6 +5,34 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-09-13
+
+### Fixed
+- **History/Reflog вечный рефреш** — watcher → lastRefresh → loadHistory loop
+- **tauri.conf.json** — removed `digestHashingAlgorithm` (Tauri v2 schema violation)
+- **CSP** — added sha256 hash for inline boot-screen script
+- **Merge in progress** — `blockedByRepoState` with inline Abort button
+- **Tags in History** — RefBadges max=5 + "Tagged" quick-filter chip
+- **E0255** — moved `#[tauri::command]` functions to `commands` submodule (tauri-apps/tauri#10340 workaround)
+- **notify v6 API** — `notify::recommended()` → `RecommendedWatcher::new()`
+- **tauri-plugin-dialog v2.7** — `.blocking_confirm()` → `.show(callback)` + mpsc channel
+- **Missing icons** — created 32×32 / 128×128 / 256×256 / 512×512 PNG + ICO
+- **CSS comment** — PostCSS parser broke on backtick with `*/` in globals.css
+- **`require('electron')`** — replaced with preload bridge for Vite ESM compatibility
+- **operationLogStore dynamic/static import mismatch** — converted to static import
+- **FsEventWatcher** — replaced with `RecommendedWatcher` in WatcherState struct
+
+### Added
+- **PR search filter** — title / #number / head/base branch / author
+- **Tauri parity: 41 git methods** — add/commit/push/pull/fetch/checkout/branch/remote/reset/diff/commitFiles/trackedFiles/settings
+- **Bundle optimization** — lazy-load 8 rarely-used components (CommandPalette, GlobalSearch, AiAssistant, TourOverlay, KeyboardShortcutsOverlay, RefActionDialog, FindObjectDialog, CommandLogPanel)
+- **manualChunks** — tauri-vendor, git-utils (shared diffParser+gitGraph)
+- **DataGrid in RecyclablePage** — sortable + resizable columns
+
+### Changed
+- Main bundle: 726 KB → 672 KB (-7.4%, gzip 218 → 203 KB)
+- Tauri coverage: 11 → 41 git API methods
+
 ## [4.1.0] - 2026-09-09
 
 ### Added
