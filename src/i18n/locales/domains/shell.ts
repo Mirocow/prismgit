@@ -117,6 +117,7 @@ export const en: Record<string, string> = {
   'shell.openInBrowserFailed': 'Failed to open in browser',
   'shell.revealFailed': 'Failed to reveal in file manager',
   'shell.openRepoShortcut': 'Open Repository (Ctrl+O)',
+  'shell.gitFlowTooltip': 'Open Git-Flow dialog (feature/release/hotfix lifecycle)',
   'shell.repoInfo': 'Repository Info',
   'shell.findObject': 'Find Object (Ctrl+F)',
   'shell.openInBrowser': 'Open in Browser',
@@ -205,7 +206,6 @@ export const en: Record<string, string> = {
   'shell.commitHistory': 'Commit history',
   'shell.compareFilesTooltip': 'Compare files between refs',
   'shell.blameFileTooltip': 'Blame a file',
-  'shell.gitFlowTooltip': 'Git-Flow operations',
   'shell.interactiveRebase': 'Interactive rebase',
   'shell.fetchFailed': 'Fetch failed',
 
@@ -423,6 +423,7 @@ export const ru: Record<string, string> = {
   'shell.openInBrowserFailed': 'Не удалось открыть в браузере',
   'shell.revealFailed': 'Не удалось показать в файловом менеджере',
   'shell.openRepoShortcut': 'Открыть репозиторий (Ctrl+O)',
+  'shell.gitFlowTooltip': 'Открыть Git-Flow (жизненный цикл feature/release/hotfix)',
   'shell.repoInfo': 'О репозитории',
   'shell.findObject': 'Найти объект (Ctrl+F)',
   'shell.openInBrowser': 'Открыть в браузере',
@@ -511,7 +512,6 @@ export const ru: Record<string, string> = {
   'shell.commitHistory': 'История коммитов',
   'shell.compareFilesTooltip': "Сравнить файлы между ref'ами",
   'shell.blameFileTooltip': 'Авторство файла (blame)',
-  'shell.gitFlowTooltip': 'Операции Git-Flow',
   'shell.interactiveRebase': 'Интерактивный rebase',
   'shell.fetchFailed': 'Ошибка fetch',
 
@@ -729,6 +729,7 @@ export const zh: Record<string, string> = {
   'shell.openInBrowserFailed': '在浏览器中打开失败',
   'shell.revealFailed': '在文件管理器中显示失败',
   'shell.openRepoShortcut': '打开仓库 (Ctrl+O)',
+  'shell.gitFlowTooltip': '打开 Git-Flow（feature/release/hotfix 生命周期）',
   'shell.repoInfo': '仓库信息',
   'shell.findObject': '查找对象 (Ctrl+F)',
   'shell.openInBrowser': '在浏览器中打开',
@@ -817,7 +818,6 @@ export const zh: Record<string, string> = {
   'shell.commitHistory': '提交历史',
   'shell.compareFilesTooltip': '在引用之间比较文件',
   'shell.blameFileTooltip': '追溯文件（blame）',
-  'shell.gitFlowTooltip': 'Git-Flow 操作',
   'shell.interactiveRebase': '交互式变基',
   'shell.fetchFailed': '获取失败',
 
@@ -1035,6 +1035,7 @@ export const de: Record<string, string> = {
   'shell.openInBrowserFailed': 'Öffnen im Browser fehlgeschlagen',
   'shell.revealFailed': 'Anzeigen im Dateimanager fehlgeschlagen',
   'shell.openRepoShortcut': 'Repository öffnen (Ctrl+O)',
+  'shell.gitFlowTooltip': 'Git-Flow öffnen (feature/release/hotfix Lebenszyklus)',
   'shell.repoInfo': 'Repository-Info',
   'shell.findObject': 'Objekt suchen (Ctrl+F)',
   'shell.openInBrowser': 'Im Browser öffnen',
@@ -1123,7 +1124,6 @@ export const de: Record<string, string> = {
   'shell.commitHistory': 'Commit-Verlauf',
   'shell.compareFilesTooltip': 'Dateien zwischen Refs vergleichen',
   'shell.blameFileTooltip': 'Blame für eine Datei',
-  'shell.gitFlowTooltip': 'Git-Flow-Operationen',
   'shell.interactiveRebase': 'Interaktives Rebase',
   'shell.fetchFailed': 'Fetch fehlgeschlagen',
 

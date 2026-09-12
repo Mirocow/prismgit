@@ -249,6 +249,15 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
         {groups.utils && (
           <>
             <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title={t('shell.repoInfo')} />
+            {/* Task 12 — Git-Flow as a prominent top-toolbar button.
+                Previously only in the GitToolbar (second row); now also
+                in the main utility row for quick access. */}
+            <IconButton
+              icon={GitBranch}
+              onClick={() => onGitFlow && onGitFlow()}
+              disabled={disabled}
+              title={t('shell.gitFlowTooltip')}
+            />
             {/* Task 1 — search is enabled even when no repo is open.
                 GlobalSearch falls back to repository-list search when
                 currentRepo is null (see GlobalSearch's empty-state
