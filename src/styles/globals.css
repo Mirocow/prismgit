@@ -907,6 +907,106 @@
   --splitter-color-hover: #fabd2f;
 }
 
+/* ===========================================================================
+ * Task 5 — Slack-inspired dark theme. Aubergine + charcoal backgrounds,
+ * high-contrast secondary text for message-density readability. Four-color
+ * status accents (Slack's signature red/orange/green/blue palette).
+ * ===========================================================================
+ */
+[data-theme="slack-dark"] {
+  --bg-primary: #1a1d21;
+  --bg-secondary: #1a1d21;
+  --bg-tertiary: #2c2f33;
+  --bg-elevated: #232529;
+  --bg-hover: #2a2d31;
+  --bg-active: #3a3d41;
+  --bg-selected: #4a1448;
+
+  --border-default: #3a3d41;
+  --border-subtle: #2a2d31;
+  --border-strong: #52555a;
+  --border-focused: #611f69;
+
+  --text-primary: #f0f0f0;
+  --text-secondary: #c8c8c8;
+  --text-tertiary: #b3a8c9; /* A11Y-3: AA contrast on bg-tertiary */
+  --text-inverse: #ffffff;
+  --text-link: #36c5f0;
+
+  --accent: #611f69;
+  --accent-hover: #7d2a87;
+  --accent-active: #4a1448;
+  --accent-muted: rgba(97, 31, 105, 0.20);
+  --accent-light-blue: #36c5f0;
+
+  --status-added: #2eb886;
+  --status-modified: #f2c744;
+  --status-deleted: #e01e5a;
+  --status-renamed: #36c5f0;
+  --status-untracked: #8b8e92;
+  --status-conflict: #ecb22f;
+
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+
+  --splitter-color: #3a3d41;
+  --splitter-color-hover: #611f69;
+
+  --scrollbar-track: #1a1d21;
+  --scrollbar-thumb: rgba(240, 240, 240, 0.15);
+  --scrollbar-thumb-hover: rgba(240, 240, 240, 0.30);
+}
+
+/* ===========================================================================
+ * Task 5 — Discord-inspired theme. Blurple accent (#5865F2) on Discord's
+ * neutral grey-3/grey-2 palette. Optimized for long-form reading with
+ * warmer secondary text (#b9bbbe) than typical dark themes.
+ * ===========================================================================
+ */
+[data-theme="discord"] {
+  --bg-primary: #36393f;
+  --bg-secondary: #2f3136;
+  --bg-tertiary: #292b30;
+  --bg-elevated: #2f3136;
+  --bg-hover: #3c3f45;
+  --bg-active: #404248;
+  --bg-selected: rgba(88, 101, 242, 0.20);
+
+  --border-default: #202225;
+  --border-subtle: #2d2f32;
+  --border-strong: #3a3d41;
+  --border-focused: #5865f2;
+
+  --text-primary: #dcddde;
+  --text-secondary: #b9bbbe;
+  --text-tertiary: #a3a6aa; /* A11Y-3: AA contrast on bg-tertiary */
+  --text-inverse: #ffffff;
+  --text-link: #00aff4;
+
+  --accent: #5865f2;
+  --accent-hover: #6f7bff;
+  --accent-active: #4752c4;
+  --accent-muted: rgba(88, 101, 242, 0.15);
+  --accent-light-blue: #00aff4;
+
+  --status-added: #3ba55c;
+  --status-modified: #faa61a;
+  --status-deleted: #ed4245;
+  --status-renamed: #00aff4;
+  --status-untracked: #72767d;
+  --status-conflict: #faa61a;
+
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  --splitter-color: #202225;
+  --splitter-color-hover: #5865f2;
+
+  --scrollbar-track: #2f3136;
+  --scrollbar-thumb: rgba(220, 221, 222, 0.10);
+  --scrollbar-thumb-hover: rgba(220, 221, 222, 0.20);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

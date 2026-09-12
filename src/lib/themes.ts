@@ -28,7 +28,9 @@ export type ThemeId =
   | 'tokyo-night'
   | 'catppuccin-mocha'
   | 'one-dark'
-  | 'gruvbox-dark';
+  | 'gruvbox-dark'
+  | 'slack-dark'         // Task 5 — Slack-inspired dark theme (aubergine + 4 accent colors)
+  | 'discord';           // Task 5 — Discord-inspired (Blurple + grey-3 / channel-sidebar)
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -193,6 +195,35 @@ export const THEMES: ThemeMeta[] = [
       textPrimary: '#ebdbb2', textSecondary: '#a89984',
       accent: '#fabd2f', border: '#504945',
       statusAdded: '#b8bb26', statusModified: '#fabd2f', statusDeleted: '#fb4934',
+    },
+  },
+  // Task 5 — Slack-inspired dark theme. Slack's signature palette: dark
+  // aubergine/charcoal backgrounds, four accent colors (red/orange/green/blue)
+  // for status indicators. Designed for high message density — high contrast
+  // secondary text so commits/files stand out.
+  {
+    id: 'slack-dark',
+    labelKey: 'settings.themeSlackDark',
+    isDark: true,
+    preview: {
+      bgPrimary: '#1a1d21', bgSecondary: '#1a1d21', bgTertiary: '#2c2f33',
+      textPrimary: '#f0f0f0', textSecondary: '#cfc3f8',
+      accent: '#611f69', border: '#3a3d41',
+      statusAdded: '#2eb886', statusModified: '#f2c744', statusDeleted: '#e01e5a',
+    },
+  },
+  // Task 5 — Discord-inspired theme. Discord uses 'Blurple' (#5865F2) accent
+  // on a series of neutral greys (grey-3 / grey-2 / grey-1). Light secondary
+  // text for readability. Designed for long-form reading.
+  {
+    id: 'discord',
+    labelKey: 'settings.themeDiscord',
+    isDark: true,
+    preview: {
+      bgPrimary: '#36393f', bgSecondary: '#2f3136', bgTertiary: '#292b30',
+      textPrimary: '#dcddde', textSecondary: '#b9bbbe',
+      accent: '#5865f2', border: '#202225',
+      statusAdded: '#3ba55c', statusModified: '#faa61a', statusDeleted: '#ed4245',
     },
   },
 ];
