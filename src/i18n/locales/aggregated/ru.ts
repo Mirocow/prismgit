@@ -20,6 +20,7 @@ import { ru as settings } from '../domains/settings';
 import { ru as vscode } from '../domains/vscode';
 import { ru as search } from '../domains/search';
 import { ru as tour } from '../domains/tour';
+import { ru as aiassistant } from '../domains/aiassistant';
 
 export const ru: Record<string, string> = {
   ...core,
@@ -37,4 +38,5 @@ export const ru: Record<string, string> = {
   ...vscode,
   ...search,
   ...tour,
+  ...aiassistant,
 };

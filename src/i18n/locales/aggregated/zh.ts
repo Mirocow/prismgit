@@ -16,6 +16,7 @@ import { zh as settings } from '../domains/settings';
 import { zh as vscode } from '../domains/vscode';
 import { zh as search } from '../domains/search';
 import { zh as tour } from '../domains/tour';
+import { zh as aiassistant } from '../domains/aiassistant';
 
 export const zh: Record<string, string> = {
   ...core,
@@ -33,4 +34,5 @@ export const zh: Record<string, string> = {
   ...vscode,
   ...search,
   ...tour,
+  ...aiassistant,
 };

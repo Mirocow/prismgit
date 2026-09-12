@@ -10,6 +10,7 @@ import { FindObjectDialog } from './components/FindObjectDialog';
 import { HelpBanner } from './components/HelpBanner';
 import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
 import { TourOverlay } from './components/TourOverlay';
+import { AiAssistant } from './components/AiAssistant';
 import { NAV_SHORTCUTS } from './components/navItems';
 import { RefActionDialog, type RefAction } from './components/RefActionDialog';
 import { ResizableSplitter } from './components/ResizableSplitter';
@@ -170,6 +171,8 @@ export default function App() {
   const [conflictFile, setConflictFile] = useState<string | null>(null);
   const [dismissRebase, setDismissRebase] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  // LAR-3 — AI Assistant chat panel visibility (toggle via toolbar button).
+  const [showAiAssistant, setShowAiAssistant] = useState(false);
   const [showCommandLog, setShowCommandLog] = useState(false);
   const [commandLogHeight, setCommandLogHeight] = useState(260);
   /**
@@ -978,6 +981,12 @@ export default function App() {
         setShowGlobalSearch((v) => !v);
         return;
       }
+      // LAR-3 — AI Assistant toggle (Ctrl+Shift+A).
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault();
+        setShowAiAssistant((v) => !v);
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'f' && !isInInput) {
         e.preventDefault();
         setShowFind(true);
@@ -1226,7 +1235,7 @@ export default function App() {
   if (!currentRepo) {
     return (
       <div className="flex flex-col h-screen">
-        <Toolbar onFind={handleFind} onGlobalSearch={() => setShowGlobalSearch(true)} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onShowShortcuts={() => setShowShortcuts(true)} onShowClone={() => setShowClone(true)} onShowInit={() => setShowInit(true)} />
+        <Toolbar onFind={handleFind} onGlobalSearch={() => setShowGlobalSearch(true)} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onShowShortcuts={() => setShowShortcuts(true)} onShowClone={() => setShowClone(true)} onShowInit={() => setShowInit(true)} onToggleAiAssistant={() => setShowAiAssistant(v => !v)} />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex-1 overflow-hidden flex flex-col">
@@ -1395,6 +1404,8 @@ export default function App() {
       />
       {/* ONB-1 — first-run tour overlay (spotlight + popover) */}
       {showTour && <TourOverlay onClose={() => setShowTour(false)} />}
+      {/* LAR-3 — AI Assistant chat panel (floating, bottom-right). */}
+      {showAiAssistant && <AiAssistant onClose={() => setShowAiAssistant(false)} />}
     </div>
   );
 }

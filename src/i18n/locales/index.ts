@@ -27,6 +27,7 @@ import * as settings from './domains/settings';
 import * as vscode from './domains/vscode';
 import * as search from './domains/search';
 import * as tour from './domains/tour';
+import * as aiassistant from './domains/aiassistant';
 
 /** All domain modules — used by the parity tests to walk every dictionary. */
 export const DOMAINS: Record<string, { en: Record<string, string>; ru: Record<string, string>; zh: Record<string, string>; de: Record<string, string> }> = {
@@ -45,6 +46,7 @@ export const DOMAINS: Record<string, { en: Record<string, string>; ru: Record<st
   vscode,
   search,
   tour,
+  aiassistant,
 };
 
 /** Static English merge — synchronous fallback for the whole app. */

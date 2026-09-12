@@ -658,3 +658,37 @@ export const FileCheck = (p: IconProps) => (
     <path d="m9 15 2 2 4-4" />
   </Icon>
 );
+
+/** User — chat bubble user icon (fa-user) */
+export const User = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </Icon>
+);
+
+/** Bot — chat bubble bot icon (fa-robot) */
+export const Bot = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="11" width="18" height="10" rx="2" />
+    <circle cx="12" cy="5" r="2" />
+    <path d="M12 7v4" />
+    <line x1="8" y1="16" x2="8" y2="16" />
+    <line x1="16" y1="16" x2="16" y2="16" />
+  </Icon>
+);
+
+/** Wrench — tools icon (fa-wrench) */
+export const Wrench = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+  </Icon>
+);
+
+/** Send — paper-plane icon (fa-paper-plane) */
+export const Send = (p: IconProps) => (
+  <Icon {...p}>
+    <line x1="22" y1="2" x2="11" y2="13" />
+    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+  </Icon>
+);

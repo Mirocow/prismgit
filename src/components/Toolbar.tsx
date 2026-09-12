@@ -14,7 +14,7 @@ import { confirmDialog } from './ConfirmDialog';
 import { getRepoInProgressState, isRepoBusy } from '../lib/repoState';
 import { useI18n } from '../lib/i18n';
 import { getThemeMeta } from '../lib/themes';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Terminal, Trash } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -73,9 +73,11 @@ interface ToolbarProps {
   onShowClone?: () => void;
   onToggleCommandLog?: () => void;
   onShowInit?: () => void;
+  /** LAR-3 — toggle the AI Assistant chat panel. */
+  onToggleAiAssistant?: () => void;
 }
 
-export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts, onShowClone, onShowInit, onToggleCommandLog }: ToolbarProps = {}) {
+export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts, onShowClone, onShowInit, onToggleCommandLog, onToggleAiAssistant }: ToolbarProps = {}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const currentMetadata = useRepositoryStore((s) => s.currentMetadata);
   const status = useGitStore((s) => s.status);
@@ -275,6 +277,12 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
             title={t('shell.keyboardShortcutsTooltip')}
           />
         </span>
+        {/* LAR-3 — AI Assistant toggle button. */}
+        <IconButton
+          icon={Sparkles}
+          onClick={() => onToggleAiAssistant && onToggleAiAssistant()}
+          title={t('aiAssistant.toggleTitle')}
+        />
         <IconButton
           icon={(getThemeMeta(theme)?.isDark ?? false) ? Sun : Moon}
           onClick={() => toggleTheme()}
