@@ -16,22 +16,18 @@ name = "prismgit_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.0.1", features = [] }
+tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
 # Tauri core — provides window, IPC, plugins.
-# Version >=2.0.1 required: Tauri 2.0.0 has a proc-macro bug where
-# #[tauri::command] generates duplicate __cmd__<name> definitions
-# (E0255). Fixed in 2.0.1.
-tauri = { version = "2.0.1", features = [] }
-# Tauri plugins — shell (for invoking git CLI), dialog (file pickers),
-# fs (read files). Window management is built into the `tauri` crate
-# itself in v2 (no separate `tauri-plugin-window` crate exists on crates.io
-# — only the alpha prerelease, which we don't need). For window state
-# persistence (position/size), use `tauri-plugin-window-state` if needed.
-tauri-plugin-shell = "2.0.1"
-tauri-plugin-dialog = "2.0.1"
-tauri-plugin-fs = "2.0.1"
+# Note: the E0255 "__cmd__<name> defined multiple times" error is a
+# known issue that appears with certain tauri + proc-macro2 combinations.
+# It typically clears after `cargo update` or removing Cargo.lock.
+# See https://github.com/tauri-apps/tauri/issues/10340
+tauri = { version = "2.0", features = [] }
+tauri-plugin-shell = "2.0"
+tauri-plugin-dialog = "2.0"
+tauri-plugin-fs = "2.0"
 # notify — file watcher (replaces chokidar from Electron).
 notify = "6.1.1"
 # serde — JSON serialization for IPC commands.
