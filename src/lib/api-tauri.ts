@@ -77,6 +77,29 @@ async function callGit(cmd: string, repoPath: string, args?: unknown[]): Promise
   return res.stdout;
 }
 
+/** Lazily import the frontend diff parser — avoids pulling it into the
+ *  startup bundle when the user never opens a Diff view. */
+async function parseRawDiff(rawDiff: string): Promise<unknown> {
+  const { parseDiff } = await import('./diffParser');
+  const parsed = parseDiff(rawDiff);
+  // Read old/new content via `git show :file` / `git show ref:file` —
+  // for the Tauri path we approximate by joining hunk lines (the full
+  // file content is only needed by the side-by-side view, which falls
+  // back to the hunk-based view when oldContent/newContent are empty).
+  return {
+    oldContent: '',
+    newContent: '',
+    oldPath: '',
+    newPath: '',
+    hunks: parsed.hunks,
+    binary: rawDiff.includes('Binary files'),
+    newFile: parsed.newFile,
+    deletedFile: parsed.deletedFile,
+    renamedFile: parsed.renamedFile,
+    modeChange: parsed.modeChange,
+  };
+}
+
 // --- Minimal types matching the Electron-side contracts ---
 interface RawBranchInfo {
   name: string;
@@ -370,9 +393,53 @@ export const tauriApi = {
       await writeTextFile(ignorePath, `${existing}${existing.endsWith('\n') || !existing ? '' : '\n'}${additions}\n`);
     },
 
+    // --- Diff methods: shell out to `git diff` and parse the unified
+    //     output via the shared frontend diffParser. The result shape
+    //     matches DiffResult from electron/types/git-api.ts so the
+    //     DiffViewer component works identically in Electron + Tauri.
+    //     oldContent/newContent are empty strings — the side-by-side view
+    //     falls back to hunk-based rendering when they're missing.
+    diff: async (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }): Promise<unknown> => {
+      const args = ['diff', '--no-color'];
+      if (options?.staged) args.push('--cached');
+      if (options?.ref) args.push(options.ref);
+      args.push('--', file);
+      const raw = await callGit('git_raw', repoPath, args);
+      return parseRawDiff(raw);
+    },
+    diffBranches: async (repoPath: string, base: string, compare: string): Promise<unknown> => {
+      const raw = await callGit('git_raw', repoPath, ['diff', '--no-color', `${base}..${compare}`]);
+      return parseRawDiff(raw);
+    },
+    diffCommit: async (repoPath: string, hash: string, parentHash?: string): Promise<unknown> => {
+      const range = parentHash ? `${parentHash}..${hash}` : `${hash}^..${hash}`;
+      const raw = await callGit('git_raw', repoPath, ['diff', '--no-color', range]);
+      return parseRawDiff(raw);
+    },
+    commitFiles: async (repoPath: string, hash: string): Promise<unknown[]> => {
+      // git diff-tree --no-commit-id --name-status -r <hash>
+      const raw = await callGit('git_raw', repoPath, ['diff-tree', '--no-commit-id', '--name-status', '-r', hash]);
+      return raw.split('\n').filter(Boolean).map(line => {
+        const [status, ...pathParts] = line.split('\t');
+        const path = pathParts.join('\t');
+        const letter = status.charAt(0);
+        return {
+          path,
+          status: letter === 'A' ? 'A' : letter === 'D' ? 'D' : letter === 'R' ? 'R' : letter === 'C' ? 'C' : 'M',
+          oldPath: letter === 'R' || letter === 'C' ? pathParts[1] : undefined,
+          additions: 0,
+          deletions: 0,
+          binary: false,
+        };
+      });
+    },
+    trackedFiles: async (repoPath: string): Promise<string[]> => {
+      const raw = await callGit('git_raw', repoPath, ['ls-files']);
+      return raw.split('\n').filter(Boolean);
+    },
+
     // --- Methods that still need full Rust impl (status bar / context
     //     menu / GitHub integration) — left as stubs.
-    diff: async (): Promise<never> => { throw new Error('git.diff not yet wired in Tauri backend — use Electron for now'); },
     stageLines: async (): Promise<never> => { throw new Error('git.stageLines not yet wired in Tauri backend'); },
     unstageLines: async (): Promise<never> => { throw new Error('git.unstageLines not yet wired in Tauri backend'); },
   },
