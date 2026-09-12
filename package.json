@@ -26,6 +26,7 @@
     "test:e2e:headed": "xvfb-run -a playwright test --workers=1",
     "test:verify": "npm run typecheck && npm run test && npm run build && npm run test:e2e",
     "verify": "npm run typecheck && npm run test && npm run build",
+    "audit:contrast": "node scripts/audit-contrast.mjs",
     "hooks:install": "bash scripts/install-hooks.sh",
     "icons": "python3 scripts/make-icons.py",
     "test:simple-git": "node --test tests/simple-git-suite.mjs"
