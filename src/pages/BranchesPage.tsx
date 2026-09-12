@@ -2,11 +2,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   GitBranch, Plus, RefreshCw, Trash, GitMerge, Check, ArrowUp, ArrowDown,
   ExternalLink, Upload, ChevronDown, ChevronRight, X, Pencil, CloudDownload,
-  Settings as Cog, Loader, Tag as TagIcon, Package, Download, AlertCircle,
+  Settings as Cog, Loader, Tag as TagIcon, Package, Download, AlertCircle, Sparkles,
 } from '../components/icons';
 import { MergePanel } from '../components/MergePanel';
 import { EmptyState } from '../components/EmptyState';
 import { FilterInput } from '../components/FilterInput';
+import { generateBranchNames, type LLMProvider } from '../lib/aiCommitMessages';
+import type { AppSettings } from '../../electron/types/settings-api';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -28,6 +31,23 @@ import { getRepoInProgressState } from '../lib/repoState';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useI18n } from '../lib/i18n';
+
+/**
+ * MED-3 — Build an LLMProvider from AppSettings, or null if AI is not
+ * configured. Mirrors the same-named helper in ChangesPage so the New
+ * Branch dialog can offer AI name suggestions using the SAME provider
+ * the user already set up for AI commit messages.
+ */
+function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvider | null {
+  if (!settings?.aiProvider) return null;
+  const type = settings.aiProvider as LLMProvider['type'];
+  const id = settings.aiProvider;
+  const url = settings.aiUrl || '';
+  const model = settings.aiModel || '';
+  if (!model) return null;
+  return { id, name: id, type, url, apiKey: settings.aiApiKey, model };
+}
+
 export function BranchesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -69,6 +89,10 @@ export function BranchesPage() {
    */
   const lastClickedIndex = useRef<number | null>(null);
   const [newBranchName, setNewBranchName] = useState('');
+  // MED-3 — AI branch-name suggestion state
+  const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [suggestedNames, setSuggestedNames] = useState<string[]>([]);
+  const settings = useSettingsStore((s) => s.settings);
   const [newBranchStart, setNewBranchStart] = useState('HEAD');
   const [newBranchCheckout, setNewBranchCheckout] = useState(true);
   // SmartGit-style dialogs: rename (branch/remote) + configure/add remote
@@ -211,9 +235,70 @@ export function BranchesPage() {
       toast.success(t('branches.created', { name: newBranchName }));
       setShowNewDialog(false);
       setNewBranchName(''); setNewBranchStart('HEAD'); setNewBranchCheckout(true);
+      // MED-3 — also clear AI suggestion state on dialog close.
+      setSuggestedNames([]);
       await load();
       await refreshStatus(repo.path);
     } catch (e) { toast.error(t('branches.failed'), String(e)); }
+  };
+
+  /**
+   * MED-3 — call the LLM with the current repo's changed file paths and
+   * get back 3-5 kebab-case branch names. Shows them as clickable chips
+   * below the name input; clicking a chip sets the name input.
+   *
+   * Cheap: we only send file paths (no diff body), so the request is
+   * typically <500 tokens. The LLM provider comes from settingsStore
+   * (same place the commit-message AI button reads from).
+   */
+  const handleAISuggestBranches = async () => {
+    if (!repo) return;
+    // Build provider from settings (mirrors ChangesPage's buildAIProvider).
+    const provider = buildAIProvider(settings);
+    if (!provider) { toast.info(t('branches.aiSuggestNoProvider')); return; }
+
+    // Collect changed files: staged + untracked (no diff body — names only).
+    let files: string[] = [];
+    try {
+      const [stagedOut, untrackedOut] = await Promise.all([
+        api.git.raw(repo.path, ['diff', '--cached', '--name-only']),
+        api.git.raw(repo.path, ['ls-files', '--others', '--exclude-standard']),
+      ]);
+      files = [
+        ...stagedOut.split('\n').filter(Boolean),
+        ...untrackedOut.split('\n').filter(Boolean),
+      ];
+    } catch (e) {
+      toast.error(t('branches.aiSuggestFailed'), String(e));
+      return;
+    }
+    if (files.length === 0) {
+      toast.info(t('branches.aiSuggestNoChanges'));
+      return;
+    }
+
+    // Pull recent branch names as style reference (max 5 local).
+    const recentBranches = branches.filter(b => !b.remote).slice(0, 5).map(b => b.name);
+
+    setAiSuggesting(true);
+    setSuggestedNames([]);
+    try {
+      const names = await generateBranchNames({
+        files,
+        provider,
+        recentBranches,
+        count: 5,
+      });
+      if (names.length === 0) {
+        toast.info(t('branches.aiSuggestNoChanges'));
+      } else {
+        setSuggestedNames(names);
+      }
+    } catch (e) {
+      toast.error(t('branches.aiSuggestFailed'), String(e));
+    } finally {
+      setAiSuggesting(false);
+    }
   };
 
   const handleDelete = async (branch: BranchInfo) => {
@@ -1739,10 +1824,37 @@ export function BranchesPage() {
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-text-tertiary block mb-1">{t('branches.nameLabel')}</label>
-                <input type="text" className="w-full text-sm" placeholder="feature/my-branch"
-                  value={newBranchName} autoFocus
-                  onChange={(e) => setNewBranchName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()} />
+                <div className="flex items-center gap-1">
+                  <input type="text" className="flex-1 text-sm" placeholder="feature/my-branch"
+                    value={newBranchName} autoFocus
+                    onChange={(e) => setNewBranchName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreate()} />
+                  <button
+                    type="button"
+                    className="btn btn-secondary text-2xs !py-1 !px-2 flex-shrink-0"
+                    onClick={handleAISuggestBranches}
+                    disabled={aiSuggesting}
+                    title={t('branches.aiSuggestTooltip')}
+                  >
+                    {aiSuggesting ? <Loader size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                    {aiSuggesting ? '...' : t('branches.aiSuggest')}
+                  </button>
+                </div>
+                {suggestedNames.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {suggestedNames.map(name => (
+                      <button
+                        key={name}
+                        type="button"
+                        className="text-2xs px-2 py-0.5 border rounded hover:bg-bg-hover font-mono"
+                        onClick={() => setNewBranchName(name)}
+                        title={name}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-xs text-text-tertiary block mb-1">{t('branches.startingPoint')}</label>

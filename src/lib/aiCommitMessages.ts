@@ -349,6 +349,70 @@ Output ONLY the stash message, no explanation.`;
   return callProvider(provider, prompt, userPrompt, 128);
 }
 
+/**
+ * MED-3 — Generate 3-5 candidate git branch names using AI, based on the
+ * list of changed files. Used by the BranchesPage "New Branch" dialog:
+ *
+ *   user stages a few files → opens New Branch → clicks ✨ AI Suggest →
+ *   gets back kebab-case names like 'feature/add-user-auth' to pick from.
+ *
+ * The prompt deliberately uses file paths (not the diff body) because:
+ *  - branch names are short, so file-name context is enough;
+ *  - we keep the request small (cheap to stream over slow connections);
+ *  - we never leak secret file contents to the LLM beyond what filenames
+ *    already reveal.
+ *
+ * The output is parsed loosely: each non-empty line is one candidate,
+ * backticks / quotes / leading dashes are stripped.
+ */
+export interface GenerateBranchNameParams {
+  /** List of changed file paths (staged + untracked, capped at 20). */
+  files: string[];
+  /** LLM provider. */
+  provider: LLMProvider;
+  /** Optional custom prompt template. */
+  systemPrompt?: string;
+  /** Recent branch names for style consistency (e.g. 'feature/auth'). */
+  recentBranches?: string[];
+  /** How many candidates to request (default 5). */
+  count?: number;
+}
+
+export async function generateBranchNames(params: GenerateBranchNameParams): Promise<string[]> {
+  const { files, provider, systemPrompt, recentBranches = [], count = 5 } = params;
+  if (files.length === 0) return [];
+
+  const prompt = systemPrompt || `You are a helpful assistant that suggests Git branch names.
+Given a list of changed files, suggest ${count} candidate branch names.
+
+Rules:
+1. Use kebab-case (lowercase letters, digits, hyphens).
+2. Format: <type>/<short-description>, e.g. feature/add-user-auth, fix/rename-detection, refactor/extract-filter.
+3. Type prefix MUST be one of: feature, fix, refactor, docs, test, chore, build, ci, perf, revert.
+4. Short-description: 2-5 words summarising the change.
+5. No prefix variation — exactly one type per name.
+6. Do NOT repeat candidates.
+
+Output ONLY the branch names, one per line. No bullet points, no numbering, no code fences, no quotes.`;
+
+  const recentBlock = recentBranches.length > 0
+    ? `\nRecent branch names in this repo (for style reference — do not repeat these exact names):\n${recentBranches.map(b => '- ' + b).join('\n')}\n`
+    : '';
+
+  const userPrompt = `Changed files (${files.length}):\n${files.slice(0, 20).map(f => '- ' + f).join('\n')}${recentBlock}\nSuggest ${count} branch names.`;
+  const raw = await callProvider(provider, prompt, userPrompt, 256);
+
+  return raw
+    .split('\n')
+    .map(s => s.trim())
+    .map(s => s.replace(/^[`'"\-•*\d.\s]+/, '').replace(/[`'"]/g, '').trim())
+    .filter(s => s.length > 0 && s.length <= 80)
+    // Enforce conventional-commits type prefix and kebab-case description.
+    // Allow both 'feat' (canonical) and 'feature' (ergonomic) as prefixes.
+    .filter(s => /^(feat|feature|fix|docs|style|refactor|perf|test|chore|build|ci|revert)(\/[a-z0-9][a-z0-9-]*)+$/.test(s))
+    .slice(0, count);
+}
+
 /** Internal: call the appropriate provider. */
 async function callProvider(
   provider: LLMProvider,
