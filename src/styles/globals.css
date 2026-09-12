@@ -1916,8 +1916,8 @@ html.density-comfortable {
  * across the codebase, using `color-mix(in srgb, <var> <pct>%, transparent)`
  * which works in Chromium 111+ (Electron 32 = Chromium 128 = supported).
  *
- * Affected utilities (search the codebase for `bg-status-*/`, `text-status-*/`,
- * `border-status-*/`):
+ * Affected utilities (search the codebase for 'bg-status-*/', 'text-status-*/',
+ * 'border-status-*/'):
  *   /5  /8  /10  /12  /15  /20  /25  /30  /40
  * ===========================================================================
  */
