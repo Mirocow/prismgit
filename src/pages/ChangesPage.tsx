@@ -1778,7 +1778,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <span style={{ width: 92 }}></span>
             </div>
 
-            {/* === Staged / Changes / Untracked in separate lists === */}
+            {/* === Single flat file list (only Staged has its own group) === */}
             {(totalChanged > 0 || unchangedFiles.length > 0 || ignoredFileList.length > 0 || untrackedFiles.length > 0) && (
               <>
             {/* Conflicts — red accent, shown ABOVE staged when there are conflicted files */}
@@ -1795,7 +1795,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 </div>
               </>
             )}
-            {/* Staged — green accent left border, clickable header to stage all/unstage all */}
+            {/* Staged — the ONLY group with a header (green accent) */}
             {stagedFiles.length > 0 && (
               <div
                 className="px-2 py-1 bg-status-added/8 text-2xs font-bold uppercase text-status-added border-b border-status-added/20 border-l-2 border-l-status-added/40 flex items-center justify-between cursor-pointer hover:bg-status-added/12 transition-colors"
@@ -1815,69 +1815,24 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 <span className="text-text-tertiary normal-case font-normal">{t('changes.clickToUnstageAllHint')}</span>
               </div>
             )}
-            <div className={stagedFiles.length > 0 ? 'border-l-2 border-l-status-added/20' : ''}>
+            {stagedFiles.length > 0 && (
               <LazyFileList files={stagedFiles} isStaged={true} renderRow={renderFileRow} />
-            </div>
-
-            {/* Unstaged — orange accent */}
-            {unstagedFiles.length > 0 && (
-              <div
-                className="px-2 py-1 bg-status-modified/8 text-2xs font-bold uppercase text-status-modified border-b border-status-modified/20 border-l-2 border-l-status-modified/40 flex items-center justify-between cursor-pointer hover:bg-status-modified/12 transition-colors"
-                onClick={() => {
-                  // Click on header = stage all unstaged
-                  if (repo) {
-                    useGitStore.getState().stageAll(repo.path);
-                  }
-                }}
-                title={t('changes.clickToStageAll')}
-              >
-                <span>{t('changes.changesCount', { count: unstagedFiles.length })}</span>
-                <span className="text-text-tertiary normal-case font-normal">{t('changes.clickToStageAllHint')}</span>
-              </div>
-            )}
-            <div className={(unstagedFiles.length > 0 || renamedFiles.length > 0) ? 'border-l-2 border-l-status-modified/20' : ''}>
-              <LazyFileList files={[...unstagedFiles, ...renamedFiles]} isStaged={false} renderRow={renderFileRow} />
-            </div>
-
-            {/* Unchanged — gray accent (shown only when 'unchanged' flag is ON) */}
-            {unchangedFiles.length > 0 && (
-              <div className="px-2 py-1 bg-bg-tertiary/50 text-2xs font-bold uppercase text-text-tertiary border-b border-border-subtle border-l-2 border-l-text-tertiary/20">
-                Unchanged ({unchangedFiles.length})
-              </div>
-            )}
-            {unchangedFiles.length > 0 && (
-              <LazyFileList files={unchangedFiles} isStaged={false} renderRow={renderFileRow} />
             )}
 
-            {/* Ignored — dark gray accent (shown only when 'ignored' flag is ON) */}
-            {ignoredFileList.length > 0 && (
-              <div className="px-2 py-1 bg-bg-tertiary/30 text-2xs font-bold uppercase text-text-tertiary border-b border-border-subtle border-l-2 border-l-text-tertiary/20">
-                Ignored ({ignoredFileList.length})
-              </div>
-            )}
-            {ignoredFileList.length > 0 && (
-              <LazyFileList files={ignoredFileList} isStaged={false} renderRow={renderFileRow} />
-            )}
-
-            {/* Untracked — cyan accent */}
-            {untrackedFiles.length > 0 && (
-              <div
-                className="px-2 py-1 bg-status-untracked/8 text-2xs font-bold uppercase text-status-untracked border-b border-status-untracked/20 border-l-2 border-l-status-untracked/40 flex items-center justify-between cursor-pointer hover:bg-status-untracked/12 transition-colors"
-                onClick={() => {
-                  // Click on header = stage all untracked
-                  if (repo) {
-                    useGitStore.getState().stageAll(repo.path);
-                  }
-                }}
-                title={t('changes.clickToStageAllUntracked')}
-              >
-                <span>{t('changes.untrackedCount', { count: untrackedFiles.length })}</span>
-                <span className="text-text-tertiary normal-case font-normal">{t('changes.clickToStageAllHint')}</span>
-              </div>
-            )}
-            <div className={untrackedFiles.length > 0 ? 'border-l-2 border-l-status-untracked/20' : ''}>
-              <LazyFileList files={untrackedFiles} isStaged={false} renderRow={renderFileRow} />
-            </div>
+            {/* All non-staged files in ONE flat list:
+                Changes (modified/deleted/renamed) + Untracked + Ignored + Unchanged (last) */}
+            {(() => {
+              // Build the combined list in order: changed → untracked → ignored → unchanged
+              const combined = [
+                ...unstagedFiles,
+                ...renamedFiles,
+                ...untrackedFiles,
+                ...ignoredFileList,
+                ...unchangedFiles, // unchanged always last
+              ];
+              if (combined.length === 0) return null;
+              return <LazyFileList files={combined} isStaged={false} renderRow={renderFileRow} />;
+            })()}
               </>
             )}
 
