@@ -1745,7 +1745,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             </div>
 
             {/* === Staged / Changes / Untracked in separate lists === */}
-            {(
+            {(totalChanged > 0 || unchangedFiles.length > 0 || ignoredFileList.length > 0 || untrackedFiles.length > 0) && (
               <>
             {/* Conflicts — red accent, shown ABOVE staged when there are conflicted files */}
             {conflictedFiles.length > 0 && (
@@ -1847,7 +1847,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               </>
             )}
 
-            {totalChanged === 0 && (
+            {totalChanged === 0 && unchangedFiles.length === 0 && ignoredFileList.length === 0 && untrackedFiles.length === 0 && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">
                 <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
                 {t('changes.workingTreeClean')}
