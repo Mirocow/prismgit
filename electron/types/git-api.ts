@@ -500,6 +500,9 @@ export interface GitApi {
 
   // Repository directory tree (Changes view)
   listDirectories: (repoPath: string, maxDepth?: number) => Promise<DirNode[]>;
+  /** Like listDirectories but includes ALL directories — even those normally
+   *  skipped (node_modules, dist, .cache). Used when 'ignored' flag is ON. */
+  listAllDirectories: (repoPath: string, maxDepth?: number) => Promise<DirNode[]>;
 
   // ===== Git Notes (SmartGit Notes feature) =====
   noteCategories: (repoPath: string) => Promise<NoteCategory[]>;

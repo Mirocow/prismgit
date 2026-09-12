@@ -3486,7 +3486,8 @@ async function buildDirLevel(
   rel: string,
   depth: number,
   maxDepth: number,
-  budget: DirBudget
+  budget: DirBudget,
+  includeIgnored = false
 ): Promise<DirNode[]> {
   if (depth > maxDepth || budget.count >= budget.max) return [];
   let entries: fs.Dirent[];
@@ -3496,7 +3497,15 @@ async function buildDirLevel(
     return [];
   }
   const names = entries
-    .filter((e) => e.isDirectory() && !DIR_SKIP.has(e.name))
+    .filter((e) => {
+      if (!e.isDirectory()) return false;
+      // When includeIgnored is true, show ALL directories (including
+      // node_modules, dist, .git, etc.) so the user can browse
+      // git-ignored content in the tree panel.
+      if (includeIgnored) return e.name !== '.git';
+      // Default: skip VCS/build directories for performance.
+      return !DIR_SKIP.has(e.name);
+    })
     .map((e) => e.name)
     .sort((a, b) => a.localeCompare(b));
   const nodes: DirNode[] = [];
@@ -3507,7 +3516,7 @@ async function buildDirLevel(
     nodes.push({
       name,
       path: childRel,
-      children: await buildDirLevel(absBase, childRel, depth + 1, maxDepth, budget),
+      children: await buildDirLevel(absBase, childRel, depth + 1, maxDepth, budget, includeIgnored),
     });
   }
   return nodes;
@@ -3515,10 +3524,16 @@ async function buildDirLevel(
 
 /** List repository directories (Changes view tree), skipping VCS/build directories. */
 export async function listDirectories(repoPath: string, maxDepth = 1024): Promise<DirNode[]> {
-  // No practical depth or node limit — 1024 depth, 200000 node budget.
-  // These are just safety guards against pathological filesystems (e.g. symlink loops).
   const budget: DirBudget = { count: 0, max: 200000 };
-  return buildDirLevel(repoPath, '', 1, maxDepth, budget);
+  return buildDirLevel(repoPath, '', 1, maxDepth, budget, false);
+}
+
+/** Like listDirectories but includes ALL directories — even those normally
+ *  skipped (node_modules, dist, .cache, etc.). Used when the 'ignored'
+ *  display flag is ON so the user can browse git-ignored content. */
+export async function listAllDirectories(repoPath: string, maxDepth = 1024): Promise<DirNode[]> {
+  const budget: DirBudget = { count: 0, max: 200000 };
+  return buildDirLevel(repoPath, '', 1, maxDepth, budget, true);
 }
 
 /**

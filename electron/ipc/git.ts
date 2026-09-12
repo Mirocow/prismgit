@@ -6,6 +6,7 @@ export function registerGitIpc(): void {
   // Status & working tree
   ipcMain.handle('git:status', (_e, p: string) => gitService.status(p));
   ipcMain.handle('git:listDirectories', (_e, p: string, d?: number) => gitService.listDirectories(p, d));
+  ipcMain.handle('git:listAllDirectories', (_e, p: string, d?: number) => gitService.listAllDirectories(p, d));
   ipcMain.handle('git:add', (_e, p: string, f: string[]) => gitService.add(p, f));
   ipcMain.handle('git:addAll', (_e, p: string) => gitService.addAll(p));
   ipcMain.handle('git:restore', (_e, p: string, f: string[], staged?: boolean) => gitService.restore(p, f, staged));

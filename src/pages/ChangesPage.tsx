@@ -359,14 +359,20 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const loadDirTree = useCallback(async () => {
     setDirTreeLoading(true);
     try {
-      const tree = await api.git.listDirectories(repo.path);
+      // When 'ignored' flag is ON, load ALL directories (including
+      // node_modules, dist, etc.) so the user can browse ignored content.
+      // Otherwise, use the default which skips VCS/build directories.
+      const showIgnored = fileDisplayFlags.has('ignored');
+      const tree = showIgnored
+        ? await api.git.listAllDirectories(repo.path)
+        : await api.git.listDirectories(repo.path);
       setDirTree(tree);
     } catch {
       setDirTree([]);
     } finally {
       setDirTreeLoading(false);
     }
-  }, [repo.path]);
+  }, [repo.path, fileDisplayFlags]);
 
   const loadTrackedCount = useCallback(async () => {
     try {
