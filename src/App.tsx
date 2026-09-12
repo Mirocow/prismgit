@@ -1,18 +1,10 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
-import { CommandLogPanel } from './components/CommandLogPanel';
-import { CommandPalette } from './components/CommandPalette';
-import { GlobalSearch } from './components/GlobalSearch';
 import { ConfirmDialogHost, confirmDialog, promptDialog } from './components/ConfirmDialog';
 import { DeepLinkHandler } from './components/DeepLinkHandler';
 import { DragDropHandler } from './components/DragDropHandler';
-import { FindObjectDialog } from './components/FindObjectDialog';
 import { HelpBanner } from './components/HelpBanner';
-import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
-import { TourOverlay } from './components/TourOverlay';
-import { AiAssistant } from './components/AiAssistant';
 import { NAV_SHORTCUTS } from './components/navItems';
-import { RefActionDialog, type RefAction } from './components/RefActionDialog';
 import { ResizableSplitter } from './components/ResizableSplitter';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
@@ -35,6 +27,7 @@ import { t as i18nT, useI18nStore } from './lib/i18n';
 import { clearProjectPrefs, loadProjectPrefs, saveProjectPrefs } from './lib/projectPrefs';
 import { useAuthStore } from './stores/authStore';
 import { useCommandLogStore } from './stores/commandLogStore';
+import { initOperationLogIpcListener } from './stores/operationLogStore';
 import { useGitStore } from './stores/gitStore';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSelectionStore } from './stores/selectionStore';
@@ -54,6 +47,21 @@ const RepoInfoDialog = lazy(() => import('./components/RepoInfoDialog').then(m =
 const ApplyPatchModal = lazy(() => import('./components/ApplyPatchModal').then(m => ({ default: m.ApplyPatchModal })));
 const IndexEditorDialog = lazy(() => import('./components/IndexEditorDialog').then(m => ({ default: m.IndexEditorDialog })));
 const RepoSettingsDialog = lazy(() => import('./components/RepoSettingsDialog').then(m => ({ default: m.RepoSettingsDialog })));
+// Rarely-used overlays — lazy-load to keep the initial bundle small.
+// These are triggered by keyboard shortcuts / toolbar buttons, so a
+// ~50ms chunk fetch on first open is invisible to the user.
+const CommandPalette = lazy(() => import('./components/CommandPalette').then(m => ({ default: m.CommandPalette })));
+const GlobalSearch = lazy(() => import('./components/GlobalSearch').then(m => ({ default: m.GlobalSearch })));
+const AiAssistant = lazy(() => import('./components/AiAssistant').then(m => ({ default: m.AiAssistant })));
+const TourOverlay = lazy(() => import('./components/TourOverlay').then(m => ({ default: m.TourOverlay })));
+const KeyboardShortcutsOverlay = lazy(() => import('./components/KeyboardShortcutsOverlay').then(m => ({ default: m.KeyboardShortcutsOverlay })));
+const RefActionDialog = lazy(() => import('./components/RefActionDialog').then(m => ({ default: m.RefActionDialog })));
+const FindObjectDialog = lazy(() => import('./components/FindObjectDialog').then(m => ({ default: m.FindObjectDialog })));
+const CommandLogPanel = lazy(() => import('./components/CommandLogPanel').then(m => ({ default: m.CommandLogPanel })));
+
+// Type-only re-export of RefAction so the refAction state can be typed
+// without pulling the component into the main bundle.
+import type { RefAction } from './components/RefActionDialog';
 
 // Lazy-load pages for smaller initial bundle
 const ChangesPage = lazy(() => import('./pages/ChangesPage').then(m => ({ default: m.ChangesPage })));
@@ -249,10 +257,11 @@ export default function App() {
   // rebase, stash, tag, clone, etc.) — not just the ones manually logged in
   // the UI layer — and feeds them into the Operations tab.
   useEffect(() => {
-    import('./stores/operationLogStore').then(({ initOperationLogIpcListener }) => {
-      const cleanup = initOperationLogIpcListener();
-      return cleanup;
-    }).catch(() => { /* ignore — test env without electron */ });
+    // Static import — operationLogStore is already pulled into the main
+    // bundle by StatusBar/Toolbar/etc., so dynamic import() gained nothing
+    // except a Vite warning. Calling init directly is simpler.
+    const cleanup = initOperationLogIpcListener();
+    return cleanup;
   }, []);
 
   // Listen for repo-closed events to clear global selections and free memory
@@ -1272,23 +1281,25 @@ export default function App() {
         <DeepLinkHandler />
         <Suspense fallback={null}><CloneModal open={showClone} onClose={() => setShowClone(false)} /></Suspense>
         <Suspense fallback={null}><InitModal open={showInit} onClose={() => setShowInit(false)} /></Suspense>
-        <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
-        <CommandPalette
-          open={showPalette}
-          onClose={() => setShowPalette(false)}
-          triggers={{
-            onFind: () => setShowFind(true),
-            onGitFlow: () => setShowGitFlow(true),
-            onInteractiveRebase: () => setShowIRebase(true),
-            onRepoInfo: () => setShowRepoInfo(true),
-            onApplyPatch: () => setShowApplyPatch(true),
-            onClone: () => setShowClone(true),
-            onInit: () => setShowInit(true),
-            onGoDeepLink: handleGoDeepLink,
-            onCopyDeepLink: handleCopyDeepLink,
-          }}
-        />
-        <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+        <Suspense fallback={null}><FindObjectDialog open={showFind} onClose={() => setShowFind(false)} /></Suspense>
+        <Suspense fallback={null}>
+          <CommandPalette
+            open={showPalette}
+            onClose={() => setShowPalette(false)}
+            triggers={{
+              onFind: () => setShowFind(true),
+              onGitFlow: () => setShowGitFlow(true),
+              onInteractiveRebase: () => setShowIRebase(true),
+              onRepoInfo: () => setShowRepoInfo(true),
+              onApplyPatch: () => setShowApplyPatch(true),
+              onClone: () => setShowClone(true),
+              onInit: () => setShowInit(true),
+              onGoDeepLink: handleGoDeepLink,
+              onCopyDeepLink: handleCopyDeepLink,
+            }}
+          />
+        </Suspense>
+        <Suspense fallback={null}><KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} /></Suspense>
       </div>
     );
   }
@@ -1350,16 +1361,18 @@ export default function App() {
         <>
           <ResizableSplitter direction="vertical" onResize={(d) => setCommandLogHeight(h => Math.max(100, Math.min(600, h - d)))} />
           <div style={{ height: commandLogHeight, flexShrink: 0 }}>
-            <CommandLogPanel
-              onClose={() => {
-                setShowCommandLog(false);
-                setCommandLogErrorsOnly(false);
-                // QW-5 — record the manual-close timestamp so the next
-                // error within 30s does NOT auto-reopen the panel.
-                useCommandLogStore.getState().markManualClose();
-              }}
-              initialErrorsOnly={commandLogErrorsOnly}
-            />
+            <Suspense fallback={null}>
+              <CommandLogPanel
+                onClose={() => {
+                  setShowCommandLog(false);
+                  setCommandLogErrorsOnly(false);
+                  // QW-5 — record the manual-close timestamp so the next
+                  // error within 30s does NOT auto-reopen the panel.
+                  useCommandLogStore.getState().markManualClose();
+                }}
+                initialErrorsOnly={commandLogErrorsOnly}
+              />
+            </Suspense>
           </div>
         </>
       )}
@@ -1373,15 +1386,15 @@ export default function App() {
       <DeepLinkHandler />
       <Suspense fallback={null}><CloneModal open={showClone} onClose={() => setShowClone(false)} /></Suspense>
       <Suspense fallback={null}><InitModal open={showInit} onClose={() => setShowInit(false)} /></Suspense>
-      <FindObjectDialog open={showFind} onClose={() => setShowFind(false)} />
+      <Suspense fallback={null}><FindObjectDialog open={showFind} onClose={() => setShowFind(false)} /></Suspense>
       <Suspense fallback={null}>
         <GitFlowDialog open={showGitFlow} onClose={() => { setShowGitFlow(false); setGitFlowType(undefined); }} initialFlow={gitFlowType} />
         <InteractiveRebaseDialog open={showIRebase} onClose={() => setShowIRebase(false)} />
         <RepoInfoDialog open={showRepoInfo} onClose={() => setShowRepoInfo(false)} />
         <ApplyPatchModal open={showApplyPatch} onClose={() => setShowApplyPatch(false)} />
       </Suspense>
-      <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
-      {refAction && <RefActionDialog action={refAction} onClose={() => setRefAction(null)} />}
+      <Suspense fallback={null}><KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} /></Suspense>
+      <Suspense fallback={null}>{refAction && <RefActionDialog action={refAction} onClose={() => setRefAction(null)} />}</Suspense>
       {showIndexEditor && (
         <Suspense fallback={null}>
           <IndexEditorDialog filePath={indexEditorFile} onClose={() => setShowIndexEditor(false)} />
@@ -1398,29 +1411,33 @@ export default function App() {
       {conflictFile && (
         <ConflictRedirect file={conflictFile} onDone={() => setConflictFile(null)} />
       )}
-      <CommandPalette
-        open={showPalette}
-        onClose={() => setShowPalette(false)}
-        triggers={{
-          onFind: () => setShowFind(true),
-          onGitFlow: () => setShowGitFlow(true),
-          onInteractiveRebase: () => setShowIRebase(true),
-          onRepoInfo: () => setShowRepoInfo(true),
-          onApplyPatch: () => setShowApplyPatch(true),
-          onClone: () => setShowClone(true),
-          onInit: () => setShowInit(true),
-          onGoDeepLink: handleGoDeepLink,
-          onCopyDeepLink: handleCopyDeepLink,
-        }}
-      />
-      <GlobalSearch
-        open={showGlobalSearch}
-        onClose={() => setShowGlobalSearch(false)}
-      />
+      <Suspense fallback={null}>
+        <CommandPalette
+          open={showPalette}
+          onClose={() => setShowPalette(false)}
+          triggers={{
+            onFind: () => setShowFind(true),
+            onGitFlow: () => setShowGitFlow(true),
+            onInteractiveRebase: () => setShowIRebase(true),
+            onRepoInfo: () => setShowRepoInfo(true),
+            onApplyPatch: () => setShowApplyPatch(true),
+            onClone: () => setShowClone(true),
+            onInit: () => setShowInit(true),
+            onGoDeepLink: handleGoDeepLink,
+            onCopyDeepLink: handleCopyDeepLink,
+          }}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <GlobalSearch
+          open={showGlobalSearch}
+          onClose={() => setShowGlobalSearch(false)}
+        />
+      </Suspense>
       {/* ONB-1 — first-run tour overlay (spotlight + popover) */}
-      {showTour && <TourOverlay onClose={() => setShowTour(false)} />}
+      <Suspense fallback={null}>{showTour && <TourOverlay onClose={() => setShowTour(false)} />}</Suspense>
       {/* LAR-3 — AI Assistant chat panel (floating, bottom-right). */}
-      {showAiAssistant && <AiAssistant onClose={() => setShowAiAssistant(false)} />}
+      <Suspense fallback={null}>{showAiAssistant && <AiAssistant onClose={() => setShowAiAssistant(false)} />}</Suspense>
     </div>
   );
 }

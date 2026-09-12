@@ -71,9 +71,20 @@ export default defineConfig({
       output: {
         // Split stable vendor code into separate chunks so app code changes
         // don't invalidate the long-term cache for React/zustand/router.
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'zustand': ['zustand'],
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+              return 'react-vendor';
+            }
+            if (id.includes('zustand')) return 'zustand';
+            if (id.includes('@tauri-apps')) return 'tauri-vendor';
+            if (id.includes('simple-git')) return 'simple-git';
+          }
+          // Pull the diff parser + git graph into a shared chunk — used by
+          // History, Diff, Blame, Annotate, Investigate (5 lazy pages).
+          if (id.includes('/src/lib/diffParser') || id.includes('/src/lib/gitGraph') || id.includes('/src/lib/graphAncestry')) {
+            return 'git-utils';
+          }
         },
         // Use a content-based hash for long-term caching.
         chunkFileNames: 'assets/[name]-[hash].js',
