@@ -3,7 +3,7 @@ import type { AppSettings } from '../../electron/types/settings-api';
 import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FilePlus, FileCheck, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Lock, Minus, Plus, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FilePlus, FileCheck, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Loader, Lock, Minus, Plus, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
 import { LazyFileList } from '../components/LazyFileList';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
@@ -1189,7 +1189,13 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // refresh, user actions firing several status changes in a row), and
   // aborts any in-flight check when the inputs change so stale results
   // never overwrite fresh ones.
+  //
+  // A spinner overlay is shown in the center of the file list while the
+  // detection is in flight. The spinner is itself delayed 300ms so it
+  // doesn't flash on fast (<300ms) checks — it only appears for genuinely
+  // slow detections (large working trees).
   const [detectedRenames, setDetectedRenames] = useState<{ oldPath: string; newPath: string }[]>([]);
+  const [isDetectingRenames, setIsDetectingRenames] = useState(false);
   useEffect(() => {
     if (!repo?.path || !status) return;
     const deletedFiles = status.files
@@ -1210,6 +1216,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     // Fast path: nothing to detect.
     if (deletedFiles.length === 0 || untrackedFiles.length === 0) {
       setDetectedRenames([]);
+      setIsDetectingRenames(false);
       return;
     }
 
@@ -1217,18 +1224,45 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     // pass. Without this, a fast-refresh loop (auto-refresh + user actions)
     // would fire one detection per status change, piling up IPC calls.
     let cancelled = false;
+    // Spinner delay: only show the spinner if detection takes longer than
+    // 300ms. Fast detections (typical case after the perf optimization)
+    // shouldn't flash any UI.
+    let spinnerTimer: ReturnType<typeof setTimeout> | undefined;
+    const armSpinner = () => {
+      spinnerTimer = setTimeout(() => {
+        if (!cancelled) setIsDetectingRenames(true);
+      }, 300);
+    };
+    const disarmSpinner = () => {
+      if (spinnerTimer) {
+        clearTimeout(spinnerTimer);
+        spinnerTimer = undefined;
+      }
+    };
+
     const timer = setTimeout(async () => {
+      armSpinner();
       try {
         const result = await api.git.detectWorkingTreeRenames(repo.path, deletedFiles, untrackedFiles);
-        if (!cancelled) setDetectedRenames(result);
+        disarmSpinner();
+        if (!cancelled) {
+          setDetectedRenames(result);
+          setIsDetectingRenames(false);
+        }
       } catch {
-        if (!cancelled) setDetectedRenames([]);
+        disarmSpinner();
+        if (!cancelled) {
+          setDetectedRenames([]);
+          setIsDetectingRenames(false);
+        }
       }
     }, 200);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      disarmSpinner();
+      setIsDetectingRenames(false);
     };
   }, [repo?.path, status]);
 
@@ -1922,10 +1956,22 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           {/* SmartGit background color highlighting: light red = committable files hidden,
               light yellow = name-filtered, gray = unchanged files shown by name match */}
           <div className={cn(
-            'flex-1 overflow-y-auto transition-colors',
+            'relative flex-1 overflow-y-auto transition-colors',
             // Light yellow: files are being name-filtered
             (fileFilter.trim().length > 0) ? 'bg-yellow-50 dark:bg-yellow-950/10' : '',
           )}>
+            {/* Rename detection spinner — centered overlay shown only while
+                detection is in flight (and only after 300ms so fast checks
+                don't flash the UI). Pointer-events-none so user clicks pass
+                through to the file list underneath. */}
+            {isDetectingRenames && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+                <div className="flex flex-col items-center gap-2 px-4 py-3 rounded-md bg-bg-secondary/90 backdrop-blur-sm shadow-lg border border-border-subtle">
+                  <Loader size={20} className="animate-spin text-text-secondary" />
+                  <span className="text-2xs text-text-secondary">{t('changes.detectingRenames')}</span>
+                </div>
+              </div>
+            )}
             {/* Table header — click a column to sort (SmartGit-style) */}
             <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary sticky top-0 z-10">
               <span className="w-4"></span>
