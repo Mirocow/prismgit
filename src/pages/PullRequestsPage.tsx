@@ -11,6 +11,7 @@ import { cn, formatDate } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog } from '../components/ConfirmDialog';
 export function PullRequestsPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
@@ -78,6 +79,65 @@ export function PullRequestsPage() {
       loadPRs();
     }
   }, [repoInfo, state, loadPRs]);
+
+  // LAR-2 — PR action handlers. Wire up to api.github.* methods which
+  // already exist in electron/services/github.ts.
+  // Note: api.github.* take (owner, repo, prNumber, ...) — not repoPath.
+  const handleApprove = async (prNumber: number) => {
+    if (!repoInfo.owner || !repoInfo.repo) return;
+    try {
+      await api.github.submitPRReview(repoInfo.owner, repoInfo.repo, prNumber, 'APPROVE', '');
+      toast.success(t('pages.prApproved', { n: prNumber }));
+      await loadPRs();
+    } catch (e) { toast.error(t('pages.prApproveFailed'), String(e)); }
+  };
+  const handleRequestChanges = async (prNumber: number) => {
+    if (!repoInfo.owner || !repoInfo.repo) return;
+    const body = await promptForComment();
+    if (body == null) return;
+    try {
+      await api.github.submitPRReview(repoInfo.owner, repoInfo.repo, prNumber, 'REQUEST_CHANGES', body);
+      toast.success(t('pages.prRequestedChanges', { n: prNumber }));
+      await loadPRs();
+    } catch (e) { toast.error(t('pages.prRequestChangesFailed'), String(e)); }
+  };
+  const handleMerge = async (prNumber: number) => {
+    if (!repoInfo.owner || !repoInfo.repo) return;
+    if (!(await confirmDialog({
+      title: t('pages.prMergeConfirmTitle', { n: prNumber }),
+      message: t('pages.prMergeConfirmMessage'),
+      confirmLabel: t('pages.prMerge'),
+    }))) return;
+    try {
+      await api.github.mergePR(repoInfo.owner, repoInfo.repo, prNumber, { merge_method: 'merge' });
+      toast.success(t('pages.prMerged', { n: prNumber }));
+      await loadPRs();
+      await refreshStatus(repo.path);
+    } catch (e) { toast.error(t('pages.prMergeFailed'), String(e)); }
+  };
+  const handleClose = async (prNumber: number) => {
+    if (!repoInfo.owner || !repoInfo.repo) return;
+    try {
+      await api.github.closePR(repoInfo.owner, repoInfo.repo, prNumber);
+      toast.success(t('pages.prClosed', { n: prNumber }));
+      await loadPRs();
+    } catch (e) { toast.error(t('pages.prCloseFailed'), String(e)); }
+  };
+  const handleReopen = async (prNumber: number) => {
+    if (!repoInfo.owner || !repoInfo.repo) return;
+    try {
+      await api.github.reopenPR(repoInfo.owner, repoInfo.repo, prNumber);
+      toast.success(t('pages.prReopened', { n: prNumber }));
+      await loadPRs();
+    } catch (e) { toast.error(t('pages.prReopenFailed'), String(e)); }
+  };
+  // Helper: prompt for review comment via native prompt dialog.
+  const promptForComment = async (): Promise<string | null> => {
+    return await new Promise<string | null>((resolve) => {
+      const result = window.prompt(t('pages.prCommentPrompt'));
+      resolve(result);
+    });
+  };
 
   const handleCreate = async () => {
     if (!repoInfo.owner || !repoInfo.repo) return;
@@ -301,6 +361,52 @@ export function PullRequestsPage() {
                 </div>
               </div>
               <ExternalLink size={12} className="text-text-tertiary opacity-0 group-hover:opacity-100" />
+              {/* LAR-2 — wire up GitHub PR actions to the existing backend
+                  methods (electron/services/github.ts: submitPRReview /
+                  mergePR / closePR / reopenPR). Buttons are shown only
+                  for OPEN PRs in a GitHub repo where the user is
+                  authenticated. */}
+              {pr.state === 'open' && repoInfo.provider === 'github' && authenticated && (
+                <div className="flex items-center gap-1 ml-2" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="text-2xs px-2 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 border border-status-added/30"
+                    onClick={() => handleApprove(pr.number)}
+                    title={t('pages.prApproveTooltip')}
+                  >
+                    ✓
+                  </button>
+                  <button
+                    className="text-2xs px-2 py-0.5 rounded bg-status-deleted/15 text-status-deleted hover:bg-status-deleted/25 border border-status-deleted/30"
+                    onClick={() => handleRequestChanges(pr.number)}
+                    title={t('pages.prRequestChangesTooltip')}
+                  >
+                    ✕
+                  </button>
+                  <button
+                    className="text-2xs px-2 py-0.5 rounded bg-status-modified/15 text-status-modified hover:bg-status-modified/25 border border-status-modified/30"
+                    onClick={() => handleMerge(pr.number)}
+                    title={t('pages.prMergeTooltip')}
+                  >
+                    ⇪
+                  </button>
+                  <button
+                    className="text-2xs px-2 py-0.5 rounded bg-bg-tertiary text-text-secondary hover:bg-bg-hover border border-border-default"
+                    onClick={() => handleClose(pr.number)}
+                    title={t('pages.prCloseTooltip')}
+                  >
+                    ⊘
+                  </button>
+                </div>
+              )}
+              {pr.state === 'closed' && repoInfo.provider === 'github' && authenticated && !pr.merged_at && (
+                <button
+                  className="text-2xs px-2 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 border border-status-added/30 ml-2"
+                  onClick={(e) => { e.stopPropagation(); handleReopen(pr.number); }}
+                  title={t('pages.prReopenTooltip')}
+                >
+                  ↻
+                </button>
+              )}
             </div>
           ))
         )}

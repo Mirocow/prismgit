@@ -39,6 +39,8 @@ export interface GithubPullRequest {
   created_at: string;
   updated_at: string;
   body?: string;
+  /** LAR-2 — when the PR was merged (null if open or closed without merge). */
+  merged_at?: string | null;
 }
 
 export interface GithubApi {
