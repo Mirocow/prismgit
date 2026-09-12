@@ -1289,11 +1289,14 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
 
   // Detected rename entries — shown in the unstaged section as Renamed rows.
   // Each entry has the new path as the file path and old_path set.
+  // working_dir MUST be ' ' (porcelain unmodified), NOT 'unmodified' —
+  // renderFileRow's isUnmodified check fires on wd==='unmodified' BEFORE
+  // the renamed check, which would misclassify these rows as 'Unchanged'.
   const renamedFiles: FileStatus[] = useMemo(() => {
     return detectedRenames.map(r => ({
       path: r.newPath,
       index: 'renamed' as FileStatus['index'],
-      working_dir: 'unmodified' as FileStatus['working_dir'],
+      working_dir: ' ' as FileStatus['working_dir'],
       old_path: r.oldPath,
     }));
   }, [detectedRenames]);
