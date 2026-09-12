@@ -10,7 +10,7 @@ import { LazyFileList } from '../components/LazyFileList';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
-import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, type LLMProvider } from '../lib/aiCommitMessages';
+import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, generateCommitMessageStream, type LLMProvider } from '../lib/aiCommitMessages';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { buildFileMenu, getIndexFlagsAsync, runFileAction, type IndexFlags } from '../lib/fileContextMenu';
@@ -836,13 +836,27 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         toast.info(t('changes.aiNoChanges'));
         return;
       }
-      const aiMessage = await generateCommitMessage({
+      // LAR-1 — streaming AI: tokens arrive as they're generated, so the
+      // user sees the commit message compose itself in real time.
+      setCommitMsg(''); // clear the textarea so we can stream into it
+      let accumulated = '';
+      for await (const _tok of generateCommitMessageStream({
         diff: diffText,
         provider,
         recentMessages: journal.slice(0, 5).map(j => j.subject),
-      });
-      setCommitMsg(aiMessage);
-      toast.success(t('changes.aiMessageGenerated'), t('changes.reviewBeforeCommitting'));
+      }, {
+        onToken: (token) => {
+          accumulated += token;
+          setCommitMsg(accumulated);
+        },
+      })) {
+        // tokens are applied via the onToken callback above; we don't
+        // need to do anything extra in the loop body.
+      }
+      if (accumulated) {
+        setCommitMsg(accumulated.trim());
+        toast.success(t('changes.aiMessageGenerated'), t('changes.reviewBeforeCommitting'));
+      }
     } catch (e) {
       toast.error(t('changes.aiGenerationFailed'), String(e));
     } finally {

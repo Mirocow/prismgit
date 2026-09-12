@@ -435,3 +435,225 @@ async function callProvider(
       throw new Error(`Unsupported provider type: ${provider.type}`);
   }
 }
+
+// ============================================================================
+// LAR-1 — Streaming AI responses.
+//
+// Adds `callLLMStream()` and `generateCommitMessageStream()` that yield
+// tokens as they arrive from the LLM, so the user sees the message
+// compose itself in real time instead of waiting for the full response
+// (5-15 sec for long PR descriptions).
+//
+// All three provider families support streaming:
+//   - OpenAI / Custom / GitHub / Mistral  → SSE `data: {choices:[{delta:{content}}]}\n\n`
+//   - Anthropic                           → SSE `event: content_block_delta` + `data: {delta:{text}}\n\n`
+//   - Ollama                              → NDJSON (one JSON object per line, `message.content`)
+//
+// The frontend's ChangesPage integrates this via `for await (const tok of generateCommitMessageStream(...))`,
+// appending each token to the commit-message textarea in real time.
+// ============================================================================
+
+/**
+ * Streaming variant of callProvider. Yields tokens as they arrive.
+ * Returns the full concatenated message when the generator completes.
+ *
+ * The `onToken` callback is also called for each token — useful for
+ * callers that want to update UI without using `for await`.
+ */
+export async function* callLLMStream(
+  provider: LLMProvider,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  options?: { onToken?: (token: string) => void; signal?: AbortSignal },
+): AsyncGenerator<string, string, unknown> {
+  let full = '';
+  const onToken = options?.onToken;
+  const signal = options?.signal;
+
+  // --- OpenAI-compatible (OpenAI / Custom / GitHub / Mistral) ---
+  async function* streamOpenAICompatible(): AsyncGenerator<string> {
+    const url = provider.url || 'https://api.openai.com/v1/chat/completions';
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    };
+    if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
+    const body = JSON.stringify({
+      model: provider.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: maxTokens,
+      temperature: provider.temperature ?? 0.4,
+      stream: true,
+    });
+    const response = await fetch(url, { method: 'POST', headers, body, signal });
+    if (!response.ok || !response.body) {
+      const text = await response.text();
+      throw new Error(`LLM stream error ${response.status}: ${text}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        const data = trimmed.slice(6);
+        if (data === '[DONE]') return;
+        try {
+          const json = JSON.parse(data);
+          const token = json.choices?.[0]?.delta?.content;
+          if (token) {
+            full += token;
+            onToken?.(token);
+            yield token;
+          }
+        } catch { /* ignore non-JSON keepalive lines */ }
+      }
+    }
+  }
+
+  // --- Anthropic (Claude) ---
+  async function* streamAnthropic(): AsyncGenerator<string> {
+    const url = provider.url || 'https://api.anthropic.com/v1/messages';
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      Accept: 'text/event-stream',
+    };
+    if (provider.apiKey) headers['x-api-key'] = provider.apiKey;
+    const body = JSON.stringify({
+      model: provider.model,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+      max_tokens: maxTokens,
+      stream: true,
+    });
+    const response = await fetch(url, { method: 'POST', headers, body, signal });
+    if (!response.ok || !response.body) {
+      const text = await response.text();
+      throw new Error(`Anthropic stream error ${response.status}: ${text}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentData = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) currentData += line.slice(6);
+        else if (line === '' && currentData) {
+          try {
+            const json = JSON.parse(currentData);
+            // Anthropic delta events arrive as:
+            //   { type: 'content_block_delta', delta: { type: 'text_delta', text: '<token>' } }
+            if (json.type === 'content_block_delta' && json.delta?.text) {
+              full += json.delta.text;
+              onToken?.(json.delta.text);
+              yield json.delta.text;
+            }
+          } catch { /* ignore */ }
+          currentData = '';
+        }
+      }
+    }
+  }
+
+  // --- Ollama (NDJSON — one JSON object per line) ---
+  async function* streamOllama(): AsyncGenerator<string> {
+    const url = (provider.url || 'http://localhost:11434') + '/api/chat';
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const body = JSON.stringify({
+      model: provider.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      stream: true,
+      options: { temperature: provider.temperature ?? 0.4 },
+    });
+    const response = await fetch(url, { method: 'POST', headers, body, signal });
+    if (!response.ok || !response.body) {
+      const text = await response.text();
+      throw new Error(`Ollama stream error ${response.status}: ${text}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const json = JSON.parse(trimmed);
+          const token = json.message?.content;
+          const doneFlag = json.done;
+          if (token) {
+            full += token;
+            onToken?.(token);
+            yield token;
+          }
+          if (doneFlag) return;
+        } catch { /* ignore */ }
+      }
+    }
+  }
+
+  // Dispatch by provider type.
+  switch (provider.type) {
+    case 'openai':
+    case 'custom':
+    case 'github':
+    case 'mistral':
+      yield* streamOpenAICompatible();
+      break;
+    case 'anthropic':
+      yield* streamAnthropic();
+      break;
+    case 'ollama':
+      yield* streamOllama();
+      break;
+    default:
+      throw new Error(`Unsupported provider type for streaming: ${provider.type}`);
+  }
+
+  return full; // AsyncGenerator return value — the full concatenated message.
+}
+
+/**
+ * Streaming variant of generateCommitMessage. Yields tokens as they arrive.
+ * Returns the full message when the generator completes.
+ *
+ * Usage:
+ *   for await (const tok of generateCommitMessageStream(params, { onToken: t => setCommitMsg(p => p + t) })) {
+ *     // token already applied via onToken callback above
+ *   }
+ */
+export async function* generateCommitMessageStream(
+  params: GenerateMessageParams,
+  options?: { onToken?: (token: string) => void; signal?: AbortSignal },
+): AsyncGenerator<string, string, unknown> {
+  const { diff, recentMessages = [], systemPrompt = DEFAULT_PROMPT, provider, maxTokens = 256 } = params;
+  const truncatedDiff = diff.length > 48000 ? diff.slice(0, 48000) + '\n... (diff truncated)' : diff;
+  const userPrompt = recentMessages.length > 0
+    ? `Recent commit messages for style reference:\n${recentMessages.map(m => '- ' + m.split('\n')[0]).join('\n')}\n\nGenerate a commit message for these changes:\n\n${truncatedDiff}`
+    : `Generate a commit message for these changes:\n\n${truncatedDiff}`;
+  return yield* callLLMStream(provider, systemPrompt, userPrompt, maxTokens, options);
+}
