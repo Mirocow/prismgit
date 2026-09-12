@@ -103,6 +103,12 @@ export function BranchesPage() {
   // other tool — a branch picked in History/Toolbar, a tag from Tags page, a
   // stash from Stashes page. BranchesPage used to be write-only.
   const globalSelectedBranch = useSelectionStore((s) => s.selectedBranch);
+  // Multi-selection (Ctrl-click on rows OR checkbox). Stored in
+  // selectedBranches Set in the global store so History / Diff can pick it
+  // up and operate on a range of branches at once.
+  const selectedBranches = useSelectionStore((s) => s.selectedBranches);
+  const toggleBranch = useSelectionStore((s) => s.toggleBranch);
+  const clearBranches = useSelectionStore((s) => s.clearBranches);
   const globalSelectedTag = useSelectionStore((s) => s.selectedTag);
   const globalSelectedStashIndex = useSelectionStore((s) => s.selectedStashIndex);
   useEscapeKey(!!showAddTag, () => setShowAddTag(false));
@@ -114,6 +120,8 @@ export function BranchesPage() {
   useEscapeKey(!!depthRemote, () => setDepthRemote(null));
   useEscapeKey(!!moreRemote, () => setMoreRemote(null));
   useEscapeKey(!!propertiesRemote, () => setPropertiesRemote(null));
+  // Esc clears branch multi-selection (when no dialog is open)
+  useEscapeKey(selectedBranches.size > 0, () => clearBranches());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1040,13 +1048,18 @@ export function BranchesPage() {
   }
 
   const renderBranchRow = (b: BranchInfo) => {
+    // Selected = either single-selection (globalSelectedBranch) OR part of
+    // the multi-selection set. Both should highlight the row.
+    const isMultiSelected = selectedBranches.has(b.name);
+    const isSingleSelected = globalSelectedBranch === b.name && !b.current;
     return (
       <div
         key={b.name}
         className={cn(
           'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
           b.current && 'bg-bg-active font-medium',
-          globalSelectedBranch === b.name && !b.current && 'bg-bg-selected',
+          isSingleSelected && 'bg-bg-selected',
+          isMultiSelected && !b.current && 'bg-bg-selected',
           draggedBranch === b.name && 'opacity-50'
         )}
         draggable={!b.remote}
@@ -1073,10 +1086,11 @@ export function BranchesPage() {
           setDraggedBranch(null);
         }}
         onClick={(e) => {
-          // Ctrl/Cmd-click: select branch in global store ONLY (no checkout)
+          // Ctrl/Cmd-click: toggle branch in multi-selection set. Allows
+          // picking several branches at once for batch operations
+          // (e.g. multi-branch History filter, multi-branch Diff).
           if (e.ctrlKey || e.metaKey) {
-            useSelectionStore.getState().selectBranch(b.name);
-            toast.info(t('branches.selectedGlobal', { name: b.name }));
+            toggleBranch(b.name);
             return;
           }
           // Plain click: SELECT ONLY — never checkout.
@@ -1107,6 +1121,17 @@ export function BranchesPage() {
         }}
         onContextMenu={(e) => showBranchContextMenu(e, b)}
       >
+        {/* Selection checkbox — toggles this branch in the multi-selection
+            set. Click does NOT propagate to the row (otherwise it would
+            also trigger single-select and clear the multi-set). */}
+        <input
+          type="checkbox"
+          className="flex-shrink-0 cursor-pointer"
+          checked={isMultiSelected}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => toggleBranch(b.name)}
+          title={isMultiSelected ? t('branches.deselectBranch') : t('branches.selectBranch')}
+        />
         {/* Current branch indicator — ">" marks the checked-out branch (HEAD).
             Bright accent background + bold ">" + "HEAD" label so the user
             can always see at a glance which branch they are on. */}
@@ -1561,6 +1586,28 @@ export function BranchesPage() {
         </div>
       </div>
 
+      {/* Multi-selection action bar — shows count + clear button when one or
+          more branches are selected via checkbox or Ctrl-click. The selection
+          is global (stored in selectionStore.selectedBranches) so History / Diff
+          can pick it up and operate on multiple branches at once. */}
+      {selectedBranches.size > 0 && (
+        <div className="px-3 py-1 border-b border-accent/40 bg-accent-muted/40 flex items-center gap-2">
+          <span className="text-2xs font-semibold text-accent">
+            {t('branches.selectedCount', { count: selectedBranches.size })}
+          </span>
+          <span className="text-2xs text-text-tertiary truncate min-w-0">
+            {Array.from(selectedBranches).slice(0, 5).join(', ')}
+            {selectedBranches.size > 5 && ` +${selectedBranches.size - 5}`}
+          </span>
+          <button
+            className="ml-auto text-2xs px-2 py-0.5 hover:bg-bg-hover rounded text-text-secondary hover:text-text-primary"
+            onClick={clearBranches}
+            title={t('branches.clearSelectionTitle')}
+          >
+            {t('branches.clearSelection')}
+          </button>
+        </div>
+      )}
       {/* In-progress warning banner — explains why checkout / push are blocked
           and points to the Changes page banner for Continue / Skip / Abort.
           Covers ALL five states (incl. bisect) via repoState. */}

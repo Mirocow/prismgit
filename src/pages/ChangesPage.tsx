@@ -1773,16 +1773,16 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             </button>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-1 min-w-0">
           <input
             type="text"
-            className="text-xs w-32 px-2 py-0.5"
+            className="text-xs flex-1 min-w-0 px-2 py-0.5"
             placeholder={t('changes.fileFilter')}
             value={fileFilter}
             onChange={(e) => setFileFilter(e.target.value)}
           />
           <button
-            className={cn('text-2xs px-1.5 py-0.5 border rounded font-mono',
+            className={cn('text-2xs px-1.5 py-0.5 border rounded font-mono flex-shrink-0',
               fileFilterRegex
                 ? 'border-accent bg-accent-muted text-accent'
                 : 'border-border-default bg-bg-tertiary text-text-secondary hover:text-text-primary')}
