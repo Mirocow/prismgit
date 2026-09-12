@@ -1652,6 +1652,22 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           }
           setDraggedFile(null);
         }}
+        // A11Y-1 — keyboard alternative to drag-drop for screen reader
+        // and keyboard-only users. Space/Enter toggles the file's stage
+        // state — same effect as dropping the file onto the opposite
+        // section. role='option' + aria-selected lets SR users navigate
+        // the list with arrow keys.
+        role="option"
+        aria-selected={isSelected}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (isStaged) handleUnstageFile(file.path);
+            else handleStageFile(file.path);
+          }
+        }}
         onClick={(e) => handleFileClick(e, file.path)}
         onDoubleClick={() => handleFileDoubleClick(file.path)}
         onContextMenu={(e) => {

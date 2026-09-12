@@ -61,13 +61,17 @@ export function LazyFileList({ files, isStaged, renderRow }: LazyFileListProps) 
   if (files.length === 0) return null;
 
   return (
-    <>
+    // A11Y-1 — wrap the file rows in role="listbox" so screen readers
+    // announce the listbox semantics ("X items, in list") and let SR
+    // users navigate with arrow keys. Each row's role="option" +
+    // aria-selected is set by the renderRow caller.
+    <div role="listbox" aria-multiselectable={true}>
       {files.slice(0, visibleCount).map((f) => renderRow(f, isStaged))}
       {visibleCount < files.length && (
-        <div ref={sentinelRef} className="px-3 py-1 text-2xs text-text-tertiary">
+        <div ref={sentinelRef} className="px-3 py-1 text-2xs text-text-tertiary" aria-hidden={true}>
           {t('changes.loadingMore', { loaded: visibleCount, total: files.length })}
         </div>
       )}
-    </>
+    </div>
   );
 }
