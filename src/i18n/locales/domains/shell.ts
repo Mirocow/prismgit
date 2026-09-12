@@ -28,6 +28,8 @@ export const en: Record<string, string> = {
   'shell.foldersDroppedNoGit': '{count} folders dropped, none contained a .git directory',
 
   // Sidebar — group dialogs / context menus
+  'shell.addToGroup': 'Add Project to Group…',
+  'shell.cloneIntoGroup': 'Clone Project into Group…',
   'shell.newSubgroup': 'New subgroup',
   'shell.newGroupTitle': 'New group',
   'shell.subgroupPrompt': 'Enter a name for the subgroup:',
@@ -332,6 +334,8 @@ export const ru: Record<string, string> = {
   'shell.foldersDroppedNoGit': 'Перетащено папок: {count}, ни в одной нет каталога .git',
 
   // Sidebar — group dialogs / context menus
+  'shell.addToGroup': 'Добавить проект в группу…',
+  'shell.cloneIntoGroup': 'Клонировать проект в группу…',
   'shell.newSubgroup': 'Новая подгруппа',
   'shell.newGroupTitle': 'Новая группа',
   'shell.subgroupPrompt': 'Введите имя подгруппы:',
@@ -636,6 +640,8 @@ export const zh: Record<string, string> = {
   'shell.foldersDroppedNoGit': '拖入 {count} 个文件夹，均不包含 .git 目录',
 
   // Sidebar — group dialogs / context menus
+  'shell.addToGroup': '将项目添加到分组…',
+  'shell.cloneIntoGroup': '克隆项目到分组…',
   'shell.newSubgroup': '新建子分组',
   'shell.newGroupTitle': '新建分组',
   'shell.subgroupPrompt': '请输入子分组名称：',
@@ -940,6 +946,8 @@ export const de: Record<string, string> = {
   'shell.foldersDroppedNoGit': '{count} Ordner abgelegt, keiner enthält ein .git-Verzeichnis',
 
   // Sidebar — group dialogs / context menus
+  'shell.addToGroup': 'Projekt zur Gruppe hinzufügen…',
+  'shell.cloneIntoGroup': 'Projekt in Gruppe klonen…',
   'shell.newSubgroup': 'Neue Untergruppe',
   'shell.newGroupTitle': 'Neue Gruppe',
   'shell.subgroupPrompt': 'Namen für die Untergruppe eingeben:',

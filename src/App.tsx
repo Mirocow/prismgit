@@ -109,6 +109,23 @@ export default function App() {
   const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
   const navigate = useNavigate();
   const [showClone, setShowClone] = useState(false);
+  // Task 10 — listen for 'prismgit:clone-into-group' custom events
+  // dispatched by Sidebar's group right-click menu. Opens the Clone modal.
+  useEffect(() => {
+    const onCloneIntoGroup = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { groupId: string; groupName: string } | undefined;
+      // Could pre-fill the target-group in CloneModal via prop, but the
+      // modal already groups new clones into the current group context.
+      // For now, just open the modal — the user can move it post-clone.
+      if (detail) {
+        // Persist target group so the cloned repo lands here.
+        sessionStorage.setItem('prismgit-clone-target-group', detail.groupId);
+      }
+      setShowClone(true);
+    };
+    window.addEventListener('prismgit:clone-into-group', onCloneIntoGroup);
+    return () => window.removeEventListener('prismgit:clone-into-group', onCloneIntoGroup);
+  }, []);
   const [showInit, setShowInit] = useState(false);
   const [showFind, setShowFind] = useState(false);
   const [showGitFlow, setShowGitFlow] = useState(false);

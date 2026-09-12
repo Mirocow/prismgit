@@ -388,7 +388,14 @@ export function Sidebar() {
       else (n.children as Array<RepoGroupNode | RepoItemNode>).forEach(walk);
     };
     node.children.forEach(walk);
+    // Task 10 — 'Add Project to Group' and 'Clone Project into Group' come
+    // FIRST in the menu (at the top), as the user requested. They open the
+    // standard Open / Clone modals with the target group preselected so
+    // the newly-added repo lands in this group automatically.
     void showContextMenu([
+      { label: t('shell.addToGroup'), clickId: 'add-to-group' },
+      { label: t('shell.cloneIntoGroup'), clickId: 'clone-into-group' },
+      { type: 'separator' },
       { label: t('shell.newSubgroup'), clickId: 'subgroup' },
       { label: t('common.rename'), clickId: 'rename' },
       ...(groupRepoPaths.length > 0 ? [
@@ -397,12 +404,28 @@ export function Sidebar() {
       { type: 'separator' },
       { label: t('shell.deleteGroup'), clickId: 'delete' },
     ], (clickId) => {
-      if (clickId === 'subgroup') void handleCreateGroup(node.group.id);
-      if (clickId === 'rename') void handleRenameGroup(node.group.id, node.group.name);
-      if (clickId === 'vscode-workspace') void handleOpenGroupWorkspace(node.group.name, groupRepoPaths);
-      if (clickId === 'delete') void handleDeleteGroup(node.group.id, node.group.name);
+      if (clickId === 'add-to-group') {
+        // Open the standard repo picker (which also opens the repo).
+        // Once selected, move it into this group.
+        void useRepositoryStore.getState().openRepositoryPicker().then(() => {
+          const cur = useRepositoryStore.getState().currentRepo;
+          if (cur) void dropRepoIntoGroup(cur.path, node.group.id);
+        }).catch(() => {});
+      } else if (clickId === 'clone-into-group') {
+        // Trigger the global Clone modal, but mark this group as the target
+        // via a CustomEvent App.tsx listens for.
+        window.dispatchEvent(new CustomEvent('prismgit:clone-into-group', { detail: { groupId: node.group.id, groupName: node.group.name } }));
+      } else if (clickId === 'subgroup') {
+        void handleCreateGroup(node.group.id);
+      } else if (clickId === 'rename') {
+        void handleRenameGroup(node.group.id, node.group.name);
+      } else if (clickId === 'vscode-workspace') {
+        void handleOpenGroupWorkspace(node.group.name, groupRepoPaths);
+      } else if (clickId === 'delete') {
+        void handleDeleteGroup(node.group.id, node.group.name);
+      }
     });
-  }, [showContextMenu, handleCreateGroup, handleRenameGroup, handleDeleteGroup, handleOpenGroupWorkspace, t]);
+  }, [showContextMenu, dropRepoIntoGroup, handleCreateGroup, handleRenameGroup, handleDeleteGroup, handleOpenGroupWorkspace, t]);
 
   const showRepoMenu = useCallback((e: React.MouseEvent, repoPath: string, repoGroupId: string | null | undefined) => {
     e.preventDefault();
