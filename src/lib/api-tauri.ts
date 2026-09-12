@@ -516,6 +516,12 @@ export const tauriApi = {
       const mod = await import('@tauri-apps/plugin-shell');
       await mod.open(url);
     },
+    // setLocale is a no-op in Tauri — locale is managed by the i18n
+    // store in the renderer. This stub exists so App.tsx's
+    // window.smartgit?.app?.setLocale?.(locale) doesn't crash.
+    setLocale: async (_locale: string): Promise<void> => {
+      /* no-op — renderer-side i18n store handles locale */
+    },
   },
 
   // Settings — persisted as JSON in the app's data directory.
@@ -564,6 +570,117 @@ export const tauriApi = {
         data.repos = repos;
         await writeSettingsFile(data);
       }
+    },
+
+    // --- Repository groups (sidebar tree) ---
+    getRepoGroups: async (): Promise<unknown[]> => {
+      const data = await readSettingsFile();
+      return (data.repoGroups as unknown[]) ?? [];
+    },
+    createRepoGroup: async (name: string, parentId?: string | null): Promise<unknown> => {
+      const data = await readSettingsFile();
+      const groups = (data.repoGroups as Array<{ id: string; name: string; parentId: string | null; expanded?: boolean }>) ?? [];
+      const group = { id: `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name, parentId: parentId ?? null, expanded: true };
+      groups.push(group);
+      data.repoGroups = groups;
+      await writeSettingsFile(data);
+      return group;
+    },
+    renameRepoGroup: async (id: string, name: string): Promise<void> => {
+      const data = await readSettingsFile();
+      const groups = (data.repoGroups as Array<{ id: string; name: string }>) ?? [];
+      const g = groups.find(g => g.id === id);
+      if (g) { g.name = name; data.repoGroups = groups; await writeSettingsFile(data); }
+    },
+    deleteRepoGroup: async (id: string): Promise<void> => {
+      const data = await readSettingsFile();
+      const groups = (data.repoGroups as Array<{ id: string; parentId: string | null }>) ?? [];
+      data.repoGroups = groups.filter(g => g.id !== id);
+      // Also delete children
+      await writeSettingsFile(data);
+    },
+    moveRepoGroup: async (id: string, newParentId: string | null): Promise<void> => {
+      const data = await readSettingsFile();
+      const groups = (data.repoGroups as Array<{ id: string; parentId: string | null }>) ?? [];
+      const g = groups.find(g => g.id === id);
+      if (g) { g.parentId = newParentId; data.repoGroups = groups; await writeSettingsFile(data); }
+    },
+    setRepoGroupExpanded: async (id: string, expanded: boolean): Promise<void> => {
+      const data = await readSettingsFile();
+      const groups = (data.repoGroups as Array<{ id: string; expanded?: boolean }>) ?? [];
+      const g = groups.find(g => g.id === id);
+      if (g) { g.expanded = expanded; data.repoGroups = groups; await writeSettingsFile(data); }
+    },
+    assignRepoGroup: async (path: string, groupId: string | null): Promise<void> => {
+      const data = await readSettingsFile();
+      const repos = (data.repos as Array<{ path: string; groupId?: string | null }>) ?? [];
+      const r = repos.find(r => r.path === path);
+      if (r) { r.groupId = groupId; data.repos = repos; await writeSettingsFile(data); }
+    },
+
+    // --- Repository metadata (favorites, tags, stats) ---
+    getRepoMetadata: async (path: string): Promise<unknown | null> => {
+      const data = await readSettingsFile();
+      const meta = (data.repoMetadata as Record<string, unknown>) ?? {};
+      return meta[path] ?? null;
+    },
+    getRepoMetadataAll: async (): Promise<unknown[]> => {
+      const data = await readSettingsFile();
+      const meta = (data.repoMetadata as Record<string, unknown>) ?? {};
+      return Object.entries(meta).map(([path, m]) => ({ ...(m as object), path }));
+    },
+    setRepoMetadata: async (path: string, metadata: Record<string, unknown>): Promise<void> => {
+      const data = await readSettingsFile();
+      const meta = (data.repoMetadata as Record<string, unknown>) ?? {};
+      meta[path] = metadata;
+      data.repoMetadata = meta;
+      await writeSettingsFile(data);
+    },
+    updateRepoMetadata: async (path: string, updates: Record<string, unknown>): Promise<void> => {
+      const data = await readSettingsFile();
+      const meta = (data.repoMetadata as Record<string, Record<string, unknown>>) ?? {};
+      meta[path] = { ...(meta[path] ?? {}), ...updates };
+      data.repoMetadata = meta;
+      await writeSettingsFile(data);
+    },
+    deleteRepoMetadata: async (path: string): Promise<void> => {
+      const data = await readSettingsFile();
+      const meta = (data.repoMetadata as Record<string, unknown>) ?? {};
+      delete meta[path];
+      data.repoMetadata = meta;
+      await writeSettingsFile(data);
+    },
+    toggleFavorite: async (path: string): Promise<void> => {
+      const data = await readSettingsFile();
+      const meta = (data.repoMetadata as Record<string, { favorite?: boolean }>) ?? {};
+      if (!meta[path]) meta[path] = {};
+      meta[path].favorite = !meta[path]?.favorite;
+      data.repoMetadata = meta;
+      await writeSettingsFile(data);
+    },
+    addTag: async (path: string, tag: string): Promise<void> => {
+      const data = await readSettingsFile();
+      const meta = (data.repoMetadata as Record<string, { tags?: string[] }>) ?? {};
+      if (!meta[path]) meta[path] = {};
+      if (!meta[path].tags) meta[path].tags = [];
+      if (!meta[path].tags!.includes(tag)) meta[path].tags!.push(tag);
+      data.repoMetadata = meta;
+      await writeSettingsFile(data);
+    },
+    removeTag: async (path: string, tag: string): Promise<void> => {
+      const data = await readSettingsFile();
+      const meta = (data.repoMetadata as Record<string, { tags?: string[] }>) ?? {};
+      if (meta[path]?.tags) {
+        meta[path].tags = meta[path].tags!.filter(t => t !== tag);
+        data.repoMetadata = meta;
+        await writeSettingsFile(data);
+      }
+    },
+    refreshRepoStats: async (path: string): Promise<unknown> => {
+      // Return a minimal stats object — the real stats require git operations
+      // that are already available via api.git.*. The sidebar uses this for
+      // incoming/outgoing counters which are computed in checkRemotes().
+      return { path, branch: null, lastCommit: null, commitCount: 0 };
     },
   },
 
