@@ -1628,106 +1628,115 @@ smartgit.refresh.inspectEol=true
 
         {/* Settings redesign — UI Density (Compact / Comfortable) */}
         <section className="panel mb-4">
-          <h2 className="text-sm font-medium mb-3">{t('settings.densityTitle')}</h2>
-          <p className="text-xs text-text-tertiary mb-4">{t('settings.densityHint')}</p>
-          <div className="flex items-center gap-1">
-            {(['compact', 'comfortable'] as const).map((d) => (
-              <button
-                key={d}
-                className={cn(
-                  'px-3 py-1 text-xs rounded border transition-colors',
-                  (settings.uiDensity ?? 'comfortable') === d
-                    ? 'bg-accent text-text-inverse border-accent'
-                    : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover',
-                )}
-                onClick={() => setSetting('uiDensity', d)}
-              >
-                {t(`settings.density_${d}`)}
-              </button>
-            ))}
+          <div className="panel-header">{t('settings.densityTitle')}</div>
+          <div className="p-5 space-y-3">
+            <p className="text-xs text-text-tertiary">{t('settings.densityHint')}</p>
+            <div className="flex items-center gap-1">
+              {(['compact', 'comfortable'] as const).map((d) => (
+                <button
+                  key={d}
+                  className={cn(
+                    'px-4 py-1.5 text-xs rounded border transition-colors',
+                    (settings.uiDensity ?? 'comfortable') === d
+                      ? 'bg-accent text-text-inverse border-accent'
+                      : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover',
+                  )}
+                  onClick={() => setSetting('uiDensity', d)}
+                >
+                  {t(`settings.density_${d}`)}
+                </button>
+              ))}
+            </div>
           </div>
         </section>
 
         {/* Settings redesign — Date Format (Relative / Absolute / Both) */}
         <section className="panel mb-4">
-          <h2 className="text-sm font-medium mb-3">{t('settings.dateFormatTitle')}</h2>
-          <p className="text-xs text-text-tertiary mb-4">{t('settings.dateFormatHint')}</p>
-          <div className="flex items-center gap-1">
-            {(['relative', 'absolute', 'both'] as const).map((f) => (
-              <button
-                key={f}
-                className={cn(
-                  'px-3 py-1 text-xs rounded border transition-colors',
-                  (settings.dateFormat ?? 'relative') === f
-                    ? 'bg-accent text-text-inverse border-accent'
-                    : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover',
-                )}
-                onClick={() => setSetting('dateFormat', f)}
-              >
-                {t(`settings.dateFormat_${f}`)}
-              </button>
-            ))}
+          <div className="panel-header">{t('settings.dateFormatTitle')}</div>
+          <div className="p-5 space-y-3">
+            <p className="text-xs text-text-tertiary">{t('settings.dateFormatHint')}</p>
+            <div className="flex items-center gap-1">
+              {(['relative', 'absolute', 'both'] as const).map((f) => (
+                <button
+                  key={f}
+                  className={cn(
+                    'px-4 py-1.5 text-xs rounded border transition-colors',
+                    (settings.dateFormat ?? 'relative') === f
+                      ? 'bg-accent text-text-inverse border-accent'
+                      : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover',
+                  )}
+                  onClick={() => setSetting('dateFormat', f)}
+                >
+                  {t(`settings.dateFormat_${f}`)}
+                </button>
+              ))}
+            </div>
           </div>
         </section>
 
         {/* Settings redesign — Zoom (stepper control) */}
         <section className="panel mb-4">
-          <h2 className="text-sm font-medium mb-3">{t('settings.zoomTitle')}</h2>
-          <p className="text-xs text-text-tertiary mb-4">{t('settings.zoomHint')}</p>
-          <div className="flex items-center gap-2">
-            <button
-              className="icon-btn !w-7 !h-7"
-              onClick={() => setSetting('zoomLevel', Math.max(60, (settings.zoomLevel ?? 100) - 10))}
-              title={t('settings.zoomOut')}
-            >−</button>
-            <span className="text-xs font-mono w-14 text-center">
-              {settings.zoomLevel ?? 100}%
-            </span>
-            <button
-              className="icon-btn !w-7 !h-7"
-              onClick={() => setSetting('zoomLevel', Math.min(240, (settings.zoomLevel ?? 100) + 10))}
-              title={t('settings.zoomIn')}
-            >+</button>
-            <button
-              className="text-2xs text-accent hover:underline ml-2"
-              onClick={() => setSetting('zoomLevel', 100)}
-            >
-              {t('settings.zoomReset')}
-            </button>
+          <div className="panel-header">{t('settings.zoomTitle')}</div>
+          <div className="p-5 space-y-3">
+            <p className="text-xs text-text-tertiary">{t('settings.zoomHint')}</p>
+            <div className="flex items-center gap-2">
+              <button
+                className="icon-btn !w-8 !h-8 border border-border-default rounded bg-bg-tertiary hover:bg-bg-hover"
+                onClick={() => setSetting('zoomLevel', Math.max(60, (settings.zoomLevel ?? 100) - 10))}
+                title={t('settings.zoomOut')}
+              >−</button>
+              <span className="text-sm font-mono w-16 text-center bg-bg-tertiary border border-border-default rounded px-2 py-1">
+                {settings.zoomLevel ?? 100}%
+              </span>
+              <button
+                className="icon-btn !w-8 !h-8 border border-border-default rounded bg-bg-tertiary hover:bg-bg-hover"
+                onClick={() => setSetting('zoomLevel', Math.min(240, (settings.zoomLevel ?? 100) + 10))}
+                title={t('settings.zoomIn')}
+              >+</button>
+              <button
+                className="text-2xs text-accent hover:underline ml-2 px-2 py-1"
+                onClick={() => setSetting('zoomLevel', 100)}
+              >
+                {t('settings.zoomReset')}
+              </button>
+            </div>
           </div>
         </section>
 
         {/* Task 18 — VSCode-style footer display settings. Each checkbox
             toggles a StatusBar footer section. */}
         <section className="panel mb-4">
-          <h2 className="text-sm font-medium mb-3">{t('settings.footerSectionTitle')}</h2>
-          <p className="text-xs text-text-tertiary mb-4">{t('settings.footerSectionDesc')}</p>
-          <div className="grid grid-cols-2 gap-2">
-            {([
-              ['head', t('settings.footerItemHead')],
-              ['inProgress', t('settings.footerItemInProgress')],
-              ['selectedCommit', t('settings.footerItemSelectedCommit')],
-              ['stagedChanged', t('settings.footerItemStagedChanged')],
-              ['aheadBehind', t('settings.footerItemAheadBehind')],
-              ['recyclable', t('settings.footerItemRecyclable')],
-              ['stashes', t('settings.footerItemStashes')],
-              ['submodules', t('settings.footerItemSubmodules')],
-              ['lfs', t('settings.footerItemLfs')],
-              ['updatedAt', t('settings.footerItemUpdatedAt')],
-              ['outputToggle', t('settings.footerItemOutputToggle')],
-            ] as const).map(([key, label]) => (
-              <label key={key} className="flex items-center gap-2 text-xs cursor-pointer p-2 hover:bg-bg-hover rounded">
-                <input
-                  type="checkbox"
-                  checked={(settings.footerVisible ?? {})[key] !== false}
-                  onChange={(e) => {
-                    const next = { ...(settings.footerVisible ?? {}), [key]: e.target.checked };
-                    void setSetting('footerVisible', next);
-                  }}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
+          <div className="panel-header">{t('settings.footerSectionTitle')}</div>
+          <div className="p-5 space-y-3">
+            <p className="text-xs text-text-tertiary">{t('settings.footerSectionDesc')}</p>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                ['head', t('settings.footerItemHead')],
+                ['inProgress', t('settings.footerItemInProgress')],
+                ['selectedCommit', t('settings.footerItemSelectedCommit')],
+                ['stagedChanged', t('settings.footerItemStagedChanged')],
+                ['aheadBehind', t('settings.footerItemAheadBehind')],
+                ['recyclable', t('settings.footerItemRecyclable')],
+                ['stashes', t('settings.footerItemStashes')],
+                ['submodules', t('settings.footerItemSubmodules')],
+                ['lfs', t('settings.footerItemLfs')],
+                ['updatedAt', t('settings.footerItemUpdatedAt')],
+                ['outputToggle', t('settings.footerItemOutputToggle')],
+              ] as const).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 text-xs cursor-pointer p-2 hover:bg-bg-hover rounded border border-border-subtle">
+                  <input
+                    type="checkbox"
+                    className="w-3.5 h-3.5"
+                    checked={(settings.footerVisible ?? {})[key] !== false}
+                    onChange={(e) => {
+                      const next = { ...(settings.footerVisible ?? {}), [key]: e.target.checked };
+                      void setSetting('footerVisible', next);
+                    }}
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
           </div>
         </section>
       </div>
