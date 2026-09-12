@@ -7,7 +7,7 @@
  *
  * Each file row is rendered via the `renderRow` callback.
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { FileStatus } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 
@@ -24,10 +24,22 @@ export function LazyFileList({ files, isStaged, renderRow }: LazyFileListProps) 
   const [visibleCount, setVisibleCount] = useState(Math.min(BATCH_SIZE, files.length));
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  // Reset when file list changes (e.g. filter applied)
+  // Stable key derived from file paths — only changes when the ACTUAL file
+  // list content changes (paths added/removed/reordered), NOT when the
+  // array reference changes. This prevents visibleCount from resetting on
+  // every rename-detection refresh (which creates a new array reference
+  // even when the file list is identical).
+  const fileKey = useMemo(
+    () => files.map(f => `${f.path}\0${f.index}\0${f.working_dir}`).join('\n'),
+    [files]
+  );
+
+  // Reset visibleCount only when the file list content actually changes.
+  // Using fileKey (string) as dependency — stable across array-reference
+  // changes when content is the same.
   useEffect(() => {
     setVisibleCount(Math.min(BATCH_SIZE, files.length));
-  }, [files]);
+  }, [fileKey, files.length]);
 
   // IntersectionObserver to load more when sentinel is visible
   const loadMore = useCallback(() => {

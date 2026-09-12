@@ -1215,7 +1215,11 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
 
     // Fast path: nothing to detect.
     if (deletedFiles.length === 0 || untrackedFiles.length === 0) {
-      setDetectedRenames([]);
+      // Use functional update — only set [] if previous value was non-empty.
+      // This avoids creating a new array reference when there's nothing to
+      // change, preventing unnecessary re-renders of downstream memos and
+      // LazyFileList resets.
+      setDetectedRenames(prev => prev.length === 0 ? prev : []);
       setIsDetectingRenames(false);
       return;
     }
@@ -1246,13 +1250,31 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         const result = await api.git.detectWorkingTreeRenames(repo.path, deletedFiles, untrackedFiles);
         disarmSpinner();
         if (!cancelled) {
-          setDetectedRenames(result);
+          // Only update state if the result actually changed. Returning the
+          // previous reference skips the re-render entirely when the detected
+          // renames are the same as before (common case on auto-refresh).
+          // This prevents the cascade: detectedRenames → renamedOldPaths →
+          // renamedNewPaths → unstagedFiles/renamedFiles → LazyFileList
+          // files prop → visibleCount reset.
+          setDetectedRenames(prev => {
+            if (prev.length === result.length) {
+              let same = true;
+              for (let i = 0; i < result.length; i++) {
+                if (prev[i].oldPath !== result[i].oldPath || prev[i].newPath !== result[i].newPath) {
+                  same = false;
+                  break;
+                }
+              }
+              if (same) return prev;
+            }
+            return result;
+          });
           setIsDetectingRenames(false);
         }
       } catch {
         disarmSpinner();
         if (!cancelled) {
-          setDetectedRenames([]);
+          setDetectedRenames(prev => prev.length === 0 ? prev : []);
           setIsDetectingRenames(false);
         }
       }
