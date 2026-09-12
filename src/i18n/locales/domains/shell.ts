@@ -101,6 +101,10 @@ export const en: Record<string, string> = {
   'shell.updatedAt': 'updated {time}',
   'shell.toggleOutputTooltip': 'Toggle Output panel (Ctrl+Shift+L)',
   'shell.outputPanel': 'Output',
+  'footer.recyclableTooltip': '{count} recyclable commits — click to view',
+  'footer.stashesTooltip': '{count} stashes — click to view',
+  'footer.submodulesTooltip': '{count} submodules — click to view',
+  'footer.lfsTooltip': '{count} LFS-tracked patterns — click to view',
 
   // Toolbar — window controls & top row
   'shell.minimize': 'Minimize',
@@ -401,6 +405,10 @@ export const ru: Record<string, string> = {
   'shell.updatedAt': 'обновлено {time}',
   'shell.toggleOutputTooltip': 'Показать/скрыть панель Output (Ctrl+Shift+L)',
   'shell.outputPanel': 'Вывод',
+  'footer.recyclableTooltip': '{count} перерабатываемых коммитов — нажмите, чтобы просмотреть',
+  'footer.stashesTooltip': '{count} stashes — нажмите, чтобы просмотреть',
+  'footer.submodulesTooltip': '{count} подмодулей — нажмите, чтобы просмотреть',
+  'footer.lfsTooltip': '{count} LFS-паттернов — нажмите, чтобы просмотреть',
 
   // Toolbar — window controls & top row
   'shell.minimize': 'Свернуть',
@@ -701,6 +709,10 @@ export const zh: Record<string, string> = {
   'shell.updatedAt': '已更新 {time}',
   'shell.toggleOutputTooltip': '切换输出面板 (Ctrl+Shift+L)',
   'shell.outputPanel': '输出',
+  'footer.recyclableTooltip': '{count} 个可回收提交 — 点击查看',
+  'footer.stashesTooltip': '{count} 个贮藏 — 点击查看',
+  'footer.submodulesTooltip': '{count} 个子模块 — 点击查看',
+  'footer.lfsTooltip': '{count} 个 LFS 跟踪模式 — 点击查看',
 
   // Toolbar — window controls & top row
   'shell.minimize': '最小化',
@@ -1001,6 +1013,10 @@ export const de: Record<string, string> = {
   'shell.updatedAt': 'aktualisiert {time}',
   'shell.toggleOutputTooltip': 'Output-Panel umschalten (Ctrl+Shift+L)',
   'shell.outputPanel': 'Ausgabe',
+  'footer.recyclableTooltip': '{count} wiederverwendbare Commits — klicken zum Anzeigen',
+  'footer.stashesTooltip': '{count} Stashes — klicken zum Anzeigen',
+  'footer.submodulesTooltip': '{count} Submodule — klicken zum Anzeigen',
+  'footer.lfsTooltip': '{count} LFS-verfolgte Muster — klicken zum Anzeigen',
 
   // Toolbar — window controls & top row
   'shell.minimize': 'Minimieren',

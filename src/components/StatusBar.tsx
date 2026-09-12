@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { memo, useEffect, useState, useCallback } from 'react';
 import { ArrowUp, ArrowDown, Loader, ChevronUp, ChevronDown } from './icons';
+import { FooterCounters } from './FooterCounters';
 import { useContextMenu } from '../lib/useContextMenu';
 import { buildHashMenu, runHashMenuAction } from '../lib/commitMenu';
 import { describePushResult } from '../lib/pushResult';
@@ -212,6 +213,9 @@ export function StatusBar({
             )}
           </button>
         )}
+        {/* Tasks 15/16/17/20 — footer counters for Recyclable/Stashes/Submodules/LFS.
+            Click to jump to the corresponding page. */}
+        <FooterCounters />
         {/* Ahead / behind — click to push / pull (VS Code-style sync buttons) */}
         {status?.ahead ? (
           <button
