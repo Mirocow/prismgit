@@ -1,20 +1,18 @@
 import { useState, useCallback, useEffect } from 'react';
 import { RefreshCw, Check, AlertCircle, Loader } from './icons';
+import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
 /**
- * Ollama model picker — fetches /api/tags from the Ollama server and
- * presents a dropdown of available models. The user can select instead
- * of typing the model name manually.
+ * Ollama model picker — fetches /api/tags from the Ollama server via IPC
+ * (main process, to bypass CORS — Ollama doesn't send CORS headers).
  *
  * Features:
- *   - "Test Connection" button → fetches the model list
+ *   - "Test Connection" button → fetches the model list via api.ai.ollamaListModels
  *   - Green badge with model count on success
- *   - Red error message on failure (wrong URL, server down, CORS)
- *   - Model dropdown auto-refreshes when the URL changes
+ *   - Red error message on failure (wrong URL, server down)
+ *   - Model dropdown auto-refreshes when the URL changes (500ms debounce)
  *   - Selected model is persisted via onSelect callback
- *
- * Ollama API: GET {url}/api/tags → { models: [{ name: "llama3.2:latest", size: 3825819519, ... }] }
  */
 export function OllamaModelPicker({
   url,
@@ -30,37 +28,30 @@ export function OllamaModelPicker({
   const [error, setError] = useState<string | null>(null);
   const [tested, setTested] = useState(false);
 
-  // Fetch models from Ollama /api/tags
+  // Fetch models from Ollama /api/tags via IPC (main process, no CORS)
   const fetchModels = useCallback(async (serverUrl: string) => {
     setLoading(true);
     setError(null);
     try {
-      // Normalize URL: strip trailing slash, default to http://localhost:11434
       const base = serverUrl.trim().replace(/\/$/, '') || 'http://localhost:11434';
-      const tagsUrl = `${base}/api/tags`;
-      const response = await fetch(tagsUrl, { method: 'GET' });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      }
-      const data = await response.json();
-      const modelList: { name: string; size?: number }[] = (data.models || []).map((m: { name: string; size?: number }) => ({
-        name: m.name,
-        size: m.size,
-      }));
-      setModels(modelList);
-      setTested(true);
-      if (modelList.length === 0) {
-        setError('No models found. Run "ollama pull llama3.2" to download a model.');
+      // Use IPC (main process) — renderer fetch() is blocked by CORS
+      // because Ollama doesn't send Access-Control-Allow-Origin headers.
+      const result = await api.ai.ollamaListModels(base);
+      if (result.ok) {
+        setModels(result.models);
+        setTested(true);
+        if (result.models.length === 0) {
+          setError('No models found. Run "ollama pull llama3.2" to download a model.');
+        }
+      } else {
+        setModels([]);
+        setTested(true);
+        setError(result.error || 'Unknown error');
       }
     } catch (e) {
       setModels([]);
       setTested(true);
-      const msg = String(e);
-      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
-        setError('Cannot connect to Ollama. Make sure it\'s running (ollama serve) and the URL is correct.');
-      } else {
-        setError(msg);
-      }
+      setError(String(e));
     } finally {
       setLoading(false);
     }

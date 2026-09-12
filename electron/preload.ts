@@ -477,6 +477,8 @@ const api = {
   ai: {
     generateCommitMessage: (cfg: { url: string; apiKey?: string; model: string; maxDiffSize?: number; prompt?: string }, diff: string, hint?: string) =>
       ipcRenderer.invoke('ai:generateCommitMessage', cfg, diff, hint),
+    ollamaListModels: (url: string) =>
+      ipcRenderer.invoke('ai:ollamaListModels', url),
   },
 
   // Raw git command log (Output panel → Commands tab)

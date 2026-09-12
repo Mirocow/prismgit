@@ -3718,12 +3718,21 @@ export async function lfsStatus(repoPath: string): Promise<{ installed: boolean;
  * Used as a preflight check before any LFS operation — avoids the
  * "git: 'lfs' is not a git command" error being shown to the user
  * when LFS is simply not installed.
+ *
+ * Uses a raw spawn with stdio captured (not simple-git) so the command
+ * logger doesn't record the failed 'git lfs version' call — it would
+ * show as an error in the Output panel even though the failure is
+ * expected when git-lfs is not installed.
  */
 export async function isLfsInstalled(repoPath: string): Promise<boolean> {
-  const git = getGit(repoPath);
   try {
-    const version = await git.raw(['lfs', 'version']);
-    return !!version.trim();
+    const { execFileSync } = await import('node:child_process');
+    const out = execFileSync('git', ['-C', repoPath, 'lfs', 'version'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],  // suppress stderr completely
+    });
+    return !!out.trim();
   } catch {
     return false;
   }
@@ -4450,9 +4459,18 @@ export async function notesShow(
   notesRef: string,
   commit: string
 ): Promise<string | null> {
-  const git = getGit(repoPath);
+  // Use execFileSync instead of simple-git so the command logger doesn't
+  // record the 'git notes show' call — when no note exists, git exits 1
+  // with "error: no note found" which shows as an error in the Output panel
+  // even though it's a perfectly normal state (most commits have no notes).
   try {
-    return await git.raw(['notes', `--ref=${notesRef}`, 'show', commit]);
+    const { execFileSync } = await import('node:child_process');
+    const out = execFileSync('git', ['-C', repoPath, 'notes', `--ref=${notesRef}`, 'show', commit], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return out.trim() || null;
   } catch {
     return null;
   }

@@ -759,6 +759,26 @@ export const tauriApi = {
     },
   },
 
+  ai: {
+    generateCommitMessage: async (): Promise<string> => {
+      throw new Error('ai.generateCommitMessage not yet wired in Tauri backend');
+    },
+    ollamaListModels: async (url: string): Promise<{ ok: boolean; error: string | null; models: { name: string; size?: number }[] }> => {
+      try {
+        const base = (url || 'http://localhost:11434').trim().replace(/\/$/, '');
+        const response = await fetch(`${base}/api/tags`);
+        if (!response.ok) {
+          return { ok: false, error: `HTTP ${response.status}`, models: [] };
+        }
+        const data = await response.json();
+        const models = (data.models || []).map((m: { name: string; size?: number }) => ({ name: m.name, size: m.size }));
+        return { ok: true, error: null, models };
+      } catch (e) {
+        return { ok: false, error: String(e), models: [] };
+      }
+    },
+  },
+
   github: {
     // GitHub integration requires Tauri HTTP plugin + OAuth flow — left for follow-up.
     getUser: async (): Promise<never> => { throw new Error('github.getUser not yet wired in Tauri backend'); },
