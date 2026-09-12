@@ -146,13 +146,13 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
       {targetRect ? (
         <>
           {/* Top strip */}
-          <div className="fixed top-0 left-0 right-0 bg-black/60" style={{ height: targetRect.top }} />
+          <div className="fixed top-0 left-0 right-0 bg-black/3" style={{ height: targetRect.top }} />
           {/* Bottom strip */}
-          <div className="fixed left-0 right-0 bottom-0 bg-black/60" style={{ top: targetRect.bottom }} />
+          <div className="fixed left-0 right-0 bottom-0 bg-black/3" style={{ top: targetRect.bottom }} />
           {/* Left strip */}
-          <div className="fixed top-0 left-0 bottom-0 bg-black/60" style={{ width: targetRect.left }} />
+          <div className="fixed top-0 left-0 bottom-0 bg-black/3" style={{ width: targetRect.left }} />
           {/* Right strip */}
-          <div className="fixed top-0 right-0 bottom-0 bg-black/60" style={{ left: targetRect.right }} />
+          <div className="fixed top-0 right-0 bottom-0 bg-black/3" style={{ left: targetRect.right }} />
           {/* Spotlight border */}
           <div
             className="fixed pointer-events-none border-2 border-accent rounded"
@@ -161,7 +161,7 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
               left: targetRect.left - 2,
               width: targetRect.width + 4,
               height: targetRect.height + 4,
-              boxShadow: '0 0 0 9999px rgba(0,0,0,0.6)',
+              boxShadow: '0 0 0 9999px rgba(0,0,0,0.03)',
             }}
           />
         </>
