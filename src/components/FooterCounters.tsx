@@ -66,9 +66,16 @@ export function FooterCounters() {
       } catch { if (!cancelled) setSubmodules(null); }
 
       // LFS — check if .gitattributes has any 'filter=lfs' entries.
+      // Skip the lfsList call entirely when git-lfs is not installed —
+      // avoids "git: 'lfs' is not a git command" stderr noise.
       try {
-        const tracked = await api.git.lfsList(repo.path);
-        if (!cancelled) setLfs({ tracked: tracked.length });
+        const installed = await api.git.isLfsInstalled(repo.path);
+        if (!installed) {
+          if (!cancelled) setLfs(null);
+        } else {
+          const tracked = await api.git.lfsList(repo.path);
+          if (!cancelled) setLfs({ tracked: tracked.length });
+        }
       } catch { if (!cancelled) setLfs(null); }
     };
     void fetch();

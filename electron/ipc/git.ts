@@ -281,6 +281,7 @@ export function registerGitIpc(): void {
 
   // LFS support
   ipcMain.handle('git:lfsStatus', (_e, p: string) => gitService.lfsStatus(p));
+  ipcMain.handle('git:isLfsInstalled', (_e, p: string) => gitService.isLfsInstalled(p));
   ipcMain.handle('git:lfsPull', (_e, p: string, f?: string[]) => gitService.lfsPull(p, f));
   ipcMain.handle('git:lfsPush', (_e, p: string) => gitService.lfsPush(p));
   ipcMain.handle('git:lfsFetch', (_e, p: string) => gitService.lfsFetch(p));

@@ -3690,7 +3690,8 @@ export async function extractRepoInfo(
 export async function lfsStatus(repoPath: string): Promise<{ installed: boolean; files: { path: string; size: string; status: string }[] }> {
   const git = getGit(repoPath);
   try {
-    // Check if LFS is initialized
+    // Check if LFS is initialized — `git lfs version` exits non-zero when
+    // git-lfs is not installed. Suppress stderr to avoid console noise.
     const lfsVersion = await git.raw(['lfs', 'version']).catch(() => '');
     if (!lfsVersion.trim()) {
       return { installed: false, files: [] };
@@ -3709,6 +3710,22 @@ export async function lfsStatus(repoPath: string): Promise<{ installed: boolean;
     return { installed: true, files };
   } catch {
     return { installed: false, files: [] };
+  }
+}
+
+/**
+ * Check whether git-lfs is installed (git lfs version exits 0).
+ * Used as a preflight check before any LFS operation — avoids the
+ * "git: 'lfs' is not a git command" error being shown to the user
+ * when LFS is simply not installed.
+ */
+export async function isLfsInstalled(repoPath: string): Promise<boolean> {
+  const git = getGit(repoPath);
+  try {
+    const version = await git.raw(['lfs', 'version']);
+    return !!version.trim();
+  } catch {
+    return false;
   }
 }
 
