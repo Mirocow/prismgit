@@ -130,6 +130,11 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:currentBranch', (_e, p: string) => gitService.currentBranch(p));
   ipcMain.handle('git:revParse', (_e, p: string, r: string) => gitService.revParse(p, r));
   ipcMain.handle('git:revParseArgs', (_e, p: string, a: string[]) => gitService.revParseArgs(p, a));
+  // Rename detection — single IPC call replaces N+M per-file spawns in the
+  // renderer. See services/git.ts detectWorkingTreeRenames() for the strategy.
+  ipcMain.handle('git:detectWorkingTreeRenames', (_e, p: string, deleted: string[], untracked: string[]) =>
+    gitService.detectWorkingTreeRenames(p, deleted, untracked)
+  );
   // git:raw — suppress noisy "path does not exist" errors that flood the
   // main-process console. ConflictMergeView intentionally probes stages
   // :1/:2/:3 that may not exist (e.g. when a file is no longer conflicted).

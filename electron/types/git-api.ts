@@ -399,6 +399,13 @@ export interface GitApi {
   revParse: (repoPath: string, ref: string) => Promise<string>;
   revParseArgs: (repoPath: string, args: string[]) => Promise<string>;
   raw: (repoPath: string, args: string[]) => Promise<string>;
+  /**
+   * Detect renames in the working tree (staged + unstaged) in a single
+   * optimized IPC call. Returns { oldPath, newPath }[] for every detected
+   * rename. Pass the file lists from `git status` so we don't recompute them.
+   * Distinct from detectRenames() (which uses --find-renames=<threshold>%).
+   */
+  detectWorkingTreeRenames: (repoPath: string, deletedFiles: string[], untrackedFiles: string[]) => Promise<{ oldPath: string; newPath: string }[]>;
 
   // New: full git CLI surface coverage (added per simple-git comprehensive test spec)
   grep: (repoPath: string, pattern: string, options?: string[], pathspec?: string) => Promise<string>;

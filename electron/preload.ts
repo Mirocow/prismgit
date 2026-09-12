@@ -111,6 +111,9 @@ const api = {
     revParse: (repoPath: string, ref: string) => ipcRenderer.invoke('git:revParse', repoPath, ref),
     revParseArgs: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:revParseArgs', repoPath, args),
     raw: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:raw', repoPath, args),
+    // Single IPC call replaces N+M per-file spawns for rename detection
+    detectWorkingTreeRenames: (repoPath: string, deletedFiles: string[], untrackedFiles: string[]) =>
+      ipcRenderer.invoke('git:detectWorkingTreeRenames', repoPath, deletedFiles, untrackedFiles),
     // New: full git CLI surface coverage
     grep: (repoPath: string, pattern: string, options?: string[], pathspec?: string) => ipcRenderer.invoke('git:grep', repoPath, pattern, options, pathspec),
     applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => ipcRenderer.invoke('git:applyPatch', repoPath, patch, options),

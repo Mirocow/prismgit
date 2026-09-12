@@ -1180,79 +1180,56 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     ), [status, sortFiles, fileDisplayFlags]);
 
   // Detect unstaged renames by comparing content hashes of deleted tracked
-  // files with untracked files. Uses git ls-tree HEAD for deleted files
-  // (they no longer exist on disk) and git hash-object for untracked files.
+  // files with untracked files. Delegates the heavy lifting to a single
+  // `git:detectWorkingTreeRenames` IPC call (which batches ls-tree +
+  // hash-object server-side — see electron/services/git.ts
+  // detectWorkingTreeRenames()).
+  //
+  // The effect is debounced 200ms to coalesce rapid status updates (auto-
+  // refresh, user actions firing several status changes in a row), and
+  // aborts any in-flight check when the inputs change so stale results
+  // never overwrite fresh ones.
   const [detectedRenames, setDetectedRenames] = useState<{ oldPath: string; newPath: string }[]>([]);
   useEffect(() => {
     if (!repo?.path || !status) return;
-    const deletedFiles = status.files.filter(f => {
-      const wd = f.working_dir as string;
-      const idx = f.index as string;
-      // Deleted in working tree (wd='D') OR deleted in index (idx='D')
-      return wd === 'D' || (idx === 'D' && wd === ' ');
-    });
-    const untrackedFiles = status.files.filter(f => {
-      const idx = f.index as string;
-      const wd = f.working_dir as string;
-      return idx === '?' && wd === '?';
-    });
+    const deletedFiles = status.files
+      .filter(f => {
+        const wd = f.working_dir as string;
+        const idx = f.index as string;
+        return wd === 'D' || (idx === 'D' && wd === ' ');
+      })
+      .map(f => f.path);
+    const untrackedFiles = status.files
+      .filter(f => {
+        const idx = f.index as string;
+        const wd = f.working_dir as string;
+        return idx === '?' && wd === '?';
+      })
+      .map(f => f.path);
 
-    const checkRenames = async () => {
-      const renames: { oldPath: string; newPath: string }[] = [];
+    // Fast path: nothing to detect.
+    if (deletedFiles.length === 0 || untrackedFiles.length === 0) {
+      setDetectedRenames([]);
+      return;
+    }
 
-      // 1. Staged renames
+    // Debounce 200ms — coalesce bursts of status updates into one detection
+    // pass. Without this, a fast-refresh loop (auto-refresh + user actions)
+    // would fire one detection per status change, piling up IPC calls.
+    let cancelled = false;
+    const timer = setTimeout(async () => {
       try {
-        const stagedOut = await api.git.raw(repo.path, ['diff', '--cached', '--name-status', '--find-renames', '--diff-filter=R']);
-        for (const line of stagedOut.split('\n').filter(Boolean)) {
-          const parts = line.split('\t');
-          if (parts.length >= 3 && parts[0].startsWith('R')) {
-            renames.push({ oldPath: parts[1], newPath: parts[2] });
-          }
-        }
-      } catch { /* ignore */ }
-
-      // 2. Unstaged renames via content-hash matching
-      if (deletedFiles.length === 0 || untrackedFiles.length === 0) {
-        setDetectedRenames(renames);
-        return;
+        const result = await api.git.detectWorkingTreeRenames(repo.path, deletedFiles, untrackedFiles);
+        if (!cancelled) setDetectedRenames(result);
+      } catch {
+        if (!cancelled) setDetectedRenames([]);
       }
-      try {
-        // Get blob hashes of deleted files FROM HEAD
-        const deletedResults = await Promise.all(deletedFiles.map(async (df) => {
-          try {
-            const out = await api.git.raw(repo.path, ['ls-tree', 'HEAD', '--', df.path]);
-            const line = out.trim();
-            if (!line) return null;
-            // Format: "100644 blob <hash>\t<path>"
-            const match = line.match(/blob\s+([0-9a-f]+)/);
-            if (match) return { path: df.path, hash: match[1] };
-            return null;
-          } catch { return null; }
-        }));
-        const deletedHashes = deletedResults.filter(Boolean) as { path: string; hash: string }[];
+    }, 200);
 
-        // Get blob hashes of untracked files from disk
-        const untrackedResults = await Promise.all(untrackedFiles.map(async (uf) => {
-          try {
-            const hash = await api.git.raw(repo.path, ['hash-object', '--', uf.path]);
-            const trimmed = hash.trim();
-            if (trimmed) return { path: uf.path, hash: trimmed };
-            return null;
-          } catch { return null; }
-        }));
-        const untrackedHashes = untrackedResults.filter(Boolean) as { path: string; hash: string }[];
-
-        // Match by hash
-        for (const dh of deletedHashes) {
-          const match = untrackedHashes.find(uh => uh.hash === dh.hash);
-          if (match && !renames.some(r => r.newPath === match.path)) {
-            renames.push({ oldPath: dh.path, newPath: match.path });
-          }
-        }
-      } catch { /* ignore */ }
-      setDetectedRenames(renames);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
     };
-    checkRenames();
   }, [repo?.path, status]);
 
   // Sets of old/new paths for detected renames — used to filter out the
