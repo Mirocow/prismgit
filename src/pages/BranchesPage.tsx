@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   GitBranch, Plus, RefreshCw, Trash, GitMerge, Check, ArrowUp, ArrowDown,
   ExternalLink, Upload, ChevronDown, ChevronRight, X, Pencil, CloudDownload,
@@ -58,6 +58,14 @@ export function BranchesPage() {
   const [search, setSearch] = useState('');
   const [showNewDialog, setShowNewDialog] = useState(false);
   useEscapeKey(showNewDialog, () => setShowNewDialog(false));
+  /**
+   * QW-4 — anchor index for Shift+click range selection. Stored in a ref
+   * (not state) because we don't want a re-render when it changes, and we
+   * need the value to persist across renders without causing cascading
+   * updates. Reset to null whenever the branch list is re-filtered
+   * (otherwise Shift+click after a search would refer to a stale anchor).
+   */
+  const lastClickedIndex = useRef<number | null>(null);
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchStart, setNewBranchStart] = useState('HEAD');
   const [newBranchCheckout, setNewBranchCheckout] = useState(true);
@@ -1035,6 +1043,12 @@ export function BranchesPage() {
   };
 
   const filtered = branches.filter(b => b.name.toLowerCase().includes(search.toLowerCase()));
+  // QW-4 — reset the Shift+click anchor whenever the filter changes;
+  // otherwise the anchor index would refer to a different branch than
+  // the one the user originally clicked on.
+  useEffect(() => {
+    lastClickedIndex.current = null;
+  }, [search]);
   const filteredTags = tags.filter(t => t.name.toLowerCase().includes(search.toLowerCase()));
   const filteredStashes = stashes.filter(s => s.message.toLowerCase().includes(search.toLowerCase()));
 
@@ -1086,18 +1100,38 @@ export function BranchesPage() {
           setDraggedBranch(null);
         }}
         onClick={(e) => {
+          // Find this branch's index in the FILTERED list (the same list
+          // that's being rendered). We need it for Shift+click range.
+          const index = filtered.findIndex(b2 => b2.name === b.name);
+
           // Ctrl/Cmd-click: toggle branch in multi-selection set. Allows
           // picking several branches at once for batch operations
           // (e.g. multi-branch History filter, multi-branch Diff).
           if (e.ctrlKey || e.metaKey) {
             toggleBranch(b.name);
+            lastClickedIndex.current = index >= 0 ? index : null;
             return;
           }
+
+          // Shift+click: select the contiguous range between the last
+          // clicked anchor and this row. Replaces any previous selection.
+          // (Matches the standard file-explorer / spreadsheet behaviour.)
+          if (e.shiftKey && lastClickedIndex.current !== null && index >= 0) {
+            const start = Math.min(lastClickedIndex.current, index);
+            const end = Math.max(lastClickedIndex.current, index);
+            const rangeNames = filtered.slice(start, end + 1).map(b2 => b2.name);
+            useSelectionStore.getState().selectBranchRange(rangeNames);
+            // Anchor stays at lastClickedIndex.current so a subsequent
+            // Shift+click extends from the original anchor.
+            return;
+          }
+
           // Plain click: SELECT ONLY — never checkout.
           // Checkout must be an explicit action (Checkout button, context-menu,
           // or double-click). Selecting a branch just sets it as the active
           // branch for History filtering / merge / rebase targeting.
           useSelectionStore.getState().selectBranch(b.name);
+          lastClickedIndex.current = index >= 0 ? index : null;
         }}
         onDoubleClick={(e) => {
           // Double-click is the explicit "checkout this branch" gesture.

@@ -129,6 +129,18 @@ export interface GlobalSelectionState {
   /** Select a stash by index (pass hash so other tools can navigate to its commit). */
   selectStash: (index: number | null, hash?: string | null) => void;
   toggleBranch: (name: string) => void;
+  /**
+   * QW-4 — add a contiguous range of branch names to the multi-selection
+   * WITHOUT toggling what's already selected. Used for Shift+click range
+   * selection in BranchesPage.
+   */
+  addBranches: (names: string[]) => void;
+  /**
+   * QW-4 — replace the multi-selection with the given names (used for the
+   * 'click anchor + Shift+click end' UX where only the range between the
+   * two clicks should end up selected).
+   */
+  selectBranchRange: (names: string[]) => void;
   clearBranches: () => void;
   setPathFilter: (path: string | null) => void;
   setAuthorFilter: (author: string | null) => void;
@@ -205,6 +217,16 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
     const next = new Set(get().selectedBranches);
     if (next.has(name)) next.delete(name);
     else next.add(name);
+    set({ selectedBranches: next, selectedBranch: next.size > 0 ? null : get().selectedBranch });
+  },
+  addBranches: (names) => {
+    if (names.length === 0) return;
+    const next = new Set(get().selectedBranches);
+    for (const n of names) next.add(n);
+    set({ selectedBranches: next, selectedBranch: next.size > 0 ? null : get().selectedBranch });
+  },
+  selectBranchRange: (names) => {
+    const next = new Set(names);
     set({ selectedBranches: next, selectedBranch: next.size > 0 ? null : get().selectedBranch });
   },
   clearBranches: () => set({ selectedBranches: new Set(), selectedBranch: null }),
