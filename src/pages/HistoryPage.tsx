@@ -41,6 +41,7 @@ import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastActions } from '../stores/toastStore';
+import { useI18n } from '../lib/i18n';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -53,6 +54,7 @@ export { BRANCH_COLORS };
 
 export function HistoryPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
+  const { t } = useI18n();
   const toast = useToastActions();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const status = useGitStore((s) => s.status);
@@ -940,21 +942,21 @@ export function HistoryPage() {
     } catch { /* ignore — empty tag list */ }
 
     const items: ContextMenuItem[] = [
-      { label: 'Cherry Pick', clickId: 'cherry-pick' },
-      { label: 'Revert Commit', clickId: 'revert' },
+      { label: t('history.cherryPick'), clickId: 'cherry-pick' },
+      { label: t('history.revertCommit'), clickId: 'revert' },
       { type: 'separator' },
-      { label: 'Checkout (detached HEAD)', clickId: 'checkout' },
+      { label: t('history.checkoutDetached'), clickId: 'checkout' },
       { type: 'separator' },
-      { label: 'Reset to this commit', clickId: 'reset-header' },
-      { label: '  Reset Soft (keep changes)', clickId: 'reset-soft' },
-      { label: '  Reset Mixed (unstage)', clickId: 'reset-mixed' },
-      { label: '  Reset Hard (discard all)', clickId: 'reset-hard' },
-      { label: '  Reset Keep (keep working tree)', clickId: 'reset-keep' },
+      { label: t('history.resetToThis'), clickId: 'reset-header' },
+      { label: t('history.resetSoft'), clickId: 'reset-soft' },
+      { label: t('history.resetMixed'), clickId: 'reset-mixed' },
+      { label: t('history.resetHard'), clickId: 'reset-hard' },
+      { label: t('history.resetKeep'), clickId: 'reset-keep' },
       { type: 'separator' },
-      { label: 'Rebase onto this commit', clickId: 'rebase' },
+      { label: t('history.rebaseOnto'), clickId: 'rebase' },
       { type: 'separator' },
-      { label: 'Create Tag here...', clickId: 'create-tag' },
-      { label: 'Create Branch here...', clickId: 'create-branch' },
+      { label: t('history.createTagHere'), clickId: 'create-tag' },
+      { label: t('history.createBranchHere'), clickId: 'create-branch' },
     ];
     // If tags point at this commit, add Edit/Delete actions for each.
     // Annotated tags can be edited (message); lightweight tags can only be deleted.
@@ -962,35 +964,35 @@ export function HistoryPage() {
       items.push({ type: 'separator' });
       for (const tag of commitTags) {
         const label = tag.annotated
-          ? `Edit Tag "${tag.name}"...`
-          : `Tag "${tag.name}" (lightweight)`;
+          ? t('history.editTag', { name: tag.name })
+          : t('history.tagLightweight', { name: tag.name });
         items.push({ label, clickId: `edit-tag:${tag.name}` });
-        items.push({ label: `  Delete Tag "${tag.name}"`, clickId: `delete-tag:${tag.name}` });
+        items.push({ label: t('history.deleteTag', { name: tag.name }), clickId: `delete-tag:${tag.name}` });
       }
     }
     items.push(
       { type: 'separator' },
-      { label: 'Open in Diff tool...', clickId: 'open-in-diff' },
-      { label: 'Compare with Working Tree...', clickId: 'compare-wt' },
-      { label: 'Show Full Commit Diff', clickId: 'show-commit-diff' },
-      { label: 'Open Commit Patch in VS Code', clickId: 'open-vscode-patch' },
+      { label: t('history.openInDiff'), clickId: 'open-in-diff' },
+      { label: t('history.compareWithWT'), clickId: 'compare-wt' },
+      { label: t('history.showFullDiff'), clickId: 'show-commit-diff' },
+      { label: t('history.openPatchInVSCode'), clickId: 'open-vscode-patch' },
       { type: 'separator' },
-      { label: 'Split Off Files Into New Commit...', clickId: 'split-off' },
-      { label: 'Start Interactive Edit (split commit)', clickId: 'split-commit' },
+      { label: t('history.splitOffFiles'), clickId: 'split-off' },
+      { label: t('history.startInteractiveEdit'), clickId: 'split-commit' },
       { type: 'separator' },
-      { label: 'Add Git Note...', clickId: 'add-note' },
-      { label: 'Show Git Note', clickId: 'show-note' },
-      { label: 'Remove Git Note', clickId: 'remove-note' },
+      { label: t('history.addNote'), clickId: 'add-note' },
+      { label: t('history.showNote'), clickId: 'show-note' },
+      { label: t('history.removeNote'), clickId: 'remove-note' },
       { type: 'separator' },
-      { label: 'Copy Short Hash', clickId: 'copy-short' },
-      { label: 'Copy Full Hash', clickId: 'copy-full' },
-      { label: 'Copy Commit Message', clickId: 'copy-msg' },
+      { label: t('history.copyShortHash'), clickId: 'copy-short' },
+      { label: t('history.copyFullHash'), clickId: 'copy-full' },
+      { label: t('history.copyCommitMessage'), clickId: 'copy-msg' },
       { type: 'separator' },
-      { label: 'Edit Commit Message...', clickId: 'edit-msg' },
-      { label: 'Edit Commit Author...', clickId: 'edit-author' },
+      { label: t('history.editCommitMessage'), clickId: 'edit-msg' },
+      { label: t('history.editCommitAuthor'), clickId: 'edit-author' },
       { type: 'separator' },
-      { label: 'Format Patch...', clickId: 'format-patch' },
-      { label: 'Open in Browser', clickId: 'browser' },
+      { label: t('history.formatPatch'), clickId: 'format-patch' },
+      { label: t('history.openInBrowser'), clickId: 'browser' },
     );
     showContextMenu(items, (action) => {
       // Tag actions — dynamic clickId with tag name encoded after ':'
@@ -1144,9 +1146,9 @@ export function HistoryPage() {
 
   const handleDeleteTag = async (tagName: string) => {
     if (!(await confirmDialog({
-      title: `Delete tag "${tagName}"`,
-      message: `The tag will be removed from the local repository. If it was pushed to a remote, it will still exist there until you delete it remotely.`,
-      confirmLabel: 'Delete Tag',
+      title: t('history.deleteTagConfirmTitle', { name: tagName }),
+      message: t('history.deleteTagConfirmMsg'),
+      confirmLabel: t('history.deleteTagButton'),
       danger: true,
     }))) return;
     try {
