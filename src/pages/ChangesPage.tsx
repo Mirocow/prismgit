@@ -4,6 +4,7 @@ import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
 import { CommitTypeDropdown } from '../components/CommitTypeDropdown';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
+import { FilterInput } from '../components/FilterInput';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FilePlus, FileCheck, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Loader, Lock, Minus, Plus, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
 import { LazyFileList } from '../components/LazyFileList';
 import { RepoStateBanner } from '../components/RepoStateBanner';
@@ -1804,23 +1805,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           )}
         </div>
         <div className="flex items-center gap-1 flex-1 min-w-0">
-          <input
-            type="text"
-            className="text-xs flex-1 min-w-0 px-2 py-0.5"
-            placeholder={t('changes.fileFilter')}
+          <FilterInput
             value={fileFilter}
-            onChange={(e) => setFileFilter(e.target.value)}
+            onChange={setFileFilter}
+            placeholder={t('changes.fileFilter')}
+            ariaLabel={t('changes.fileFilter')}
+            isRegex={fileFilterRegex}
+            onToggleRegex={toggleFileFilterRegex}
+            regexTitle={t('changes.fileFilterRegexTitle')}
           />
-          <button
-            className={cn('text-2xs px-1.5 py-0.5 border rounded font-mono flex-shrink-0',
-              fileFilterRegex
-                ? 'border-accent bg-accent-muted text-accent'
-                : 'border-border-default bg-bg-tertiary text-text-secondary hover:text-text-primary')}
-            onClick={toggleFileFilterRegex}
-            title={t('changes.fileFilterRegexTitle')}
-          >
-            .*
-          </button>
           {/* File display flags — SmartGit-style toggle buttons with meaningful icons.
               Each icon visually represents what the toggle controls.
               Default: Subdir + Unver ON. Changed files always visible.

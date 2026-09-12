@@ -6,6 +6,7 @@ import {
 } from '../components/icons';
 import { MergePanel } from '../components/MergePanel';
 import { EmptyState } from '../components/EmptyState';
+import { FilterInput } from '../components/FilterInput';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -1609,9 +1610,13 @@ export function BranchesPage() {
             })}
           </span>
         </div>
-        <div className="flex items-center gap-1">
-          <input type="text" placeholder={t('branches.filterPlaceholder')} value={search}
-            onChange={(e) => setSearch(e.target.value)} className="text-xs w-32 px-2 py-1" />
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+          <FilterInput
+            value={search}
+            onChange={setSearch}
+            placeholder={t('branches.filterPlaceholder')}
+            ariaLabel={t('branches.filterPlaceholder')}
+          />
           <button className="icon-btn !w-6 !h-6" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={12} />
           </button>

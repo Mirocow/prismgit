@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommitFileTree } from '../components/CommitFileTree';
 import { DiffViewer } from '../components/DiffViewer';
+import { FilterInput } from '../components/FilterInput';
 import {
   ChevronDown, ChevronRight,
   Copy,
@@ -1126,10 +1127,16 @@ export function HistoryPage() {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1">
-          <input type="text" placeholder={useRegex ? 'Regex...' : 'Filter / hash...'} value={search}
-            onChange={(e) => setSearch(e.target.value)} className="text-xs w-40 px-2 py-0.5 font-mono"
-            title={useRegex ? 'Search using JavaScript regex' : 'Search by subject/author/hash — hash prefix resolves across the whole history'} />
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+          <FilterInput
+            value={search}
+            onChange={setSearch}
+            placeholder={useRegex ? 'Regex...' : 'Filter / hash...'}
+            ariaLabel="Filter commits"
+            isRegex={useRegex}
+            onToggleRegex={() => setUseRegex(!useRegex)}
+            regexTitle="Toggle regex"
+          />
           <button className={cn('icon-btn !w-5 !h-5', useRegex && 'active')}
             title="Toggle regex" onClick={() => setUseRegex(!useRegex)}>
             <span className="text-2xs font-mono">.*</span>
