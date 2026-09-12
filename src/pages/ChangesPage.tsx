@@ -233,6 +233,21 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       selectFileGlobal(filePath);
     }
   };
+
+  // Double-click on a file row:
+  //   - If the file is conflicted → dispatch 'smartgit:resolve-conflict' (opens 3-way merge panel)
+  //   - If the file is NOT conflicted → open in Diff tool (navigate to #/diff with file selected)
+  const handleFileDoubleClick = (filePath: string) => {
+    const isConflicted = (status?.conflicted ?? []).includes(filePath);
+    if (isConflicted) {
+      // Resolve conflict — same as right-click → "Resolve Conflict..."
+      window.dispatchEvent(new CustomEvent('smartgit:resolve-conflict', { detail: { file: filePath } }));
+    } else {
+      // Open in Diff tool — select file globally and navigate to #/diff
+      selectFileGlobal(filePath);
+      window.location.hash = '#/diff';
+    }
+  };
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [commitMsg, setCommitMsg] = useState('');
@@ -1273,6 +1288,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           setDraggedFile(null);
         }}
         onClick={(e) => handleFileClick(e, file.path)}
+        onDoubleClick={() => handleFileDoubleClick(file.path)}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
