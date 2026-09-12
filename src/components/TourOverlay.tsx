@@ -129,8 +129,54 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
           />
         </>
       ) : (
-        // Target not found — full overlay so the user can still skip.
-        <div className="fixed inset-0 bg-black/60" />
+        // Target not found — full overlay so the user can still skip /
+        // advance. Bug fix: previously the popover was ONLY rendered when
+        // popoverPos was set, which means if a tour step's target wasn't
+        // mounted (e.g. user is on a page without the spotlighted
+        // element), the user saw only the bg-black/60 dim overlay with
+        // NO way to dismiss — the X-skip button was inside the popover
+        // that never rendered. Now we center a popover with Next/Skip
+        // so the user can recover.
+        <div
+          className="fixed panel p-4 shadow-2xl w-[360px] z-[101]"
+          style={{
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+          }}
+        >
+          <div className="flex items-start justify-between mb-2">
+            <div className="text-sm font-semibold text-text-primary">{t(step.titleKey)}</div>
+            <button className="icon-btn !w-5 !h-5" onClick={handleSkip} aria-label={t('tour.skip')} title={t('tour.skip')}>
+              <X size={12} />
+            </button>
+          </div>
+          <div className="text-xs text-text-secondary leading-relaxed mb-4">
+            {t(step.descKey)}
+            <div className="mt-2 text-2xs text-text-tertiary italic">
+              (Target not on this page — skipping to next step.)
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-1">
+            {stepIdx > 0 && (
+              <button className="btn btn-secondary text-2xs !py-1 !px-2 flex items-center gap-1" onClick={handleBack}>
+                <ChevronLeft size={10} />
+                {t('tour.back')}
+              </button>
+            )}
+            {stepIdx < TOUR_STEPS.length - 1 ? (
+              <button className="btn btn-primary text-2xs !py-1 !px-2 flex items-center gap-1" onClick={handleNext}>
+                {t('tour.next')}
+                <ChevronRight size={10} />
+              </button>
+            ) : (
+              <button className="btn btn-primary text-2xs !py-1 !px-2 flex items-center gap-1" onClick={handleNext}>
+                <Check size={10} />
+                {t('tour.done')}
+              </button>
+            )}
+          </div>
+        </div>
       )}
 
       {popoverPos && (

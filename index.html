@@ -5,9 +5,210 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.github.com https://github.com;" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PrismGit</title>
+    <style>
+      /* Loading screen — shown immediately on first paint, before React mounts.
+         The renderer script takes ~200-500ms to load + parse + execute; during
+         that gap, the user used to see a blank white screen. Now we show the
+         PrismGit logo + a random feature tip that rotates every 4 seconds.
+
+         Removed automatically when React renders the real App (App.tsx
+         replaces #root's children).
+
+         The styling mirrors Ayu Dark so it matches what most users will see
+         after the app finishes loading. */
+      #boot-screen {
+        position: fixed;
+        inset: 0;
+        background: #0b0e14;
+        color: #bfbdb6;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        z-index: 9999;
+        transition: opacity 200ms ease-out;
+      }
+      #boot-screen.fade-out {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .boot-logo {
+        width: 64px;
+        height: 64px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, #39bae6 0%, #d2a6ff 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        font-weight: 700;
+        color: #0b0e14;
+        letter-spacing: -2px;
+        box-shadow: 0 8px 24px rgba(57, 186, 230, 0.25);
+      }
+      .boot-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #f0f0f0;
+        margin: 0;
+      }
+      .boot-subtitle {
+        font-size: 11px;
+        color: #6a737d;
+        margin: 0;
+      }
+      .boot-tip {
+        max-width: 380px;
+        min-height: 32px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 12px;
+        line-height: 1.5;
+        text-align: center;
+        color: #c8c8c8;
+        opacity: 0;
+        transition: opacity 250ms ease-in-out;
+      }
+      .boot-tip.visible { opacity: 1; }
+      .boot-tip-label {
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #39bae6;
+        margin-bottom: 4px;
+        font-weight: 600;
+      }
+      .boot-spinner {
+        width: 24px;
+        height: 24px;
+        border: 2px solid rgba(255, 255, 255, 0.15);
+        border-top-color: #39bae6;
+        border-radius: 50%;
+        animation: boot-spin 0.8s linear infinite;
+      }
+      @keyframes boot-spin {
+        to { transform: rotate(360deg); }
+      }
+      /* Light-theme fallback — only when the saved theme is 'light' or 'github-light'. */
+      html[data-boot-theme="light"] #boot-screen {
+        background: #f7f8fa;
+        color: #2c3138;
+      }
+      html[data-boot-theme="light"] .boot-logo {
+        box-shadow: 0 8px 24px rgba(57, 158, 230, 0.18);
+      }
+      html[data-boot-theme="light"] .boot-title { color: #1f2328; }
+      html[data-boot-theme="light"] .boot-subtitle { color: #59636e; }
+      html[data-boot-theme="light"] .boot-tip {
+        background: rgba(0, 0, 0, 0.04);
+        border-color: rgba(0, 0, 0, 0.08);
+        color: #4a4f55;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot-screen">
+        <div class="boot-logo">P</div>
+        <div>
+          <p class="boot-title">PrismGit</p>
+          <p class="boot-subtitle">Modern Git client</p>
+        </div>
+        <div class="boot-spinner"></div>
+        <div class="boot-tip" id="boot-tip">
+          <div class="boot-tip-label">Did you know?</div>
+          <div id="boot-tip-text">Loading…</div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // Random rotating tips — picked fresh on every page load so users
+      // discover features over time without reading documentation.
+      (function () {
+        var tips = [
+          'Press Ctrl+K anytime to open the Command Palette — fuzzy-search every action.',
+          'Ctrl+Shift+F opens Global Search across commits, branches, tags, files, and stashes.',
+          'Right-click a commit row to cherry-pick, revert, or tag it.',
+          'Ctrl+click multiple branches to multi-select; Shift+click selects a range.',
+          'Drag a file between Staged and Unstaged sections in Changes — or press Space to toggle.',
+          'In History, click any commit hash (anywhere) to jump to it in the graph.',
+          'The Conventional Commits dropdown in Changes lets you insert feat:/fix:/docs:/… with one click.',
+          'The new AI Suggest button in Branches generates 5 candidate branch names from your staged files.',
+          'Right-click a diff line in Diff viewer to open it in VS Code at that exact line.',
+          'In Settings → Appearance, dim the sidebar like Discord / Slack with one click.',
+          'Settings → Footer lets you toggle every status-bar section (VS Code-style).',
+          'Pull Requests page supports GitHub PR list/create/merge — configure a PAT in Settings → GitHub.',
+          'Git-Flow page handles feature/release/hotfix branch lifecycles automatically.',
+          'Recyclable page shows commits unreachable from any ref — recover before they expire (90 days).',
+          'Right-click a repository group in the sidebar to Add or Clone a project into it.',
+          'Themes: 15 built-in palettes including Slack, Discord, Dracula, Tokyo Night, and Gruvbox.',
+        ];
+        var tipEl = document.getElementById('boot-tip-text');
+        var wrapEl = document.getElementById('boot-tip');
+        var last = -1;
+        function showRandom() {
+          var i;
+          do { i = Math.floor(Math.random() * tips.length); } while (i === last);
+          last = i;
+          if (wrapEl) wrapEl.classList.remove('visible');
+          setTimeout(function () {
+            if (tipEl) tipEl.textContent = tips[i];
+            if (wrapEl) wrapEl.classList.add('visible');
+          }, 250);
+        }
+        // First tip after 600ms (after spinner appears), then every 4s.
+        setTimeout(showRandom, 600);
+        setInterval(showRandom, 4000);
+
+        // Pick boot theme based on saved localStorage so the boot screen
+        // matches what the user will see post-load.
+        try {
+          var saved = localStorage.getItem('prismgit-theme');
+          var lightThemes = ['light', 'github-light', 'solarized-light'];
+          if (lightThemes.indexOf(saved) >= 0) {
+            document.documentElement.setAttribute('data-boot-theme', 'light');
+          }
+        } catch (e) { /* localStorage blocked */ }
+
+        // Auto-hide when React unmounts the boot screen.
+        // App.tsx replaces #root's children, which triggers a MutationObserver.
+        var observer = new MutationObserver(function (mutations) {
+          for (var i = 0; i < mutations.length; i++) {
+            var added = mutations[i].addedNodes;
+            for (var j = 0; j < added.length; j++) {
+              var node = added[j];
+              if (node.nodeType === 1 && node.id !== 'boot-screen') {
+                var bs = document.getElementById('boot-screen');
+                if (bs) {
+                  bs.classList.add('fade-out');
+                  setTimeout(function () { if (bs.parentNode) bs.parentNode.removeChild(bs); }, 250);
+                }
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.getElementById('root'), { childList: true, subtree: false });
+        // Bug fix: safety net — if React fails to mount (runtime error in
+        // App.tsx or a CSS bug), the MutationObserver never fires and the
+        // user is stuck on a dim screen with no app. After 15 seconds,
+        // assume the boot failed and hide the boot screen anyway so the
+        // user can at least see the error in the dev tools / reload.
+        setTimeout(function () {
+          var bs = document.getElementById('boot-screen');
+          if (bs && bs.parentNode) {
+            console.warn('PrismGit: boot screen safety timeout fired — React mount took >15s, hiding boot screen.');
+            bs.classList.add('fade-out');
+            setTimeout(function () { if (bs.parentNode) bs.parentNode.removeChild(bs); }, 250);
+          }
+        }, 15000);
+      })();
+    </script>
     <script type="module" src="/src/theme-init.ts"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

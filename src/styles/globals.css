@@ -1883,3 +1883,74 @@ html.sidebar-dim aside {
 html.sidebar-light aside {
   background-image: linear-gradient(rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.04));
 }
+
+/* ===========================================================================
+ * BUG FIX: Tailwind opacity modifier doesn't work with CSS var colors.
+ *
+ * When tailwind.config.js defines `status: { added: 'var(--status-added)' }`
+ * and the actual CSS variable holds a hex value like `#86b300`, Tailwind's
+ * `bg-status-added/10` syntax is supposed to apply 10% opacity. But
+ * Tailwind can't extract RGB channels from a CSS var at build time, so the
+ * rule is silently NEVER generated. The class appears in the HTML but
+ * matches no CSS — the user sees no background tint.
+ *
+ * Workaround: define explicit utility classes for each opacity value used
+ * across the codebase, using `color-mix(in srgb, <var> <pct>%, transparent)`
+ * which works in Chromium 111+ (Electron 32 = Chromium 128 = supported).
+ *
+ * Affected utilities (search the codebase for `bg-status-*/`, `text-status-*/`,
+ * `border-status-*/`):
+ *   /5  /8  /10  /12  /15  /20  /25  /30  /40
+ * ===========================================================================
+ */
+@layer utilities {
+  /* status-added (green) opacity variants */
+  .bg-status-added\/5 { background-color: color-mix(in srgb, var(--status-added) 5%, transparent); }
+  .bg-status-added\/8 { background-color: color-mix(in srgb, var(--status-added) 8%, transparent); }
+  .bg-status-added\/10 { background-color: color-mix(in srgb, var(--status-added) 10%, transparent); }
+  .bg-status-added\/12 { background-color: color-mix(in srgb, var(--status-added) 12%, transparent); }
+  .bg-status-added\/15 { background-color: color-mix(in srgb, var(--status-added) 15%, transparent); }
+  .bg-status-added\/20 { background-color: color-mix(in srgb, var(--status-added) 20%, transparent); }
+  .bg-status-added\/25 { background-color: color-mix(in srgb, var(--status-added) 25%, transparent); }
+  .bg-status-added\/30 { background-color: color-mix(in srgb, var(--status-added) 30%, transparent); }
+  .bg-status-added\/40 { background-color: color-mix(in srgb, var(--status-added) 40%, transparent); }
+  .hover\:bg-status-added\/15:hover { background-color: color-mix(in srgb, var(--status-added) 15%, transparent); }
+  .hover\:bg-status-added\/20:hover { background-color: color-mix(in srgb, var(--status-added) 20%, transparent); }
+  .hover\!bg-status-added\/15:hover { background-color: color-mix(in srgb, var(--status-added) 15%, transparent) !important; }
+
+  /* status-deleted (red) opacity variants */
+  .bg-status-deleted\/10 { background-color: color-mix(in srgb, var(--status-deleted) 10%, transparent); }
+  .bg-status-deleted\/15 { background-color: color-mix(in srgb, var(--status-deleted) 15%, transparent); }
+  .bg-status-deleted\/20 { background-color: color-mix(in srgb, var(--status-deleted) 20%, transparent); }
+  .bg-status-deleted\/25 { background-color: color-mix(in srgb, var(--status-deleted) 25%, transparent); }
+  .bg-status-deleted\/30 { background-color: color-mix(in srgb, var(--status-deleted) 30%, transparent); }
+  .bg-status-deleted\/40 { background-color: color-mix(in srgb, var(--status-deleted) 40%, transparent); }
+
+  /* status-modified (yellow/orange) opacity variants */
+  .bg-status-modified\/10 { background-color: color-mix(in srgb, var(--status-modified) 10%, transparent); }
+  .bg-status-modified\/15 { background-color: color-mix(in srgb, var(--status-modified) 15%, transparent); }
+  .bg-status-modified\/20 { background-color: color-mix(in srgb, var(--status-modified) 20%, transparent); }
+  .bg-status-modified\/25 { background-color: color-mix(in srgb, var(--status-modified) 25%, transparent); }
+  .bg-status-modified\/30 { background-color: color-mix(in srgb, var(--status-modified) 30%, transparent); }
+
+  /* status-conflict opacity variants */
+  .bg-status-conflict\/10 { background-color: color-mix(in srgb, var(--status-conflict) 10%, transparent); }
+  .bg-status-conflict\/15 { background-color: color-mix(in srgb, var(--status-conflict) 15%, transparent); }
+  .bg-status-conflict\/20 { background-color: color-mix(in srgb, var(--status-conflict) 20%, transparent); }
+  .bg-status-conflict\/30 { background-color: color-mix(in srgb, var(--status-conflict) 30%, transparent); }
+  .bg-status-conflict\/40 { background-color: color-mix(in srgb, var(--status-conflict) 40%, transparent); }
+
+  /* status-warning opacity variants */
+  .bg-status-warning\/10 { background-color: color-mix(in srgb, var(--status-warning) 10%, transparent); }
+  .bg-status-warning\/15 { background-color: color-mix(in srgb, var(--status-warning) 15%, transparent); }
+
+  /* Border color opacity variants (used for badge borders) */
+  .border-status-added\/20 { border-color: color-mix(in srgb, var(--status-added) 20%, transparent); }
+  .border-status-added\/30 { border-color: color-mix(in srgb, var(--status-added) 30%, transparent); }
+  .border-status-added\/40 { border-color: color-mix(in srgb, var(--status-added) 40%, transparent); }
+  .border-status-deleted\/30 { border-color: color-mix(in srgb, var(--status-deleted) 30%, transparent); }
+  .border-status-deleted\/40 { border-color: color-mix(in srgb, var(--status-deleted) 40%, transparent); }
+  .border-status-modified\/30 { border-color: color-mix(in srgb, var(--status-modified) 30%, transparent); }
+  .border-status-conflict\/40 { border-color: color-mix(in srgb, var(--status-conflict) 40%, transparent); }
+  .border-l-status-added\/40 { border-left-color: color-mix(in srgb, var(--status-added) 40%, transparent); }
+}

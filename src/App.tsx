@@ -149,6 +149,18 @@ export default function App() {
       }
     } catch { /* SSR / test env */ }
   }, []);
+  // Bug fix: safety timeout — if the tour overlay ever gets stuck (e.g.
+  // an error prevents the user from dismissing it, or all spotlight
+  // targets are unreachable), auto-hide after 5 minutes so the user can
+  // keep working. They can re-trigger via Help menu.
+  useEffect(() => {
+    if (!showTour) return;
+    const t = setTimeout(() => {
+      setShowTour(false);
+      try { localStorage.setItem('prismgit-tour-completed', '1'); } catch {}
+    }, 5 * 60_000);
+    return () => clearTimeout(t);
+  }, [showTour]);
   /**
    * Global Search modal — cross-entity search (commits/branches/tags/files/
    * stashes/repos). Triggered by Ctrl+Shift+F (or Toolbar button). Distinct

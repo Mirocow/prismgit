@@ -384,7 +384,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                     const isAdd = line.type === 'add';
                     const isDel = line.type === 'del';
                     const bg = highlightMode === 'background'
-                      ? (isAdd ? 'bg-status-added/10' : isDel ? 'bg-status-deleted/10' : '')
+                      ? (isAdd ? 'bg-status-added/15' : isDel ? 'bg-status-deleted/15' : '')
                       : '';
                     const textColor = highlightMode === 'text'
                       ? (isAdd ? 'text-status-added' : isDel ? 'text-status-deleted' : 'text-text-primary')
@@ -489,7 +489,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                   const isDel = line.type === 'del';
                   // Background mode: red tint for del lines.
                   // Text mode: red text for del lines.
-                  const bg = highlightMode === 'background' && isDel ? 'bg-status-deleted/10' : '';
+                  const bg = highlightMode === 'background' && isDel ? 'bg-status-deleted/15' : '';
                   const textColor = highlightMode === 'text' && isDel ? 'text-status-deleted' : '';
                   const key = `${hi}:${li}`;
                   const isSelected = selectedLines.has(key);
@@ -526,7 +526,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                   const isAdd = line.type === 'add';
                   // Background mode: green tint for add lines.
                   // Text mode: green text for add lines.
-                  const bg = highlightMode === 'background' && isAdd ? 'bg-status-added/10' : '';
+                  const bg = highlightMode === 'background' && isAdd ? 'bg-status-added/15' : '';
                   const textColor = highlightMode === 'text' && isAdd ? 'text-status-added' : '';
                   const key = `${hi}:${li}`;
                   const isSelected = selectedLines.has(key);
@@ -552,7 +552,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
         </div>
       );
     });
-  }, [diff, viewMode, wsMode, collapsedHunks, selectedLines, lang, highlightMode, toggleHunk, toggleLineSelection, useWordDiff, renderLineWithWordDiff, findPairedLine]);
+  }, [diff, viewMode, wsMode, collapsedHunks, selectedLines, lang, highlightMode, toggleHunk, toggleLineSelection, useWordDiff, renderLineWithWordDiff, findPairedLine, compactMode]);
 
   if (loading) {
     return (
