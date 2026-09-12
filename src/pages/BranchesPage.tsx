@@ -1360,7 +1360,7 @@ export function BranchesPage() {
         >
           {b.current ? '>' : ''}
         </span>
-        <GitBranch size={12} className={b.current ? 'text-accent' : 'text-text-tertiary'} flex-shrink-0 />
+        <GitBranch size={12} className={cn('flex-shrink-0', b.current ? 'text-accent' : 'text-text-tertiary')} />
         {/* Name */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">

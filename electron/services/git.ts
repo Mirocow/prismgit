@@ -2155,6 +2155,11 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
     const parts = line.split('\t');
     if (parts.length < 2) continue;
     const statusCode = parts[0];
+    // R068 — git name-status returns 'R100' / 'C75' (status letter + similarity
+    // score) for renames and copies. Strip the digits so the UI shows just
+    // the 1-letter status (R / C) — the similarity % is already conveyed
+    // via the colored badge and the old→new path text.
+    const statusLetter = statusCode.replace(/[0-9]+$/, '');
     let pathStr = parts[1];
     let oldPath: string | undefined;
     if (statusCode.startsWith('R') || statusCode.startsWith('C')) {
@@ -2166,7 +2171,7 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
     // previously this was an N+1: one `git show --numstat <file>` per file).
     result.push({
       path: pathStr,
-      status: statusCode,
+      status: statusLetter,
       oldPath,
       additions: 0,
       deletions: 0,
