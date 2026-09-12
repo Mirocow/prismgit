@@ -919,6 +919,7 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
  * This is the toolbar the user wants to be separate from the app-level header.
  */
 export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () => void; onInteractiveRebase?: () => void } = {}) {
+  const { t } = useI18n();
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const status = useGitStore((s) => s.status);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
@@ -1040,10 +1041,10 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           <button
             className="flex items-center gap-1.5 px-3 h-8 rounded-md transition-colors no-drag text-xs bg-status-conflict/15 text-status-conflict border border-status-conflict/40 hover:bg-status-conflict/25 font-medium animate-pulse"
             onClick={handleResolveConflicts}
-            title={`${status?.conflicted?.length || 0} conflicted file(s) — click to resolve`}
+            title={t('shell.conflictsTooltip', { count: status?.conflicted?.length || 0 })}
           >
             <AlertCircle size={14} />
-            <span>Resolve {status?.conflicted?.length || 0} Conflicts</span>
+            <span>{t('shell.resolveConflicts', { count: status?.conflicted?.length || 0 })}</span>
           </button>
           <Divider />
         </>

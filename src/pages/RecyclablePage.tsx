@@ -272,9 +272,7 @@ export function RecyclablePage() {
       <div className="px-3 py-1.5 border-b border-border-subtle bg-bg-tertiary flex items-center gap-2">
         <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
         <span className="text-2xs text-text-secondary">
-          <strong>Recyclable commits</strong> are unreachable from any branch or tag.
-          They will be <strong>garbage-collected after 90 days</strong> (default reflog retention).
-          Recover them by creating a branch or cherry-picking onto the current branch.
+          {t('pages.recyclableBanner')}
         </span>
       </div>
 
@@ -346,7 +344,7 @@ export function RecyclablePage() {
 
       {/* Footer hint */}
       <div className="px-3 py-1 border-t border-border-default bg-bg-tertiary text-2xs text-text-tertiary">
-        Hover a row · <GitBranch size={9} className="inline" /> Create branch (recover) · <Plus size={9} className="inline" /> Cherry-pick onto current · Click row = view commit
+        {t('pages.recyclableFooterHint')}
       </div>
     </div>
   );

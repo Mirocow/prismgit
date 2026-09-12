@@ -312,6 +312,8 @@ export const en: Record<string, string> = {
 
   // ===== Recyclable Commits =====
   'pages.recyclableTitle': 'Recyclable Commits',
+  'pages.recyclableBanner': 'Recyclable commits are unreachable from any branch or tag. They will be garbage-collected after 90 days (default reflog retention). Recover them by creating a branch or cherry-picking onto the current branch.',
+  'pages.recyclableFooterHint': 'Hover a row · Create branch (recover) · Cherry-pick onto current · Click row = view commit',
   'pages.recyclableCounts': '{unreachable} unreachable · {shown} shown',
   'pages.recyclableLoadFailed': 'Failed to load recyclable commits',
   'pages.cherryPickConflictsFiles': 'Cherry-pick conflicts in {count} files',
@@ -947,6 +949,8 @@ export const ru: Record<string, string> = {
 
   // ===== Recyclable Commits =====
   'pages.recyclableTitle': 'Корзина коммитов',
+  'pages.recyclableBanner': 'Перерабатываемые коммиты недостижимы ни из одной ветки или тега. Они будут удалены сборщиком мусора через 90 дней (по умолчанию для reflog). Восстановите их, создав ветку или сделав cherry-pick на текущую ветку.',
+  'pages.recyclableFooterHint': 'Наведите на строку · Создать ветку (восстановить) · Cherry-pick на текущую · Клик = просмотр коммита',
   'pages.recyclableCounts': '{unreachable} недостижимых · показано {shown}',
   'pages.recyclableLoadFailed': 'Не удалось загрузить корзину коммитов',
   'pages.cherryPickConflictsFiles': 'Конфликты cherry-pick в {count} файлах',
@@ -1582,6 +1586,8 @@ export const zh: Record<string, string> = {
 
   // ===== Recyclable Commits =====
   'pages.recyclableTitle': '可回收提交',
+  'pages.recyclableBanner': '可回收提交是从任何分支或标签都无法到达的提交。它们将在 90 天后被垃圾回收（默认 reflog 保留期）。通过创建分支或 cherry-pick 到当前分支来恢复它们。',
+  'pages.recyclableFooterHint': '悬停行 · 创建分支（恢复） · Cherry-pick 到当前 · 点击行 = 查看提交',
   'pages.recyclableCounts': '{unreachable} 个不可达 · 显示 {shown} 个',
   'pages.recyclableLoadFailed': '加载可回收提交失败',
   'pages.cherryPickConflictsFiles': 'cherry-pick 在 {count} 个文件中产生冲突',
@@ -2217,6 +2223,8 @@ export const de: Record<string, string> = {
 
   // ===== Recyclable Commits =====
   'pages.recyclableTitle': 'Verwertbare Commits',
+  'pages.recyclableBanner': 'Verwertbare Commits sind von keinem Branch oder Tag erreichbar. Sie werden nach 90 Tagen vom Garbage Collector entfernt (Standard reflog Aufbewahrung). Stellen Sie sie wieder her, indem Sie einen Branch erstellen oder auf den aktuellen Branch cherry-picken.',
+  'pages.recyclableFooterHint': 'Zeile berühren · Branch erstellen (wiederherstellen) · Cherry-pick auf aktuellen · Klick = Commit anzeigen',
   'pages.recyclableCounts': '{unreachable} unerreichbar · {shown} angezeigt',
   'pages.recyclableLoadFailed': 'Verwertbare Commits konnten nicht geladen werden',
   'pages.cherryPickConflictsFiles': 'Cherry-pick-Konflikte in {count} Dateien',
