@@ -286,19 +286,24 @@ export function HistoryPage() {
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  // Task 7 — auto-refresh History after Pull / Fetch / Push.
-  // gitStore actions bump `lastRefresh` after every status refresh; Pull
-  // explicitly calls refreshStatus, which means lastRefresh changes — we
-  // re-load history so newly fetched commits show up immediately.
-  // (Also covers the case of push creating new outgoing commits — though
-  // push doesn't add to local history, the post-push refresh keeps the
-  // list in sync with whatever metadata the sidebar recomputed.)
-  const lastRefresh = useGitStore((s) => s.lastRefresh);
+  // Task 7 — auto-refresh History ONLY after explicit user-initiated Pull /
+  // Fetch / Push (NOT on every watcher-triggered refresh).
+  //
+  // ROOT CAUSE of "вечный рефреш": the file watcher fires on .git/index
+  // changes → App.tsx scheduleRefresh() → refreshStatus() → bumps
+  // `lastRefresh` → this useEffect re-runs → loadHistory() calls git log
+  // → which reads .git/index → watcher fires again → infinite loop.
+  //
+  // Fix: subscribe to the `smartgit:history-refresh` event instead, which
+  // is dispatched ONLY by explicit Pull/Fetch/Push handlers (App.tsx).
+  // Watcher-triggered refreshes don't need to reload the whole git log
+  // graph — they only need to update the Changes page file list (handled
+  // separately via `useGitStore.status`).
   useEffect(() => {
-    if (lastRefresh === 0) return; // skip initial mount
-    loadHistory();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastRefresh]);
+    const handler = () => loadHistory();
+    window.addEventListener('smartgit:history-refresh', handler);
+    return () => window.removeEventListener('smartgit:history-refresh', handler);
+  }, [loadHistory]);
 
   // Background fetch on History page load — silently fetch all remotes so
   // incoming (remote-only) commits show up in the graph with fresh data.

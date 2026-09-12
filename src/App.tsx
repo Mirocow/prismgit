@@ -367,7 +367,14 @@ export default function App() {
       const repo = useRepositoryStore.getState().currentRepo;
       if (!repo) return;
       useGitStore.getState().push(repo.path)
-        .then(() => toast.success('Pushed successfully'))
+        .then(() => {
+          toast.success('Pushed successfully');
+          // Notify History page to reload — emits a one-shot event that
+          // History's useEffect listens to (replaces the old `lastRefresh`
+          // subscription which caused an infinite refresh loop with the
+          // file watcher).
+          window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
+        })
         .catch((e) => toast.error('Push failed', String(e)));
     };
     const handlePull = () => {
@@ -378,6 +385,7 @@ export default function App() {
         .then((result) => {
           toast.success(`Smart pull: ${result.strategy}`, result.message);
           useGitStore.getState().refreshStatus(repo.path);
+          window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
         })
         .catch((e) => toast.error('Pull failed', String(e)));
     };
@@ -385,7 +393,10 @@ export default function App() {
       const repo = useRepositoryStore.getState().currentRepo;
       if (!repo) return;
       useGitStore.getState().fetch(repo.path)
-        .then(() => toast.success('Fetched successfully'))
+        .then(() => {
+          toast.success('Fetched successfully');
+          window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
+        })
         .catch((e) => toast.error('Fetch failed', String(e)));
     };
     const handleToggleTheme = () => useSettingsStore.getState().toggleTheme();
@@ -717,8 +728,12 @@ export default function App() {
     const handleFetchAll = async () => {
       const repo = requireRepo();
       if (!repo) return;
-      try { await api.git.fetchAll(repo.path); toast.success('Fetched all remotes'); useGitStore.getState().refreshStatus(repo.path); }
-      catch (e) { toast.error('Fetch all failed', String(e)); }
+      try {
+        await api.git.fetchAll(repo.path);
+        toast.success('Fetched all remotes');
+        useGitStore.getState().refreshStatus(repo.path);
+        window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
+      } catch (e) { toast.error('Fetch all failed', String(e)); }
     };
     const handleFetchMore = () => {
       window.location.hash = '#/branches';

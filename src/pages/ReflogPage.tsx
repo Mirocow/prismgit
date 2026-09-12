@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { History, RefreshCw, Trash, ChevronDown, ChevronRight, ArrowRight } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -53,7 +53,13 @@ export function ReflogPage() {
     try {
       const result = await api.git.reflog(repo.path, ref, 500);
       setEntries(result);
-      if (result.length > 0 && !selectedHash) {
+      // Set initial selection WITHOUT depending on `selectedHash` — the
+      // previous dependency on `selectedHash` recreated `load` whenever
+      // the selection changed, which then re-ran this very effect,
+      // causing the "вечный рефреш" loop. Read the current value from
+      // a ref so this callback stays stable.
+      if (result.length > 0 && !selectedHashRef.current) {
+        selectedHashRef.current = result[0].hash;
         setSelectedHash(result[0].hash);
       }
     } catch (e) {
@@ -61,7 +67,14 @@ export function ReflogPage() {
     } finally {
       setLoading(false);
     }
-  }, [repo.path, ref, toast, t, selectedHash]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo.path, ref]);
+
+  // Mirror `selectedHash` into a ref so `load` can read its current value
+  // without being recreated on every selection change (which would re-run
+  // the load effect and cause infinite refresh).
+  const selectedHashRef = useRef<string | null>(null);
+  useEffect(() => { selectedHashRef.current = selectedHash; }, [selectedHash]);
 
   useEffect(() => {
     void load();

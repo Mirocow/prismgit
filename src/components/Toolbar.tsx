@@ -957,6 +957,8 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
         () => push(currentRepo.path)
       );
       toast.success('Pushed successfully');
+      // Notify History page to reload (one-shot event, no loop).
+      window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
     } catch (e) { toast.error('Push failed', String(e)); }
   };
   const handlePull = async () => {
@@ -974,6 +976,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
         }
       );
       toast.success(`Pulled ${shouldRebase ? '(rebase)' : '(merge)'}`);
+      window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
     } catch (e) {
       const msg = String(e);
       if (msg.includes('CONFLICT') || msg.includes('conflict')) {
