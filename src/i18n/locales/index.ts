@@ -25,6 +25,7 @@ import * as dialogs from './domains/dialogs';
 import * as pages from './domains/pages';
 import * as settings from './domains/settings';
 import * as vscode from './domains/vscode';
+import * as search from './domains/search';
 
 /** All domain modules — used by the parity tests to walk every dictionary. */
 export const DOMAINS: Record<string, { en: Record<string, string>; ru: Record<string, string>; zh: Record<string, string>; de: Record<string, string> }> = {
@@ -41,6 +42,7 @@ export const DOMAINS: Record<string, { en: Record<string, string>; ru: Record<st
   pages,
   settings,
   vscode,
+  search,
 };
 
 /** Static English merge — synchronous fallback for the whole app. */

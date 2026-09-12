@@ -32,6 +32,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { descKey: 'shell.scCommandPaletteAlt', keys: ['Ctrl', 'P'] },
       { descKey: 'shell.scOpenRepo', keys: ['Ctrl', 'O'] },
       { descKey: 'shell.scCloneRepo', keys: ['Ctrl', 'Shift', 'O'] },
+      { descKey: 'shell.scGlobalSearch', keys: ['Ctrl', 'Shift', 'F'] },
       { descKey: 'shell.scFindObject', keys: ['Ctrl', 'F'] },
       { descKey: 'shell.scRefreshStatus', keys: ['F5'] },
       { descKey: 'shell.scToggleTheme', keys: ['Ctrl', 'Shift', 'T'] },

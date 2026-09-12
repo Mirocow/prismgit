@@ -63,6 +63,8 @@ function WindowControls() {
 
 interface ToolbarProps {
   onFind?: () => void;
+  /** Global cross-entity search (commits/branches/tags/files/stashes). */
+  onGlobalSearch?: () => void;
   onGitFlow?: () => void;
   onInteractiveRebase?: () => void;
   onRepoInfo?: () => void;
@@ -72,7 +74,7 @@ interface ToolbarProps {
   onShowInit?: () => void;
 }
 
-export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts, onShowClone, onShowInit, onToggleCommandLog }: ToolbarProps = {}) {
+export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts, onShowClone, onShowInit, onToggleCommandLog }: ToolbarProps = {}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const currentMetadata = useRepositoryStore((s) => s.currentMetadata);
   const status = useGitStore((s) => s.status);
@@ -244,7 +246,8 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
         {groups.utils && (
           <>
             <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title={t('shell.repoInfo')} />
-            <IconButton icon={Search} onClick={() => onFind && onFind()} disabled={disabled} title={t('shell.findObject')} />
+            <IconButton icon={Search} onClick={() => onGlobalSearch && onGlobalSearch()} disabled={!currentRepo} title={t('search.toolbarButtonTitle')} />
+            <IconButton icon={FileText} onClick={() => onFind && onFind()} disabled={disabled} title={t('shell.findObject')} />
             <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title={t('shell.openInBrowser')} />
             <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title={t('shell.revealInFileManager')} />
             <Divider />

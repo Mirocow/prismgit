@@ -39,12 +39,16 @@ describe('settingsStore', () => {
       expect(state.theme).toBe('light');
     });
 
-    it('defaults to dark theme', async () => {
+    it('defaults to light theme when settings has no theme', async () => {
+      // The default theme is 'light' (Ayu Light) — matches theme-init.ts
+      // FOUC prevention which also defaults to 'light'. This keeps the
+      // first-paint and post-load themes consistent (no flash from light
+      // to dark on first launch).
       vi.mocked(api.settings.getAll).mockResolvedValue({});
 
       await useSettingsStore.getState().loadSettings();
 
-      expect(useSettingsStore.getState().theme).toBe('dark');
+      expect(useSettingsStore.getState().theme).toBe('light');
     });
 
     it('handles errors gracefully', async () => {

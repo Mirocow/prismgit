@@ -14,6 +14,7 @@ import { de as dialogs } from '../domains/dialogs';
 import { de as pages } from '../domains/pages';
 import { de as settings } from '../domains/settings';
 import { de as vscode } from '../domains/vscode';
+import { de as search } from '../domains/search';
 
 export const de: Record<string, string> = {
   ...core,
@@ -29,4 +30,5 @@ export const de: Record<string, string> = {
   ...pages,
   ...settings,
   ...vscode,
+  ...search,
 };

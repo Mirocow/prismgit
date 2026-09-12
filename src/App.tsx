@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { CommandLogPanel } from './components/CommandLogPanel';
 import { CommandPalette } from './components/CommandPalette';
+import { GlobalSearch } from './components/GlobalSearch';
 import { ConfirmDialogHost, confirmDialog, promptDialog } from './components/ConfirmDialog';
 import { DeepLinkHandler } from './components/DeepLinkHandler';
 import { DragDropHandler } from './components/DragDropHandler';
@@ -117,6 +118,12 @@ export default function App() {
   const [showRepoInfo, setShowRepoInfo] = useState(false);
   const [showApplyPatch, setShowApplyPatch] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  /**
+   * Global Search modal — cross-entity search (commits/branches/tags/files/
+   * stashes/repos). Triggered by Ctrl+Shift+F (or Toolbar button). Distinct
+   * from CommandPalette (which is for actions/commands).
+   */
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [conflictFile, setConflictFile] = useState<string | null>(null);
   const [dismissRebase, setDismissRebase] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -891,6 +898,14 @@ export default function App() {
         setShowPalette((v) => !v);
         return;
       }
+      // Global Search — Ctrl+Shift+F. Distinct from the per-page Find
+      // (Ctrl+F) which is for hash lookup only. Global Search searches
+      // across commits/branches/tags/files/stashes/repos.
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        setShowGlobalSearch((v) => !v);
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'f' && !isInInput) {
         e.preventDefault();
         setShowFind(true);
@@ -1139,7 +1154,7 @@ export default function App() {
   if (!currentRepo) {
     return (
       <div className="flex flex-col h-screen">
-        <Toolbar onFind={handleFind} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onShowShortcuts={() => setShowShortcuts(true)} onShowClone={() => setShowClone(true)} onShowInit={() => setShowInit(true)} />
+        <Toolbar onFind={handleFind} onGlobalSearch={() => setShowGlobalSearch(true)} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onShowShortcuts={() => setShowShortcuts(true)} onShowClone={() => setShowClone(true)} onShowInit={() => setShowInit(true)} />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex-1 overflow-hidden flex flex-col">
@@ -1186,6 +1201,7 @@ export default function App() {
     <div className="flex flex-col h-screen">
       <Toolbar
         onFind={handleFind}
+        onGlobalSearch={() => setShowGlobalSearch(true)}
         onGitFlow={() => setShowGitFlow(true)}
         onInteractiveRebase={() => setShowIRebase(true)}
         onRepoInfo={() => setShowRepoInfo(true)}
@@ -1300,6 +1316,10 @@ export default function App() {
           onGoDeepLink: handleGoDeepLink,
           onCopyDeepLink: handleCopyDeepLink,
         }}
+      />
+      <GlobalSearch
+        open={showGlobalSearch}
+        onClose={() => setShowGlobalSearch(false)}
       />
     </div>
   );
