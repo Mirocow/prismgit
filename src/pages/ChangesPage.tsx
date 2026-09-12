@@ -1112,24 +1112,47 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     .filter((f) => matchesDirScope(f.path))
     ), [status, sortFiles, fileDisplayFlags]);
 
-  // Detect unstaged renames: `git diff --name-status --find-renames` returns
-  // R<score>\told_path\tnew_path for detected renames. We use this to:
-  //   1. Remove the old_path from the Deleted list (show as Rename Source)
-  //   2. Remove the new_path from the Untracked list (show as Renamed)
-  //   3. Show a single Renamed row with old_path → new_path
+  // Detect unstaged renames: stage everything temporarily, run
+  // `git diff --cached --find-renames --name-status`, then reset.
+  // This is the ONLY reliable way to detect unstaged renames — git diff
+  // --find-renames on unstaged changes doesn't see untracked files as
+  // rename targets. By staging first, git can match old→new paths.
   const [detectedRenames, setDetectedRenames] = useState<{ oldPath: string; newPath: string }[]>([]);
   useEffect(() => {
     if (!repo?.path) return;
-    api.git.raw(repo.path, ['diff', '--name-status', '--find-renames', '--diff-filter=R']).then(out => {
+    // First: detect STAGED renames (already in index)
+    api.git.raw(repo.path, ['diff', '--cached', '--name-status', '--find-renames', '--diff-filter=R']).then(stagedOut => {
       const renames: { oldPath: string; newPath: string }[] = [];
-      for (const line of out.split('\n').filter(Boolean)) {
-        // Format: R100\told_path\tnew_path  (R<similarity score 0-100>)
+      for (const line of stagedOut.split('\n').filter(Boolean)) {
         const parts = line.split('\t');
         if (parts.length >= 3 && parts[0].startsWith('R')) {
           renames.push({ oldPath: parts[1], newPath: parts[2] });
         }
       }
-      setDetectedRenames(renames);
+      // Then: detect UNSTAGED renames by temporarily staging all changes,
+      // running diff --cached --find-renames, then resetting.
+      // Use `git add -A` + diff + `git reset` — safe because we immediately
+      // undo the staging. The user's actual index is untouched.
+      api.git.raw(repo.path, ['add', '-A']).then(() => {
+        return api.git.raw(repo.path, ['diff', '--cached', '--name-status', '--find-renames', '--diff-filter=R']);
+      }).then(unstagedOut => {
+        // Reset the temporary staging
+        api.git.raw(repo.path, ['reset', '-q', 'HEAD', '--']).catch(() => {});
+        for (const line of unstagedOut.split('\n').filter(Boolean)) {
+          const parts = line.split('\t');
+          if (parts.length >= 3 && parts[0].startsWith('R')) {
+            // Only add if not already in staged renames
+            if (!renames.some(r => r.newPath === parts[2])) {
+              renames.push({ oldPath: parts[1], newPath: parts[2] });
+            }
+          }
+        }
+        setDetectedRenames(renames);
+      }).catch(() => {
+        // Reset on error too
+        api.git.raw(repo.path, ['reset', '-q', 'HEAD', '--']).catch(() => {});
+        setDetectedRenames(renames);
+      });
     }).catch(() => setDetectedRenames([]));
   }, [repo?.path, status]);
 
@@ -1220,14 +1243,25 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       }));
   }, [hasFlag, status, trackedFilesList, fileFilter, fileExtensionFilter, showSubdirs, fileScopeDir]);
 
-  // Ignored files — shown only when 'ignored' flag is ON.
+  // Ignored files AND directories — shown only when 'ignored' flag is ON.
   // Loaded via `git status --porcelain --ignored` which respects .gitignore.
+  // Entries from git can be files (debug.log) or directories (node_modules/).
+  // Directory entries end with '/' — we show them as-is.
   const ignoredFileList: FileStatus[] = useMemo(() => {
     if (!hasFlag('ignored')) return [];
     return ignoredFiles
       .filter(p => matchesFileFilter(p))
-      .filter(p => !fileExtensionFilter || p.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-      .filter(p => matchesDirScope(p))
+      .filter(p => {
+        // For directory entries (ending with '/'), skip extension filter
+        if (p.endsWith('/')) return true;
+        return !fileExtensionFilter || p.toLowerCase().endsWith(fileExtensionFilter.toLowerCase());
+      })
+      .filter(p => {
+        // For directory entries, always show (don't apply dirScope filtering
+        // since the directory itself is a top-level entry).
+        if (p.endsWith('/')) return true;
+        return matchesDirScope(p);
+      })
       .map(p => ({
         path: p,
         index: 'ignored' as FileStatus['index'],
