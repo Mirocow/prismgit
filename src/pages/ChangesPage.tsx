@@ -1167,19 +1167,26 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         }
       } catch { /* ignore */ }
       // 2. Unstaged renames via content-hash matching
-      // For each deleted tracked file, get its hash from HEAD
-      // For each untracked file, compute its hash on disk
-      // If they match → it's a rename
+      // For deleted files: get hash from HEAD (git rev-parse HEAD:<path>)
+      // For untracked files: get hash from disk (git hash-object -- <path>)
+      // If hashes match → it's a rename
       try {
-        // Get blob hashes of deleted files from HEAD
+        // Get blob hashes of deleted files FROM HEAD (not from disk — files are deleted!)
         const hashPromises = deletedFiles.map(async (df) => {
           try {
-            const hash = await api.git.raw(repo.path, ['hash-object', '--', df.path]);
-            return { path: df.path, hash: hash.trim() };
+            // git ls-tree HEAD -- <path> returns "<mode> blob <hash>\t<path>"
+            const out = await api.git.raw(repo.path, ['ls-tree', 'HEAD', '--', df.path]);
+            const line = out.trim();
+            if (!line) return null;
+            const parts = line.split(/\s+/);
+            if (parts.length >= 3 && parts[1] === 'blob') {
+              return { path: df.path, hash: parts[2] };
+            }
+            return null;
           } catch { return null; }
         });
         const deletedHashes = (await Promise.all(hashPromises)).filter(Boolean) as { path: string; hash: string }[];
-        // Get blob hashes of untracked files from disk
+        // Get blob hashes of untracked files from disk (these files exist)
         const untrackedPromises = untrackedFiles.map(async (uf) => {
           try {
             const hash = await api.git.raw(repo.path, ['hash-object', '--', uf.path]);
