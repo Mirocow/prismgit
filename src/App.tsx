@@ -1306,6 +1306,12 @@ export default function App() {
           />
         </Suspense>
         <Suspense fallback={null}><KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} /></Suspense>
+        <Suspense fallback={null}>
+          <GlobalSearch
+            open={showGlobalSearch}
+            onClose={() => setShowGlobalSearch(false)}
+          />
+        </Suspense>
       </div>
     );
   }

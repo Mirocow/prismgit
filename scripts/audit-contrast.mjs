@@ -80,8 +80,14 @@ for (let i = 0; i < blocks.length; i++) {
   // Find selector (everything before `{`)
   const openIdx = block.indexOf('{');
   if (openIdx < 0) continue;
-  const selector = block.slice(0, openIdx).trim();
+  // The "selector" is everything before {, but it may include leading
+  // CSS comments. Extract the actual selector by taking the LAST line
+  // before { that isn't a comment.
+  const beforeBrace = block.slice(0, openIdx);
+  // Strip trailing CSS comments (/* ... */) — keep only the selector
+  const selector = beforeBrace.replace(/\/\*[\s\S]*?\*\//g, '').trim();
   const body = block.slice(openIdx + 1).trim();
+  if (!selector) continue;
   // Only consider rules that set BOTH --bg-tertiary and --text-tertiary.
   const bgMatch = body.match(/--bg-tertiary:\s*([^;]+);/);
   const textMatch = body.match(/--text-tertiary:\s*([^;]+);/);

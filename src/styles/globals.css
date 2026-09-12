@@ -1007,6 +1007,109 @@
   --scrollbar-thumb-hover: rgba(220, 221, 222, 0.20);
 }
 
+/* ===========================================================================
+ * Light main + dimmed dark sidebar themes.
+ * These themes use a light color palette for the main content area but
+ * override the sidebar to use dark colors. The sidebar override is
+ * applied via [data-theme="..."] > aside selectors below.
+ * =========================================================================== */
+
+/* Light main + VS Code-style dark sidebar */
+[data-theme="light-dim-sidebar"] {
+  --bg-primary: #f7f8fa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #eef0f3;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f0f1f4;
+  --bg-selected: #e4f0fb;
+  --text-primary: #2c3138;
+  --text-secondary: #5c6166;
+  --text-tertiary: #5c6166;
+  --accent: #399ee6;
+  --accent-muted: rgba(57, 158, 230, 0.12);
+  --border-default: #d8dade;
+  --border-subtle: #e8eaee;
+  --status-added: #86b300;
+  --status-modified: #f2ae49;
+  --status-deleted: #f07171;
+  --status-renamed: #399ee6;
+  --status-conflict: #f07171;
+  --status-info: #399ee6;
+  --status-warning: #f2ae49;
+  --status-error: #f07171;
+}
+
+/* GitHub Light main + dimmed dark sidebar */
+[data-theme="github-light-dim"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #eaeef2;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f0f2f5;
+  --bg-selected: #ddf4ff;
+  --text-primary: #1f2328;
+  --text-secondary: #59636e;
+  --text-tertiary: #57606a;
+  --accent: #0969da;
+  --accent-muted: rgba(9, 105, 218, 0.12);
+  --border-default: #d0d7de;
+  --border-subtle: #e1e4e8;
+  --status-added: #1a7f37;
+  --status-modified: #bf8700;
+  --status-deleted: #cf222e;
+  --status-renamed: #0969da;
+  --status-conflict: #cf222e;
+  --status-info: #0969da;
+  --status-warning: #bf8700;
+  --status-error: #cf222e;
+}
+
+/* Dark sidebar override for both light-dim-sidebar and github-light-dim.
+   Targets the <aside> sidebar element specifically so the main content
+   area stays light. */
+[data-theme="light-dim-sidebar"] aside,
+[data-theme="github-light-dim"] aside {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2d2d30;
+  --bg-elevated: #333333;
+  --bg-hover: #2a2d2e;
+  --bg-selected: #37373d;
+  --text-primary: #cccccc;
+  --text-secondary: #aaaaaa;
+  --text-tertiary: #999999;
+  --border-default: #3e3e42;
+  --border-subtle: #2d2d30;
+  --accent: #4fc3f7;
+  --accent-muted: rgba(79, 195, 247, 0.12);
+  --bg-sidebar-selected: rgba(79, 195, 247, 0.15);
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(138, 138, 138, 0.30);
+  --scrollbar-thumb-hover: rgba(138, 138, 138, 0.50);
+  background-color: #1e1e1e;
+  color: #cccccc;
+}
+
+/* GitHub-light-dim sidebar uses GitHub dark colors */
+[data-theme="github-light-dim"] aside {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-elevated: #30363d;
+  --bg-hover: #1c2128;
+  --bg-selected: #1f6feb33;
+  --text-primary: #e6edf3;
+  --text-secondary: #b1bac4;
+  --text-tertiary: #9198a1;
+  --border-default: #30363d;
+  --border-subtle: #21262d;
+  --accent: #58a6ff;
+  --accent-muted: rgba(88, 166, 255, 0.15);
+  --bg-sidebar-selected: rgba(56, 139, 253, 0.15);
+  background-color: #0d1117;
+  color: #e6edf3;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

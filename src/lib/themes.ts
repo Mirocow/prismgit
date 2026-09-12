@@ -30,7 +30,9 @@ export type ThemeId =
   | 'one-dark'
   | 'gruvbox-dark'
   | 'slack-dark'         // Task 5 — Slack-inspired dark theme (aubergine + 4 accent colors)
-  | 'discord';           // Task 5 — Discord-inspired (Blurple + grey-3 / channel-sidebar)
+  | 'discord'            // Task 5 — Discord-inspired (Blurple + grey-3 / channel-sidebar)
+  | 'light-dim-sidebar'  // Light main + dimmed dark sidebar (VS Code style)
+  | 'github-light-dim';  // GitHub Light main + dimmed dark sidebar
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -224,6 +226,33 @@ export const THEMES: ThemeMeta[] = [
       textPrimary: '#dcddde', textSecondary: '#b9bbbe',
       accent: '#5865f2', border: '#202225',
       statusAdded: '#3ba55c', statusModified: '#faa61a', statusDeleted: '#ed4245',
+    },
+  },
+  // Light main window + dimmed dark sidebar — VS Code "Light+" with dark activity bar.
+  // The sidebar uses dark colors while the main editor area stays light.
+  // Achieved via CSS: [data-theme="light-dim-sidebar"] overrides sidebar vars.
+  {
+    id: 'light-dim-sidebar',
+    labelKey: 'settings.themeLightDimSidebar',
+    isDark: false,
+    preview: {
+      bgPrimary: '#f7f8fa', bgSecondary: '#1e1e1e', bgTertiary: '#252526',
+      textPrimary: '#2c3138', textSecondary: '#5c6166',
+      accent: '#399ee6', border: '#d8dade',
+      statusAdded: '#86b300', statusModified: '#f2ae49', statusDeleted: '#f07171',
+    },
+  },
+  // GitHub Light main + dimmed dark sidebar — matches GitHub.com's new UI where
+  // the left sidebar is dark and the content area is light.
+  {
+    id: 'github-light-dim',
+    labelKey: 'settings.themeGithubLightDim',
+    isDark: false,
+    preview: {
+      bgPrimary: '#ffffff', bgSecondary: '#0d1117', bgTertiary: '#161b22',
+      textPrimary: '#1f2328', textSecondary: '#59636e',
+      accent: '#0969da', border: '#d0d7de',
+      statusAdded: '#1a7f37', statusModified: '#bf8700', statusDeleted: '#cf222e',
     },
   },
 ];
