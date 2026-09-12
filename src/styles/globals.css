@@ -1502,6 +1502,24 @@ kbd {
 }
 
 /* ===========================================================================
+ * A11Y — visually-hidden helper (screen-reader-only text).
+ * Element is removed from visual layout but read by assistive tech.
+ * Standard pattern from the WebAIM / Bootstrap sr-only implementation.
+ * ===========================================================================
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ===========================================================================
  * UX Polish: Loading states — spinners + skeleton screens
  * ===========================================================================
  */
