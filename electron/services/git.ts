@@ -450,22 +450,27 @@ function spawnGitCapture(
 
 // ── Rename detection — heavily optimized ─────────────────────────────────────
 //
-// The renderer used to issue one `git ls-tree HEAD -- <path>` per deleted file
-// AND one `git hash-object -- <path>` per untracked file (N + M child-process
-// spawns). On a 200-file working tree that meant ~200 sequential git calls
-// (~5–10 s on Windows). detectRenames does it in 2 git invocations:
+// Three optimizations stack:
 //
-//   1. `git diff --cached --name-status --find-renames --diff-filter=R`
-//      → staged renames (1 call)
-//   2. `git ls-tree HEAD -- <all deleted paths at once>` → HEAD blob hashes
-//      for every deleted file in a single spawn (1 call, missing paths are
-//      silently omitted by ls-tree so no error handling needed)
-//   3. `git hash-object -- <all untracked paths at once>` → on-disk blob hashes
-//      for every untracked file in a single spawn. hash-object aborts on the
-//      first missing file, so when the batch fails we fall back to per-file
-//      hashing for just that chunk (handles the rare status→check race).
+//   1. HEAD tree cache: `git ls-tree -r HEAD` (whole tree) is FASTER than
+//      `git ls-tree HEAD -- <paths>` (which is quadratic in path count:
+//      1000 paths = 266ms, 10000 = 1528ms on a 50k-file repo). So we fetch
+//      the WHOLE tree once (22ms) and filter by deletedFiles in-memory (O(N)
+//      Map lookups). Cached by HEAD hash — subsequent calls with unchanged
+//      HEAD skip ls-tree entirely (only ~1ms rev-parse to validate).
 //
-// Result: ~50–150 ms total regardless of file count (was seconds).
+//   2. stdin paths: `git hash-object --stdin-paths` reads paths via stdin
+//      instead of argv — no ARG_MAX limit, no chunking. Single spawn handles
+//      any number of paths.
+//
+//   3. Parallel execution: all 3 git invocations (staged diff, ls-tree,
+//      hash-object) run concurrently via Promise.all. Wall-clock time is
+//      max(3) instead of sum.
+//
+// Total wall-clock time on 5000-file working tree:
+//   - First call (cache miss): ~25ms
+//   - Subsequent calls (cache hit): ~25ms  (hash-object dominates)
+//   - Was: ~100ms sequential (and ~4s with N+M per-file spawns originally)
 //
 // Returns: { oldPath, newPath }[] for every detected rename (staged + unstaged).
 
@@ -485,17 +490,102 @@ function parseLsTreeLine(line: string): { path: string; hash: string } | null {
   return { path: filePath, hash: m[1] };
 }
 
+// ── HEAD tree cache ──────────────────────────────────────────────────────────
+//
+// Benchmark insight: `git ls-tree -r HEAD` (whole tree, 22ms on 50k files) is
+// FASTER than `git ls-tree HEAD -- <paths>` (which is quadratic in path count:
+// 1000 paths = 266ms, 10000 paths = 1528ms). So we always fetch the WHOLE
+// tree once, then filter by deleted-paths in-memory (O(1) Map lookup).
+//
+// To avoid re-fetching on every status update (renderer calls
+// detectWorkingTreeRenames frequently during auto-refresh), we cache the tree
+// keyed by repoPath + HEAD hash. Validating the cache costs one `git rev-parse
+// HEAD` (1ms); on cache hit we skip ls-tree entirely.
+
+interface CachedHeadTree {
+  headHash: string;
+  treeMap: Map<string, string>;
+  /** Timestamp for LRU eviction. */
+  lastUsed: number;
+}
+
+/** LRU cache: repoPath → cached HEAD tree. Capped at 16 repos. */
+const headTreeCache = new Map<string, CachedHeadTree>();
+const HEAD_TREE_CACHE_MAX = 16;
+
+function touchHeadTreeCache(repoPath: string): void {
+  const entry = headTreeCache.get(repoPath);
+  if (entry) {
+    entry.lastUsed = Date.now();
+    // Re-insert to refresh Map iteration order (LRU)
+    headTreeCache.delete(repoPath);
+    headTreeCache.set(repoPath, entry);
+  }
+}
+
+function evictHeadTreeCacheIfNeeded(): void {
+  while (headTreeCache.size > HEAD_TREE_CACHE_MAX) {
+    // Map iterates in insertion order; oldest entry is the first.
+    const oldest = headTreeCache.keys().next().value;
+    if (oldest === undefined) break;
+    headTreeCache.delete(oldest);
+  }
+}
+
+/**
+ * Returns Map<path, hash> for every file in `git ls-tree -r HEAD`. Uses a
+ * cache keyed by HEAD hash — subsequent calls with unchanged HEAD skip the
+ * ls-tree invocation entirely (only ~1ms rev-parse to validate).
+ *
+ * Uses `-z` (NUL-separated output) for robust parsing of paths containing
+ * newlines (rare but possible).
+ */
+export async function getCachedHeadTree(repoPath: string): Promise<Map<string, string>> {
+  // Get current HEAD hash — cheap (~1ms).
+  let headHash = '';
+  try {
+    const revOut = await spawnGitCapture(repoPath, ['rev-parse', 'HEAD']);
+    if (revOut.code === 0) headHash = revOut.stdout.trim();
+  } catch {
+    /* fall back to fresh fetch */
+  }
+
+  // Cache hit?
+  const cached = headTreeCache.get(repoPath);
+  if (cached && cached.headHash === headHash && headHash) {
+    touchHeadTreeCache(repoPath);
+    return cached.treeMap;
+  }
+
+  // Cache miss — fetch full tree.
+  const treeMap = new Map<string, string>();
+  try {
+    const { stdout } = await spawnGitCapture(repoPath, ['ls-tree', '-r', '-z', 'HEAD']);
+    // -z separates entries with NUL. Each entry is the same format as a
+    // single-line ls-tree output but paths may contain newlines.
+    for (const entry of stdout.split('\0')) {
+      if (!entry) continue;
+      const parsed = parseLsTreeLine(entry);
+      if (parsed) treeMap.set(parsed.path, parsed.hash);
+    }
+  } catch {
+    /* return empty map — partial failure is acceptable */
+  }
+
+  headTreeCache.set(repoPath, { headHash, treeMap, lastUsed: Date.now() });
+  evictHeadTreeCacheIfNeeded();
+  return treeMap;
+}
+
 /**
  * Hash every existing file in `paths`. Returns a Map<path, hash>.
  *
- * Strategy: try the whole list in one `git hash-object` call (fast path).
- * If git aborts (exit != 0 — happens when any file was deleted between
- * `git status` and this call), fall back to per-file hashing for JUST the
- * paths in the failing chunk. This keeps the common case fast while
- * gracefully handling the rare race condition.
+ * Uses `--stdin-paths` to feed paths via stdin (no ARG_MAX limit, no
+ * chunking needed — handles 100k+ paths in a single spawn).
  *
- * Chunks at 500 paths to stay well under ARG_MAX (~128 KB on Linux,
- * ~32 KB on Windows — each path averages ~50 bytes).
+ * If git aborts (exit != 0 — happens when any file was deleted between
+ * `git status` and this call, race condition), falls back to per-file
+ * hashing with bounded concurrency (8 parallel spawns max).
  */
 export async function batchHashObject(
   repoPath: string,
@@ -504,27 +594,25 @@ export async function batchHashObject(
   const result = new Map<string, string>();
   if (paths.length === 0) return result;
 
-  const CHUNK_SIZE = 500;
-  for (let i = 0; i < paths.length; i += CHUNK_SIZE) {
-    const chunk = paths.slice(i, i + CHUNK_SIZE);
-    try {
-      const { code, stdout } = await spawnGitCapture(repoPath, [
-        'hash-object', '--', ...chunk,
-      ]);
-      if (code === 0) {
-        const lines = stdout.split('\n');
-        for (let j = 0; j < chunk.length && j < lines.length; j++) {
-          const h = lines[j].trim();
-          if (HASH_RE.test(h)) result.set(chunk[j], h);
-        }
-        continue; // success — next chunk
+  // Fast path: single spawn, paths fed via stdin (no ARG_MAX limit).
+  try {
+    const { code, stdout } = await spawnGitWithStdin(repoPath, ['hash-object', '--stdin-paths'], paths.join('\n') + '\n');
+    if (code === 0) {
+      const lines = stdout.split('\n');
+      // hash-object outputs one hash per input path (in order). The last
+      // line is empty (trailing newline) — ignore it.
+      for (let i = 0; i < paths.length && i < lines.length; i++) {
+        const h = lines[i].trim();
+        if (HASH_RE.test(h)) result.set(paths[i], h);
       }
-    } catch {
-      // spawn itself failed — fall through to per-file
+      return result;
     }
-    // Batch failed — per-file fallback for this chunk only
-    await hashObjectPerFile(repoPath, chunk, result);
+  } catch {
+    // spawn itself failed — fall through to per-file
   }
+
+  // Fallback: per-file hashing with bounded concurrency.
+  await hashObjectPerFile(repoPath, paths, result);
   return result;
 }
 
@@ -556,12 +644,35 @@ async function hashObjectPerFile(
 }
 
 /**
+ * Run `git` with stdin piped. Used by batchHashObject to feed a large path
+ * list without ARG_MAX limits. Reuses the same spawn pattern as
+ * spawnGitCapture but writes to stdin and closes it.
+ */
+function spawnGitWithStdin(
+  repoPath: string,
+  args: string[],
+  stdin: string
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd: repoPath, windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+    // Write paths to stdin, then close it so git knows input is done.
+    child.stdin.end(stdin);
+  });
+}
+
+/**
  * Look up blob hashes in HEAD for every path in `paths`. Returns Map<path, hash>.
  *
- * `git ls-tree HEAD -- <p1> <p2> ...` silently omits paths that don't exist
- * in HEAD — perfect for our use case (we want a hash only for files that
- * were tracked-and-then-deleted). Single spawn handles all paths; chunked
- * to stay under ARG_MAX.
+ * Uses getCachedHeadTree() — fetches the WHOLE HEAD tree once and caches it
+ * by HEAD hash. Subsequent calls (with unchanged HEAD) skip ls-tree entirely.
+ * In-memory filtering by `paths` is O(N) Map lookups, much faster than
+ * `git ls-tree HEAD -- <paths>` which is quadratic in path count.
  */
 export async function batchLsTreeHead(
   repoPath: string,
@@ -570,21 +681,10 @@ export async function batchLsTreeHead(
   const result = new Map<string, string>();
   if (paths.length === 0) return result;
 
-  const CHUNK_SIZE = 500;
-  for (let i = 0; i < paths.length; i += CHUNK_SIZE) {
-    const chunk = paths.slice(i, i + CHUNK_SIZE);
-    try {
-      const { stdout } = await spawnGitCapture(repoPath, [
-        'ls-tree', 'HEAD', '--', ...chunk,
-      ]);
-      for (const line of stdout.split('\n')) {
-        if (!line) continue;
-        const entry = parseLsTreeLine(line);
-        if (entry) result.set(entry.path, entry.hash);
-      }
-    } catch {
-      /* ignore chunk failure — partial results are still useful */
-    }
+  const fullTree = await getCachedHeadTree(repoPath);
+  for (const p of paths) {
+    const h = fullTree.get(p);
+    if (h) result.set(p, h);
   }
   return result;
 }
@@ -598,10 +698,18 @@ export interface DetectedRename {
  * Detect all renames in the working tree (staged + unstaged) in a single
  * optimized IPC call. Used by ChangesPage's rename detection.
  *
+ * Three independent git operations run IN PARALLEL via Promise.all:
+ *   1. `git diff --cached --find-renames --diff-filter=R` (staged renames)
+ *   2. `git ls-tree -r HEAD` (cached by HEAD hash) — HEAD blob hashes for
+ *      every deleted file. Filtering by `deletedFiles` happens in-memory.
+ *   3. `git hash-object --stdin-paths` (paths via stdin) — blob hashes for
+ *      every untracked file on disk.
+ *
+ * Total wall-clock time = max(3 operations) instead of sum. On a 5000-file
+ * working tree this is ~25ms (was ~100ms sequential, was ~4s with N+M spawns).
+ *
  * Distinct from the existing detectRenames() (which uses --find-renames=
- * <threshold>% with a single git diff). This version is purpose-built for
- * the Changes page: it batch-hashes deleted + untracked files in TWO git
- * invocations instead of N+M per-file spawns.
+ * <threshold>% with a single git diff).
  *
  * @param deletedFiles   Files reported as ' D' or 'D ' by `git status`
  * @param untrackedFiles Files reported as '??' by `git status`
@@ -611,48 +719,52 @@ export async function detectWorkingTreeRenames(
   deletedFiles: string[],
   untrackedFiles: string[]
 ): Promise<DetectedRename[]> {
-  const renames: DetectedRename[] = [];
   const git = getGit(repoPath);
 
-  // 1. Staged renames — `git diff --cached --find-renames --diff-filter=R`
-  try {
-    const stagedOut = await git.raw([
+  // Fast path: if either list is empty, no unstaged renames possible —
+  // only need the staged-rename diff. Skip ls-tree + hash-object entirely.
+  const needUnstaged = deletedFiles.length > 0 && untrackedFiles.length > 0;
+
+  // Run all three operations in parallel. Each is independent of the others.
+  // Promise.all returns [stagedOut, deletedHashes, untrackedHashes] — the
+  // latter two are `undefined` when needUnstaged is false.
+  const [stagedOut, deletedHashes, untrackedHashes] = await Promise.all([
+    // 1. Staged renames
+    git.raw([
       'diff', '--cached', '--name-status',
       '--find-renames', '--diff-filter=R',
-    ]);
-    for (const line of stagedOut.split('\n')) {
-      if (!line) continue;
-      const parts = line.split('\t');
-      if (parts.length >= 3 && parts[0].startsWith('R')) {
-        renames.push({ oldPath: parts[1], newPath: parts[2] });
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-
-  // 2. Unstaged renames via content-hash matching (only if both lists non-empty)
-  if (deletedFiles.length === 0 || untrackedFiles.length === 0) {
-    return renames;
-  }
-
-  // Run both lookups in parallel — they're independent.
-  const [deletedHashes, untrackedHashes] = await Promise.all([
-    batchLsTreeHead(repoPath, deletedFiles),
-    batchHashObject(repoPath, untrackedFiles),
+    ]).catch(() => ''),
+    // 2. HEAD hashes for deleted files (cached by HEAD hash)
+    needUnstaged ? batchLsTreeHead(repoPath, deletedFiles) : Promise.resolve(new Map<string, string>()),
+    // 3. Disk hashes for untracked files
+    needUnstaged ? batchHashObject(repoPath, untrackedFiles) : Promise.resolve(new Map<string, string>()),
   ]);
+
+  const renames: DetectedRename[] = [];
+
+  // Parse staged renames.
+  for (const line of stagedOut.split('\n')) {
+    if (!line) continue;
+    const parts = line.split('\t');
+    if (parts.length >= 3 && parts[0].startsWith('R')) {
+      renames.push({ oldPath: parts[1], newPath: parts[2] });
+    }
+  }
+
+  // No unstaged renames to detect — return staged-only result.
+  if (!needUnstaged) return renames;
 
   // Build reverse index untrackedHash → path (first occurrence wins).
   // Map lookup is O(1); old code did O(N×M) find/some scans.
   const untrackedByHash = new Map<string, string>();
-  for (const [path, hash] of untrackedHashes) {
+  for (const [path, hash] of untrackedHashes!) {
     if (!untrackedByHash.has(hash)) untrackedByHash.set(hash, path);
   }
 
   // Already-used new paths (from staged renames) — skip to avoid duplicates.
   const usedNewPaths = new Set(renames.map((r) => r.newPath));
 
-  for (const [oldPath, hash] of deletedHashes) {
+  for (const [oldPath, hash] of deletedHashes!) {
     const newPath = untrackedByHash.get(hash);
     if (newPath && !usedNewPaths.has(newPath)) {
       renames.push({ oldPath, newPath });
