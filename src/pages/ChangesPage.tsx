@@ -3,7 +3,7 @@ import type { AppSettings } from '../../electron/types/settings-api';
 import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CornerDownRight, Download, EyeOff, FileText, Folder, FolderOpen, FolderTree, GitCommit, GitPullRequest, Lock, Minus, Package, Plus, RefreshCw, RotateCcw, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FilePlus, FileCheck, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Lock, Minus, Plus, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
 import { LazyFileList } from '../components/LazyFileList';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
@@ -1422,25 +1422,27 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           >
             .*
           </button>
-          {/* File display flags — SmartGit-style toggle buttons.
-              Each button shows a SHORT LABEL + tooltip for clarity.
+          {/* File display flags — SmartGit-style toggle buttons with meaningful icons.
+              Each icon visually represents what the toggle controls.
               Default: Subdir + Unver ON. Changed files always visible.
               Flags ADD categories (union). Staged files go to their own section. */}
           <div className="flex items-center gap-0.5">
             {([
-              { id: 'subdirectories' as const, label: 'Sub', title: 'Files From Subdirectories (flat list vs tree)' },
-              { id: 'unchanged' as const, label: 'Unch', title: 'Show Unchanged Files' },
-              { id: 'unversioned' as const, label: 'Unv', title: 'Show Unversioned (untracked) Files' },
-              { id: 'ignored' as const, label: 'Ign', title: 'Show Ignored Files (.gitignore)' },
-              { id: 'assumeUnchanged' as const, label: 'A-U', title: 'Show Assume-Unchanged Files' },
-              { id: 'skipped' as const, label: 'Skip', title: 'Show Skipped (skip-worktree) Files' },
-              { id: 'movedRename' as const, label: 'Move', title: 'Show Rename Source Files' },
-              { id: 'submodules' as const, label: 'Subm', title: 'Show Files From Submodules' },
-            ]).map(opt => (
+              { id: 'subdirectories' as const, Icon: ListTree, title: 'Files From Subdirectories (flat list vs tree)' },
+              { id: 'unchanged' as const, Icon: FileCheck, title: 'Show Unchanged Files' },
+              { id: 'unversioned' as const, Icon: FilePlus, title: 'Show Unversioned (untracked) Files' },
+              { id: 'ignored' as const, Icon: EyeOff, title: 'Show Ignored Files (.gitignore)' },
+              { id: 'assumeUnchanged' as const, Icon: Lock, title: 'Show Assume-Unchanged Files' },
+              { id: 'skipped' as const, Icon: SkipForward, title: 'Show Skipped (skip-worktree) Files' },
+              { id: 'movedRename' as const, Icon: Route, title: 'Show Rename Source Files' },
+              { id: 'submodules' as const, Icon: Cubes, title: 'Show Files From Submodules' },
+            ]).map(opt => {
+              const Icon = opt.Icon;
+              return (
               <button
                 key={opt.id}
                 className={cn(
-                  'text-2xs px-1.5 h-5 rounded flex items-center justify-center font-mono font-bold transition-colors',
+                  'w-5 h-5 rounded flex items-center justify-center transition-colors',
                   hasFlag(opt.id)
                     ? 'bg-accent-muted text-accent'
                     : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'
@@ -1448,9 +1450,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 title={opt.title}
                 onClick={() => toggleFileDisplayFlag(opt.id)}
               >
-                {opt.label}
+                <Icon size={11} />
               </button>
-            ))}
+              );
+            })}
           </div>
           {/* Extension filter */}
           <input
