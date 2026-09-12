@@ -200,6 +200,21 @@ export const en: Record<string, string> = {
   'settings.commandLogLimit': 'Command log limit',
   'settings.commandLogLimitHint': "Maximum number of commands shown in the Output panel's Commands tab (default 20)",
 
+  // Task 18 — footer visibility
+  'settings.footerSectionTitle': 'STATUS BAR',
+  'settings.footerSectionDesc': 'Choose which sections appear in the status bar footer.',
+  'settings.footerItemHead': 'HEAD indicator',
+  'settings.footerItemInProgress': 'In-progress operation',
+  'settings.footerItemSelectedCommit': 'Selected commit (non-HEAD)',
+  'settings.footerItemStagedChanged': 'Staged / changed counts',
+  'settings.footerItemAheadBehind': 'Ahead / behind (sync)',
+  'settings.footerItemRecyclable': 'Recyclable commits counter',
+  'settings.footerItemStashes': 'Stashes counter',
+  'settings.footerItemSubmodules': 'Submodules counter',
+  'settings.footerItemLfs': 'LFS counter',
+  'settings.footerItemUpdatedAt': 'Last refresh time',
+  'settings.footerItemOutputToggle': 'Output panel toggle',
+
   // About
   'settings.version': 'Version',
   'settings.platform': 'Platform',
@@ -401,6 +416,21 @@ export const ru: Record<string, string> = {
   'settings.outputPanel': 'Панель вывода',
   'settings.commandLogLimit': 'Лимит журнала команд',
   'settings.commandLogLimitHint': 'Максимум команд, показываемых на вкладке Commands панели вывода (по умолчанию 20)',
+
+  // Task 18 — footer visibility
+  'settings.footerSectionTitle': 'СТРОКА СОСТОЯНИЯ',
+  'settings.footerSectionDesc': 'Выберите, какие секции показывать в футере строки состояния.',
+  'settings.footerItemHead': 'Индикатор HEAD',
+  'settings.footerItemInProgress': 'Текущая операция',
+  'settings.footerItemSelectedCommit': 'Выбранный коммит (не HEAD)',
+  'settings.footerItemStagedChanged': 'Счётчики Staged / changed',
+  'settings.footerItemAheadBehind': 'Ahead / behind (синхронизация)',
+  'settings.footerItemRecyclable': 'Счётчик перерабатываемых',
+  'settings.footerItemStashes': 'Счётчик stashes',
+  'settings.footerItemSubmodules': 'Счётчик подмодулей',
+  'settings.footerItemLfs': 'Счётчик LFS',
+  'settings.footerItemUpdatedAt': 'Время последнего обновления',
+  'settings.footerItemOutputToggle': 'Переключатель панели Output',
 
   // About
   'settings.version': 'Версия',
@@ -604,6 +634,21 @@ export const zh: Record<string, string> = {
   'settings.commandLogLimit': '命令日志上限',
   'settings.commandLogLimitHint': '输出面板 Commands 标签页中显示的最大命令数（默认 20）',
 
+  // Task 18 — footer visibility
+  'settings.footerSectionTitle': '状态栏',
+  'settings.footerSectionDesc': '选择状态栏底部显示哪些分区。',
+  'settings.footerItemHead': 'HEAD 指示器',
+  'settings.footerItemInProgress': '进行中的操作',
+  'settings.footerItemSelectedCommit': '选中提交（非 HEAD）',
+  'settings.footerItemStagedChanged': '已暂存/已修改计数',
+  'settings.footerItemAheadBehind': '领先/落后（同步）',
+  'settings.footerItemRecyclable': '可回收提交计数',
+  'settings.footerItemStashes': '贮藏计数',
+  'settings.footerItemSubmodules': '子模块计数',
+  'settings.footerItemLfs': 'LFS 计数',
+  'settings.footerItemUpdatedAt': '最后刷新时间',
+  'settings.footerItemOutputToggle': '输出面板切换',
+
   // About
   'settings.version': '版本',
   'settings.platform': '平台',
@@ -805,6 +850,21 @@ export const de: Record<string, string> = {
   'settings.outputPanel': 'Ausgabe-Panel',
   'settings.commandLogLimit': 'Befehlsprotokoll-Limit',
   'settings.commandLogLimitHint': 'Maximale Anzahl der im Commands-Tab des Ausgabe-Panels angezeigten Befehle (Standard 20)',
+
+  // Task 18 — footer visibility
+  'settings.footerSectionTitle': 'STATUSLEISTE',
+  'settings.footerSectionDesc': 'Wählen Sie, welche Abschnitte in der Fußleiste der Statusleiste erscheinen.',
+  'settings.footerItemHead': 'HEAD-Anzeige',
+  'settings.footerItemInProgress': 'Laufende Operation',
+  'settings.footerItemSelectedCommit': 'Ausgewählter Commit (nicht HEAD)',
+  'settings.footerItemStagedChanged': 'Staged / Changed-Zähler',
+  'settings.footerItemAheadBehind': 'Ahead / Behind (Sync)',
+  'settings.footerItemRecyclable': 'Wiederverwendbare-Commits-Zähler',
+  'settings.footerItemStashes': 'Stashes-Zähler',
+  'settings.footerItemSubmodules': 'Submodule-Zähler',
+  'settings.footerItemLfs': 'LFS-Zähler',
+  'settings.footerItemUpdatedAt': 'Letzte Aktualisierungszeit',
+  'settings.footerItemOutputToggle': 'Output-Panel-Umschalter',
 
   // About
   'settings.version': 'Version',

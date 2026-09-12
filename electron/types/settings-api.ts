@@ -82,6 +82,23 @@ export interface AppSettings {
    * interval while the repository is open. Key = absolute repo path.
    */
   backgroundFetchRemotes?: Record<string, string[]>;
+  /**
+   * Task 18 — VSCode-style footer display settings. Each key toggles
+   * a StatusBar footer section. Missing keys default to visible (true).
+   */
+  footerVisible?: {
+    head?: boolean;
+    inProgress?: boolean;
+    selectedCommit?: boolean;
+    stagedChanged?: boolean;
+    aheadBehind?: boolean;
+    recyclable?: boolean;
+    stashes?: boolean;
+    submodules?: boolean;
+    lfs?: boolean;
+    updatedAt?: boolean;
+    outputToggle?: boolean;
+  };
   // === SmartGit Manual: Preferences → Commands ===
   /** Allow modifying pushed commits (e.g. amend, squash, rebase) without blocking. */
   allowModifyingPushedCommits?: boolean;

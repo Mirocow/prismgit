@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { Recycle, GitPullRequest, Package, Layers } from './icons';
 import { useI18n } from '../lib/i18n';
 
@@ -9,6 +10,9 @@ import { useI18n } from '../lib/i18n';
  * Tasks 15, 16, 17, 20 — footer indicators for Recyclable / Stashes /
  * Submodules / LFS. Each shows a count badge; clicking navigates to the
  * corresponding page.
+ *
+ * Task 18 — respects per-section visibility settings from
+ * settings.footerVisible.{recyclable,stashes,submodules,lfs}.
  *
  * Fetched lazily once on mount and re-fetched when gitStore.lastRefresh
  * changes (so post-commit / post-stash the counts update automatically).
@@ -18,6 +22,7 @@ import { useI18n } from '../lib/i18n';
 export function FooterCounters() {
   const repo = useRepositoryStore((s) => s.currentRepo);
   const lastRefresh = useGitStore((s) => s.lastRefresh);
+  const footerVisible = useSettingsStore((s) => s.settings.footerVisible);
   const { t } = useI18n();
 
   const [recyclable, setRecyclable] = useState<number | null>(null);
@@ -72,9 +77,12 @@ export function FooterCounters() {
 
   if (!repo) return null;
 
+  const vis = footerVisible ?? {};
+  const show = (k: 'recyclable' | 'stashes' | 'submodules' | 'lfs') => vis[k] !== false;
+
   return (
     <div className="flex items-center gap-2">
-      {recyclable !== null && recyclable > 0 && (
+      {show('recyclable') && recyclable !== null && recyclable > 0 && (
         <button
           className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
           onClick={() => { window.location.hash = '#/recyclable'; }}
@@ -84,7 +92,7 @@ export function FooterCounters() {
           <span className="text-2xs">{recyclable}</span>
         </button>
       )}
-      {stashes !== null && stashes > 0 && (
+      {show('stashes') && stashes !== null && stashes > 0 && (
         <button
           className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
           onClick={() => { window.location.hash = '#/stashes'; }}
@@ -94,7 +102,7 @@ export function FooterCounters() {
           <span className="text-2xs">{stashes}</span>
         </button>
       )}
-      {submodules !== null && submodules > 0 && (
+      {show('submodules') && submodules !== null && submodules > 0 && (
         <button
           className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
           onClick={() => { window.location.hash = '#/submodules'; }}
@@ -104,7 +112,7 @@ export function FooterCounters() {
           <span className="text-2xs">{submodules}</span>
         </button>
       )}
-      {lfs && lfs.tracked > 0 && (
+      {show('lfs') && lfs && lfs.tracked > 0 && (
         <button
           className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
           onClick={() => { window.location.hash = '#/lfs'; }}

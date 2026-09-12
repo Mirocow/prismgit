@@ -1,6 +1,7 @@
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { api } from '../lib/api';
@@ -91,6 +92,10 @@ export function StatusBar({
   const selectCommit = useSelectionStore((s) => s.selectCommit);
   const toast = useToastActions();
   const { t } = useI18n();
+  // Task 18 — VSCode-style footer display settings.
+  const footerVisible = useSettingsStore((s) => s.settings.footerVisible);
+  const vis = (k: 'head' | 'inProgress' | 'selectedCommit' | 'stagedChanged' | 'aheadBehind' | 'updatedAt' | 'outputToggle') =>
+    (footerVisible ?? {})[k] !== false;
   // Running operations — show a spinner + progress in the status bar
   const runningIds = useOperationLogStore((s) => s.runningIds);
   const ops = useOperationLogStore((s) => s.ops);
@@ -135,7 +140,7 @@ export function StatusBar({
         {/* HEAD indicator — always visible, shows where you are.
             Bright accent background + ">" makes the current branch
             unmistakable from across the screen. */}
-        {status?.current && headHash && (
+        {vis('head') && status?.current && headHash && (
           <span className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-accent-muted border border-accent/40" title={t('shell.currentHead')}>
             <span className="text-accent font-bold">{'>'}</span>
             <span className="text-accent font-semibold">{status.current}</span>
@@ -147,7 +152,7 @@ export function StatusBar({
             knows the working tree is in a special state and destructive
             operations are blocked. Clicking it jumps to Changes where the
             SequencerPanel / MergePanel / RebasePanel banners live. */}
-        {(() => {
+        {vis('inProgress') && (() => {
           const m = status?.isMerging, r = status?.isRebasing, c = status?.isCherryPicking, v = status?.isReverting, b = status?.isBisecting;
           if (!m && !r && !c && !v && !b) return null;
           let label = '';
@@ -168,7 +173,7 @@ export function StatusBar({
           );
         })()}
         {/* Selected commit (if different from HEAD) */}
-        {selectedCommitHash && selectedCommitHash !== headHash && (
+        {vis('selectedCommit') && selectedCommitHash && selectedCommitHash !== headHash && (
           <span className="flex items-center gap-1.5" title={t('shell.selectedCommitTooltip')}>
             <span className="text-text-tertiary">{t('shell.selectedLabel')}</span>
             <CommitHashLink hash={selectedCommitHash} />
@@ -194,6 +199,7 @@ export function StatusBar({
           </span>
         ) : (
           /* Clickable counters — quick jump to the working tree */
+          vis('stagedChanged') && (
           <button
             className="flex items-center gap-1 hover:text-text-primary transition-colors cursor-pointer px-1 rounded"
             onClick={() => { window.location.hash = '#/changes'; }}
@@ -212,12 +218,13 @@ export function StatusBar({
               </span>
             )}
           </button>
+          )
         )}
         {/* Tasks 15/16/17/20 — footer counters for Recyclable/Stashes/Submodules/LFS.
             Click to jump to the corresponding page. */}
         <FooterCounters />
         {/* Ahead / behind — click to push / pull (VS Code-style sync buttons) */}
-        {status?.ahead ? (
+        {vis('aheadBehind') && status?.ahead ? (
           <button
             className="text-status-added flex items-center gap-0.5 font-medium hover:bg-bg-hover rounded px-1 py-0.5 transition-colors cursor-pointer"
             onClick={() => {
@@ -236,7 +243,7 @@ export function StatusBar({
             <ArrowUp size={9} />{status.ahead}
           </button>
         ) : null}
-        {status?.behind ? (
+        {vis('aheadBehind') && status?.behind ? (
           <button
             className="text-status-modified flex items-center gap-0.5 font-medium hover:bg-bg-hover rounded px-1 py-0.5 transition-colors cursor-pointer"
             onClick={() => {
@@ -250,7 +257,7 @@ export function StatusBar({
             <ArrowDown size={9} />{status.behind}
           </button>
         ) : null}
-        {lastRefresh > 0 && (
+        {vis('updatedAt') && lastRefresh > 0 && (
           <button
             className="text-text-tertiary hover:text-text-primary transition-colors cursor-pointer"
             onClick={() => currentRepo && useGitStore.getState().refreshStatus(currentRepo.path)}
@@ -260,6 +267,7 @@ export function StatusBar({
           </button>
         )}
         {/* Command Log toggle button */}
+        {vis('outputToggle') && (
         <button
           className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
           onClick={() => onToggleCommandLog && onToggleCommandLog()}
@@ -268,6 +276,7 @@ export function StatusBar({
           {showCommandLog ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
           <span className="text-2xs">{t('shell.outputPanel')}</span>
         </button>
+        )}
       </div>
     </footer>
   );

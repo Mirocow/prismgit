@@ -1566,6 +1566,40 @@ smartgit.refresh.inspectEol=true
             </div>
           </section>
         )}
+
+        {/* Task 18 — VSCode-style footer display settings. Each checkbox
+            toggles a StatusBar footer section. */}
+        <section className="panel mb-4">
+          <h2 className="text-sm font-medium mb-3">{t('settings.footerSectionTitle')}</h2>
+          <p className="text-xs text-text-tertiary mb-4">{t('settings.footerSectionDesc')}</p>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              ['head', t('settings.footerItemHead')],
+              ['inProgress', t('settings.footerItemInProgress')],
+              ['selectedCommit', t('settings.footerItemSelectedCommit')],
+              ['stagedChanged', t('settings.footerItemStagedChanged')],
+              ['aheadBehind', t('settings.footerItemAheadBehind')],
+              ['recyclable', t('settings.footerItemRecyclable')],
+              ['stashes', t('settings.footerItemStashes')],
+              ['submodules', t('settings.footerItemSubmodules')],
+              ['lfs', t('settings.footerItemLfs')],
+              ['updatedAt', t('settings.footerItemUpdatedAt')],
+              ['outputToggle', t('settings.footerItemOutputToggle')],
+            ] as const).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 text-xs cursor-pointer p-2 hover:bg-bg-hover rounded">
+                <input
+                  type="checkbox"
+                  checked={(settings.footerVisible ?? {})[key] !== false}
+                  onChange={(e) => {
+                    const next = { ...(settings.footerVisible ?? {}), [key]: e.target.checked };
+                    void setSetting('footerVisible', next);
+                  }}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        </section>
       </div>
     </div>
   );
