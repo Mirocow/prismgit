@@ -165,21 +165,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const colWidths = useSelectionStore((s) => s.colWidths);
   const setColWidth = useSelectionStore((s) => s.setColWidth);
 
-  // Sync 'subdirectories' flag with fileViewMode + dirTreeVisible:
-  //   subdirectories ON  → flat list (fileViewMode='flat'), tree panel hidden
-  //   subdirectories OFF → tree view (fileViewMode='tree'), tree panel visible
+  // Sync 'subdirectories' flag with file scope:
+  //   subdirectories ON  → fileScopeDir=null (show files from ALL directories)
+  //   subdirectories OFF → fileScopeDir='' (only root-level files, no subdirectories)
   useEffect(() => {
-    const isFlat = fileDisplayFlags.has('subdirectories');
-    if (isFlat && fileViewMode !== 'flat') {
-      setFileViewMode('flat');
-    } else if (!isFlat && fileViewMode !== 'tree') {
-      setFileViewMode('tree');
-    }
-    // Show/hide the directory tree panel based on the flag
-    if (!isFlat && !dirTreeVisible) {
-      toggleDirTreeVisible();
-    } else if (isFlat && dirTreeVisible) {
-      toggleDirTreeVisible();
+    const showSubdirs = fileDisplayFlags.has('subdirectories');
+    if (showSubdirs && fileScopeDir !== null) {
+      setFileScopeDir(null);
+    } else if (!showSubdirs && fileScopeDir === null) {
+      setFileScopeDir('');
     }
   }, [fileDisplayFlags]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showStatusPicker, setShowStatusPicker] = useState(false);
@@ -1015,9 +1009,13 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     return path.toLowerCase().includes(q.toLowerCase());
   };
 
-  // Directory scope helper: only files inside the folder selected in the tree.
+  // Directory scope helper:
+  //   fileScopeDir === null  → show ALL files (subdirectories flag ON)
+  //   fileScopeDir === ''    → show only root-level files (no '/' in path)
+  //   fileScopeDir === 'src' → show files inside src/ (tree panel scope)
   const matchesDirScope = (path: string): boolean => {
-    if (!fileScopeDir) return true;
+    if (fileScopeDir === null) return true;
+    if (fileScopeDir === '') return !path.includes('/');
     return path === fileScopeDir || path.startsWith(`${fileScopeDir}/`);
   };
 
