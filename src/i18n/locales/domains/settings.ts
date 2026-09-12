@@ -33,6 +33,7 @@ export const en: Record<string, string> = {
   'settings.aiProviderSection': 'Provider',
   'settings.aiConnectionSection': 'Connection',
   'settings.aiCustomPromptSection': 'Custom Prompt',
+  'settings.integrations': 'Integrations',
   'settings.themePicker': 'Theme Picker',
   'settings.themePickerHint': 'Click a card to apply the theme instantly',
   'settings.quickToggle': 'Quick Light/Dark Toggle',

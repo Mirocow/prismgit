@@ -21,11 +21,12 @@ export function SettingsPage() {
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
   // Top-level tab: Application Settings vs Project Settings vs Themes
-  const [activeTab, setActiveTab] = useState<'application' | 'project' | 'themes' | 'ai'>('application');
+  const [activeTab, setActiveTab] = useState<'application' | 'project' | 'themes' | 'ai' | 'show-integrations'>('application');
   const showApp = activeTab === 'application';
   const showProject = activeTab === 'project' && !!currentRepo;
   const showThemes = activeTab === 'themes';
   const showAi = activeTab === 'ai';
+  const showIntegrations = activeTab === 'show-integrations';
 
   // === Git Config section state ===
   const [configScope, setConfigScope] = useState<'local' | 'global' | 'system'>('local');
@@ -204,6 +205,17 @@ export function SettingsPage() {
                 {currentRepo.name}
               </span>
             )}
+          </button>
+          <button
+            className={cn(
+              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+              showIntegrations
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            )}
+            onClick={() => setActiveTab('show-integrations')}
+          >
+            {t('settings.integrations')}
           </button>
           <button
             className={cn(
@@ -518,78 +530,6 @@ export function SettingsPage() {
                 </div>
               </div>
             </div>
-          </div>
-        </section>
-        )}
-
-        {/* GitHub Integration */}
-        {showApp && (
-        <section className="panel mb-4">
-          <div className="panel-header">
-            <span className="flex items-center gap-2">
-              <Github size={12} />
-              {t('settings.github')}
-            </span>
-          </div>
-          <div className="p-5 space-y-4">
-            {authenticated && user ? (
-              <div className="flex items-center gap-3 p-3 bg-bg-tertiary rounded">
-                <img
-                  src={user.avatar_url}
-                  alt={user.login}
-                  className="w-10 h-10 rounded-full"
-                />
-                <div className="flex-1">
-                  <div className="text-sm font-medium">{user.name || user.login}</div>
-                  <div className="text-xs text-text-tertiary">@{user.login}</div>
-                </div>
-                <button className="btn btn-danger text-xs" onClick={handleLogout}>
-                  <LogOut size={12} />
-                  {t('settings.logout')}
-                </button>
-              </div>
-            ) : (
-              <>
-                <div>
-                  <div className="text-sm mb-2">
-                    {t('settings.authenticatePat')}
-                  </div>
-                  <div className="text-xs text-text-tertiary mb-3">
-                    {t('settings.createTokenAt')}{' '}
-                    <a
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        api.app.openExternal('https://github.com/settings/tokens/new?scopes=repo,read:user&description=PrismGit');
-                      }}
-                      className="text-accent hover:underline"
-                    >
-                      github.com/settings/tokens
-                    </a>{' '}
-                    {t('settings.withScopes')} <code className="font-mono">repo</code> {t('settings.and')}{' '}
-                    <code className="font-mono">read:user</code>{t('settings.scopesSuffix')}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="password"
-                      className="flex-1 text-sm font-mono"
-                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxx"
-                      value={pat}
-                      onChange={(e) => setPat(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                    />
-                    <button
-                      className="btn btn-primary text-xs"
-                      onClick={handleLogin}
-                      disabled={loadingAuth}
-                    >
-                      {loadingAuth ? <RefreshCw size={12} className="animate-spin" /> : <Github size={12} />}
-                      {t('settings.connect')}
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
           </div>
         </section>
         )}
@@ -1281,85 +1221,6 @@ smartgit.refresh.inspectEol=true
         </section>
         )}
 
-        {/* SmartGit Manual: CI/CD Integration (Jenkins, TeamCity, GitLab CI) */}
-        {showApp && (
-        <section className="panel mb-4">
-          <div className="panel-header">{t('settings.ciCd')}</div>
-          <div className="p-5 space-y-3 text-sm">
-            <div className="text-2xs text-text-tertiary">
-              {t('settings.ciCdHint')}
-            </div>
-            {/* Jenkins */}
-            <div className="border-t border-border-subtle pt-3">
-              <div className="text-xs font-semibold mb-2">Jenkins</div>
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  className="text-xs font-mono"
-                  placeholder="https://ci.example.com"
-                  defaultValue={settings.jenkinsUrl || ''}
-                  onBlur={(e) => setSetting('jenkinsUrl', e.target.value)}
-                />
-                <input
-                  type="password"
-                  className="text-xs font-mono"
-                  placeholder="user:api-token"
-                  defaultValue={settings.jenkinsToken || ''}
-                  onBlur={(e) => setSetting('jenkinsToken', e.target.value)}
-                />
-              </div>
-            </div>
-            {/* TeamCity */}
-            <div className="border-t border-border-subtle pt-3">
-              <div className="text-xs font-semibold mb-2">TeamCity</div>
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  className="text-xs font-mono"
-                  placeholder="https://teamcity.example.com"
-                  defaultValue={settings.teamcityUrl || ''}
-                  onBlur={(e) => setSetting('teamcityUrl', e.target.value)}
-                />
-                <input
-                  type="password"
-                  className="text-xs font-mono"
-                  placeholder="access token"
-                  defaultValue={settings.teamcityToken || ''}
-                  onBlur={(e) => setSetting('teamcityToken', e.target.value)}
-                />
-              </div>
-            </div>
-            {/* GitLab CI */}
-            <div className="border-t border-border-subtle pt-3">
-              <div className="text-xs font-semibold mb-2">GitLab CI</div>
-              <div className="grid grid-cols-3 gap-2">
-                <input
-                  type="text"
-                  className="text-xs font-mono"
-                  placeholder="https://gitlab.com"
-                  defaultValue={settings.gitlabUrl || ''}
-                  onBlur={(e) => setSetting('gitlabUrl', e.target.value)}
-                />
-                <input
-                  type="password"
-                  className="text-xs font-mono"
-                  placeholder="private token"
-                  defaultValue={settings.gitlabToken || ''}
-                  onBlur={(e) => setSetting('gitlabToken', e.target.value)}
-                />
-                <input
-                  type="number"
-                  className="text-xs font-mono"
-                  placeholder="project ID"
-                  defaultValue={settings.gitlabProjectId || ''}
-                  onBlur={(e) => setSetting('gitlabProjectId', e.target.value ? Number(e.target.value) : undefined)}
-                />
-              </div>
-            </div>
-          </div>
-        </section>
-        )}
-
         {/* Output / Command Log Settings */}
         {showApp && (
         <section className="panel mb-4">
@@ -1381,27 +1242,6 @@ smartgit.refresh.inspectEol=true
                 onChange={(e) => setSetting('commandLogLimit', Math.max(5, Math.min(500, Number(e.target.value))))}
               />
             </label>
-          </div>
-        </section>
-        )}
-
-        {/* About */}
-        {showApp && (
-        <section className="panel mb-4">
-          <div className="panel-header">{t('settings.about')}</div>
-          <div className="p-5 text-sm space-y-2">
-            <div className="flex justify-between">
-              <span className="text-text-tertiary">{t('settings.version')}</span>
-              <span className="font-mono">2.0.1</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-text-tertiary">{t('settings.platform')}</span>
-              <span className="font-mono">{navigator.platform}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-text-tertiary">Electron</span>
-              <span className="font-mono">v32</span>
-            </div>
           </div>
         </section>
         )}
@@ -1759,6 +1599,179 @@ smartgit.refresh.inspectEol=true
           </div>
         </section>
         )}
+
+        {/* About */}
+        {showApp && (
+        <section className="panel mb-4">
+          <div className="panel-header">{t('settings.about')}</div>
+          <div className="p-5 text-sm space-y-2">
+            <div className="flex justify-between">
+              <span className="text-text-tertiary">{t('settings.version')}</span>
+              <span className="font-mono">2.0.1</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-text-tertiary">{t('settings.platform')}</span>
+              <span className="font-mono">{navigator.platform}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-text-tertiary">Electron</span>
+              <span className="font-mono">v32</span>
+            </div>
+          </div>
+        </section>
+        )}
+
+        {/* Integrations */}
+        {showIntegrations && (
+        <section className="panel mb-4">
+          <div className="panel-header">
+            <span className="flex items-center gap-2">
+              <Github size={12} />
+              {t('settings.github')}
+            </span>
+          </div>
+          <div className="p-5 space-y-4">
+            {authenticated && user ? (
+              <div className="flex items-center gap-3 p-3 bg-bg-tertiary rounded">
+                <img
+                  src={user.avatar_url}
+                  alt={user.login}
+                  className="w-10 h-10 rounded-full"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-medium">{user.name || user.login}</div>
+                  <div className="text-xs text-text-tertiary">@{user.login}</div>
+                </div>
+                <button className="btn btn-danger text-xs" onClick={handleLogout}>
+                  <LogOut size={12} />
+                  {t('settings.logout')}
+                </button>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <div className="text-sm mb-2">
+                    {t('settings.authenticatePat')}
+                  </div>
+                  <div className="text-xs text-text-tertiary mb-3">
+                    {t('settings.createTokenAt')}{' '}
+                    <a
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        api.app.openExternal('https://github.com/settings/tokens/new?scopes=repo,read:user&description=PrismGit');
+                      }}
+                      className="text-accent hover:underline"
+                    >
+                      github.com/settings/tokens
+                    </a>{' '}
+                    {t('settings.withScopes')} <code className="font-mono">repo</code> {t('settings.and')}{' '}
+                    <code className="font-mono">read:user</code>{t('settings.scopesSuffix')}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="password"
+                      className="flex-1 text-sm font-mono"
+                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxx"
+                      value={pat}
+                      onChange={(e) => setPat(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                    />
+                    <button
+                      className="btn btn-primary text-xs"
+                      onClick={handleLogin}
+                      disabled={loadingAuth}
+                    >
+                      {loadingAuth ? <RefreshCw size={12} className="animate-spin" /> : <Github size={12} />}
+                      {t('settings.connect')}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+        )}
+
+        {/* SmartGit Manual: CI/CD Integration (Jenkins, TeamCity, GitLab CI) */}
+        {showIntegrations && (
+        <section className="panel mb-4">
+          <div className="panel-header">{t('settings.ciCd')}</div>
+          <div className="p-5 space-y-3 text-sm">
+            <div className="text-2xs text-text-tertiary">
+              {t('settings.ciCdHint')}
+            </div>
+            {/* Jenkins */}
+            <div className="border-t border-border-subtle pt-3">
+              <div className="text-xs font-semibold mb-2">Jenkins</div>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  className="text-xs font-mono"
+                  placeholder="https://ci.example.com"
+                  defaultValue={settings.jenkinsUrl || ''}
+                  onBlur={(e) => setSetting('jenkinsUrl', e.target.value)}
+                />
+                <input
+                  type="password"
+                  className="text-xs font-mono"
+                  placeholder="user:api-token"
+                  defaultValue={settings.jenkinsToken || ''}
+                  onBlur={(e) => setSetting('jenkinsToken', e.target.value)}
+                />
+              </div>
+            </div>
+            {/* TeamCity */}
+            <div className="border-t border-border-subtle pt-3">
+              <div className="text-xs font-semibold mb-2">TeamCity</div>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  className="text-xs font-mono"
+                  placeholder="https://teamcity.example.com"
+                  defaultValue={settings.teamcityUrl || ''}
+                  onBlur={(e) => setSetting('teamcityUrl', e.target.value)}
+                />
+                <input
+                  type="password"
+                  className="text-xs font-mono"
+                  placeholder="access token"
+                  defaultValue={settings.teamcityToken || ''}
+                  onBlur={(e) => setSetting('teamcityToken', e.target.value)}
+                />
+              </div>
+            </div>
+            {/* GitLab CI */}
+            <div className="border-t border-border-subtle pt-3">
+              <div className="text-xs font-semibold mb-2">GitLab CI</div>
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  type="text"
+                  className="text-xs font-mono"
+                  placeholder="https://gitlab.com"
+                  defaultValue={settings.gitlabUrl || ''}
+                  onBlur={(e) => setSetting('gitlabUrl', e.target.value)}
+                />
+                <input
+                  type="password"
+                  className="text-xs font-mono"
+                  placeholder="private token"
+                  defaultValue={settings.gitlabToken || ''}
+                  onBlur={(e) => setSetting('gitlabToken', e.target.value)}
+                />
+                <input
+                  type="number"
+                  className="text-xs font-mono"
+                  placeholder="project ID"
+                  defaultValue={settings.gitlabProjectId || ''}
+                  onBlur={(e) => setSetting('gitlabProjectId', e.target.value ? Number(e.target.value) : undefined)}
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+        )}
+
       </div>
     </div>
   );
