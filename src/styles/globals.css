@@ -1110,6 +1110,134 @@
   color: #e6edf3;
 }
 
+/* ===========================================================================
+ * Designer Light — Figma-inspired: pure white + light grey + coral accent
+ * =========================================================================== */
+[data-theme="designer-light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #e8e8e8;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f0f0f0;
+  --bg-selected: #fef0ec;
+  --text-primary: #1e1e1e;
+  --text-secondary: #757575;
+  --text-tertiary: #5e5e5e;
+  --accent: #F24E1E;
+  --accent-muted: rgba(242, 78, 30, 0.12);
+  --border-default: #d4d4d4;
+  --border-subtle: #e8e8e8;
+  --status-added: #0D9966;
+  --status-modified: #F24E1E;
+  --status-deleted: #F24E1E;
+  --status-renamed: #F24E1E;
+  --status-conflict: #F24E1E;
+  --status-info: #0D9966;
+  --status-warning: #F24E1E;
+  --status-error: #F24E1E;
+  --bg-sidebar-selected: rgba(242, 78, 30, 0.12);
+  --graph-node-fill: #ffffff;
+  --scrollbar-track: #f5f5f5;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+}
+
+/* ===========================================================================
+ * Purple — dark navy + electric purple
+ * =========================================================================== */
+[data-theme="purple"] {
+  --bg-primary: #1a1b2e;
+  --bg-secondary: #15162a;
+  --bg-tertiary: #25264a;
+  --bg-elevated: #2e2f5a;
+  --bg-hover: #20213f;
+  --bg-selected: rgba(155, 109, 255, 0.15);
+  --text-primary: #c8c9e8;
+  --text-secondary: #7d7ea8;
+  --text-tertiary: #9c9dc8;
+  --accent: #9b6dff;
+  --accent-muted: rgba(155, 109, 255, 0.15);
+  --border-default: #2e2f5a;
+  --border-subtle: #25264a;
+  --status-added: #5eff8e;
+  --status-modified: #ffd55e;
+  --status-deleted: #ff5e7a;
+  --status-renamed: #9b6dff;
+  --status-conflict: #ff5e7a;
+  --status-info: #9b6dff;
+  --status-warning: #ffd55e;
+  --status-error: #ff5e7a;
+  --bg-sidebar-selected: rgba(155, 109, 255, 0.15);
+  --graph-node-fill: #1a1b2e;
+  --scrollbar-track: #15162a;
+  --scrollbar-thumb: rgba(155, 109, 255, 0.20);
+  --scrollbar-thumb-hover: rgba(155, 109, 255, 0.35);
+}
+
+/* ===========================================================================
+ * Simple Light — minimal black/white/grey + blue accent
+ * =========================================================================== */
+[data-theme="simple-light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #fafafa;
+  --bg-tertiary: #f0f0f0;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f5f5f5;
+  --bg-selected: #e6f0ff;
+  --text-primary: #000000;
+  --text-secondary: #666666;
+  --text-tertiary: #666666;
+  --accent: #0066ff;
+  --accent-muted: rgba(0, 102, 255, 0.10);
+  --border-default: #e0e0e0;
+  --border-subtle: #f0f0f0;
+  --status-added: #009900;
+  --status-modified: #ff9900;
+  --status-deleted: #cc0000;
+  --status-renamed: #0066ff;
+  --status-conflict: #cc0000;
+  --status-info: #0066ff;
+  --status-warning: #ff9900;
+  --status-error: #cc0000;
+  --bg-sidebar-selected: rgba(0, 102, 255, 0.10);
+  --graph-node-fill: #ffffff;
+  --scrollbar-track: #fafafa;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.22);
+}
+
+/* ===========================================================================
+ * Material Design Light — Google Material palette (Indigo 500)
+ * =========================================================================== */
+[data-theme="material"] {
+  --bg-primary: #FAFAFA;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #F5F5F5;
+  --bg-elevated: #FFFFFF;
+  --bg-hover: #F5F5F5;
+  --bg-selected: #E8EAF6;
+  --text-primary: #212121;
+  --text-secondary: #757575;
+  --text-tertiary: #5e5e5e;
+  --accent: #3F51B5;
+  --accent-muted: rgba(63, 81, 181, 0.12);
+  --border-default: #E0E0E0;
+  --border-subtle: #EEEEEE;
+  --status-added: #4CAF50;
+  --status-modified: #FF9800;
+  --status-deleted: #F44336;
+  --status-renamed: #3F51B5;
+  --status-conflict: #F44336;
+  --status-info: #2196F3;
+  --status-warning: #FF9800;
+  --status-error: #F44336;
+  --bg-sidebar-selected: rgba(63, 81, 181, 0.12);
+  --graph-node-fill: #FAFAFA;
+  --scrollbar-track: #F5F5F5;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.22);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

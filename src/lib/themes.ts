@@ -32,7 +32,11 @@ export type ThemeId =
   | 'slack-dark'         // Task 5 — Slack-inspired dark theme (aubergine + 4 accent colors)
   | 'discord'            // Task 5 — Discord-inspired (Blurple + grey-3 / channel-sidebar)
   | 'light-dim-sidebar'  // Light main + dimmed dark sidebar (VS Code style)
-  | 'github-light-dim';  // GitHub Light main + dimmed dark sidebar
+  | 'github-light-dim'  // GitHub Light main + dimmed dark sidebar
+  | 'designer-light'    // Figma-inspired light theme with coral accent
+  | 'purple'            // Purple accent on dark navy background
+  | 'simple-light'      // Minimal light theme (black/white/grey)
+  | 'material';         // Material Design light (Indigo + grey)
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -253,6 +257,60 @@ export const THEMES: ThemeMeta[] = [
       textPrimary: '#1f2328', textSecondary: '#59636e',
       accent: '#0969da', border: '#d0d7de',
       statusAdded: '#1a7f37', statusModified: '#bf8700', statusDeleted: '#cf222e',
+    },
+  },
+  // Figma Designer Light — clean white with coral/orange accent.
+  // Inspired by Figma's UI: pure white background, very light grey panels,
+  // coral accent (#F24E1E) for selection and buttons.
+  {
+    id: 'designer-light',
+    labelKey: 'settings.themeDesignerLight',
+    isDark: false,
+    preview: {
+      bgPrimary: '#ffffff', bgSecondary: '#f5f5f5', bgTertiary: '#e8e8e8',
+      textPrimary: '#1e1e1e', textSecondary: '#757575',
+      accent: '#F24E1E', border: '#d4d4d4',
+      statusAdded: '#0D9966', statusModified: '#F24E1E', statusDeleted: '#F24E1E',
+    },
+  },
+  // Purple — deep navy background with vibrant purple accent.
+  // Inspired by Twitch/Phillips Hue aesthetic: dark navy + electric purple.
+  {
+    id: 'purple',
+    labelKey: 'settings.themePurple',
+    isDark: true,
+    preview: {
+      bgPrimary: '#1a1b2e', bgSecondary: '#15162a', bgTertiary: '#25264a',
+      textPrimary: '#c8c9e8', textSecondary: '#7d7ea8',
+      accent: '#9b6dff', border: '#2e2f5a',
+      statusAdded: '#5eff8e', statusModified: '#ffd55e', statusDeleted: '#ff5e7a',
+    },
+  },
+  // Simple Light — minimal black/white/grey with blue accent.
+  // High-contrast, no decorative colors — pure functional design.
+  {
+    id: 'simple-light',
+    labelKey: 'settings.themeSimpleLight',
+    isDark: false,
+    preview: {
+      bgPrimary: '#ffffff', bgSecondary: '#fafafa', bgTertiary: '#f0f0f0',
+      textPrimary: '#000000', textSecondary: '#666666',
+      accent: '#0066ff', border: '#e0e0e0',
+      statusAdded: '#009900', statusModified: '#ff9900', statusDeleted: '#cc0000',
+    },
+  },
+  // Material Design Light — Google Material Design palette.
+  // Indigo 500 (#3F51B5) accent on light grey (#FAFAFA) background.
+  // Follows Material Design color system with proper elevation tiers.
+  {
+    id: 'material',
+    labelKey: 'settings.themeMaterial',
+    isDark: false,
+    preview: {
+      bgPrimary: '#FAFAFA', bgSecondary: '#FFFFFF', bgTertiary: '#F5F5F5',
+      textPrimary: '#212121', textSecondary: '#757575',
+      accent: '#3F51B5', border: '#E0E0E0',
+      statusAdded: '#4CAF50', statusModified: '#FF9800', statusDeleted: '#F44336',
     },
   },
 ];
