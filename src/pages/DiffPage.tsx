@@ -1,22 +1,20 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, FileText, GitBranch, GitCommit, ChevronDown, Search, AlertCircle } from '../components/icons';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
-import { useSelectionStore } from '../stores/selectionStore';
-import { CommitHashLink } from '../components/StatusBar';
-import { api, type DiffResult, type LogEntry, type BranchInfo, type CommitFile } from '../lib/api';
-import { DiffViewer } from '../components/DiffViewer';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConflictMergeView } from '../components/ConflictMergeView';
+import { DiffViewer } from '../components/DiffViewer';
+import { FileText, RefreshCw, Search } from '../components/icons';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
-import { cn, shortHash } from '../lib/utils';
-import { useLazyList } from '../lib/useLazyList';
-import { useContextMenu } from '../lib/useContextMenu';
+import { api, type BranchInfo, type CommitFile, type DiffResult, type LogEntry } from '../lib/api';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
-import { buildRepoStateHandlers } from '../lib/repoState';
-import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { useI18n } from '../lib/i18n';
+import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
+import { buildRepoStateHandlers } from '../lib/repoState';
+import { useContextMenu } from '../lib/useContextMenu';
+import { cn, shortHash } from '../lib/utils';
+import { useGitStore } from '../stores/gitStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { useToastActions } from '../stores/toastStore';
 
 /**
  * Diff Tool — standalone comparison tool.
@@ -556,14 +554,6 @@ export function DiffPage() {
             </div>
           )}
         </div>
-
-        {/* Conflict badge in the header — visible when there are conflicted files */}
-        {conflicted.length > 0 && (
-          <div className="px-3 py-1 border-b border-status-conflict/30 bg-status-conflict/10 text-2xs text-status-conflict flex items-center gap-2 flex-shrink-0">
-            <AlertCircle size={11} className="flex-shrink-0" />
-            <span className="font-medium">{conflicted.length} conflict{conflicted.length === 1 ? '' : 's'}</span>
-          </div>
-        )}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 {
   "version": "3.1.1",
-  "lastModified": "2026-09-11T14:38:14.200Z",
+  "lastModified": "2026-09-11T21:40:58.011Z",
   "folders": [],
   "bookmarks": [
     {
@@ -65,6 +65,24 @@
       "character": 7,
       "lineContent": "const currentBisecting = !!status?.isBisecting;",
       "sortOrder": 6
+    },
+    {
+      "id": "mtxh959se3qqi45cfke",
+      "name": "const repo = node.repo;",
+      "file": "src/components/Sidebar.tsx",
+      "line": 429,
+      "character": 5,
+      "lineContent": "const repo = node.repo;",
+      "sortOrder": 7
+    },
+    {
+      "id": "mtxhdcm3xam8pdv2vmi",
+      "name": "<span className='text-accent font-medium'>{meta?.name}</span>",
+      "file": "src/components/Sidebar.tsx",
+      "line": 461,
+      "character": 13,
+      "lineContent": "<span className='text-accent font-medium'>{meta?.name}</span>",
+      "sortOrder": 8
     }
   ]
 }
