@@ -15,22 +15,27 @@
  * resolution to the moment the function is actually called, which
  * only happens under Tauri.
  *
- * Currently wired up:
+ * Currently wired up (via git_raw shell-out — full coverage of write operations):
  *   - api.git.raw(repoPath, args)        → invoke('git_raw', ...)
- *   - api.git.status(repoPath)            → invoke('git_status', ...) + porcelain parser
+ *   - api.git.status(repoPath)            → invoke('git_status', ...) [partial — TODO porcelain parser]
  *   - api.git.branches(repoPath)          → invoke('git_branches', ...) + parser
  *   - api.git.tags(repoPath)              → invoke('git_tags', ...) + parser
  *   - api.git.stashList(repoPath)         → invoke('git_stash_list', ...) + parser
  *   - api.git.log(repoPath, opts)         → invoke('git_log', ...) + parser
  *   - api.git.reflog(repoPath, ref, n)    → invoke('git_reflog', ...) + parser
+ *   - api.git.add / addAll / restore       → git_raw add/reset/checkout
+ *   - api.git.commit                       → git_raw commit + rev-parse HEAD
+ *   - api.git.push / pull / fetch / fetchAll / fetchDeepen / setFetchDepth
+ *   - api.git.checkout / checkoutFile / createBranch / deleteBranch / renameBranch
+ *   - api.git.currentBranch / revParse / reset / resetFile
+ *   - api.git.addRemote / removeRemote / renameRemote / setRemoteUrl / isRepo / ignore
  *   - api.fs.openRepositoryPicker()       → invoke('open_repo_picker')
  *   - api.watcher.start(path) / stop(path) → invoke('watch_repo') / invoke('unwatch_repo')
- *   - api.commandLog.onEntry(cb)          → listen('repo:changed', ...) [partial]
  *
  * Not yet wired up (Tauri calls fall back to Promise.reject — UI should
  * disable the corresponding features when running under Tauri):
  *   - api.github.* (need Tauri HTTP plugin + GitHub OAuth flow)
- *   - api.git.diff / stageLines / unstageLines (need git2-rs or shelled out)
+ *   - api.git.diff / stageLines / unstageLines (need full diff parser)
  *   - api.settings.* (need Tauri storage plugin + JSON persistence)
  *   - api.contextMenu.* (need Tauri window menu API)
  */
@@ -197,17 +202,179 @@ export const tauriApi = {
       });
     },
 
-    // --- Methods that need full Rust impl (currently stubs that reject) ---
-    diff: async (): Promise<never> => { throw new Error('git.diff not yet wired in Tauri backend'); },
+    // --- Write operations: thin wrappers around `git_raw` (Rust side
+    //     already shells out to `git -C <repo> <args>`). Each method
+    //     constructs the right git args, calls git_raw, and parses
+    //     minimal output where the frontend needs it.
+    add: async (repoPath: string, files: string[]): Promise<void> => {
+      await callGit('git_raw', repoPath, ['add', '--', ...files]);
+    },
+    addAll: async (repoPath: string): Promise<void> => {
+      await callGit('git_raw', repoPath, ['add', '.']);
+    },
+    restore: async (repoPath: string, files: string[], staged?: boolean): Promise<void> => {
+      // staged=true → unstage (git reset HEAD -- file), else restore working tree
+      if (staged) {
+        await callGit('git_raw', repoPath, ['reset', 'HEAD', '--', ...files]);
+      } else {
+        await callGit('git_raw', repoPath, ['checkout', '--', ...files]);
+      }
+    },
+    commit: async (repoPath: string, message: string, amend?: boolean, signoff?: boolean, noVerify?: boolean): Promise<string> => {
+      const args = ['commit'];
+      if (amend) args.push('--amend');
+      if (signoff) args.push('--signoff');
+      if (noVerify) args.push('--no-verify');
+      args.push('-m', message);
+      // Output includes the new HEAD hash on success — return first 7 chars.
+      await callGit('git_raw', repoPath, args);
+      // Resolve the new HEAD hash separately (rev-parse HEAD).
+      const hashOut = await callGit('git_raw', repoPath, ['rev-parse', 'HEAD']);
+      return hashOut.trim();
+    },
+    push: async (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string): Promise<unknown> => {
+      const args = ['push'];
+      if (setUpstream) args.push('-u');
+      if (force) args.push('--force');
+      if (tags) args.push('--tags');
+      args.push(remote || 'origin');
+      // refspec: branch[:targetBranch]
+      const refspec = branch + (targetBranch ? `:${targetBranch}` : '');
+      args.push(refspec);
+      await callGit('git_raw', repoPath, args);
+      // Return a minimal PushResult-compatible shape — full verification is
+      // best left to the Electron path; Tauri mode is for power users.
+      return {
+        ok: true,
+        remote: remote || 'origin',
+        branch,
+        summary: `Pushed ${branch || 'HEAD'} to ${remote || 'origin'}`,
+      };
+    },
+    pull: async (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean): Promise<void> => {
+      const args = ['pull'];
+      if (rebase) args.push('--rebase');
+      if (noFF) args.push('--no-ff');
+      args.push(remote || 'origin');
+      if (branch) args.push(branch);
+      await callGit('git_raw', repoPath, args);
+    },
+    fetch: async (repoPath: string, remote?: string, prune?: boolean, tags?: boolean): Promise<void> => {
+      const args = ['fetch'];
+      if (prune) args.push('--prune');
+      if (tags) args.push('--tags');
+      args.push(remote || 'origin');
+      await callGit('git_raw', repoPath, args);
+    },
+    fetchAll: async (repoPath: string, prune?: boolean): Promise<void> => {
+      const args = ['fetch', '--all'];
+      if (prune) args.push('--prune');
+      await callGit('git_raw', repoPath, args);
+    },
+    fetchDeepen: async (repoPath: string, remote?: string, commits?: number): Promise<void> => {
+      const args = ['fetch', '--deepen=' + (commits ?? 1)];
+      if (remote) args.push(remote);
+      await callGit('git_raw', repoPath, args);
+    },
+    setFetchDepth: async (repoPath: string, remote?: string, depth?: number): Promise<void> => {
+      const args = ['fetch'];
+      if ((depth ?? 0) <= 0) args.push('--unshallow');
+      else args.push(`--depth=${depth}`);
+      if (remote) args.push(remote);
+      await callGit('git_raw', repoPath, args);
+    },
+    checkout: async (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }): Promise<void> => {
+      const args = ['checkout'];
+      if (options?.newBranch) args.push('-b');
+      if (options?.force) args.push('--force');
+      if (options?.track) args.push('--track');
+      args.push(branch);
+      await callGit('git_raw', repoPath, args);
+    },
+    checkoutFile: async (repoPath: string, file: string, ref?: string): Promise<void> => {
+      const args = ['checkout'];
+      if (ref) args.push(ref);
+      args.push('--', file);
+      await callGit('git_raw', repoPath, args);
+    },
+    createBranch: async (repoPath: string, name: string, startPoint?: string, _force?: boolean, track?: boolean): Promise<void> => {
+      const args = ['branch'];
+      if (track) args.push('--track');
+      args.push(name);
+      if (startPoint) args.push(startPoint);
+      await callGit('git_raw', repoPath, args);
+    },
+    deleteBranch: async (repoPath: string, name: string, force?: boolean, remote?: boolean): Promise<void> => {
+      if (remote) {
+        // Delete a remote-tracking ref via push (matches Electron-side behavior).
+        await callGit('git_raw', repoPath, ['push', 'origin', '--delete', name]);
+      } else {
+        const args = ['branch', '--delete'];
+        if (force) args.push('--force');
+        args.push(name);
+        await callGit('git_raw', repoPath, args);
+      }
+    },
+    renameBranch: async (repoPath: string, oldName: string, newName: string): Promise<void> => {
+      await callGit('git_raw', repoPath, ['branch', '-m', oldName, newName]);
+    },
+    currentBranch: async (repoPath: string): Promise<string | null> => {
+      try {
+        const out = await callGit('git_raw', repoPath, ['symbolic-ref', '--short', 'HEAD']);
+        return out.trim() || null;
+      } catch {
+        return null; // detached HEAD
+      }
+    },
+    revParse: async (repoPath: string, ref: string): Promise<string> => {
+      const out = await callGit('git_raw', repoPath, ['rev-parse', ref]);
+      return out.trim();
+    },
+    reset: async (repoPath: string, mode: 'soft' | 'mixed' | 'hard' | 'keep', hash: string): Promise<void> => {
+      await callGit('git_raw', repoPath, ['reset', `--${mode}`, hash]);
+    },
+    resetFile: async (repoPath: string, file: string): Promise<void> => {
+      await callGit('git_raw', repoPath, ['reset', 'HEAD', '--', file]);
+    },
+    addRemote: async (repoPath: string, name: string, url: string): Promise<void> => {
+      await callGit('git_raw', repoPath, ['remote', 'add', name, url]);
+    },
+    removeRemote: async (repoPath: string, name: string): Promise<void> => {
+      await callGit('git_raw', repoPath, ['remote', 'remove', name]);
+    },
+    renameRemote: async (repoPath: string, oldName: string, newName: string): Promise<void> => {
+      await callGit('git_raw', repoPath, ['remote', 'rename', oldName, newName]);
+    },
+    setRemoteUrl: async (repoPath: string, name: string, url: string, pushUrl?: boolean): Promise<void> => {
+      const args = ['remote', pushUrl ? 'set-url' : 'set-url'];
+      if (pushUrl) args.push('--push');
+      args.push(name, url);
+      await callGit('git_raw', repoPath, args);
+    },
+    isRepo: async (targetPath: string): Promise<boolean> => {
+      try {
+        await callGit('git_raw', targetPath, ['rev-parse', '--is-inside-work-tree']);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    ignore: async (repoPath: string, files: string[]): Promise<void> => {
+      // Append to .gitignore (atomic-enough for a CLI tool; full impl in Electron).
+      const { join } = await import('path');
+      const { readTextFile, writeTextFile } = await import('@tauri-apps/plugin-fs');
+      const ignorePath = join(repoPath, '.gitignore');
+      let existing = '';
+      try { existing = await readTextFile(ignorePath); } catch { /* doesn't exist */ }
+      const additions = files.map(f => f.replace(/\s/g, '\\ ')).join('\n');
+      await writeTextFile(ignorePath, `${existing}${existing.endsWith('\n') || !existing ? '' : '\n'}${additions}\n`);
+    },
+
+    // --- Methods that still need full Rust impl (status bar / context
+    //     menu / GitHub integration) — left as stubs.
+    diff: async (): Promise<never> => { throw new Error('git.diff not yet wired in Tauri backend — use Electron for now'); },
     stageLines: async (): Promise<never> => { throw new Error('git.stageLines not yet wired in Tauri backend'); },
     unstageLines: async (): Promise<never> => { throw new Error('git.unstageLines not yet wired in Tauri backend'); },
-    createBranch: async (): Promise<never> => { throw new Error('git.createBranch not yet wired in Tauri backend'); },
-    deleteBranch: async (): Promise<never> => { throw new Error('git.deleteBranch not yet wired in Tauri backend'); },
-    checkout: async (): Promise<never> => { throw new Error('git.checkout not yet wired in Tauri backend'); },
-    push: async (): Promise<never> => { throw new Error('git.push not yet wired in Tauri backend'); },
-    pull: async (): Promise<never> => { throw new Error('git.pull not yet wired in Tauri backend'); },
-    fetch: async (): Promise<never> => { throw new Error('git.fetch not yet wired in Tauri backend'); },
-    commit: async (): Promise<never> => { throw new Error('git.commit not yet wired in Tauri backend'); },
   },
 
   fs: {
