@@ -7,6 +7,7 @@ import {
 import { MergePanel } from '../components/MergePanel';
 import { EmptyState } from '../components/EmptyState';
 import { FilterInput } from '../components/FilterInput';
+import { BranchTrackingIndicator } from '../components/BranchTrackingIndicator';
 import { generateBranchNames, type LLMProvider } from '../lib/aiCommitMessages';
 import type { AppSettings } from '../../electron/types/settings-api';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -1384,6 +1385,10 @@ export function BranchesPage() {
           {b.current ? '>' : ''}
         </span>
         <GitBranch size={12} className={cn('flex-shrink-0', b.current ? 'text-accent' : 'text-text-tertiary')} />
+        {/* Task 6 — visual fork/socket indicator for the local↔remote
+            tracking relationship. Plug inserted into the socket when the
+            branch has an upstream; hovering shows the upstream ref name. */}
+        <BranchTrackingIndicator tracking={!!b.tracking} upstreamName={b.tracking} size={12} />
         {/* Name */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
