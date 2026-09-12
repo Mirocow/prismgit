@@ -2,7 +2,7 @@
 // This file is loaded as a regular module, not inline script.
 //
 // Two things applied early:
-//   1. Theme class (.dark) on <html>
+//   1. Theme class (.dark) + data-theme attribute on <html>
 //   2. UI contrast (text/border color overrides) applied to <html> CSS vars.
 //      The contrast is read from localStorage; settingsStore re-applies once
 //      React mounts. We can't apply it here because the CSS variables aren't
@@ -10,9 +10,14 @@
 //      The settingsStore.loadSettings() call will apply it.
 try {
   var theme = localStorage.getItem('prismgit-theme') || 'light';
-  if (theme === 'dark') {
+  // Apply both the legacy .dark class (for backward compat with code that
+  // checks classList.contains('dark')) AND the data-theme attribute (the
+  // actual theme selector used by globals.css to override CSS variables).
+  var knownDarkThemes = ['dark', 'github-dark', 'dracula', 'monokai', 'solarized-dark', 'nord', 'tokyo-night', 'catppuccin-mocha', 'one-dark', 'gruvbox-dark'];
+  if (knownDarkThemes.indexOf(theme) >= 0) {
     document.documentElement.classList.add('dark');
   }
+  document.documentElement.setAttribute('data-theme', theme);
 } catch (e) {
   // Default to light
 }

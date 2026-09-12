@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { Folder, Github, Loader, LogOut, Moon, Plus, RefreshCw, Settings as SettingsIcon, Sun, Trash, GitBranch } from '../components/icons';
+import { Folder, Github, Loader, LogOut, Moon, Plus, RefreshCw, Settings as SettingsIcon, Sun, Trash, GitBranch, Palette } from '../components/icons';
 import { api, type GitConfigEntry } from '../lib/api';
+import { THEMES, type ThemeId, getThemeMeta } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
@@ -10,7 +11,7 @@ import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useI18n, LOCALES } from '../lib/i18n';
 
 export function SettingsPage() {
-  const { settings, theme, setSetting, toggleTheme } = useSettingsStore();
+  const { settings, theme, setSetting, toggleTheme, setTheme } = useSettingsStore();
   const { user, authenticated, loginWithPAT, logout, loadAuthState } = useAuthStore();
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastActions();
@@ -18,10 +19,11 @@ export function SettingsPage() {
   const { t, locale, setLocale } = useI18n();
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
-  // Top-level tab: Application Settings vs Project Settings
-  const [activeTab, setActiveTab] = useState<'application' | 'project'>('application');
+  // Top-level tab: Application Settings vs Project Settings vs Themes
+  const [activeTab, setActiveTab] = useState<'application' | 'project' | 'themes'>('application');
   const showApp = activeTab === 'application';
   const showProject = activeTab === 'project' && !!currentRepo;
+  const showThemes = activeTab === 'themes';
 
   // === Git Config section state ===
   const [configScope, setConfigScope] = useState<'local' | 'global' | 'system'>('local');
@@ -205,6 +207,18 @@ export function SettingsPage() {
                 {currentRepo.name}
               </span>
             )}
+          </button>
+          <button
+            className={cn(
+              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              showThemes
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            )}
+            onClick={() => setActiveTab('themes')}
+          >
+            <Palette size={14} />
+            {t('settings.themes')}
           </button>
         </div>
 
@@ -1319,6 +1333,238 @@ smartgit.refresh.inspectEol=true
             </div>
           </div>
         </section>
+        )}
+
+        {/* ─── Themes tab — multi-theme picker with pseudo-window preview ─── */}
+        {showThemes && (
+          <section className="panel mb-4">
+            <div className="panel-header flex items-center justify-between">
+              <span>{t('settings.themePicker')}</span>
+              <span className="text-2xs text-text-tertiary font-normal">
+                {t('settings.themePickerHint')}
+              </span>
+            </div>
+            <div className="p-5">
+              {/* Quick light/dark toggle button — kept for users who just
+                  want to flip between the two defaults without picking a
+                  specific palette. */}
+              <div className="flex items-center justify-between mb-4 pb-4 border-b border-border-subtle">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.quickToggle')}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.quickToggleHint')}
+                  </div>
+                </div>
+                <button className="btn btn-secondary" onClick={toggleTheme}>
+                  {theme === 'dark' || getThemeMeta(theme)?.isDark ? <Sun size={14} /> : <Moon size={14} />}
+                  {theme === 'dark' || getThemeMeta(theme)?.isDark ? t('settings.lightMode') : t('settings.darkMode')}
+                </button>
+              </div>
+
+              {/* Theme grid — each card shows a pseudo-window preview of the
+                  theme with its name. Click to apply. */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {THEMES.map((meta) => {
+                  const isActive = theme === meta.id;
+                  const p = meta.preview;
+                  return (
+                    <button
+                      key={meta.id}
+                      onClick={() => setTheme(meta.id)}
+                      className={cn(
+                        'text-left rounded-md border-2 transition-all overflow-hidden',
+                        isActive
+                          ? 'border-accent shadow-md'
+                          : 'border-border-default hover:border-border-strong hover:shadow-sm'
+                      )}
+                      style={{ background: p.bgPrimary }}
+                    >
+                      {/* Pseudo-window: title bar + body. Title bar mimics an
+                          OS window with traffic-light dots on the left. */}
+                      <div
+                        className="flex items-center gap-1.5 px-2 py-1.5 border-b"
+                        style={{
+                          background: p.bgTertiary,
+                          borderColor: p.border,
+                        }}
+                      >
+                        {/* Traffic-light dots — colored circles, classic macOS style */}
+                        <span
+                          className="rounded-full"
+                          style={{ width: 8, height: 8, background: p.statusDeleted, display: 'inline-block' }}
+                        />
+                        <span
+                          className="rounded-full"
+                          style={{ width: 8, height: 8, background: p.statusModified, display: 'inline-block' }}
+                        />
+                        <span
+                          className="rounded-full"
+                          style={{ width: 8, height: 8, background: p.statusAdded, display: 'inline-block' }}
+                        />
+                        {/* Window title — theme name */}
+                        <span
+                          className="ml-1 text-2xs font-medium truncate flex-1"
+                          style={{ color: p.textPrimary }}
+                        >
+                          {t(meta.labelKey)}
+                        </span>
+                        {/* Active check-mark */}
+                        {isActive && (
+                          <span
+                            className="text-2xs font-bold px-1.5 py-0 rounded-sm"
+                            style={{ background: p.accent, color: p.bgPrimary }}
+                          >
+                            ✓
+                          </span>
+                        )}
+                      </div>
+                      {/* Window body — mimics the actual app layout:
+                          sidebar on the left, content area on the right.
+                          Shows representative UI elements: a sidebar item,
+                          a row, a button. */}
+                      <div className="flex" style={{ minHeight: 70 }}>
+                        {/* Sidebar */}
+                        <div
+                          className="flex flex-col gap-1 p-1.5"
+                          style={{
+                            width: 38,
+                            background: p.bgSecondary,
+                            borderRight: `1px solid ${p.border}`,
+                          }}
+                        >
+                          {/* Two sidebar items — one active (accent bg),
+                              one inactive (faded). */}
+                          <div
+                            className="rounded-sm"
+                            style={{
+                              height: 6,
+                              background: p.accent,
+                              opacity: 0.5,
+                            }}
+                          />
+                          <div
+                            className="rounded-sm"
+                            style={{
+                              height: 6,
+                              background: p.textSecondary,
+                              opacity: 0.25,
+                            }}
+                          />
+                          <div
+                            className="rounded-sm"
+                            style={{
+                              height: 6,
+                              background: p.textSecondary,
+                              opacity: 0.25,
+                            }}
+                          />
+                        </div>
+                        {/* Main content area */}
+                        <div
+                          className="flex-1 p-2 flex flex-col gap-1"
+                          style={{ background: p.bgPrimary }}
+                        >
+                          {/* Row 1 — file with state letter (M for modified) */}
+                          <div
+                            className="flex items-center gap-1 text-2xs"
+                            style={{ color: p.textPrimary }}
+                          >
+                            <span style={{ color: p.statusModified, fontWeight: 700 }}>M</span>
+                            <span style={{ opacity: 0.85 }}>file.ts</span>
+                          </div>
+                          {/* Row 2 — another file */}
+                          <div
+                            className="flex items-center gap-1 text-2xs"
+                            style={{ color: p.textPrimary }}
+                          >
+                            <span style={{ color: p.statusAdded, fontWeight: 700 }}>A</span>
+                            <span style={{ opacity: 0.85 }}>new.ts</span>
+                          </div>
+                          {/* Row 3 — button */}
+                          <div
+                            className="self-start mt-auto px-1.5 py-0.5 rounded text-2xs font-medium"
+                            style={{
+                              background: p.accent,
+                              color: p.bgPrimary,
+                            }}
+                          >
+                            {t('settings.sampleButton')}
+                          </div>
+                        </div>
+                      </div>
+                      {/* Footer — theme name + dark/light indicator */}
+                      <div
+                        className="flex items-center justify-between px-2 py-1 border-t"
+                        style={{
+                          background: p.bgSecondary,
+                          borderColor: p.border,
+                        }}
+                      >
+                        <span
+                          className="text-2xs font-medium"
+                          style={{ color: p.textPrimary }}
+                        >
+                          {t(meta.labelKey)}
+                        </span>
+                        <span
+                          className="text-2xs px-1.5 py-0 rounded-sm"
+                          style={{
+                            color: meta.isDark ? p.textSecondary : p.textSecondary,
+                            border: `1px solid ${p.border}`,
+                          }}
+                        >
+                          {meta.isDark ? t('settings.themeDarkTag') : t('settings.themeLightTag')}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Color swatches — shows the key accent + status colors of
+                  the CURRENTLY SELECTED theme, so users can see the full
+                  palette at a glance without scanning the pseudo-window. */}
+              <div className="mt-5 pt-4 border-t border-border-subtle">
+                <div className="text-xs font-medium mb-2">
+                  {t('settings.currentPalette')}
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {(() => {
+                    const meta = getThemeMeta(theme);
+                    if (!meta) return null;
+                    const p = meta.preview;
+                    const swatches: { name: string; color: string }[] = [
+                      { name: t('settings.swatchBgPrimary'), color: p.bgPrimary },
+                      { name: t('settings.swatchBgSecondary'), color: p.bgSecondary },
+                      { name: t('settings.swatchBgTertiary'), color: p.bgTertiary },
+                      { name: t('settings.swatchTextPrimary'), color: p.textPrimary },
+                      { name: t('settings.swatchTextSecondary'), color: p.textSecondary },
+                      { name: t('settings.swatchAccent'), color: p.accent },
+                      { name: t('settings.swatchBorder'), color: p.border },
+                      { name: t('settings.swatchAdded'), color: p.statusAdded },
+                      { name: t('settings.swatchModified'), color: p.statusModified },
+                      { name: t('settings.swatchDeleted'), color: p.statusDeleted },
+                    ];
+                    return swatches.map((s) => (
+                      <div key={s.name} className="flex flex-col items-center gap-1">
+                        <div
+                          className="rounded-md border border-border-default"
+                          style={{ background: s.color, width: 36, height: 36 }}
+                          title={s.color}
+                        />
+                        <span className="text-2xs text-text-tertiary text-center max-w-[60px] truncate">
+                          {s.name}
+                        </span>
+                        <span className="text-2xs font-mono text-text-tertiary/70">
+                          {s.color}
+                        </span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            </div>
+          </section>
         )}
       </div>
     </div>

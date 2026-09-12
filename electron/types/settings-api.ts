@@ -49,7 +49,15 @@ export interface RepositoryMetadata {
 }
 
 export interface AppSettings {
-  theme: 'dark' | 'light' | 'system';
+  /**
+   * UI theme id. Stored as a string; validated at runtime against the registry
+   * in src/lib/themes.ts. Old installs may have 'light' / 'dark' / 'system'
+   * — these are still accepted (light/dark map to default Ayu themes).
+   * New values: 'github-light', 'github-dark', 'dracula', 'monokai',
+   * 'solarized-light', 'solarized-dark', 'nord', 'tokyo-night',
+   * 'catppuccin-mocha', 'one-dark', 'gruvbox-dark'.
+   */
+  theme: string;
   fontSize: number;          // Global base font size
   fontSizeTree: number;      // File tree / directory tree font size
   fontSizeList: number;      // Commit lists, branch lists, tag lists

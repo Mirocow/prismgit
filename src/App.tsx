@@ -31,6 +31,7 @@ import {
 import { t as i18nT, useI18nStore } from './lib/i18n';
 import { clearProjectPrefs, loadProjectPrefs, saveProjectPrefs } from './lib/projectPrefs';
 import { useAuthStore } from './stores/authStore';
+import { useCommandLogStore } from './stores/commandLogStore';
 import { useGitStore } from './stores/gitStore';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSelectionStore } from './stores/selectionStore';
@@ -121,6 +122,19 @@ export default function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showCommandLog, setShowCommandLog] = useState(false);
   const [commandLogHeight, setCommandLogHeight] = useState(260);
+  /**
+   * When the command-log panel is auto-opened by a simple-git error, this
+   * flag tells CommandLogPanel to start with the "Errors only" filter ON
+   * and scroll to the latest failed entry. Reset to false on manual close
+   * or manual toggle so subsequent opens show the full command list.
+   */
+  const [commandLogErrorsOnly, setCommandLogErrorsOnly] = useState(false);
+  /**
+   * Tracks the last errorPulse we've seen — used to detect NEW errors
+   * while the panel is closed so we can auto-open it.
+   */
+  const [lastSeenErrorPulse, setLastSeenErrorPulse] = useState(0);
+  const errorPulse = useCommandLogStore((s) => s.errorPulse);
   const [refAction, setRefAction] = useState<RefAction | null>(null);
   const [indexEditorFile, setIndexEditorFile] = useState<string | null | undefined>(undefined);
   const [showIndexEditor, setShowIndexEditor] = useState(false);
@@ -141,6 +155,24 @@ export default function App() {
   useEffect(() => {
     window.smartgit?.app?.setLocale?.(locale);
   }, [locale]);
+
+  // Auto-open the Command Log panel when a NEW git error arrives AND the
+  // panel is currently closed. The errorPulse counter increments in
+  // commandLogStore.append() whenever a failed entry (exitCode !== 0)
+  // arrives from the main-process spawn interceptor. By tracking
+  // lastSeenErrorPulse we only react to NEW errors — not the same error
+  // re-rendering the component.
+  //
+  // When triggered: opens the panel + sets errorsOnly=true so the user
+  // immediately sees the failed command (not the full command list). The
+  // panel auto-scrolls to the top (newest = the failed entry).
+  useEffect(() => {
+    if (errorPulse > lastSeenErrorPulse && !showCommandLog) {
+      setCommandLogErrorsOnly(true);
+      setShowCommandLog(true);
+    }
+    setLastSeenErrorPulse(errorPulse);
+  }, [errorPulse, lastSeenErrorPulse, showCommandLog]);
 
   useEffect(() => {
     loadRepos();
@@ -297,7 +329,12 @@ export default function App() {
     const handleGitFlow = () => setShowGitFlow(true);
     const handleIRebase = () => setShowIRebase(true);
     const handleShowShortcuts = () => setShowShortcuts(true);
-    const handleToggleCommandLog = () => setShowCommandLog(s => !s);
+    const handleToggleCommandLog = () => {
+      // Manual toggle resets the errorsOnly flag — user wants to see the
+      // full command list, not just errors.
+      setCommandLogErrorsOnly(false);
+      setShowCommandLog(s => !s);
+    };
 
     // ===== SmartGit-style command helpers =====
     const requireRepo = () => useRepositoryStore.getState().currentRepo;
@@ -1204,7 +1241,13 @@ export default function App() {
         <>
           <ResizableSplitter direction="vertical" onResize={(d) => setCommandLogHeight(h => Math.max(100, Math.min(600, h - d)))} />
           <div style={{ height: commandLogHeight, flexShrink: 0 }}>
-            <CommandLogPanel onClose={() => setShowCommandLog(false)} />
+            <CommandLogPanel
+              onClose={() => {
+                setShowCommandLog(false);
+                setCommandLogErrorsOnly(false);
+              }}
+              initialErrorsOnly={commandLogErrorsOnly}
+            />
           </div>
         </>
       )}

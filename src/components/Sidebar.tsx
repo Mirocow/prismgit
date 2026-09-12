@@ -776,7 +776,12 @@ export function Sidebar() {
           )}
 
           {/* Regular navigation groups */}
-          {Object.entries(groups_).map(([groupName, items]) => (
+          {Object.entries(groups_).map(([groupName, items]) => {
+            // Hide the entire group if all its items are favorited (moved
+            // to the Favorites section above). Avoids empty group headers.
+            const visibleItems = items.filter(item => !favoriteTools.includes(item.path));
+            if (visibleItems.length === 0) return null;
+            return (
             <div key={groupName} className="mb-3">
               {true && (
                 <button
@@ -795,7 +800,14 @@ export function Sidebar() {
                   {groupName}
                 </button>
               )}
-              {!collapsedGroups.has(groupName) && items.map((item) => {
+              {!collapsedGroups.has(groupName) && items
+                // Hide items that are already favorited — they show in the
+                // Favorites section at the top, no need to duplicate them
+                // in their original group. This keeps the sidebar compact
+                // and avoids the "where do I click" ambiguity of the same
+                // tool appearing in two places.
+                .filter(item => !favoriteTools.includes(item.path))
+                .map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
                 // Changes item gets a live badge; others show their quick-nav key
@@ -867,7 +879,8 @@ export function Sidebar() {
                 );
               })}
             </div>
-          ))}
+            );
+          })}
           </>
         ) : (
           <div className="px-3 py-4 text-xs text-text-tertiary text-center">

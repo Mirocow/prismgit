@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { api, type AppSettings } from '../lib/api';
+import { type ThemeId, THEMES, getThemeMeta, DEFAULT_THEME, isThemeDark } from '../lib/themes';
 
-type Theme = 'dark' | 'light';
+export type Theme = ThemeId;
 
 interface SettingsState {
   settings: Partial<AppSettings>;
@@ -17,11 +18,16 @@ interface SettingsState {
 
 function applyThemeToDOM(theme: Theme) {
   const html = document.documentElement;
-  if (theme === 'dark') {
-    html.classList.add('dark');
-  } else {
-    html.classList.remove('dark');
-  }
+  const meta = getThemeMeta(theme);
+  const dark = meta?.isDark ?? false;
+  // Legacy .dark class — preserved for backward compat with components that
+  // check `classList.contains('dark')` (e.g. contrast blending in this file).
+  if (dark) html.classList.add('dark');
+  else html.classList.remove('dark');
+  // data-theme attribute — the actual theme selector used in globals.css.
+  // Each [data-theme="..."] block overrides the default :root / .dark
+  // variables with theme-specific colors.
+  html.setAttribute('data-theme', theme);
   // Persist for next load
   try {
     localStorage.setItem('prismgit-theme', theme);
@@ -119,13 +125,13 @@ function applyContrastToDOM(contrast: number) {
 // Apply theme immediately on module load (prevents FOUC)
 try {
   const saved = localStorage.getItem('prismgit-theme') as Theme | null;
-  if (saved === 'dark' || saved === 'light') {
-    applyThemeToDOM(saved);
-  } else {
-    applyThemeToDOM('light'); // default to light
-  }
+  // Accept any registered theme; fall back to default for unknown values
+  // (handles old installs that had only 'light' / 'dark').
+  const validIds = THEMES.map((t) => t.id);
+  const theme = saved && validIds.includes(saved) ? saved : DEFAULT_THEME;
+  applyThemeToDOM(theme);
 } catch {
-  applyThemeToDOM('light');
+  applyThemeToDOM(DEFAULT_THEME);
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -137,7 +143,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ loading: true });
     try {
       const settings = await api.settings.getAll();
-      const theme = settings.theme === 'light' ? 'light' : 'dark';
+      // Validate stored theme — old installs may have 'light'/'dark' only,
+      // newer may have any of the registered themes.
+      const stored = settings.theme as string | undefined;
+      const validIds = THEMES.map((t) => t.id);
+      const theme: Theme = stored && validIds.includes(stored as Theme) ? (stored as Theme) : DEFAULT_THEME;
       set({ settings, theme, loading: false });
       get().applyTheme();
       // Apply all font sizes on load
@@ -161,7 +171,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const settings = { ...get().settings, [key]: value };
     set({ settings });
     if (key === 'theme') {
-      const t = value === 'light' ? 'light' : 'dark';
+      const t = value as Theme;
       set({ theme: t });
       get().applyTheme();
     }
@@ -196,7 +206,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   toggleTheme: async () => {
-    const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
+    // Toggle between light and dark variants — flips isDark but keeps the
+    // palette family when possible (e.g. github-light ↔ github-dark).
+    // For themes without a paired opposite, falls back to DEFAULT_THEME.
+    const current = get().theme;
+    const currentMeta = getThemeMeta(current);
+    if (!currentMeta) {
+      await get().setTheme(DEFAULT_THEME);
+      return;
+    }
+    // Try to find a paired opposite (same family, opposite darkness)
+    const opposite = THEMES.find((t) => t.isDark !== currentMeta.isDark && t.id.startsWith(current.split('-')[0]));
+    const next: Theme = opposite
+      ? opposite.id
+      : (currentMeta.isDark ? DEFAULT_THEME : 'dark');
     await get().setTheme(next);
   },
 

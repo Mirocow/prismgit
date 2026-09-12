@@ -130,10 +130,18 @@ const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEn
 
 export function CommandLogPanel({
   onClose,
+  initialErrorsOnly,
 }: {
   onClose: () => void;
+  /**
+   * When true, the "Errors only" filter is checked on mount (and the panel
+   * scrolls to the latest failed entry). Used by App.tsx when auto-opening
+   * the panel after a simple-git failure — the user wants to see the error
+   * immediately, not the full command list.
+   */
+  initialErrorsOnly?: boolean;
 }) {
-  const [errorsOnly, setErrorsOnly] = useState(false);
+  const [errorsOnly, setErrorsOnly] = useState(initialErrorsOnly ?? false);
   const [showSystem, setShowSystem] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const { t } = useI18n();
@@ -184,6 +192,18 @@ export function CommandLogPanel({
     itemCount: visibleEntries.length,
     estimateRowHeight: ROW_HEIGHT,
   });
+
+  // Auto-scroll to the top (newest entry) when the panel is auto-opened
+  // on error. Entries are sorted newest-first, so the failed entry that
+  // triggered the open is at the top. We only do this on mount when
+  // initialErrorsOnly is set (auto-open scenario) — not on every filter
+  // change afterwards, which would fight the user's manual scroll.
+  useEffect(() => {
+    if (initialErrorsOnly && lazyList.scrollRef.current) {
+      lazyList.scrollRef.current.scrollTop = 0;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const copyAll = () => {
     const text = visibleEntries
