@@ -175,9 +175,16 @@ export function initOperationLogIpcListener(): () => void {
   if (typeof window === 'undefined' || !(window as any).smartgit) {
     return () => {}; // no-op cleanup
   }
-  const { ipcRenderer } = require('electron') as typeof import('electron');
+  // Use the preload bridge instead of require('electron') — the latter
+  // breaks under Vite ESM in the browser (require is not defined).
+  // Preload exposes operationLog.onStart / onFinish which subscribe to
+  // the same IPC channels ('operation-log:start' / 'operation-log:finish').
+  const api = (window as any).smartgit;
+  if (!api.operationLog) {
+    return () => {}; // preload bridge missing — silent no-op
+  }
 
-  const startListener = (_: unknown, entry: { id: string; timestamp: number; action: string; command?: string; repoPath: string; status: 'running' }) => {
+  const startListener = (entry: { id: string; timestamp: number; action: string; command?: string; repoPath: string; status: 'running' }) => {
     const store = useOperationLogStore.getState();
     const op: OperationLog = {
       id: entry.id,
@@ -193,7 +200,7 @@ export function initOperationLogIpcListener(): () => void {
     }));
   };
 
-  const finishListener = (_: unknown, entry: { id: string; status: 'success' | 'error'; result?: string; error?: string }) => {
+  const finishListener = (entry: { id: string; status: 'success' | 'error'; result?: string; error?: string }) => {
     const startTime = useOperationLogStore.getState().ops.find((o) => o.id === entry.id)?.timestamp;
     const duration = startTime ? Date.now() - startTime : undefined;
     useOperationLogStore.setState((state) => ({
@@ -210,11 +217,11 @@ export function initOperationLogIpcListener(): () => void {
     }));
   };
 
-  ipcRenderer.on('operation-log:start', startListener);
-  ipcRenderer.on('operation-log:finish', finishListener);
+  const unsubStart = api.operationLog.onStart(startListener);
+  const unsubFinish = api.operationLog.onFinish(finishListener);
 
   return () => {
-    ipcRenderer.removeListener('operation-log:start', startListener);
-    ipcRenderer.removeListener('operation-log:finish', finishListener);
+    unsubStart();
+    unsubFinish();
   };
 }

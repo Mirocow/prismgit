@@ -491,6 +491,23 @@ const api = {
     },
   },
 
+  // Operation log — high-level operation start/finish events emitted by the
+  // main process (electron/services/operationLog.ts). Exposed here so the
+  // renderer can subscribe WITHOUT using require('electron') (which breaks
+  // under Vite ESM).
+  operationLog: {
+    onStart: (cb: (entry: { id: string; timestamp: number; action: string; command?: string; repoPath: string; status: 'running' }) => void) => {
+      const listener = (_: unknown, entry: any) => cb(entry);
+      ipcRenderer.on('operation-log:start', listener);
+      return () => ipcRenderer.removeListener('operation-log:start', listener);
+    },
+    onFinish: (cb: (entry: { id: string; status: 'success' | 'error'; result?: string; error?: string }) => void) => {
+      const listener = (_: unknown, entry: any) => cb(entry);
+      ipcRenderer.on('operation-log:finish', listener);
+      return () => ipcRenderer.removeListener('operation-log:finish', listener);
+    },
+  },
+
   // Menu events (one-way from main to renderer)
   events: {
     on: (channel: string, cb: (...args: unknown[]) => void) => {
