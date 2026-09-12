@@ -133,7 +133,13 @@ export default function App() {
       setShowClone(true);
     };
     window.addEventListener('prismgit:clone-into-group', onCloneIntoGroup);
-    return () => window.removeEventListener('prismgit:clone-into-group', onCloneIntoGroup);
+    // Root context menu 'Clone' → open Clone modal without a target group
+    const onOpenClone = () => setShowClone(true);
+    window.addEventListener('prismgit:open-clone-modal', onOpenClone);
+    return () => {
+      window.removeEventListener('prismgit:clone-into-group', onCloneIntoGroup);
+      window.removeEventListener('prismgit:open-clone-modal', onOpenClone);
+    };
   }, []);
   const [showInit, setShowInit] = useState(false);
   const [showFind, setShowFind] = useState(false);

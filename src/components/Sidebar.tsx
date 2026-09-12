@@ -709,6 +709,27 @@ export function Sidebar() {
               }
             }}
             onDrop={(e) => void handleDrop(e, null)}
+            onContextMenu={(e) => {
+              // Right-click on empty area of repo list → root context menu
+              // (New repository group / Open another repository / Clone)
+              e.preventDefault();
+              e.stopPropagation();
+              void showContextMenu([
+                { label: t('sidebar.newGroup'), clickId: 'new-group' },
+                { type: 'separator' },
+                { label: t('sidebar.openRepository'), clickId: 'open-repo' },
+                { label: t('shell.cloneRepositoryMenu'), clickId: 'clone-repo' },
+              ], (clickId) => {
+                if (clickId === 'new-group') {
+                  void handleCreateGroup(null);
+                } else if (clickId === 'open-repo') {
+                  useRepositoryStore.getState().openRepositoryPicker();
+                } else if (clickId === 'clone-repo') {
+                  // Trigger the global Clone modal via CustomEvent
+                  window.dispatchEvent(new CustomEvent('prismgit:open-clone-modal'));
+                }
+              });
+            }}
           >
             {repos.length === 0 && groups.length === 0 ? (
               <div
