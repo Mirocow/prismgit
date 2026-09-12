@@ -1825,6 +1825,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                   onSelectDir={handleSelectDir}
                   changeCounts={dirChangeCounts}
                   totalChanges={totalChanged}
+                  ignoredPaths={new Set(ignoredFiles)}
                 />
               </div>
             </div>
