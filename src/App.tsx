@@ -1312,6 +1312,7 @@ export default function App() {
             onClose={() => setShowGlobalSearch(false)}
           />
         </Suspense>
+        <Suspense fallback={null}>{showAiAssistant && <AiAssistant onClose={() => setShowAiAssistant(false)} />}</Suspense>
       </div>
     );
   }
