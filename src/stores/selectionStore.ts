@@ -106,7 +106,7 @@ export interface GlobalSelectionState {
   /** Whether the directory tree panel is visible on the Changes page. */
   dirTreeVisible: boolean;
   /** Column widths (px) for the Changes file table: State and Relative Directory. */
-  colWidths: { state: number; dir: number };
+  colWidths: { state: number; dir: number; name: number };
 
   /**
    * One-shot diff request — set by other tools (e.g. Stashes → "Open in Diff")
@@ -159,7 +159,7 @@ export interface GlobalSelectionState {
   toggleFileFilterRegex: () => void;
   toggleDirTreeVisible: () => void;
   /** Set the width (px) of one of the resizable Changes table columns. */
-  setColWidth: (col: 'state' | 'dir', width: number) => void;
+  setColWidth: (col: 'state' | 'dir' | 'name', width: number) => void;
   /** Set a one-shot diff request — DiffPage consumes it on first render. */
   setDiffRequest: (req: { baseRef: string; compareRef: string; filePath?: string; stashHash?: string } | null) => void;
   /**
@@ -199,7 +199,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   fileSort: { key: 'name', dir: 1 },
   fileFilterRegex: false,
   dirTreeVisible: false,
-  colWidths: { state: 70, dir: 120 },
+  colWidths: { state: 70, dir: 120, name: 280 },
   diffRequest: null,
 
   selectCommit: (hash) => set({ selectedCommitHash: hash }),
@@ -258,7 +258,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
     fileSort: prefs.fileSort ?? { key: 'name', dir: 1 },
     fileFilterRegex: prefs.fileFilterRegex ?? false,
     dirTreeVisible: prefs.dirTreeVisible ?? false,
-    colWidths: prefs.colWidths ?? { state: 70, dir: 120 },
+    colWidths: prefs.colWidths ?? { state: 70, dir: 120, name: 280 },
     // fileDisplayFlags is NOT restored from prefs — always use defaults.
   }),
   clearAll: () => set({

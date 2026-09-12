@@ -548,12 +548,12 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // column's visible boundary moved LEFT). With the handle on the column's
   // left boundary and width = start - dx, the boundary under the mouse tracks
   // the cursor 1:1 in both directions — the expected table-resize feel.
-  const startColResize = (e: ReactMouseEvent, col: 'state' | 'dir') => {
+  const startColResize = (e: ReactMouseEvent, col: 'state' | 'dir' | 'name') => {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = colWidths[col];
-    const min = col === 'state' ? 46 : 50;
-    const max = col === 'state' ? 220 : 480;
+    const min = col === 'state' ? 46 : col === 'dir' ? 50 : 100;
+    const max = col === 'state' ? 220 : col === 'dir' ? 480 : 800;
     const onMove = (ev: MouseEvent) => {
       setColWidth(col, Math.max(min, Math.min(max, startWidth - (ev.clientX - startX))));
     };
@@ -2054,7 +2054,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             {/* Table header — click a column to sort (SmartGit-style) */}
             <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary sticky top-0 z-10">
               <span className="w-4"></span>
-              <SortableHeader label={t('changes.colName')} sortKey="name" sort={fileSort} onSort={handleSort} />
+              <SortableHeader label={t('changes.colName')} sortKey="name" sort={fileSort} onSort={handleSort} width={colWidths.name} onResizeStart={(e) => startColResize(e, 'name')} />
               <span style={{ width: 74 }} title={t('changes.addedRemovedLines')}></span>
               <SortableHeader label={t('changes.colState')} sortKey="state" sort={fileSort} onSort={handleSort} width={colWidths.state} onResizeStart={(e) => startColResize(e, 'state')} />
               {!compressFilePaths && (

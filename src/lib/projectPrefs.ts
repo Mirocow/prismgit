@@ -36,7 +36,7 @@ export interface ProjectPrefs {
   fileSort?: { key: FileSortKey; dir: 1 | -1 };
   fileFilterRegex?: boolean;
   dirTreeVisible?: boolean;
-  colWidths?: { state: number; dir: number };
+  colWidths?: { state: number; dir: number; name: number };
 
   // --- Panel sizes ---
   /** Width of the Changes left panel (file list + journal + commit editor). */

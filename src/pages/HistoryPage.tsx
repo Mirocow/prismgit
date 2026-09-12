@@ -928,10 +928,17 @@ export function HistoryPage() {
     } catch (e) { toast.error('Failed', String(e)); }
   };
 
-  const showCommitContextMenu = (e: React.MouseEvent, entry: LogEntry, idx: number) => {
+  const showCommitContextMenu = async (e: React.MouseEvent, entry: LogEntry, idx: number) => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedIdx(idx);
+    // Load tags pointing at THIS commit (not the currently selected one) so
+    // the context menu can offer Edit/Delete actions for them.
+    let commitTags: { name: string; annotated: boolean; tagger?: string; date?: string; message?: string }[] = [];
+    try {
+      commitTags = await api.git.tagsAt(repo.path, entry.hash);
+    } catch { /* ignore — empty tag list */ }
+
     const items: ContextMenuItem[] = [
       { label: 'Cherry Pick', clickId: 'cherry-pick' },
       { label: 'Revert Commit', clickId: 'revert' },
@@ -948,6 +955,20 @@ export function HistoryPage() {
       { type: 'separator' },
       { label: 'Create Tag here...', clickId: 'create-tag' },
       { label: 'Create Branch here...', clickId: 'create-branch' },
+    ];
+    // If tags point at this commit, add Edit/Delete actions for each.
+    // Annotated tags can be edited (message); lightweight tags can only be deleted.
+    if (commitTags.length > 0) {
+      items.push({ type: 'separator' });
+      for (const tag of commitTags) {
+        const label = tag.annotated
+          ? `Edit Tag "${tag.name}"...`
+          : `Tag "${tag.name}" (lightweight)`;
+        items.push({ label, clickId: `edit-tag:${tag.name}` });
+        items.push({ label: `  Delete Tag "${tag.name}"`, clickId: `delete-tag:${tag.name}` });
+      }
+    }
+    items.push(
       { type: 'separator' },
       { label: 'Open in Diff tool...', clickId: 'open-in-diff' },
       { label: 'Compare with Working Tree...', clickId: 'compare-wt' },
@@ -970,8 +991,19 @@ export function HistoryPage() {
       { type: 'separator' },
       { label: 'Format Patch...', clickId: 'format-patch' },
       { label: 'Open in Browser', clickId: 'browser' },
-    ];
+    );
     showContextMenu(items, (action) => {
+      // Tag actions — dynamic clickId with tag name encoded after ':'
+      if (action.startsWith('edit-tag:')) {
+        const tagName = action.slice('edit-tag:'.length);
+        handleEditTag(tagName, entry);
+        return;
+      }
+      if (action.startsWith('delete-tag:')) {
+        const tagName = action.slice('delete-tag:'.length);
+        handleDeleteTag(tagName);
+        return;
+      }
       switch (action) {
         case 'cherry-pick': handleCherryPick(entry); break;
         case 'revert': handleRevert(entry); break;
@@ -1061,18 +1093,67 @@ export function HistoryPage() {
     setTagName('');
     setTagMessage('');
     setTagAnnotated(true);
+    setEditingTagName(null);
     setShowTagDialog(true);
   };
 
   const handleSaveTag = async () => {
     if (!tagTarget || !tagName.trim()) return;
     try {
-      await api.git.createTag(repo.path, tagName.trim(), tagMessage || undefined, tagTarget, false, tagAnnotated);
-      toast.success(`Tag '${tagName}' created`, `Points to ${shortHash(tagTarget)}`);
+      // When editing (editingTagName is set), use force=true to overwrite
+      // the existing tag at the same commit with the new message.
+      const force = !!editingTagName;
+      await api.git.createTag(repo.path, tagName.trim(), tagMessage || undefined, tagTarget, force, tagAnnotated);
+      toast.success(
+        force ? `Tag '${tagName}' updated` : `Tag '${tagName}' created`,
+        `Points to ${shortHash(tagTarget)}`
+      );
       setShowTagDialog(false);
-      // Refresh history so the tag decoration appears immediately
+      setEditingTagName(null);
       await loadHistory();
-    } catch (e) { toast.error('Failed to create tag', String(e)); }
+    } catch (e) { toast.error('Failed to save tag', String(e)); }
+  };
+
+  // Edit an existing tag's message (annotated tags only). Re-creates the tag
+  // with force=true at the same commit so the message is updated. Lightweight
+  // tags have no message to edit — the menu offers Delete instead.
+  const handleEditTag = async (tagName: string, entry: LogEntry) => {
+    // Fetch the existing tag's annotation (if annotated) to pre-fill the dialog
+    try {
+      const tags = await api.git.tagsAt(repo.path, entry.hash);
+      const existing = tags.find(t => t.name === tagName);
+      const isAnnotated = existing?.annotated ?? false;
+      if (!isAnnotated) {
+        toast.info('Lightweight tag', `"${tagName}" has no message to edit. Use Delete + Create to convert.`);
+        return;
+      }
+      // Open the tag dialog in "edit" mode — pre-fill name + message,
+      // reuse the same dialog as Create (save uses force=true when editing).
+      setTagTarget(entry.hash);
+      setTagName(tagName);
+      setTagMessage(existing?.message ?? '');
+      setTagAnnotated(true);
+      setEditingTagName(tagName);
+      setShowTagDialog(true);
+    } catch (e) { toast.error('Failed to load tag', String(e)); }
+  };
+
+  // Track whether the dialog is in edit mode (vs create). When set, handleSaveTag
+  // uses force=true to overwrite the existing tag at the same commit.
+  const [editingTagName, setEditingTagName] = useState<string | null>(null);
+
+  const handleDeleteTag = async (tagName: string) => {
+    if (!(await confirmDialog({
+      title: `Delete tag "${tagName}"`,
+      message: `The tag will be removed from the local repository. If it was pushed to a remote, it will still exist there until you delete it remotely.`,
+      confirmLabel: 'Delete Tag',
+      danger: true,
+    }))) return;
+    try {
+      await api.git.deleteTag(repo.path, tagName);
+      toast.success(`Tag "${tagName}" deleted`);
+      await loadHistory();
+    } catch (e) { toast.error('Failed to delete tag', String(e)); }
   };
 
   // Branch-from-commit dialog state
@@ -1414,11 +1495,15 @@ export function HistoryPage() {
                 const end = lazyList.visibleRange.end;
                 const sliceHeight = Math.max(0, (end - start) * ROW_HEIGHT);
                 const sliceRows = graphRows.slice(start, end);
+                // The SVG must align with the commit rows, which live inside
+                // the spacer div that starts AFTER the Working Tree row.
+                // Add wtOffset so the SVG's top matches the rows' top.
+                const svgTop = lazyList.offsetY + wtOffset;
                 return (
                 <svg
                   width={graphWidth}
                   height={sliceHeight}
-                  style={{ position: 'absolute', top: lazyList.offsetY, left: 0, pointerEvents: 'none', zIndex: 5 }}
+                  style={{ position: 'absolute', top: svgTop, left: 0, pointerEvents: 'none', zIndex: 5 }}
                 >
                   {sliceRows.map((row, idx) => {
                     // idx is local to the visible slice; rowY is relative
