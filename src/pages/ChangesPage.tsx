@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { AppSettings } from '../../electron/types/settings-api';
 import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
+import { CommitTypeDropdown } from '../components/CommitTypeDropdown';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FilePlus, FileCheck, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Loader, Lock, Minus, Plus, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
@@ -775,6 +776,35 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // Commit message history dropdown
   const [showMsgHistory, setShowMsgHistory] = useState(false);
   const [commitMsgHistory, setCommitMsgHistory] = useState<string[]>([]);
+
+  /**
+   * QW-3 — apply a Conventional-Commits prefix ('feat', 'fix', …) to the
+   * commit-message textarea.
+   *  - If textarea is empty → insert `${type}: `.
+   *  - If textarea already starts with `<one of the 11 types>: ` → strip the
+   *    existing prefix and replace with `${type}: ` (so users can switch
+   *    feat → fix without manually editing).
+   *  - Otherwise → prepend `${type}: ` to the existing text.
+   * Also re-focuses the textarea and moves the caret to the end so the user
+   * can keep typing.
+   */
+  const handlePickCommitType = useCallback((type: string) => {
+    const CONVENTIONAL_PREFIX = /^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert):\s/;
+    setCommitMsg((prev) => {
+      const stripped = prev.replace(CONVENTIONAL_PREFIX, '');
+      const trimmed = stripped.replace(/^\s+/, '');
+      return trimmed.length === 0 ? `${type}: ` : `${type}: ${trimmed}`;
+    });
+    // Re-focus the textarea at end so the user can continue typing.
+    requestAnimationFrame(() => {
+      const ta = document.getElementById('commit-message-input') as HTMLTextAreaElement | null;
+      if (ta) {
+        ta.focus();
+        const end = ta.value.length;
+        ta.setSelectionRange(end, end);
+      }
+    });
+  }, [setCommitMsg]);
 
   // Load commit message history when repo changes
   useEffect(() => {
@@ -2223,6 +2253,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 <Sparkles size={10} className={aiGenerating ? 'animate-pulse' : ''} />
                 AI
               </button>
+              {/* Conventional Commits prefix dropdown (QW-3) */}
+              <CommitTypeDropdown onPickType={handlePickCommitType} />
               {/* Commit message history dropdown */}
               <div className="relative">
                 <button
