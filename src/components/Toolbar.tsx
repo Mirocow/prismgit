@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api, type BranchInfo, type RemoteInfo } from '../lib/api';
+import { useI18n } from '../lib/i18n';
 import { describePushResult } from '../lib/pushResult';
+import { getRepoInProgressState, isRepoBusy } from '../lib/repoState';
+import { getThemeMeta } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
+import { useToastActions } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
-import { getRepoInProgressState, isRepoBusy } from '../lib/repoState';
-import { useI18n } from '../lib/i18n';
-import { getThemeMeta } from '../lib/themes';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
@@ -249,15 +249,6 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
         {groups.utils && (
           <>
             <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title={t('shell.repoInfo')} />
-            {/* Task 12 — Git-Flow as a prominent top-toolbar button.
-                Previously only in the GitToolbar (second row); now also
-                in the main utility row for quick access. */}
-            <IconButton
-              icon={GitBranch}
-              onClick={() => onGitFlow && onGitFlow()}
-              disabled={disabled}
-              title={t('shell.gitFlowTooltip')}
-            />
             {/* Task 1 — search is enabled even when no repo is open.
                 GlobalSearch falls back to repository-list search when
                 currentRepo is null (see GlobalSearch's empty-state

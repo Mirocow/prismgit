@@ -3,14 +3,14 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type { RemoteCheckSummary } from '../lib/api';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
-import { getThemeMeta } from '../lib/themes';
+import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import {
   buildRepoTree, canMoveGroup, flattenGroupOptions,
   type RepoGroupNode, type RepoItemNode,
 } from '../lib/repoTree';
+import { getThemeMeta } from '../lib/themes';
 import { useContextMenu } from '../lib/useContextMenu';
 import { cn } from '../lib/utils';
-import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -666,20 +666,6 @@ export function Sidebar() {
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); void checkRemotes(); }}
             >
               <RefreshCw size={13} className={cn(checkingRemotes && 'animate-spin')} />
-            </button>
-            <button
-              className="icon-btn no-drag flex-shrink-0 !w-7 !h-7"
-              title={t('sidebar.newGroup')}
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleCreateGroup(null); }}
-            >
-              <FolderPlus size={14} />
-            </button>
-            <button
-              className="icon-btn no-drag flex-shrink-0 !w-7 !h-7"
-              title={t('sidebar.openRepository')}
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); useRepositoryStore.getState().openRepositoryPicker(); }}
-            >
-              <FolderOpen size={14} />
             </button>
           </div>
         </div>

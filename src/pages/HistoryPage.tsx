@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Avatar } from '../components/Avatar';
 import { CommitFileTree } from '../components/CommitFileTree';
 import { DiffViewer } from '../components/DiffViewer';
 import { FilterInput } from '../components/FilterInput';
@@ -19,28 +20,27 @@ import {
   Undo,
   X
 } from '../components/icons';
+import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
-import { RepoStateBanner } from '../components/RepoStateBanner';
 import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
 import { api, type BranchInfo, type CommitFile, type LogEntry, type RecyclableCommit, type StashEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
-import { Avatar } from '../components/Avatar';
 import { linkifyCommitMessage } from '../lib/bugtraq';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
 import { RefBadges } from '../lib/refBadge';
+import { buildRepoStateHandlers } from '../lib/repoState';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { useLazyList } from '../lib/useLazyList';
 import { cn, copyToClipboard, shortHash } from '../lib/utils';
-import { buildRepoStateHandlers } from '../lib/repoState';
 import { useAuthStore } from '../stores/authStore';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
+import { useToastActions } from '../stores/toastStore';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -1312,10 +1312,6 @@ export function HistoryPage() {
             onToggleRegex={() => setUseRegex(!useRegex)}
             regexTitle="Toggle regex"
           />
-          <button className={cn('icon-btn !w-5 !h-5', useRegex && 'active')}
-            title="Toggle regex" onClick={() => setUseRegex(!useRegex)}>
-            <span className="text-2xs font-mono">.*</span>
-          </button>
           <button className={cn('icon-btn !w-5 !h-5', showFilters && 'active')}
             title="More filters" onClick={() => setShowFilters(!showFilters)}>
             <Filter size={11} />
