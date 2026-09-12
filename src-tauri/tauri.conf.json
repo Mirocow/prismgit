@@ -27,7 +27,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.github.com https://github.com https://www.gravatar.com;"
+      "csp": "default-src 'self'; script-src 'self' 'sha256-fd7U3wsOO2GN+dmvkzsGOiJDQzqnbBImELc9sF22ytA='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.github.com https://github.com https://www.gravatar.com ws: wss:;"
     },
     "withGlobalTauri": true
   },
@@ -56,7 +56,6 @@
     },
     "windows": {
       "certificateThumbprint": null,
-      "digestHashingAlgorithm": null,
       "timestampUrl": null,
       "wix": {
         "language": ["en-US", "ru-RU", "zh-CN", "de-DE"]

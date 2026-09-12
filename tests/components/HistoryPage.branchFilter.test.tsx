@@ -58,6 +58,8 @@ vi.mock('../../src/lib/api', () => ({
       checkout: vi.fn().mockResolvedValue(undefined),
       editCommitMessage: vi.fn().mockResolvedValue(undefined),
       editCommitAuthor: vi.fn().mockResolvedValue(undefined),
+      // Tags list — empty by default; tests that need it override this mock.
+      tags: vi.fn().mockResolvedValue([]),
     },
     contextMenu: {
       show: vi.fn().mockResolvedValue(undefined),

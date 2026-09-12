@@ -104,6 +104,18 @@ export function HistoryPage() {
   }, [globalAuthorFilter]);
   // "Recent" smart-view preset (last 7 days) — date-based, independent of author filter
   const [recentActive, setRecentActive] = useState(false);
+  // "Tagged" smart-view preset — show only commits that have at least one tag
+  // pointing at them (refs/tags/*). Mirrors the "Mine"/"Merges"/"Recent"
+  // quick-filter pattern so the user can scope History to release points.
+  const [taggedActive, setTaggedActive] = useState(false);
+  // Cache of all tags in the repo (name + hash) — used for the Tagged filter
+  // and the Tags header section. Loaded once per repo, refreshed on demand.
+  const [allTags, setAllTags] = useState<{ name: string; hash: string }[]>([]);
+  useEffect(() => {
+    api.git.tags(repo.path).then(tags => {
+      setAllTags(tags.map(t => ({ name: t.name, hash: t.hash })));
+    }).catch(() => setAllTags([]));
+  }, [repo.path]);
   // Current user's git config user.name — for "Mine" quick filter
   const [myAuthorName, setMyAuthorName] = useState('');
   useEffect(() => {
@@ -392,8 +404,14 @@ export function HistoryPage() {
       const toTs = new Date(dateTo).getTime() + 86400000; // end of day
       if (!isNaN(toTs)) result = result.filter(e => e.author.timestamp <= toTs);
     }
+    // Tagged-only filter — show only commits that have at least one tag pointing
+    // at them. `entry.refs` from `git log --decorate=full` contains entries
+    // like "tag: refs/tags/v1.0.0" — we look for that prefix.
+    if (taggedActive) {
+      result = result.filter(e => e.refs.some(r => r.startsWith('tag:') || r.includes('refs/tags/')));
+    }
     return result;
-  }, [searchPool, debouncedSearch, authorFilter, pathFilter, dateFrom, dateTo, useRegex]);
+  }, [searchPool, debouncedSearch, authorFilter, pathFilter, dateFrom, dateTo, useRegex, taggedActive]);
 
   // Auto-scroll to the globally selected commit (set here or from another tool —
   // e.g. a tag click in Tags page). See the index-space warning above.
@@ -615,19 +633,58 @@ export function HistoryPage() {
     return () => { cancelled = true; };
   }, [selectedIdx, filtered, repo.path]);
 
-  // SmartGit: while a cherry-pick is in progress no other HEAD-moving
-  // operation may start — it would discard the unfinished pick.
-  const blockedByCherryPick = (): boolean => {
-    if (!status?.isCherryPicking) return false;
-    toast.error(
-      'Cherry-pick in progress',
-      'Finish it first on the Changes page (Continue, Skip or Abort)'
-    );
+  // SmartGit: while ANY sequencer state is in progress (cherry-pick / revert /
+  // merge / rebase / bisect) no other HEAD-moving operation may start — it
+  // would discard the unfinished work. We surface a single guard so the user
+  // sees the same message + can Abort *right here* (no need to navigate to
+  // Changes just to call `git merge --abort`).
+  const blockedByRepoState = async (): Promise<boolean> => {
+    if (!status) return false;
+    const state =
+      status.isMerging ? 'merge'
+        : status.isRebasing ? 'rebase'
+          : status.isCherryPicking ? 'cherry-pick'
+            : status.isReverting ? 'revert'
+              : status.isBisecting ? 'bisect'
+                : null;
+    if (!state) return false;
+    const title =
+      state === 'merge' ? 'Merge in progress'
+        : state === 'rebase' ? 'Rebase in progress'
+          : state === 'cherry-pick' ? 'Cherry-pick in progress'
+            : state === 'revert' ? 'Revert in progress'
+              : 'Bisect in progress';
+    // Offer an in-place Abort button — the user shouldn't have to leave
+    // History just to discard a stale merge.
+    const abortNow = await confirmDialog({
+      title,
+      message: `Another HEAD-moving operation would discard the in-progress ${state}.\n\nFinish it first on the Changes page, or Abort it now.`,
+      confirmLabel: `Abort ${state} now`,
+      cancelLabel: 'Go to Changes',
+      danger: true,
+    });
+    if (abortNow) {
+      try {
+        switch (state) {
+          case 'merge': await api.git.abortMerge(repo.path); break;
+          case 'rebase': await api.git.rebase(repo.path, '', { abort: true }); break;
+          case 'cherry-pick': await api.git.cherryPickAbort(repo.path); break;
+          case 'revert': await api.git.revertAbort(repo.path); break;
+          case 'bisect': await api.git.bisectReset(repo.path); break;
+        }
+        toast.success(`${state[0].toUpperCase() + state.slice(1)} aborted`);
+        await refreshStatus(repo.path);
+        await loadHistory();
+      } catch (e) { toast.error(`Abort ${state} failed`, String(e)); }
+      return true;
+    }
+    // User clicked "Go to Changes" — navigate there so they can use the banner.
+    window.location.hash = '#/changes';
     return true;
   };
 
   const handleCherryPick = async (entry: { hash: string; subject: string }) => {
-    if (blockedByCherryPick()) return;
+    if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
       title: `Cherry-pick ${shortHash(entry.hash)}`,
       message: `Apply the changes from this commit onto your current branch?\n\nCommit: "${entry.subject}"`,
@@ -658,7 +715,7 @@ export function HistoryPage() {
   useEscapeKey(!!compareDiff, () => setCompareDiff(null));
 
   const handleRevert = async (entry: LogEntry) => {
-    if (blockedByCherryPick()) return;
+    if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
       title: `Revert ${shortHash(entry.hash)}`,
       message: `Create a NEW commit that undoes the changes from this commit?\n\nOriginal commit: "${entry.subject}"`,
@@ -673,7 +730,7 @@ export function HistoryPage() {
   };
 
   const handleReset = async (hash: string, mode: 'soft' | 'mixed' | 'hard' | 'keep') => {
-    if (blockedByCherryPick()) return;
+    if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
       title: `Reset to ${shortHash(hash)} (${mode})`,
       message: mode === 'hard'
@@ -690,7 +747,7 @@ export function HistoryPage() {
   };
 
   const handleRebase = async (hash: string) => {
-    if (blockedByCherryPick()) return;
+    if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
       title: 'Rebase current branch',
       message: `Replay your current branch's commits on top of ${shortHash(hash)}?\nMay cause conflicts.`,
@@ -774,7 +831,7 @@ export function HistoryPage() {
   };
 
   const handleCheckout = async (hash: string) => {
-    if (blockedByCherryPick()) return;
+    if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
       title: `Checkout ${shortHash(hash)}`,
       message: "This puts you in detached HEAD state — you won't be on any branch.",
@@ -1195,6 +1252,17 @@ export function HistoryPage() {
             >
               Merges
             </button>
+            {/* Tagged-only filter — show only commits that have at least one tag
+                pointing at them (refs/tags/*). Useful for finding release points. */}
+            <button
+              className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1',
+                taggedActive ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
+              onClick={() => setTaggedActive(!taggedActive)}
+              title={taggedActive ? 'Showing only tagged commits — click to clear' : 'Show only commits with a tag (release points)'}
+            >
+              <TagIcon size={10} />
+              Tagged{allTags.length > 0 ? ` (${allTags.length})` : ''}
+            </button>
           </div>
           <button className={cn('icon-btn !w-5 !h-5', showGraph && 'active')}
             title="Toggle graph" onClick={() => setShowGraph(!showGraph)}>
@@ -1483,7 +1551,9 @@ export function HistoryPage() {
 
                     {/* Decorations: tags first, then HEAD/branches/remotes — parsed
                         from BOTH short and --decorate=full shapes (see refBadge). */}
-                    <RefBadges refs={entry.refs} max={3} hash={entry.hash} onChanged={loadHistory} />
+                    {/* Show up to 5 ref badges per row so tags (often grouped with
+                        branches and remotes) are visible at a glance. */}
+                    <RefBadges refs={entry.refs} max={5} hash={entry.hash} onChanged={loadHistory} />
 
                     {/* Incoming badge — commit exists only on remote, not yet pulled.
                         In VS Code style: a dashed "↓ incoming" label with the remote
