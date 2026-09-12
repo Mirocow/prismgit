@@ -193,6 +193,7 @@ const api = {
 
     // LFS support
     lfsStatus: (repoPath: string) => ipcRenderer.invoke('git:lfsStatus', repoPath),
+    isLfsInstalled: (repoPath: string) => ipcRenderer.invoke('git:isLfsInstalled', repoPath),
     lfsPull: (repoPath: string, files?: string[]) => ipcRenderer.invoke('git:lfsPull', repoPath, files),
     lfsPush: (repoPath: string) => ipcRenderer.invoke('git:lfsPush', repoPath),
     lfsFetch: (repoPath: string) => ipcRenderer.invoke('git:lfsFetch', repoPath),

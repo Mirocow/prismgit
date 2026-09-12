@@ -496,6 +496,27 @@ export const tauriApi = {
       return raw.split('\n').filter(Boolean);
     },
 
+    // LFS support — preflight check to avoid "git: 'lfs' is not a git command"
+    // errors when git-lfs is not installed.
+    isLfsInstalled: async (repoPath: string): Promise<boolean> => {
+      try {
+        const out = await callGit('git_raw', repoPath, ['lfs', 'version']);
+        return !!out.trim();
+      } catch {
+        return false;
+      }
+    },
+    lfsStatus: async (_repoPath: string): Promise<{ installed: boolean; files: never[] }> => {
+      // Stub — full LFS status parsing not yet wired in Tauri
+      return { installed: false, files: [] };
+    },
+    lfsList: async (_repoPath: string): Promise<string[]> => {
+      return [];
+    },
+    lfsListLocks: async (_repoPath: string): Promise<unknown[]> => {
+      return [];
+    },
+
     // --- Methods that still need full Rust impl (status bar / context
     //     menu / GitHub integration) — left as stubs.
     stageLines: async (repoPath: string, file: string, lineRanges: { start: number; end: number }[]): Promise<void> => {

@@ -31,6 +31,17 @@ export function LfsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // Preflight: check if git-lfs is installed BEFORE calling any LFS
+      // commands. This avoids "git: 'lfs' is not a git command" errors
+      // being shown to the user when LFS is simply not installed.
+      const lfsReady = await api.git.isLfsInstalled(repo.path);
+      if (!lfsReady) {
+        setInstalled(false);
+        setFiles([]);
+        setTracked([]);
+        setLocks([]);
+        return;
+      }
       const [status, list, lockList] = await Promise.all([
         api.git.lfsStatus(repo.path),
         api.git.lfsList(repo.path).catch(() => []),

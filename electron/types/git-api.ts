@@ -491,6 +491,8 @@ export interface GitApi {
 
   // LFS support
   lfsStatus: (repoPath: string) => Promise<{ installed: boolean; files: { path: string; size: string; status: string }[] }>;
+  /** Check if git-lfs is installed (preflight before any LFS command). */
+  isLfsInstalled: (repoPath: string) => Promise<boolean>;
   lfsPull: (repoPath: string, files?: string[]) => Promise<void>;
   lfsPush: (repoPath: string) => Promise<void>;
   lfsFetch: (repoPath: string) => Promise<void>;
