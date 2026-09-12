@@ -594,6 +594,53 @@ export const tauriApi = {
       return () => {};
     },
   },
+
+  // Menu events — App.tsx uses window.smartgit.events.on('menu:...', cb)
+  // to listen for native menu actions. Under Tauri these events don't
+  // exist yet (Tauri menu API is configured separately). Return a no-op
+  // unsubscribe so the renderer doesn't crash trying to access .events.
+  events: {
+    on: (_channel: string, _cb: (...args: unknown[]) => void): (() => void) => {
+      // No-op — menu events are not wired in Tauri mode yet.
+      return () => {};
+    },
+  },
+
+  // Window controls — App.tsx calls api.window.minimize/maximize/close
+  // via the frameless-window header. Under Tauri these map to the
+  // window plugin (built into tauri core).
+  window: {
+    minimize: async (): Promise<void> => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().minimize();
+    },
+    maximize: async (): Promise<void> => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const win = getCurrentWindow();
+      // Toggle maximize — matches the Electron behavior where maximize()
+      // un-maximizes if already maximized.
+      const isMax = await win.isMaximized();
+      if (isMax) await win.unmaximize();
+      else await win.maximize();
+    },
+    close: async (): Promise<void> => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().close();
+    },
+    isMaximized: async (): Promise<boolean> => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      return getCurrentWindow().isMaximized();
+    },
+  },
+
+  // Tauri menu events — listen via @tauri-apps/api/event instead of
+  // Electron's ipcRenderer. Returns a no-op unsubscribe for now since
+  // Tauri menu events require a separate menu setup in Rust.
+  menu: {
+    on: (_event: string, _cb: (...args: unknown[]) => void): (() => void) => {
+      return () => {};
+    },
+  },
 };
 
 /**

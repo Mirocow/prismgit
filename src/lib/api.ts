@@ -100,4 +100,12 @@ export const api: AnyApi = isTauri()
   ? (tauriApi as unknown as AnyApi)
   : window.smartgit;
 
+// Under Tauri, window.smartgit doesn't exist (Tauri exposes window.__TAURI__
+// instead). But many components call window.smartgit.events.on(...) directly
+// rather than through the `api` import. Mirror the tauriApi onto
+// window.smartgit so those calls don't crash — they'll hit the no-op stubs.
+if (isTauri() && typeof window !== 'undefined' && !(window as { smartgit?: unknown }).smartgit) {
+  (window as { smartgit: unknown }).smartgit = tauriApi;
+}
+
 export { isTauri };
