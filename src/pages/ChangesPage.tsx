@@ -1997,7 +1997,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               </>
             )}
 
-            {/* GROUP 2: Everything else — all non-staged files in one flat list */}
+            {/* GROUP 2: Unstaged — all non-staged files in one flat list */}
             {(() => {
               const combined = [
                 ...unstagedFiles,
@@ -2010,7 +2010,23 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 ...unchangedFiles, // unchanged always last
               ];
               if (combined.length === 0) return null;
-              return <LazyFileList files={combined} isStaged={false} renderRow={renderFileRow} />;
+              return (
+                <>
+                  <div
+                    className="px-2 py-1 bg-status-modified/8 text-2xs font-bold uppercase text-status-modified border-b border-status-modified/20 border-l-2 border-l-status-modified/40 flex items-center justify-between cursor-pointer hover:bg-status-modified/12 transition-colors"
+                    onClick={() => {
+                      if (repo) {
+                        useGitStore.getState().stageAll(repo.path);
+                      }
+                    }}
+                    title={t('changes.clickToStageAll')}
+                  >
+                    <span>{t('changes.changesCount', { count: combined.length })}</span>
+                    <span className="text-text-tertiary normal-case font-normal">{t('changes.clickToStageAllHint')}</span>
+                  </div>
+                  <LazyFileList files={combined} isStaged={false} renderRow={renderFileRow} />
+                </>
+              );
             })()}
 
             {/* Empty state — only when truly nothing to show */}
