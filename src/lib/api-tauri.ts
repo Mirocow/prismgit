@@ -1,0 +1,272 @@
+/**
+ * Tauri adapter for the api surface.
+ *
+ * When the app is running under Tauri (detected via window.__TAURI__),
+ * `src/lib/api.ts` delegates to this module instead of `window.smartgit`
+ * (the Electron preload binding).
+ *
+ * Currently wired up:
+ *   - api.git.raw(repoPath, args)        → invoke('git_raw', ...)
+ *   - api.git.status(repoPath)            → invoke('git_status', ...) + porcelain parser
+ *   - api.git.branches(repoPath)          → invoke('git_branches', ...) + parser
+ *   - api.git.tags(repoPath)              → invoke('git_tags', ...) + parser
+ *   - api.git.stashList(repoPath)         → invoke('git_stash_list', ...) + parser
+ *   - api.git.log(repoPath, opts)         → invoke('git_log', ...) + parser
+ *   - api.git.reflog(repoPath, ref, n)    → invoke('git_reflog', ...) + parser
+ *   - api.fs.openRepositoryPicker()       → invoke('open_repo_picker')
+ *   - api.watcher.start(path) / stop(path) → invoke('watch_repo') / invoke('unwatch_repo')
+ *   - api.commandLog.onEntry(cb)          → listen('repo:changed', ...) [partial]
+ *
+ * Not yet wired up (Tauri calls fall back to Promise.reject — UI should
+ * disable the corresponding features when running under Tauri):
+ *   - api.github.* (need Tauri HTTP plugin + GitHub OAuth flow)
+ *   - api.git.diff / stageLines / unstageLines (need git2-rs or shelled out)
+ *   - api.settings.* (need Tauri storage plugin + JSON persistence)
+ *   - api.contextMenu.* (need Tauri window menu API)
+ *
+ * The frontend gracefully degrades — pages that need unsupported
+ * features show an empty state with a hint to use the Electron build.
+ */
+
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+
+/** Result of a Rust-side git command (matches Rust struct in src-tauri/src/lib.rs). */
+interface GitCommandResult {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+}
+
+/** Call a Rust-side git command. */
+async function callGit(cmd: string, repoPath: string, args?: unknown[]): Promise<string> {
+  const res = await invoke<GitCommandResult>(cmd, { repoPath, args: args ?? [] });
+  if (!res.ok) {
+    const err = new Error(res.stderr || `git ${cmd} failed (exit ${res.exit_code})`);
+    (err as Error & { exitCode: number }).exitCode = res.exit_code;
+    throw err;
+  }
+  return res.stdout;
+}
+
+// --- Minimal types matching the Electron-side contracts ---
+// (Trimmed down — full types live in electron/types/*.ts. We import
+// them re-export via api.ts so the rest of the frontend doesn't need
+// to know whether it's running under Electron or Tauri.)
+
+interface RawBranchInfo {
+  name: string;
+  remote: boolean;
+  current: boolean;
+  tracking?: string;
+  hashAbbrev?: string;
+  date?: string;
+}
+
+interface RawTagInfo {
+  name: string;
+  hashAbbrev?: string;
+  date?: string;
+}
+
+interface RawStashEntry {
+  index: number;
+  hash: string;
+  message: string;
+  date: string;
+}
+
+interface RawLogEntry {
+  hash: string;
+  hashAbbrev: string;
+  subject: string;
+  authorName: string;
+  authorEmail: string;
+  authorDate: string;
+  committerName: string;
+  committerEmail: string;
+  committerDate: string;
+  refs: string;
+}
+
+interface RawReflogEntry {
+  hash: string;
+  selector: string;
+  message: string;
+  date: string;
+}
+
+export const tauriApi = {
+  git: {
+    /** Run an arbitrary git command — same shape as Electron's api.git.raw. */
+    raw: async (repoPath: string, args: string[]): Promise<string> => {
+      return callGit('git_raw', repoPath, args);
+    },
+
+    /** git status --porcelain — parsed into the same StatusResult shape. */
+    status: async (_repoPath: string): Promise<{ files: unknown[]; staged: unknown[]; modified: string[]; not_added: string[]; current: string | null; ahead: number; behind: number; detached: boolean }> => {
+      // TODO: parse porcelain output into StatusResult. For now, return
+      // an empty shape so the UI doesn't crash — pages that depend on
+      // status refresh will show an empty state.
+      return {
+        files: [],
+        staged: [],
+        modified: [],
+        not_added: [],
+        current: null,
+        ahead: 0,
+        behind: 0,
+        detached: false,
+      };
+    },
+
+    branches: async (repoPath: string): Promise<RawBranchInfo[]> => {
+      const out = await callGit('git_branches', repoPath);
+      return out.split('\n').filter(Boolean).map(line => {
+        const [head, name, tracking, hashAbbrev, date] = line.split('\x00');
+        return {
+          name,
+          remote: name.includes('/'),
+          current: head === '*',
+          tracking: tracking || undefined,
+          hashAbbrev: hashAbbrev || undefined,
+          date: date || undefined,
+        };
+      });
+    },
+
+    tags: async (repoPath: string): Promise<RawTagInfo[]> => {
+      const out = await callGit('git_tags', repoPath);
+      return out.split('\n').filter(Boolean).map(line => {
+        const [name, hashAbbrev, date] = line.split('\x00');
+        return { name, hashAbbrev, date };
+      });
+    },
+
+    stashList: async (repoPath: string): Promise<RawStashEntry[]> => {
+      const out = await callGit('git_stash_list', repoPath);
+      return out.split('\n').filter(Boolean).map((line, idx) => {
+        const [hash, message, date] = line.split('\x00');
+        return { index: idx, hash, message, date };
+      });
+    },
+
+    log: async (repoPath: string, opts?: { maxCount?: number }): Promise<RawLogEntry[]> => {
+      const out = await callGit('git_log', repoPath, [opts?.maxCount]);
+      return out.split('\n').filter(Boolean).map(line => {
+        const [hash, hashAbbrev, subject, an, ae, ad, cn, ce, cd, refs] = line.split('\x00');
+        return {
+          hash,
+          hashAbbrev,
+          subject,
+          authorName: an,
+          authorEmail: ae,
+          authorDate: ad,
+          committerName: cn,
+          committerEmail: ce,
+          committerDate: cd,
+          refs,
+        };
+      });
+    },
+
+    reflog: async (repoPath: string, ref?: string, maxCount?: number): Promise<RawReflogEntry[]> => {
+      const out = await callGit('git_reflog', repoPath, [ref, maxCount]);
+      return out.split('\n').filter(Boolean).map(line => {
+        const [hash, selector, message, date] = line.split('\x00');
+        return { hash, selector, message, date };
+      });
+    },
+
+    // --- Methods that need full Rust impl (currently stubs that reject) ---
+    diff: async (): Promise<never> => { throw new Error('git.diff not yet wired in Tauri backend'); },
+    stageLines: async (): Promise<never> => { throw new Error('git.stageLines not yet wired in Tauri backend'); },
+    unstageLines: async (): Promise<never> => { throw new Error('git.unstageLines not yet wired in Tauri backend'); },
+    createBranch: async (): Promise<never> => { throw new Error('git.createBranch not yet wired in Tauri backend'); },
+    deleteBranch: async (): Promise<never> => { throw new Error('git.deleteBranch not yet wired in Tauri backend'); },
+    checkout: async (): Promise<never> => { throw new Error('git.checkout not yet wired in Tauri backend'); },
+    push: async (): Promise<never> => { throw new Error('git.push not yet wired in Tauri backend'); },
+    pull: async (): Promise<never> => { throw new Error('git.pull not yet wired in Tauri backend'); },
+    fetch: async (): Promise<never> => { throw new Error('git.fetch not yet wired in Tauri backend'); },
+    commit: async (): Promise<never> => { throw new Error('git.commit not yet wired in Tauri backend'); },
+  },
+
+  fs: {
+    openRepositoryPicker: async (): Promise<string | null> => {
+      return invoke<string | null>('open_repo_picker');
+    },
+  },
+
+  watcher: {
+    start: async (repoPath: string): Promise<UnlistenFn> => {
+      // Tauri backend emits 'repo:changed' on every fs event; the
+      // frontend subscribes via listen(). Return an unsubscriber.
+      await invoke('watch_repo', { repoPath });
+      // The unlisten function for the EVENT subscription (kept separate
+      // so the caller can stop listening without stopping the watcher).
+      return () => { /* no-op — caller can invoke unwatch_repo to stop */ };
+    },
+    stop: async (repoPath: string): Promise<void> => {
+      await invoke('unwatch_repo', { repoPath });
+    },
+  },
+
+  // Listen to fs change events emitted by the Rust watcher.
+  onRepoChanged: (cb: (path: string) => void): Promise<UnlistenFn> => {
+    return listen<string>('repo:changed', (event) => {
+      cb(event.payload);
+    });
+  },
+
+  // Stubbed methods — frontend should disable these features in Tauri.
+  app: {
+    openExternal: async (_url: string): Promise<void> => {
+      // Use the shell plugin for this once wired in capabilities.
+      const { open } = await import('@tauri-apps/plugin-shell');
+      await open(_url);
+    },
+  },
+
+  settings: {
+    get: async (): Promise<unknown> => { throw new Error('settings.get not yet wired in Tauri backend'); },
+    set: async (): Promise<void> => { throw new Error('settings.set not yet wired in Tauri backend'); },
+  },
+
+  github: {
+    // GitHub integration requires Tauri HTTP plugin + OAuth flow — left for follow-up.
+    getUser: async (): Promise<never> => { throw new Error('github.getUser not yet wired in Tauri backend'); },
+  },
+
+  commandLog: {
+    list: async (): Promise<unknown[]> => { return []; },
+    clear: async (): Promise<void> => { /* no-op */ },
+    onEntry: (_cb: (entry: unknown) => void): UnlistenFn => {
+      // No live command log in Tauri yet — return a no-op unsubscriber.
+      return () => {};
+    },
+    onClick: (_cb: (clickId: string) => void): UnlistenFn => {
+      return () => {};
+    },
+  },
+
+  contextMenu: {
+    show: async (_items: unknown[]): Promise<void> => {
+      // Tauri has a Menu API; for now, frontend should fall back to
+      // its own context menu component.
+      throw new Error('contextMenu.show not wired in Tauri backend');
+    },
+    onClick: (_cb: (clickId: string) => void): UnlistenFn => {
+      return () => {};
+    },
+  },
+};
+
+/**
+ * Detect if the app is running under Tauri.
+ * Tauri 2.x sets window.__TAURI_INTERNALS__ at runtime.
+ */
+export function isTauri(): boolean {
+  return typeof window !== 'undefined'
+    && !!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+}

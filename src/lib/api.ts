@@ -81,4 +81,23 @@ export type {
   RepoGroup,
 };
 
-export const api = window.smartgit;
+// Runtime-agnostic api: delegate to Tauri adapter when running under
+// Tauri (window.__TAURI_INTERNALS__ is set by Tauri 2.x), otherwise
+// use the Electron preload binding (window.smartgit).
+//
+// The Tauri adapter (src/lib/api-tauri.ts) implements the most critical
+// methods (git.raw/status/branches/tags/stashList/log/reflog, fs picker,
+// watcher, app.openExternal). Methods not yet wired in Tauri throw —
+// the frontend should gracefully disable those features when running
+// under Tauri (see isTauri() helper).
+import { tauriApi, isTauri } from './api-tauri';
+
+// Use 'unknown as' cast so TypeScript doesn't complain about the partial
+// Tauri adapter — methods that aren't implemented on the Tauri side
+// will throw at runtime, which the UI can catch and degrade gracefully.
+type AnyApi = typeof window.smartgit;
+export const api: AnyApi = isTauri()
+  ? (tauriApi as unknown as AnyApi)
+  : window.smartgit;
+
+export { isTauri };

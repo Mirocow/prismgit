@@ -1,0 +1,51 @@
+[package]
+name = "prismgit-tauri"
+version = "2.0.0"
+description = "PrismGit — modern Git client (Tauri build)"
+authors = ["PrismGit Team"]
+license = "MIT"
+repository = ""
+default-run = "prismgit-tauri"
+edition = "2021"
+rust-version = "1.70"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "prismgit_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+# Tauri core — provides window, IPC, plugins.
+tauri = { version = "2.0", features = [] }
+# Tauri plugins — shell (for invoking git CLI), dialog (file pickers),
+# fs (read files), window (multi-window).
+tauri-plugin-shell = "2.0"
+tauri-plugin-dialog = "2.0"
+tauri-plugin-fs = "2.0"
+tauri-plugin-window = "2.0"
+# notify — file watcher (replaces chokidar from Electron).
+notify = "6.1.1"
+# serde — JSON serialization for IPC commands.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# log + env_logger — for debugging.
+log = "0.4"
+env_logger = "0.11"
+
+[features]
+# This feature is used for production builds where the devtools are
+# intentionally disabled. Default keeps devtools ON for debugging.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+# Optimize the binary for size (smaller installer).
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

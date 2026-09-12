@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { getInitials, getAuthorColor } from '../lib/authorBadges';
 import { gravatarUrl, likelyHasGravatar } from '../lib/gravatar';
 
@@ -10,13 +10,13 @@ import { gravatarUrl, likelyHasGravatar } from '../lib/gravatar';
  * The component:
  *  - First renders the colored-initial fallback synchronously so the
  *    layout doesn't shift on mount.
- *  - Lazily loads the Gravatar image (via <img src>) only when the email
- *    matches a provider likely to have a real Gravatar (GitHub, GitLab
- *    noreply addresses). This avoids a network round-trip for every
- *    commit author in the list.
+ *  - Asynchronously computes the Gravatar URL (via crypto.subtle SHA-256,
+ *    no npm dependency) and lazy-loads the image.
+ *  - Only fires the network request if the email is from a known
+ *    provider (GitHub / GitLab noreply addresses) — avoids a network
+ *    round-trip for every commit author in the list.
  *  - On image load success, swaps to the image.
- *  - On image load failure, falls back to the initials (e.g. user is
- *    offline, or Gravatar is blocked).
+ *  - On image load failure, falls back to the initials (offline / blocked).
  *
  * `size` is the avatar diameter in px (default 24).
  */
@@ -31,23 +31,35 @@ export const Avatar = memo(function Avatar({
   size?: number;
   className?: string;
 }) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [imgOk, setImgOk] = useState(false);
-  const [imgTried, setImgTried] = useState(false);
+  // Compute the async Gravatar URL when the email changes.
+  useEffect(() => {
+    let cancelled = false;
+    if (!email || !likelyHasGravatar(email)) {
+      setImgUrl(null);
+      setImgOk(false);
+      return;
+    }
+    void gravatarUrl(email, size * 2 /* retina */).then(url => {
+      if (!cancelled) setImgUrl(url);
+    }).catch(() => { if (!cancelled) setImgUrl(null); });
+    return () => { cancelled = true; };
+  }, [email, size]);
+
   const initials = getInitials(name);
   const { bg, text } = getAuthorColor(name);
-  const shouldTryGravatar = !imgTried && email && likelyHasGravatar(email);
-  const url = shouldTryGravatar ? gravatarUrl(email, size * 2 /* retina */) : '';
 
-  if (imgOk && url) {
+  if (imgOk && imgUrl) {
     return (
       <img
-        src={url}
+        src={imgUrl}
         alt={name}
         width={size}
         height={size}
         className={`rounded-full flex-shrink-0 ${className}`}
         style={{ width: size, height: size }}
-        onError={() => { setImgTried(true); setImgOk(false); }}
+        onError={() => { setImgOk(false); }}
         loading="lazy"
       />
     );

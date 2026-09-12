@@ -29,12 +29,18 @@
     "audit:contrast": "node scripts/audit-contrast.mjs",
     "hooks:install": "bash scripts/install-hooks.sh",
     "icons": "python3 scripts/make-icons.py",
-    "test:simple-git": "node --test tests/simple-git-suite.mjs"
+    "test:simple-git": "node --test tests/simple-git-suite.mjs",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:check": "cd src-tauri && cargo check"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.3",
+    "@tauri-apps/plugin-fs": "^2.5.2",
+    "@tauri-apps/plugin-shell": "^2.3.6",
     "chokidar": "^3.6.0",
     "clsx": "^2.1.1",
-    "js-md5": "^0.9.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.27.0",
@@ -43,6 +49,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
+    "@tauri-apps/cli": "^2.11.4",
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.1",
     "@testing-library/user-event": "^14.5.2",
