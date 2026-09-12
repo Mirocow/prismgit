@@ -1328,6 +1328,7 @@ export default function App() {
         onShowClone={() => setShowClone(true)}
         onShowInit={() => setShowInit(true)}
         onToggleCommandLog={() => setShowCommandLog(s => !s)}
+        onToggleAiAssistant={() => setShowAiAssistant(v => !v)}
       />
       <GitToolbar
         onGitFlow={() => setShowGitFlow(true)}
