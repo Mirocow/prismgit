@@ -1338,10 +1338,22 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     const isSelected = selectedFiles.has(file.path);
     const idx = file.index as string;
     const wd = file.working_dir as string;
-    const code = idx !== ' ' && idx !== '?' ? idx : wd;
+
+    // Determine the display status code from BOTH index and working_dir.
+    // Priority: conflicted > untracked > renamed/copied > deleted > added > modified > unmodified > ignored
+    // This gives the user the most actionable status for the file.
+    const isUntracked = idx === '?' && wd === '?';
+    const isConflicted = idx === 'U' || wd === 'U';
+    // For staged files, the index code is the primary status.
+    // For unstaged files, the working_dir code is the primary status.
+    // When BOTH have changes (e.g. index='M' + wd='M'), the index code wins
+    // because staged changes are more 'committed' than unstaged ones.
+    const code = isStaged
+      ? (idx !== ' ' && idx !== '?' ? idx : wd)  // staged: prefer index code
+      : (wd !== ' ' && wd !== '?' ? wd : idx);    // unstaged: prefer working_dir code
     const statusCode =
-      code === '?' ? 'untracked' :
-      code === 'U' ? 'conflicted' :
+      isUntracked ? 'untracked' :
+      isConflicted ? 'conflicted' :
       code === 'M' ? 'modified' :
       code === 'A' ? 'added' :
       code === 'D' ? 'deleted' :
@@ -1350,8 +1362,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       code === 'unmodified' ? 'unmodified' :
       code === 'ignored' ? 'ignored' :
       'modified';
-    const isUntracked = idx === '?' && wd === '?';
-    const isConflicted = code === 'U' || idx === 'U' || wd === 'U';
     const stateKeys: Record<string, string> = {
       untracked: 'changes.statusUntracked',
       conflicted: 'changes.conflicted',
