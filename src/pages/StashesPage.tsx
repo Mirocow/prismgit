@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, RefreshCw, Plus, Trash, Download, Upload, Check, FileText, ChevronDown, ChevronRight, X, GitBranch } from '../components/icons';
+import { EmptyState } from '../components/EmptyState';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -187,13 +188,11 @@ export function StashesPage() {
             <div className="empty-state-title">{t('stashes.loading')}</div>
           </div>
         ) : stashes.length === 0 ? (
-          <div className="empty-state">
-            <Package size={48} className="empty-state-icon" />
-            <div className="empty-state-title">{t('stashes.empty')}</div>
-            <div className="empty-state-desc">
-              {t('stashes.emptyDesc')}
-            </div>
-          </div>
+          <EmptyState
+            icon={Package}
+            title={t('stashes.empty')}
+            description={t('stashes.emptyDesc')}
+          />
         ) : (
           stashes.map((s) => (
             <div key={s.index} className={selectedStashIndex === s.index ? 'bg-accent/10 border-l-2 border-l-accent' : ''}>

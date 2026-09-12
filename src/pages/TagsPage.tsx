@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Tag as TagIcon, Plus, Trash, RefreshCw, Check, Pencil, ChevronDown, ChevronRight, FolderTree } from '../components/icons';
+import { EmptyState } from '../components/EmptyState';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -196,13 +197,11 @@ export function TagsPage() {
             <div className="empty-state-title">{t('tags.loading')}</div>
           </div>
         ) : tags.length === 0 ? (
-          <div className="empty-state">
-            <TagIcon size={48} className="empty-state-icon" />
-            <div className="empty-state-title">{t('tags.empty')}</div>
-            <div className="empty-state-desc">
-              {t('tags.emptyDesc')}
-            </div>
-          </div>
+          <EmptyState
+            icon={TagIcon}
+            title={t('tags.empty')}
+            description={t('tags.emptyDesc')}
+          />
         ) : groupByPattern ? (
           // SmartGit Manual: Tag-Grouping display — groups tags by pattern
           (() => {

@@ -5,6 +5,7 @@ import {
   Settings as Cog, Loader, Tag as TagIcon, Package, Download, AlertCircle,
 } from '../components/icons';
 import { MergePanel } from '../components/MergePanel';
+import { EmptyState } from '../components/EmptyState';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -1678,9 +1679,12 @@ export function BranchesPage() {
         {loading ? (
           <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
         ) : filtered.length === 0 && filteredTags.length === 0 && filteredStashes.length === 0 ? (
-          <div className="p-8 text-center text-text-tertiary text-sm">
-            {search ? t('branches.nothingMatches') : t('branches.empty')}
-          </div>
+          <EmptyState
+            icon={GitBranch}
+            title={search ? t('branches.nothingMatches') : t('branches.empty')}
+            description={search ? undefined : t('branches.emptyHint')}
+            action={search ? undefined : { label: t('branches.newButton'), onClick: () => setShowNewDialog(true), disabled: blockedByRepoState() }}
+          />
         ) : (
           <>
             {/* Local branches — header right-click: Add Branch... (F7) */}
