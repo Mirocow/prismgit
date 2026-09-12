@@ -35,17 +35,29 @@ interface CommandLogState {
    * — only the next failed entry while closed bumps it again.
    */
   errorPulse: number;
+  /**
+   * QW-5 — timestamp (ms since epoch) of the most recent time the user
+   * manually closed the Command Log panel. App.tsx checks this before
+   * auto-opening on the next errorPulse: if less than 30s have elapsed,
+   * the auto-open is suppressed (so a user who just dismissed the panel
+   * does not have it pop right back open on the next failed git call).
+   * 0 means 'never manually closed'.
+   */
+  lastManualCloseAt: number;
   /** Initial list pulled from the main process. */
   load: () => Promise<void>;
   /** Append a live entry coming from the command-log:entry broadcast. */
   append: (entry: CommandLogEntry) => void;
   /** Forget all entries (main process + this mirror). */
   clear: () => Promise<void>;
+  /** QW-5 — mark that the user just manually closed the panel. */
+  markManualClose: () => void;
 }
 
 export const useCommandLogStore = create<CommandLogState>((set) => ({
   entries: [],
   errorPulse: 0,
+  lastManualCloseAt: 0,
 
   load: async () => {
     try {
@@ -78,4 +90,6 @@ export const useCommandLogStore = create<CommandLogState>((set) => ({
       // Buffer already cleared locally; main-process clear is best-effort.
     }
   },
+
+  markManualClose: () => set({ lastManualCloseAt: Date.now() }),
 }));

@@ -173,10 +173,20 @@ export default function App() {
   // When triggered: opens the panel + sets errorsOnly=true so the user
   // immediately sees the failed command (not the full command list). The
   // panel auto-scrolls to the top (newest = the failed entry).
+  //
+  // QW-5 — snooze: if the user manually closed the panel less than 30s
+  // ago, suppress the auto-open. We still bump lastSeenErrorPulse so the
+  // counter tracks the latest error, but the panel stays hidden. This
+  // stops the "close → next git error pops it right back open" loop
+  // (e.g. when a rebase is producing one error per second).
   useEffect(() => {
     if (errorPulse > lastSeenErrorPulse && !showCommandLog) {
-      setCommandLogErrorsOnly(true);
-      setShowCommandLog(true);
+      const sinceClose = Date.now() - useCommandLogStore.getState().lastManualCloseAt;
+      const SNOOZE_MS = 30_000;
+      if (sinceClose >= SNOOZE_MS) {
+        setCommandLogErrorsOnly(true);
+        setShowCommandLog(true);
+      }
     }
     setLastSeenErrorPulse(errorPulse);
   }, [errorPulse, lastSeenErrorPulse, showCommandLog]);
@@ -1261,6 +1271,9 @@ export default function App() {
               onClose={() => {
                 setShowCommandLog(false);
                 setCommandLogErrorsOnly(false);
+                // QW-5 — record the manual-close timestamp so the next
+                // error within 30s does NOT auto-reopen the panel.
+                useCommandLogStore.getState().markManualClose();
               }}
               initialErrorsOnly={commandLogErrorsOnly}
             />
