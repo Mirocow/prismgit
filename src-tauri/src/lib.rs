@@ -26,8 +26,8 @@
 use std::process::Command;
 use std::sync::Mutex;
 use std::path::Path;
-use tauri::{Emitter, Manager, State};
-use notify::{Watcher, RecursiveMode, FsEventWatcher, RecommendedWatcher};
+use tauri::{Emitter, State};
+use notify::{Watcher, RecursiveMode, RecommendedWatcher, Config};
 
 /// Result of a git CLI invocation — serialised to JSON for IPC.
 #[derive(serde::Serialize)]
@@ -147,7 +147,7 @@ pub fn watch_repo(
     let path_to_watch = Path::new(&repo_path).join(".git");
     let path_str = path_to_watch.to_string_lossy().to_string();
 
-    let mut watcher: RecommendedWatcher = notify::recommended(
+    let mut watcher: RecommendedWatcher = RecommendedWatcher::new(
         move |res: notify::Result<notify::Event>| {
             if let Ok(_event) = res {
                 // Emit a global event — the frontend's useFileWatcher
@@ -155,7 +155,7 @@ pub fn watch_repo(
                 let _ = app_handle.emit("repo:changed", &path_str);
             }
         },
-        notify::Config::default(),
+        Config::default(),
     ).map_err(|e| format!("notify init failed: {}", e))?;
 
     watcher
@@ -194,7 +194,8 @@ pub async fn confirm_dialog(
     let confirmed = app.dialog()
         .message(message)
         .title(title)
-        .blocking_confirm();
+        .show()
+        .await;
     Ok(confirmed)
 }
 
