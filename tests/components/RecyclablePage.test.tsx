@@ -106,7 +106,9 @@ describe('RecyclablePage — recovery UI', () => {
     const subjectEl = await screen.findByText('lost commit on feature/x', {}, { timeout: 8000 });
     expect(mockRecyclable).toHaveBeenCalledWith('/test/repo');
     // The hover-action buttons are inside the same row as the subject.
-    const row = subjectEl.closest('div.flex.items-center') ?? subjectEl.parentElement;
+    // With DataGrid the row wrapper has cursor-pointer — find it via the
+    // closest ancestor that contains a button (the actions container).
+    const row = subjectEl.closest('div.cursor-pointer') ?? subjectEl.closest('div.group') ?? subjectEl.parentElement?.parentElement;
     expect(row).not.toBeNull();
     const createBtn = row!.querySelector('button[title^="Create branch at"]') as HTMLButtonElement | null;
     const pickBtn = row!.querySelector('button[title^="Cherry-pick"]') as HTMLButtonElement | null;

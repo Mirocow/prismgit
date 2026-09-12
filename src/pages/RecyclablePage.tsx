@@ -10,6 +10,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { blockedOperationToast } from '../lib/repoState';
 import { useI18n } from '../lib/i18n';
+import { DataGrid, type DataGridColumn } from '../components/DataGrid';
 
 /**
  * Recyclable Commits — unreachable reflog commits that are eligible for GC.
@@ -172,6 +173,74 @@ export function RecyclablePage() {
     c.source.toLowerCase().includes(search.toLowerCase())
   );
 
+  // --- DataGrid columns + cell renderers ---
+  // Sortable + resizable: click header to sort by hash/subject/source/date,
+  // drag column edge to resize (persisted to localStorage via gridId).
+  const recyclableColumns: DataGridColumn<RecyclableCommit>[] = [
+    { key: 'hash', header: t('pages.colHash') || 'Hash', width: 90, sortAccessor: (c) => c.hash },
+    { key: 'subject', header: t('pages.colSubject') || 'Subject', width: 400, sortAccessor: (c) => c.subject.toLowerCase() },
+    { key: 'source', header: t('pages.colSource') || 'Source', width: 110, sortAccessor: (c) => c.source },
+    { key: 'date', header: t('pages.colDate') || 'Date', width: 140, sortAccessor: (c) => new Date(c.date).getTime() },
+    { key: 'actions', header: '', width: 100, resizable: false, sortable: false },
+  ];
+
+  const renderRecyclableCell = (c: RecyclableCommit, col: DataGridColumn<RecyclableCommit>) => {
+    switch (col.key) {
+      case 'hash':
+        return <CommitHashLink hash={c.hash} short className="font-mono text-accent" />;
+      case 'subject':
+        return <span className="truncate block" title={c.subject}>{c.subject}</span>;
+      case 'source':
+        return <span className="text-2xs text-text-tertiary font-mono" title={c.source}>{c.source}</span>;
+      case 'date':
+        return <span className="text-2xs text-text-tertiary">{formatDate(c.date)}</span>;
+      case 'actions':
+        return null; // rendered by renderRow wrapper below
+      default:
+        return null;
+    }
+  };
+
+  const renderRecyclableRow = (c: RecyclableCommit, _idx: number, cells: React.ReactNode) => {
+    const isBusy = busyHash === c.hash;
+    return (
+      <div
+        className={cn(
+          'flex items-stretch cursor-pointer hover:bg-bg-hover transition-colors group',
+          isBusy && 'opacity-50'
+        )}
+      >
+        {cells}
+        {/* Action buttons — visible on hover, render after the actions cell */}
+        <div className="flex items-center gap-1 pr-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+          <button
+            className="icon-btn !w-5 !h-5 !text-accent hover:!bg-accent-muted"
+            title={t('pages.createBranchAt')}
+            disabled={isBusy}
+            onClick={(e) => { e.stopPropagation(); handleCreateBranch(c.hash); }}
+          >
+            <GitBranch size={11} />
+          </button>
+          <button
+            className="icon-btn !w-5 !h-5 !text-status-added hover:!bg-status-added/15"
+            title={t('pages.cherryPickTitleHint')}
+            disabled={isBusy}
+            onClick={(e) => { e.stopPropagation(); handleCherryPick(c.hash); }}
+          >
+            <Plus size={11} />
+          </button>
+          <button
+            className="icon-btn !w-5 !h-5"
+            title={t('pages.copyHashTitle')}
+            onClick={(e) => { e.stopPropagation(); copyToClipboard(c.hash); toast.success(t('pages.copied')); }}
+          >
+            <Copy size={10} />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
@@ -246,7 +315,7 @@ export function RecyclablePage() {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
         ) : filtered.length === 0 ? (
@@ -258,53 +327,20 @@ export function RecyclablePage() {
             </div>
           </div>
         ) : (
-          <>
-            {filtered.map((c, i) => {
-              const isBusy = busyHash === c.hash;
-              return (
-                <div
-                  key={c.hash}
-                  className={cn(
-                    'flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle hover:bg-bg-hover cursor-pointer group',
-                    i % 2 === 0 ? '' : 'bg-bg-tertiary/30',
-                    isBusy && 'opacity-50'
-                  )}
-                  onClick={() => selectCommit(c.hash)}
-                >
-                  <span className="text-text-tertiary group-hover:text-accent">●</span>
-                  <CommitHashLink hash={c.hash} short className="font-mono text-accent shrink-0" />
-                  <span className="flex-1 truncate" title={c.subject}>{c.subject}</span>
-                  <span className="text-2xs text-text-tertiary font-mono shrink-0" title={c.source}>{c.source}</span>
-                  <span className="text-2xs text-text-tertiary shrink-0">{formatDate(c.date)}</span>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      className="icon-btn !w-5 !h-5 !text-accent hover:!bg-accent-muted"
-                      title={t('pages.createBranchAt')}
-                      disabled={isBusy}
-                      onClick={(e) => { e.stopPropagation(); handleCreateBranch(c.hash); }}
-                    >
-                      <GitBranch size={11} />
-                    </button>
-                    <button
-                      className="icon-btn !w-5 !h-5 !text-status-added hover:!bg-status-added/15"
-                      title={t('pages.cherryPickTitleHint')}
-                      disabled={isBusy}
-                      onClick={(e) => { e.stopPropagation(); handleCherryPick(c.hash); }}
-                    >
-                      <Plus size={11} />
-                    </button>
-                    <button
-                      className="icon-btn !w-5 !h-5"
-                      title={t('pages.copyHashTitle')}
-                      onClick={(e) => { e.stopPropagation(); copyToClipboard(c.hash); toast.success(t('pages.copied')); }}
-                    >
-                      <Copy size={10} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </>
+          <DataGrid<RecyclableCommit>
+            gridId="recyclable-page"
+            columns={recyclableColumns}
+            rows={filtered}
+            getCell={renderRecyclableCell}
+            renderRow={renderRecyclableRow}
+            onRowClick={(row) => selectCommit(row.hash)}
+            emptyState={
+              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
+                <AlertCircle size={32} className="mb-2 opacity-50" />
+                <div className="text-sm">{t('pages.recyclableEmpty')}</div>
+              </div>
+            }
+          />
         )}
       </div>
 
