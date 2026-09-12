@@ -57,6 +57,14 @@ export interface ProjectPrefs {
   // --- Commit message history ---
   /** Recent commit messages entered by the user, most-recent-first. */
   commitMessageHistory?: string[];
+
+  // --- Sidebar collapsed groups ---
+  /**
+   * Sidebar section names the user has collapsed (e.g. ['Git Actions', 'Refs']).
+   * Persisted so a user who collapsed groups does not see them all re-open on
+   * next launch.
+   */
+  collapsedSidebarGroups?: string[];
 }
 
 export function loadProjectPrefs(repoPath: string): ProjectPrefs {

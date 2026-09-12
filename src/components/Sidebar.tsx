@@ -10,6 +10,7 @@ import {
 } from '../lib/repoTree';
 import { useContextMenu } from '../lib/useContextMenu';
 import { cn } from '../lib/utils';
+import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -137,8 +138,23 @@ export function Sidebar() {
   // stagedCount erroneously (since green suggests "staged" but the number
   // was the total).
   const unstagedCount = Math.max(0, changedCount - stagedCount);
-  // Collapsible nav groups — click group header to collapse/expand
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  // Collapsible nav groups — click group header to collapse/expand.
+  // Persisted per-repo via ProjectPrefs so a user who collapsed groups does
+  // not see them all re-open on next launch.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    if (!currentRepo?.path) return new Set();
+    const saved = loadProjectPrefs(currentRepo.path).collapsedSidebarGroups;
+    return saved ? new Set(saved) : new Set();
+  });
+  // When the user switches repositories, re-hydrate from the new repo's prefs.
+  useEffect(() => {
+    if (!currentRepo?.path) {
+      setCollapsedGroups(new Set());
+      return;
+    }
+    const saved = loadProjectPrefs(currentRepo.path).collapsedSidebarGroups;
+    setCollapsedGroups(saved ? new Set(saved) : new Set());
+  }, [currentRepo?.path]);
   // Favorites — GLOBAL (shared across all repositories), not per-repo.
   // Default: Changes, History, Diff — the 3 most-used tools.
   const FAVORITES_KEY = 'prismgit-favorite-tools';
@@ -794,6 +810,12 @@ export function Sidebar() {
                     if (next.has(groupName)) next.delete(groupName);
                     else next.add(groupName);
                     setCollapsedGroups(next);
+                    // Persist per-repo so collapsed state survives restarts.
+                    if (currentRepo?.path) {
+                      saveProjectPrefs(currentRepo.path, {
+                        collapsedSidebarGroups: Array.from(next),
+                      });
+                    }
                   }}
                   title={collapsedGroups.has(groupName) ? t('shell.expand') : t('shell.collapse')}
                 >
