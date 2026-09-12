@@ -262,6 +262,14 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const [dirTree, setDirTree] = useState<DirNode[]>([]);
   const [dirTreeLoading, setDirTreeLoading] = useState(false);
   const [trackedTotal, setTrackedTotal] = useState(0);
+  /** Full list of tracked file paths (from git ls-files). Used for:
+   *  - 'unchanged' flag → show tracked files that have no changes
+   *  - hiddenCount calculation
+   */
+  const [trackedFilesList, setTrackedFilesList] = useState<string[]>([]);
+  /** Git-ignored files (from git status --porcelain --ignored). Used for
+   *  the 'ignored' display flag. */
+  const [ignoredFiles, setIgnoredFiles] = useState<string[]>([]);
   // Per-file line-change counts for the Changes table (+N -M), like History.
   const [numstat, setNumstat] = useState<{ staged: Map<string, { add: number; del: number; binary: boolean }>; unstaged: Map<string, { add: number; del: number; binary: boolean }> }>({
     staged: new Map(),
@@ -363,9 +371,29 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const loadTrackedCount = useCallback(async () => {
     try {
       const out = await api.git.raw(repo.path, ['ls-files']);
-      setTrackedTotal(out ? out.split('\n').filter(Boolean).length : 0);
+      const list = out ? out.split('\n').filter(Boolean) : [];
+      setTrackedTotal(list.length);
+      setTrackedFilesList(list);
     } catch {
       setTrackedTotal(0);
+      setTrackedFilesList([]);
+    }
+  }, [repo.path]);
+
+  /** Load git-ignored files for the 'ignored' display flag.
+   *  Uses `git status --porcelain --ignored` which respects .gitignore rules
+   *  and returns both files and directories. */
+  const loadIgnored = useCallback(async () => {
+    try {
+      const out = await api.git.raw(repo.path, ['status', '--porcelain', '--ignored']);
+      // Format: '!! path' for ignored entries
+      const list = out.split('\n')
+        .filter(l => l.startsWith('!! '))
+        .map(l => l.slice(3).trim())
+        .filter(Boolean);
+      setIgnoredFiles(list);
+    } catch {
+      setIgnoredFiles([]);
     }
   }, [repo.path]);
 
@@ -401,8 +429,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   useEffect(() => {
     loadDirTree();
     loadTrackedCount();
+    loadIgnored();
     loadNumstat();
-  }, [loadDirTree, loadTrackedCount, loadNumstat, lastRefresh, status]);
+  }, [loadDirTree, loadTrackedCount, loadIgnored, loadNumstat, lastRefresh, status]);
 
   // Reset folder scope and tree expansion when switching repositories
   useEffect(() => {
@@ -1173,6 +1202,39 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       .filter((f) => matchesDirScope(f.path)));
   }, [status, sortFiles, hasFlag, fileFilter, fileScopeDir, renamedNewPaths]);
 
+  // Unchanged tracked files — shown only when 'unchanged' flag is ON.
+  // These are tracked files (from git ls-files) that have NO changes in
+  // the working tree or index (not in status.files at all).
+  const unchangedFiles: FileStatus[] = useMemo(() => {
+    if (!hasFlag('unchanged')) return [];
+    const changedPaths = new Set((status?.files ?? []).map(f => f.path));
+    return trackedFilesList
+      .filter(p => !changedPaths.has(p))
+      .filter(p => matchesFileFilter(p))
+      .filter(p => !fileExtensionFilter || p.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+      .filter(p => matchesDirScope(p))
+      .map(p => ({
+        path: p,
+        index: 'unmodified' as FileStatus['index'],
+        working_dir: 'unmodified' as FileStatus['working_dir'],
+      }));
+  }, [hasFlag, status, trackedFilesList, fileFilter, fileExtensionFilter, showSubdirs, fileScopeDir]);
+
+  // Ignored files — shown only when 'ignored' flag is ON.
+  // Loaded via `git status --porcelain --ignored` which respects .gitignore.
+  const ignoredFileList: FileStatus[] = useMemo(() => {
+    if (!hasFlag('ignored')) return [];
+    return ignoredFiles
+      .filter(p => matchesFileFilter(p))
+      .filter(p => !fileExtensionFilter || p.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+      .filter(p => matchesDirScope(p))
+      .map(p => ({
+        path: p,
+        index: 'ignored' as FileStatus['index'],
+        working_dir: 'ignored' as FileStatus['working_dir'],
+      }));
+  }, [hasFlag, ignoredFiles, fileFilter, fileExtensionFilter, showSubdirs, fileScopeDir]);
+
   // Ctrl/Cmd+A: select all visible files in the file list
   // (placed after stagedFiles/unstagedFiles/untrackedFiles are declared)
   useEffect(() => {
@@ -1245,6 +1307,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       code === 'D' ? 'deleted' :
       (code === 'R' || code === 'renamed') ? 'renamed' :
       (code === 'C' || code === 'copied') ? 'copied' :
+      code === 'unmodified' ? 'unmodified' :
+      code === 'ignored' ? 'ignored' :
       'modified';
     const isUntracked = idx === '?' && wd === '?';
     const isConflicted = code === 'U' || idx === 'U' || wd === 'U';
@@ -1256,6 +1320,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       deleted: 'changes.statusDeleted',
       renamed: 'changes.statusRenamed',
       copied: 'changes.stateCopied',
+      unmodified: 'Unchanged',
+      ignored: 'Ignored',
     };
     const stateLabel = t(stateKeys[statusCode] ?? 'changes.statusModified');
     // Untracked directories come from porcelain as 'dir/' — show the folder
@@ -1266,9 +1332,16 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       : getFileName(file.path);
     const relDir = getRelativeDir(isDirEntry ? file.path.slice(0, -1) : file.path);
     // For renamed files (detected via --find-renames), show old_path → new_path
+    // Only show the old path when 'movedRename' flag is ON — otherwise just
+    // show the new path with 'Renamed' status (SmartGit behavior).
     const isRenamed = statusCode === 'renamed' && file.old_path;
-    const renameLabel = isRenamed ? `${getFileName(file.old_path!)} → ${displayName}` : displayName;
-    const renameTitle = isRenamed ? `${file.old_path} → ${file.path}` : file.path;
+    const showRenameSource = hasFlag('movedRename');
+    const renameLabel = (isRenamed && showRenameSource)
+      ? `${getFileName(file.old_path!)} → ${displayName}`
+      : displayName;
+    const renameTitle = (isRenamed && showRenameSource)
+      ? `${file.old_path} → ${file.path}`
+      : file.path;
     // Line-change counts (+N -M) from numstat; untracked files have none.
     const stats = isUntracked ? undefined : (isStaged ? numstat.staged : numstat.unstaged).get(file.path);
 
@@ -1731,6 +1804,26 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             <div className={(unstagedFiles.length > 0 || renamedFiles.length > 0) ? 'border-l-2 border-l-status-modified/20' : ''}>
               <LazyFileList files={[...unstagedFiles, ...renamedFiles]} isStaged={false} renderRow={renderFileRow} />
             </div>
+
+            {/* Unchanged — gray accent (shown only when 'unchanged' flag is ON) */}
+            {unchangedFiles.length > 0 && (
+              <div className="px-2 py-1 bg-bg-tertiary/50 text-2xs font-bold uppercase text-text-tertiary border-b border-border-subtle border-l-2 border-l-text-tertiary/20">
+                Unchanged ({unchangedFiles.length})
+              </div>
+            )}
+            {unchangedFiles.length > 0 && (
+              <LazyFileList files={unchangedFiles} isStaged={false} renderRow={renderFileRow} />
+            )}
+
+            {/* Ignored — dark gray accent (shown only when 'ignored' flag is ON) */}
+            {ignoredFileList.length > 0 && (
+              <div className="px-2 py-1 bg-bg-tertiary/30 text-2xs font-bold uppercase text-text-tertiary border-b border-border-subtle border-l-2 border-l-text-tertiary/20">
+                Ignored ({ignoredFileList.length})
+              </div>
+            )}
+            {ignoredFileList.length > 0 && (
+              <LazyFileList files={ignoredFileList} isStaged={false} renderRow={renderFileRow} />
+            )}
 
             {/* Untracked — cyan accent */}
             {untrackedFiles.length > 0 && (
