@@ -118,7 +118,14 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
   useEffect(() => {
     if (!open) return;
     const repo = useRepositoryStore.getState().currentRepo;
-    if (!repo) return;
+    if (!repo) {
+      // Task 1 — no repo open: clear repo-scoped results, repo-list search still works.
+      setBranches([]);
+      setTags([]);
+      setStashes([]);
+      setTrackedFiles([]);
+      return;
+    }
     // Fire all four lookups in parallel — they're independent.
     Promise.allSettled([
       api.git.branches(repo.path).catch(() => []),
@@ -139,7 +146,12 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
   // short-circuits for very short queries (< 2 chars) — a single-char search
   // would match almost every commit and overwhelm the results.
   useEffect(() => {
-    if (!open || !currentRepo) return;
+    if (!open || !currentRepo) {
+      // Task 1 — no repo: skip commit/hash search, repo-list search still works.
+      setCommits([]);
+      setSearching(false);
+      return;
+    }
     const q = query.trim();
     if (q.length < 2) {
       setCommits([]);
@@ -267,8 +279,11 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
           tertiary: c.author?.date ? formatAbsoluteDate(c.author.date, locale) : '',
           score: s,
           action: () => {
-            // Navigate to History with this commit selected — selectionStore
-            // carries the hash, HistoryPage scrolls to it on mount.
+            // Task 2 — set the hash BEFORE navigate so HistoryPage's
+            // mount effect can read it from the store. HistoryPage's
+            // scroll-to-commit effect retries on its own (see the
+            // 'pendingCommitScrollRef' logic), so we just need to
+            // plant the hash and switch route.
             useSelectionStore.getState().selectCommit(c.hash);
             navigate('/history');
           },

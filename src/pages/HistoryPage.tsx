@@ -400,6 +400,12 @@ export function HistoryPage() {
   // clear filters — otherwise clearing would wipe the user's query mid-typing
   // whenever the currently selected commit falls outside their filter.
   const prevSelectedRef = useRef<string | null>(null);
+  // Task 2 — pending scroll retry: when the user clicks a commit in
+  // GlobalSearch while NOT on the History page, the action plants the
+  // hash and navigates here. HistoryPage mounts, but the lazy list
+  // might not have rows measured yet → scrollToIndex falls back to 0
+  // (no-op). Retry a few times over the next 500ms until the lazy
+  // list's offsets are populated.
   useEffect(() => {
     if (!selectedCommitHash || entries.length === 0) return;
     const idxF = filtered.findIndex(e => e.hash === selectedCommitHash);
@@ -408,9 +414,20 @@ export function HistoryPage() {
       if (idxF !== selectedIdx) {
         setSelectedIdx(idxF);
         // Scroll into view via lazyList's scrollToIndex (works with virtualized list)
-        requestAnimationFrame(() => {
-          scrollToIndexRef.current?.(idxF);
-        });
+        // Task 2 — retry the scroll a few times so the lazy list has time
+        // to compute offsets even if entries just loaded.
+        const tryScroll = (attempt: number) => {
+          requestAnimationFrame(() => {
+            scrollToIndexRef.current?.(idxF);
+            // After the first attempt, the scrollTop should be set.
+            // If the rows weren't measured yet (offsets all 0), retry.
+            const el = listScrollRef.current;
+            if (el && Math.abs(el.scrollTop - (idxF * ROW_HEIGHT)) > ROW_HEIGHT && attempt < 5) {
+              setTimeout(() => tryScroll(attempt + 1), 100);
+            }
+          });
+        };
+        tryScroll(0);
       }
       return;
     }

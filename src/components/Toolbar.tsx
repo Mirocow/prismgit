@@ -247,9 +247,12 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
         {groups.utils && (
           <>
             <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title={t('shell.repoInfo')} />
-            {/* ONB-1 — data-tour let the TourOverlay spotlight this button. */}
+            {/* Task 1 — search is enabled even when no repo is open.
+                GlobalSearch falls back to repository-list search when
+                currentRepo is null (see GlobalSearch's empty-state
+                handling). */}
             <span data-tour="toolbar-global-search">
-              <IconButton icon={Search} onClick={() => onGlobalSearch && onGlobalSearch()} disabled={!currentRepo} title={t('search.toolbarButtonTitle')} />
+              <IconButton icon={Search} onClick={() => onGlobalSearch && onGlobalSearch()} title={t('search.toolbarButtonTitle')} />
             </span>
             <IconButton icon={FileText} onClick={() => onFind && onFind()} disabled={disabled} title={t('shell.findObject')} />
             <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title={t('shell.openInBrowser')} />
