@@ -3,9 +3,10 @@ import { type DiffResult, type DiffHunk, type DiffLine } from '../lib/api';
 import { api } from '../lib/api';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { cn } from '../lib/utils';
-import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader } from './icons';
+import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader, ExternalLink } from './icons';
 import { wordDiff, type WordSegment } from '../lib/wordDiff';
 import { useI18n } from '../lib/i18n';
+import { useContextMenu } from '../lib/useContextMenu';
 import {
   tokenizeLine, tokensToHtml, detectLang, type SupportedLang,
 } from '../lib/syntaxHighlight';
@@ -75,6 +76,7 @@ function highlightLine(content: string, lang: SupportedLang): React.ReactNode {
 export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit', onStaged, onForceCompare }: DiffViewerProps) {
   const toast = useToastActions();
   const { t } = useI18n();
+  const showContextMenu = useContextMenu();
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
   const [wsMode, setWsMode] = useState<WhitespaceMode>('normal');
   // Highlight mode: 'background' (3-way panel style) or 'text' (classic + / - style).
@@ -203,6 +205,51 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       return next;
     });
   }, []);
+
+  /**
+   * MED-4 — show a context menu for a diff line offering to open the
+   * underlying file in VSCode at the given line number. Calls
+   * api.vscode.open(repoPath, { file, line }) which already supports
+   * the --goto flag on the backend (electron/services/vscode.ts).
+   *
+   * Also offers "Copy line number" as a secondary action.
+   */
+  const showLineContextMenu = useCallback((e: React.MouseEvent, lineNo: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!repoPath || !filePath) return;
+    showContextMenu(
+      [
+        {
+          label: t('vscode.openAtLine', { line: lineNo }),
+          clickId: 'open-vscode-at-line',
+        },
+        {
+          label: t('common.copyLineNumber', { n: lineNo }),
+          clickId: 'copy-line-number',
+        },
+      ],
+      async (clickId: string) => {
+        if (clickId === 'open-vscode-at-line') {
+          try {
+            const res = await api.vscode.open(repoPath, { file: filePath, line: lineNo });
+            if (!res.ok) {
+              toast.error(t('vscode.openFailed'), `via=${res.via}`);
+            }
+          } catch (err) {
+            toast.error(t('vscode.openFailed'), String(err));
+          }
+        } else if (clickId === 'copy-line-number') {
+          try {
+            await navigator.clipboard.writeText(String(lineNo));
+            toast.success(t('common.copied'));
+          } catch (err) {
+            toast.error(t('common.copyFailed'), String(err));
+          }
+        }
+      },
+    );
+  }, [repoPath, filePath, showContextMenu, t, toast]);
 
   const toggleLineSelection = useCallback((hunkIdx: number, lineIdx: number) => {
     const key = `${hunkIdx}:${lineIdx}`;
@@ -343,6 +390,16 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                   )}
                   style={{ lineHeight: '20px', minHeight: '20px' }}
                   onClick={() => (isAdd || isDel) && toggleLineSelection(hi, li)}
+                  onContextMenu={(e) => {
+                    // MED-4 — "Open in VSCode at Line N" context menu.
+                    // Prefers the new-line number (matches the working tree
+                    // the user will land in), falls back to old-line for
+                    // pure-deletion rows.
+                    const lineNo = line.newLineNumber ?? line.oldLineNumber ?? null;
+                    if (!repoPath || !filePath || lineNo === null) return;
+                    e.preventDefault();
+                    showLineContextMenu(e, lineNo);
+                  }}
                 >
                   <span className="w-12 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
                     {line.oldLineNumber ?? ''}

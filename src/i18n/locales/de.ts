@@ -260,4 +260,8 @@ export const de: Record<string, string> = {
   'vscode.removeDiffTool': 'Difftool-/Mergetool-Registrierung entfernen',
   'vscode.toolConfigured': 'Konfiguriert',
   'vscode.toolNotConfigured': 'Nicht konfiguriert',
+  // MED-4 — line-context menu extras
+  'common.copied': 'Kopiert',
+  'common.copyFailed': 'Kopieren fehlgeschlagen',
+  'common.copyLineNumber': 'Zeilennummer kopieren ({n})',
 };

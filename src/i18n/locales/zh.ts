@@ -260,4 +260,8 @@ export const zh: Record<string, string> = {
   'vscode.removeDiffTool': '移除 difftool/mergetool 注册',
   'vscode.toolConfigured': '已配置',
   'vscode.toolNotConfigured': '未配置',
+  // MED-4 — line-context menu extras
+  'common.copied': '已复制',
+  'common.copyFailed': '复制失败',
+  'common.copyLineNumber': '复制行号 ({n})',
 };
