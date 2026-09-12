@@ -1971,10 +1971,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <span style={{ width: 92 }}></span>
             </div>
 
-            {/* === Single flat file list (only Staged has its own group) === */}
-            {(totalChanged > 0 || unchangedFiles.length > 0 || ignoredFileList.length > 0 || untrackedFiles.length > 0 || assumeUnchangedFileList.length > 0 || skippedFileList.length > 0 || submoduleFileList.length > 0) && (
-              <>
-            {/* Conflicts — red accent, shown ABOVE staged when there are conflicted files */}
+            {/* === Two groups: Staged (if any) + Everything else === */}
+            {/* Conflicts — shown above everything when there are conflicted files */}
             {conflictedFiles.length > 0 && (
               <>
                 <div
@@ -1988,34 +1986,32 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 </div>
               </>
             )}
-            {/* Staged — the ONLY group with a header (green accent) */}
+
+            {/* GROUP 1: Staged — green header, clickable to unstage all */}
             {stagedFiles.length > 0 && (
-              <div
-                className="px-2 py-1 bg-status-added/8 text-2xs font-bold uppercase text-status-added border-b border-status-added/20 border-l-2 border-l-status-added/40 flex items-center justify-between cursor-pointer hover:bg-status-added/12 transition-colors"
-                onClick={() => {
-                  // Click on header = unstage all
-                  if (repo) {
-                    useOperationLogStore.getState().logOperation(
-                      t('changes.unstageAll'), repo.path, 'git reset HEAD -- .',
-                      () => api.git.raw(repo.path, ['reset', 'HEAD', '--', '.'])
-                    ).then(() => refreshStatus(repo.path))
-                     .catch((e: unknown) => toast.error(t('changes.bulkUnstageFailed'), String(e)));
-                  }
-                }}
-                title={t('changes.clickToUnstageAll')}
-              >
-                <span>{t('changes.stagedCount', { count: stagedFiles.length })}</span>
-                <span className="text-text-tertiary normal-case font-normal">{t('changes.clickToUnstageAllHint')}</span>
-              </div>
-            )}
-            {stagedFiles.length > 0 && (
-              <LazyFileList files={stagedFiles} isStaged={true} renderRow={renderFileRow} />
+              <>
+                <div
+                  className="px-2 py-1 bg-status-added/8 text-2xs font-bold uppercase text-status-added border-b border-status-added/20 border-l-2 border-l-status-added/40 flex items-center justify-between cursor-pointer hover:bg-status-added/12 transition-colors"
+                  onClick={() => {
+                    if (repo) {
+                      useOperationLogStore.getState().logOperation(
+                        t('changes.unstageAll'), repo.path, 'git reset HEAD -- .',
+                        () => api.git.raw(repo.path, ['reset', 'HEAD', '--', '.'])
+                      ).then(() => refreshStatus(repo.path))
+                       .catch((e: unknown) => toast.error(t('changes.bulkUnstageFailed'), String(e)));
+                    }
+                  }}
+                  title={t('changes.clickToUnstageAll')}
+                >
+                  <span>{t('changes.stagedCount', { count: stagedFiles.length })}</span>
+                  <span className="text-text-tertiary normal-case font-normal">{t('changes.clickToUnstageAllHint')}</span>
+                </div>
+                <LazyFileList files={stagedFiles} isStaged={true} renderRow={renderFileRow} />
+              </>
             )}
 
-            {/* All non-staged files in ONE flat list:
-                Changes (modified/deleted/renamed) + Untracked + Ignored + Unchanged (last) */}
+            {/* GROUP 2: Everything else — all non-staged files in one flat list */}
             {(() => {
-              // Build the combined list in order: changed → untracked → ignored → unchanged
               const combined = [
                 ...unstagedFiles,
                 ...renamedFiles,
@@ -2029,10 +2025,13 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               if (combined.length === 0) return null;
               return <LazyFileList files={combined} isStaged={false} renderRow={renderFileRow} />;
             })()}
-              </>
-            )}
 
-            {totalChanged === 0 && unchangedFiles.length === 0 && ignoredFileList.length === 0 && untrackedFiles.length === 0 && assumeUnchangedFileList.length === 0 && skippedFileList.length === 0 && submoduleFileList.length === 0 && (
+            {/* Empty state — only when truly nothing to show */}
+            {stagedFiles.length === 0 && conflictedFiles.length === 0 &&
+             unstagedFiles.length === 0 && renamedFiles.length === 0 &&
+             untrackedFiles.length === 0 && ignoredFileList.length === 0 &&
+             assumeUnchangedFileList.length === 0 && skippedFileList.length === 0 &&
+             submoduleFileList.length === 0 && unchangedFiles.length === 0 && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">
                 <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
                 {t('changes.workingTreeClean')}
