@@ -433,15 +433,15 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
           <kbd className="text-2xs text-text-tertiary border border-border-subtle rounded px-1.5 py-0.5">Esc</kbd>
         </div>
 
-        {/* ─── No repo open — show hint ─── */}
-        {!currentRepo && (
+        {/* ─── No repo open + no query — show hint ─── */}
+        {!currentRepo && query.trim().length === 0 && (
           <div className="px-4 py-8 text-center text-sm text-text-tertiary">
             {t('search.openRepoFirst')}
           </div>
         )}
 
-        {/* ─── Results ─── */}
-        {currentRepo && (
+        {/* ─── Results — show when there's a query, even without a repo ─── */}
+        {(currentRepo || query.trim().length > 0) && (
           <div ref={listRef} className="max-h-[420px] overflow-y-auto py-1">
             {query.trim().length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-text-tertiary">
