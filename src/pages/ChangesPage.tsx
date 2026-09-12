@@ -147,6 +147,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }, [onResolveConflict]);
   // Global UI state for file filtering and tree mode
   const fileViewMode = useSelectionStore((s) => s.fileViewMode);
+  const setFileViewMode = useSelectionStore((s) => s.setFileViewMode);
   const groupByState = useSelectionStore((s) => s.groupByState);
   const setGroupByState = useSelectionStore((s) => s.setGroupByState);
   const compressFilePaths = useSelectionStore((s) => s.compressFilePaths);
@@ -163,6 +164,24 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const toggleDirTreeVisible = useSelectionStore((s) => s.toggleDirTreeVisible);
   const colWidths = useSelectionStore((s) => s.colWidths);
   const setColWidth = useSelectionStore((s) => s.setColWidth);
+
+  // Sync 'subdirectories' flag with fileViewMode + dirTreeVisible:
+  //   subdirectories ON  → flat list (fileViewMode='flat'), tree panel hidden
+  //   subdirectories OFF → tree view (fileViewMode='tree'), tree panel visible
+  useEffect(() => {
+    const isFlat = fileDisplayFlags.has('subdirectories');
+    if (isFlat && fileViewMode !== 'flat') {
+      setFileViewMode('flat');
+    } else if (!isFlat && fileViewMode !== 'tree') {
+      setFileViewMode('tree');
+    }
+    // Show/hide the directory tree panel based on the flag
+    if (!isFlat && !dirTreeVisible) {
+      toggleDirTreeVisible();
+    } else if (isFlat && dirTreeVisible) {
+      toggleDirTreeVisible();
+    }
+  }, [fileDisplayFlags]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const fileExtensionFilter = useSelectionStore((s) => s.fileExtensionFilter);
   const setFileExtensionFilter = useSelectionStore((s) => s.setFileExtensionFilter);
