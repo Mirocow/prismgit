@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { Folder, Github, Loader, LogOut, Moon, Plus, RefreshCw, Settings as SettingsIcon, Sun, Trash, GitBranch, Palette, Sparkles } from '../components/icons';
+import { Folder, Github, Loader, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
+import { OllamaModelPicker } from '../components/OllamaModelPicker';
 import { api, type GitConfigEntry } from '../lib/api';
-import { THEMES, type ThemeId, getThemeMeta } from '../lib/themes';
+import { LOCALES, useI18n } from '../lib/i18n';
+import { getThemeMeta, THEMES } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
-import { useI18n, LOCALES } from '../lib/i18n';
-import { OllamaModelPicker } from '../components/OllamaModelPicker';
+import { useToastActions } from '../stores/toastStore';
 
 export function SettingsPage() {
   const { settings, theme, setSetting, toggleTheme, setTheme } = useSettingsStore();
@@ -1639,6 +1639,7 @@ smartgit.refresh.inspectEol=true
         )}
 
         {/* Settings redesign — UI Density (Compact / Comfortable) */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.densityTitle')}</div>
           <div className="p-5 space-y-3">
@@ -1661,8 +1662,10 @@ smartgit.refresh.inspectEol=true
             </div>
           </div>
         </section>
+        )}
 
         {/* Settings redesign — Date Format (Relative / Absolute / Both) */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.dateFormatTitle')}</div>
           <div className="p-5 space-y-3">
@@ -1685,8 +1688,10 @@ smartgit.refresh.inspectEol=true
             </div>
           </div>
         </section>
+        )}
 
         {/* Settings redesign — Zoom (stepper control) */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.zoomTitle')}</div>
           <div className="p-5 space-y-3">
@@ -1714,9 +1719,11 @@ smartgit.refresh.inspectEol=true
             </div>
           </div>
         </section>
+        )}
 
         {/* Task 18 — VSCode-style footer display settings. Each checkbox
             toggles a StatusBar footer section. */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.footerSectionTitle')}</div>
           <div className="p-5 space-y-3">
@@ -1751,6 +1758,7 @@ smartgit.refresh.inspectEol=true
             </div>
           </div>
         </section>
+        )}
       </div>
     </div>
   );
