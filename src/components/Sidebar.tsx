@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type { RemoteCheckSummary } from '../lib/api';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
+import { getThemeMeta } from '../lib/themes';
 import {
   buildRepoTree, canMoveGroup, flattenGroupOptions,
   type RepoGroupNode, type RepoItemNode,
@@ -896,8 +897,8 @@ export function Sidebar() {
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleTheme(); }}
           title={t('shell.toggleTheme')}
         >
-          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-          <span>{theme === 'dark' ? t('sidebar.lightTheme') : t('sidebar.darkTheme')}</span>
+          {(getThemeMeta(theme)?.isDark ?? false) ? <Sun size={15} /> : <Moon size={15} />}
+          <span>{(getThemeMeta(theme)?.isDark ?? false) ? t('sidebar.lightTheme') : t('sidebar.darkTheme')}</span>
         </button>
         <button
           className={cn(

@@ -13,6 +13,7 @@ import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type Too
 import { confirmDialog } from './ConfirmDialog';
 import { getRepoInProgressState, isRepoBusy } from '../lib/repoState';
 import { useI18n } from '../lib/i18n';
+import { getThemeMeta } from '../lib/themes';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
@@ -264,9 +265,9 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
           title={t('shell.keyboardShortcutsTooltip')}
         />
         <IconButton
-          icon={theme === 'dark' ? Sun : Moon}
+          icon={(getThemeMeta(theme)?.isDark ?? false) ? Sun : Moon}
           onClick={() => toggleTheme()}
-          title={theme === 'dark' ? t('shell.switchToLightTheme') : t('shell.switchToDarkTheme')}
+          title={(getThemeMeta(theme)?.isDark ?? false) ? t('shell.switchToLightTheme') : t('shell.switchToDarkTheme')}
         />
         {/* Customize toolbar button */}
         <button
