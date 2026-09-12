@@ -1299,25 +1299,37 @@ export function HistoryPage() {
             </div>
           ) : (
             <div style={{ position: 'relative' }}>
-              {/* Graph SVG — drawn per-row, with passing lanes that span full row height */}
-              {showGraph && graphRows.length > 0 && (
+              {/* Graph SVG — drawn per-row, with passing lanes that span full row height.
+                  PERF-1: virtualize the SVG the same way commit rows are virtualized
+                  via lazyList.visibleRange. Slicing + repositioning with
+                  top:lazyList.offsetY gives identical visual output but ~50-200x
+                  fewer SVG nodes for 10k+ commit repos. */}
+              {showGraph && graphRows.length > 0 && (() => {
+                const start = lazyList.visibleRange.start;
+                const end = lazyList.visibleRange.end;
+                const sliceHeight = Math.max(0, (end - start) * ROW_HEIGHT);
+                const sliceRows = graphRows.slice(start, end);
+                return (
                 <svg
                   width={graphWidth}
-                  height={graphRows.length * ROW_HEIGHT + wtOffset}
-                  style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', zIndex: 5 }}
+                  height={sliceHeight}
+                  style={{ position: 'absolute', top: lazyList.offsetY, left: 0, pointerEvents: 'none', zIndex: 5 }}
                 >
-                  {graphRows.map((row, idx) => {
-                    const rowY = idx * ROW_HEIGHT + wtOffset;
+                  {sliceRows.map((row, idx) => {
+                    // idx is local to the visible slice; rowY is relative
+                    // to the SVG's own origin (which is already at
+                    // lazyList.offsetY in container coords).
+                    const rowY = idx * ROW_HEIGHT;
                     const cy = rowY + ROW_HEIGHT / 2;
                     const x = (lane: number) => lane * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_PAD;
                     // Stroke dash array for dashed (rewired) connections
                     const strokeDash = (d?: boolean) => d ? '4 3' : undefined;
 
                     return (
-                      <g key={`r-${idx}`}>
+                      <g key={`r-${start + idx}`}>
                         {/* Passing lanes — thinner, more transparent for cleaner look */}
                         {row.passing.map((p, pi) => (
-                          <line key={`p-${idx}-${pi}`}
+                          <line key={`p-${start + idx}-${pi}`}
                             x1={x(p.lane)} y1={rowY}
                             x2={x(p.lane)} y2={rowY + ROW_HEIGHT}
                             stroke={laneColor(p.color)} strokeWidth={2} opacity={0.5}
@@ -1328,7 +1340,7 @@ export function HistoryPage() {
                           <>
                             {/* Closing curves — smooth bezier into node */}
                             {row.node.closing.map((c, ci) => (
-                              <path key={`c-${idx}-${ci}`}
+                              <path key={`c-${start + idx}-${ci}`}
                                 d={bezierPath(x(c.lane), rowY, x(row.node!.lane), cy)}
                                 stroke={laneColor(c.color)} strokeWidth={2} fill="none" opacity={0.7}
                                 strokeDasharray={strokeDash(c.dashed)} strokeLinecap="round" />
@@ -1394,7 +1406,8 @@ export function HistoryPage() {
                     );
                   })}
                 </svg>
-              )}
+                );
+              })()}
 
               {/* Working Tree row */}
               {hasUncommitted && (
