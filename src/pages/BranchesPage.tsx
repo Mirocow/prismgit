@@ -478,6 +478,99 @@ export function BranchesPage() {
     } catch (e) { toast.error(t('branches.failed'), String(e)); }
   };
 
+  /**
+   * MED-5 — batch delete all selected branches.
+   * Skips remote branches with a toast.info — they would otherwise need the
+   * 'delete remote branch' flow (which has a separate confirmation). User
+   * can still right-click each remote branch individually for the
+   * remote-specific delete action.
+   *
+   * Reuses the existing per-branch deleteConfirm flow but as a single
+   * grouped dialog. Per-branch failures are reported as separate toasts
+   * (not a hard abort) so one 'not fully merged' branch doesn't stop
+   * the rest of the batch.
+   */
+  const handleDeleteSelected = async () => {
+    const all = Array.from(selectedBranches);
+    if (all.length === 0) return;
+    const ok = await confirmDialog({
+      title: t('branches.batchDeleteTitle', { count: all.length }),
+      message: t('branches.batchDeleteMessage', { names: all.join(', ') }),
+      confirmLabel: t('common.delete'),
+      danger: true,
+    });
+    if (!ok) return;
+    let success = 0;
+    let failed = 0;
+    for (const name of all) {
+      const isRemote = name.includes('/');
+      // Skip remote branches — they need the remote-delete flow.
+      if (isRemote) {
+        toast.info(t('branches.batchSkipRemote', { name }));
+        continue;
+      }
+      try {
+        await api.git.deleteBranch(repo.path, name, false, false);
+        success++;
+      } catch (e) {
+        const msg = String(e);
+        if (/not fully merged|branch.*not merged/i.test(msg)) {
+          // Offer force-delete for this one in batch mode — no second
+          // confirm per branch; the user already opted into 'Delete all'.
+          try {
+            await api.git.deleteBranch(repo.path, name, true, false);
+            success++;
+          } catch (e2) {
+            toast.error(t('branches.batchDeleteFailed', { name }), String(e2));
+            failed++;
+          }
+        } else {
+          toast.error(t('branches.batchDeleteFailed', { name }), msg);
+          failed++;
+        }
+      }
+    }
+    clearBranches();
+    await load();
+    if (success > 0) toast.success(t('branches.batchDeleted', { count: success }));
+    if (failed > 0) toast.warning(t('branches.batchFailed', { count: failed }));
+  };
+
+  /**
+   * MED-5 — batch push all selected branches with -u (set-upstream).
+   * Reuses the per-branch remote resolution: try branch.tracking's remote,
+   * fall back to the default remote (origin → first configured).
+   */
+  const handlePushSelected = async () => {
+    const all = Array.from(selectedBranches);
+    if (all.length === 0) return;
+    const defaultRemote = (await resolveDefaultRemote(repo.path)) || 'origin';
+    let success = 0;
+    let failed = 0;
+    for (const name of all) {
+      // Skip remote branches — pushing them is a no-op (they're upstream).
+      if (name.includes('/')) {
+        continue;
+      }
+      try {
+        // Look up tracking info if available; otherwise push with -u to default.
+        const branchInfo = branches.find(b => b.name === name);
+        const remote = (branchInfo?.tracking ? branchInfo.tracking.split('/')[0] : '')
+          || defaultRemote;
+        const setUpstream = !branchInfo?.tracking;
+        await api.git.push(repo.path, remote, name, setUpstream);
+        success++;
+      } catch (e) {
+        toast.error(t('branches.batchPushFailed', { name }), String(e));
+        failed++;
+      }
+    }
+    if (success > 0) toast.success(t('branches.batchPushed', { count: success }));
+    if (failed > 0) toast.warning(t('branches.batchFailed', { count: failed }));
+    await load();
+    await refreshStatus(repo.path);
+  };
+
   // ===== Reset dialog executor (Reset... / Reset Advanced... for local AND remote branches) =====
   const executeReset = async (mode: ResetMode, ref: string) => {
     if (!resetTarget) return;
@@ -1724,6 +1817,27 @@ export function BranchesPage() {
             {Array.from(selectedBranches).slice(0, 5).join(', ')}
             {selectedBranches.size > 5 && ` +${selectedBranches.size - 5}`}
           </span>
+          {/* MED-5 — batch operations */}
+          <button
+            type="button"
+            className="text-2xs px-2 py-0.5 rounded bg-status-deleted/15 text-status-deleted hover:bg-status-deleted/25 border border-status-deleted/30 flex items-center gap-1"
+            onClick={handleDeleteSelected}
+            disabled={blockedByRepoState()}
+            title={t('branches.batchDeleteTooltip')}
+          >
+            <Trash size={10} />
+            {t('branches.batchDelete', { count: selectedBranches.size })}
+          </button>
+          <button
+            type="button"
+            className="text-2xs px-2 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 border border-status-added/30 flex items-center gap-1"
+            onClick={handlePushSelected}
+            disabled={blockedByRepoState()}
+            title={t('branches.batchPushTooltip')}
+          >
+            <Upload size={10} />
+            {t('branches.batchPush', { count: selectedBranches.size })}
+          </button>
           <button
             className="ml-auto text-2xs px-2 py-0.5 hover:bg-bg-hover rounded text-text-secondary hover:text-text-primary"
             onClick={clearBranches}
