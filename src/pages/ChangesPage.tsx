@@ -1422,26 +1422,25 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           >
             .*
           </button>
-          {/* File display flags — SmartGit-style toggle buttons (icons only).
+          {/* File display flags — SmartGit-style toggle buttons.
+              Each button shows a SHORT LABEL + tooltip for clarity.
               Default: Subdir + Unver ON. Changed files always visible.
               Flags ADD categories (union). Staged files go to their own section. */}
           <div className="flex items-center gap-0.5">
             {([
-              { id: 'subdirectories' as const, icon: FolderTree, title: 'Files From Subdirectories' },
-              { id: 'unchanged' as const, icon: FileText, title: 'Show Unchanged Files' },
-              { id: 'unversioned' as const, icon: Plus, title: 'Show Unversioned Files' },
-              { id: 'ignored' as const, icon: X, title: 'Show Ignored Files' },
-              { id: 'assumeUnchanged' as const, icon: Lock, title: 'Show Assume-Unchanged Files' },
-              { id: 'skipped' as const, icon: SkipForward, title: 'Show Skipped Files' },
-              { id: 'movedRename' as const, icon: CornerDownRight, title: 'Show Rename Source Files' },
-              { id: 'submodules' as const, icon: Package, title: 'Show Files From Submodules' },
-            ]).map(opt => {
-              const Icon = opt.icon;
-              return (
+              { id: 'subdirectories' as const, label: 'Sub', title: 'Files From Subdirectories (flat list vs tree)' },
+              { id: 'unchanged' as const, label: 'Unch', title: 'Show Unchanged Files' },
+              { id: 'unversioned' as const, label: 'Unv', title: 'Show Unversioned (untracked) Files' },
+              { id: 'ignored' as const, label: 'Ign', title: 'Show Ignored Files (.gitignore)' },
+              { id: 'assumeUnchanged' as const, label: 'A-U', title: 'Show Assume-Unchanged Files' },
+              { id: 'skipped' as const, label: 'Skip', title: 'Show Skipped (skip-worktree) Files' },
+              { id: 'movedRename' as const, label: 'Move', title: 'Show Rename Source Files' },
+              { id: 'submodules' as const, label: 'Subm', title: 'Show Files From Submodules' },
+            ]).map(opt => (
               <button
                 key={opt.id}
                 className={cn(
-                  'w-5 h-5 rounded flex items-center justify-center transition-colors',
+                  'text-2xs px-1.5 h-5 rounded flex items-center justify-center font-mono font-bold transition-colors',
                   hasFlag(opt.id)
                     ? 'bg-accent-muted text-accent'
                     : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'
@@ -1449,10 +1448,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 title={opt.title}
                 onClick={() => toggleFileDisplayFlag(opt.id)}
               >
-                <Icon size={11} />
+                {opt.label}
               </button>
-              );
-            })}
+            ))}
           </div>
           {/* Extension filter */}
           <input
