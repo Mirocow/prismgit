@@ -100,6 +100,42 @@ async function parseRawDiff(rawDiff: string): Promise<unknown> {
   };
 }
 
+/** Resolve the path to the settings JSON file in the app's data directory.
+ *  Caches the path after the first call (appDataDir doesn't change). */
+let cachedSettingsPath: string | null = null;
+async function getSettingsPath(): Promise<string> {
+  if (cachedSettingsPath) return cachedSettingsPath;
+  const pathMod = await import('@tauri-apps/api/path');
+  const appDataDir = await pathMod.appDataDir();
+  // Ensure the directory exists — plugin-fs mkdir with recursive.
+  const { mkdir } = await import('@tauri-apps/plugin-fs');
+  try { await mkdir(appDataDir, { recursive: true }); } catch { /* may already exist */ }
+  const { join } = await import('path');
+  cachedSettingsPath = join(appDataDir, 'prismgit-settings.json');
+  return cachedSettingsPath;
+}
+
+/** Read the settings JSON file. Returns {} when the file doesn't exist yet. */
+async function readSettingsFile(): Promise<Record<string, unknown>> {
+  try {
+    const { readTextFile } = await import('@tauri-apps/plugin-fs');
+    const path = await getSettingsPath();
+    const text = await readTextFile(path);
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    // File doesn't exist or is invalid JSON — return empty object.
+    return {};
+  }
+}
+
+/** Write the settings JSON file atomically (writeTextFile is atomic on
+ *  most platforms since it's a single syscall on a small file). */
+async function writeSettingsFile(data: Record<string, unknown>): Promise<void> {
+  const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+  const path = await getSettingsPath();
+  await writeTextFile(path, JSON.stringify(data, null, 2));
+}
+
 // --- Minimal types matching the Electron-side contracts ---
 interface RawBranchInfo {
   name: string;
@@ -482,9 +518,53 @@ export const tauriApi = {
     },
   },
 
+  // Settings — persisted as JSON in the app's data directory.
+  // Uses @tauri-apps/plugin-fs readTextFile / writeTextFile.
+  // The file path is resolved via the @tauri-apps/api/path appDataDir().
+  // Shape: { settings: {...}, repos: [...], repoMetadata: {...}, groups: [...] }
+  // matching the Electron-side SettingsApi contract (subset).
   settings: {
-    get: async (): Promise<unknown> => { throw new Error('settings.get not yet wired in Tauri backend'); },
-    set: async (): Promise<void> => { throw new Error('settings.set not yet wired in Tauri backend'); },
+    get: async <T = unknown>(key: string): Promise<T | undefined> => {
+      const data = await readSettingsFile();
+      return data?.[key] as T | undefined;
+    },
+    set: async (key: string, value: unknown): Promise<void> => {
+      const data = await readSettingsFile();
+      data[key] = value;
+      await writeSettingsFile(data);
+    },
+    getAll: async (): Promise<Record<string, unknown>> => {
+      return readSettingsFile();
+    },
+    getRepos: async (): Promise<unknown[]> => {
+      const data = await readSettingsFile();
+      return (data.repos as unknown[]) ?? [];
+    },
+    addRepo: async (repo: { path: string; name: string }): Promise<void> => {
+      const data = await readSettingsFile();
+      const repos = (data.repos as Array<{ path: string; name: string }>) ?? [];
+      if (!repos.some(r => r.path === repo.path)) {
+        repos.push(repo);
+        data.repos = repos;
+        await writeSettingsFile(data);
+      }
+    },
+    removeRepo: async (path: string): Promise<void> => {
+      const data = await readSettingsFile();
+      const repos = (data.repos as Array<{ path: string }>) ?? [];
+      data.repos = repos.filter(r => r.path !== path);
+      await writeSettingsFile(data);
+    },
+    updateRepo: async (path: string, updates: Record<string, unknown>): Promise<void> => {
+      const data = await readSettingsFile();
+      const repos = (data.repos as Array<{ path: string; [k: string]: unknown }>) ?? [];
+      const idx = repos.findIndex(r => r.path === path);
+      if (idx >= 0) {
+        repos[idx] = { ...repos[idx], ...updates };
+        data.repos = repos;
+        await writeSettingsFile(data);
+      }
+    },
   },
 
   github: {
