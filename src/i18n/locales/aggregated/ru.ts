@@ -19,6 +19,7 @@ import { ru as pages } from '../domains/pages';
 import { ru as settings } from '../domains/settings';
 import { ru as vscode } from '../domains/vscode';
 import { ru as search } from '../domains/search';
+import { ru as tour } from '../domains/tour';
 
 export const ru: Record<string, string> = {
   ...core,
@@ -35,4 +36,5 @@ export const ru: Record<string, string> = {
   ...settings,
   ...vscode,
   ...search,
+  ...tour,
 };

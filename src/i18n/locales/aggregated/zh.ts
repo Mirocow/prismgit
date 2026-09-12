@@ -15,6 +15,7 @@ import { zh as pages } from '../domains/pages';
 import { zh as settings } from '../domains/settings';
 import { zh as vscode } from '../domains/vscode';
 import { zh as search } from '../domains/search';
+import { zh as tour } from '../domains/tour';
 
 export const zh: Record<string, string> = {
   ...core,
@@ -31,4 +32,5 @@ export const zh: Record<string, string> = {
   ...settings,
   ...vscode,
   ...search,
+  ...tour,
 };

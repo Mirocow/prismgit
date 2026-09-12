@@ -247,7 +247,10 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
         {groups.utils && (
           <>
             <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title={t('shell.repoInfo')} />
-            <IconButton icon={Search} onClick={() => onGlobalSearch && onGlobalSearch()} disabled={!currentRepo} title={t('search.toolbarButtonTitle')} />
+            {/* ONB-1 — data-tour let the TourOverlay spotlight this button. */}
+            <span data-tour="toolbar-global-search">
+              <IconButton icon={Search} onClick={() => onGlobalSearch && onGlobalSearch()} disabled={!currentRepo} title={t('search.toolbarButtonTitle')} />
+            </span>
             <IconButton icon={FileText} onClick={() => onFind && onFind()} disabled={disabled} title={t('shell.findObject')} />
             <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title={t('shell.openInBrowser')} />
             <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title={t('shell.revealInFileManager')} />
@@ -259,11 +262,16 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
           onClick={() => onToggleCommandLog && onToggleCommandLog()}
           title={t('shell.commandLogTooltip')}
         />
-        <IconButton
-          icon={Keyboard}
-          onClick={() => onShowShortcuts && onShowShortcuts()}
-          title={t('shell.keyboardShortcutsTooltip')}
-        />
+        {/* ONB-1 — spotlight this button as the entry-point for
+            "press Ctrl+K anytime for command palette" tour step
+            (the shortcuts dialog lists Ctrl+K as the first shortcut). */}
+        <span data-tour="toolbar-command-palette">
+          <IconButton
+            icon={Keyboard}
+            onClick={() => onShowShortcuts && onShowShortcuts()}
+            title={t('shell.keyboardShortcutsTooltip')}
+          />
+        </span>
         <IconButton
           icon={(getThemeMeta(theme)?.isDark ?? false) ? Sun : Moon}
           onClick={() => toggleTheme()}

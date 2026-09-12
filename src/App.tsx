@@ -9,6 +9,7 @@ import { DragDropHandler } from './components/DragDropHandler';
 import { FindObjectDialog } from './components/FindObjectDialog';
 import { HelpBanner } from './components/HelpBanner';
 import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
+import { TourOverlay } from './components/TourOverlay';
 import { NAV_SHORTCUTS } from './components/navItems';
 import { RefActionDialog, type RefAction } from './components/RefActionDialog';
 import { ResizableSplitter } from './components/ResizableSplitter';
@@ -118,6 +119,22 @@ export default function App() {
   const [showRepoInfo, setShowRepoInfo] = useState(false);
   const [showApplyPatch, setShowApplyPatch] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  // ONB-1 — first-run tour state. Auto-starts on first launch (when
+  // localStorage 'prismgit-tour-completed' is not set), can be re-triggered
+  // via Help menu (Help → Restart Tour — wired in electron/menu.ts via IPC).
+  const [showTour, setShowTour] = useState(false);
+  useEffect(() => {
+    // Auto-start tour on first launch.
+    try {
+      const done = localStorage.getItem('prismgit-tour-completed') === '1';
+      if (!done) {
+        // Defer until the rest of the UI has mounted so the spotlight
+        // targets exist in the DOM.
+        const t = setTimeout(() => setShowTour(true), 800);
+        return () => clearTimeout(t);
+      }
+    } catch { /* SSR / test env */ }
+  }, []);
   /**
    * Global Search modal — cross-entity search (commits/branches/tags/files/
    * stashes/repos). Triggered by Ctrl+Shift+F (or Toolbar button). Distinct
@@ -1334,6 +1351,8 @@ export default function App() {
         open={showGlobalSearch}
         onClose={() => setShowGlobalSearch(false)}
       />
+      {/* ONB-1 — first-run tour overlay (spotlight + popover) */}
+      {showTour && <TourOverlay onClose={() => setShowTour(false)} />}
     </div>
   );
 }

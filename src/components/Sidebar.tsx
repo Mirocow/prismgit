@@ -842,6 +842,15 @@ export function Sidebar() {
                     key={item.path}
                     role="button"
                     tabIndex={0}
+                    // ONB-1 — data-tour attributes let the TourOverlay
+                    // spotlight the Changes/History/Branches nav items
+                    // by CSS selector.
+                    data-tour={
+                      item.path === '/changes' ? 'sidebar-changes'
+                      : item.path === '/history' ? 'sidebar-history'
+                      : item.path === '/branches' ? 'sidebar-branches'
+                      : undefined
+                    }
                     className={cn(
                       'group w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors cursor-pointer',
                       isActive
