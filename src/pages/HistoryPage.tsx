@@ -1561,7 +1561,10 @@ export function HistoryPage() {
                             {/* Node circle — VS Code style: solid filled, colored ring */}
                             {(() => {
                               const cx = x(row.node!.lane);
-                              const isSelected = selectedIdx === idx;
+                              // Use GLOBAL index (start + idx) to match selectedIdx —
+                              // previously used local idx which was wrong after scrolling
+                              // (selectedIdx=50 would match idx=50 in a 0..20 slice → never).
+                              const isSelected = selectedIdx === (start + idx);
                               const isMerge = row.node!.isMerge;
                               const isTruncated = row.node!.truncated;
                               const isIncoming = incomingHashes.has(row.node!.entry.hash);
