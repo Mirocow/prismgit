@@ -1903,24 +1903,17 @@ html.density-comfortable {
 }
 
 /* ===========================================================================
- * BUG FIX: Tailwind opacity modifier doesn't work with CSS var colors.
+ * BUG FIX: Tailwind opacity modifier does not work with CSS var colors.
  *
- * When tailwind.config.js defines `status: { added: 'var(--status-added)' }`
- * and the actual CSS variable holds a hex value like `#86b300`, Tailwind's
- * `bg-status-added/10` syntax is supposed to apply 10% opacity. But
- * Tailwind can't extract RGB channels from a CSS var at build time, so the
- * rule is silently NEVER generated. The class appears in the HTML but
- * matches no CSS — the user sees no background tint.
+ * When tailwind.config.js defines status: { added: var(--status-added) } and
+ * the actual CSS variable holds a hex value, Tailwind cannot extract RGB
+ * channels at build time, so the bg-status-added/10 class is never generated.
  *
- * Workaround: define explicit utility classes for each opacity value used
- * across the codebase, using `color-mix(in srgb, <var> <pct>%, transparent)`
- * which works in Chromium 111+ (Electron 32 = Chromium 128 = supported).
+ * Workaround: define explicit utility classes for each opacity value used in
+ * the codebase, using color-mix(in srgb, var X percent, transparent) which
+ * works in Chromium 111+ (Electron 32 = Chromium 128 = supported).
  *
- * Affected utility patterns (search the codebase for these):
- *   bg-status-{added,modified,deleted,...} / <opacity>
- *   text-status-{added,modified,deleted,...} / <opacity>
- *   border-status-{added,modified,deleted,...} / <opacity>
- *   /5  /8  /10  /12  /15  /20  /25  /30  /40
+ * Opacity levels: 5, 8, 10, 12, 15, 20, 25, 30, 40
  * ===========================================================================
  */
 @layer utilities {
