@@ -1118,48 +1118,86 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     .filter((f) => matchesDirScope(f.path))
     ), [status, sortFiles, fileDisplayFlags]);
 
-  // Detect unstaged renames: stage everything temporarily, run
-  // `git diff --cached --find-renames --name-status`, then reset.
-  // This is the ONLY reliable way to detect unstaged renames — git diff
-  // --find-renames on unstaged changes doesn't see untracked files as
-  // rename targets. By staging first, git can match old→new paths.
+  // Detect unstaged renames by comparing content hashes of deleted tracked
+  // files with untracked files on disk. If two files have identical content,
+  // git would detect them as a rename when staged — we detect them without
+  // staging by comparing `git show HEAD:<path>` hash with the on-disk file hash.
   const [detectedRenames, setDetectedRenames] = useState<{ oldPath: string; newPath: string }[]>([]);
   useEffect(() => {
-    if (!repo?.path) return;
-    // First: detect STAGED renames (already in index)
-    api.git.raw(repo.path, ['diff', '--cached', '--name-status', '--find-renames', '--diff-filter=R']).then(stagedOut => {
-      const renames: { oldPath: string; newPath: string }[] = [];
-      for (const line of stagedOut.split('\n').filter(Boolean)) {
-        const parts = line.split('\t');
-        if (parts.length >= 3 && parts[0].startsWith('R')) {
-          renames.push({ oldPath: parts[1], newPath: parts[2] });
-        }
-      }
-      // Then: detect UNSTAGED renames by temporarily staging all changes,
-      // running diff --cached --find-renames, then resetting.
-      // Use `git add -A` + diff + `git reset` — safe because we immediately
-      // undo the staging. The user's actual index is untouched.
-      api.git.raw(repo.path, ['add', '-A']).then(() => {
-        return api.git.raw(repo.path, ['diff', '--cached', '--name-status', '--find-renames', '--diff-filter=R']);
-      }).then(unstagedOut => {
-        // Reset the temporary staging
-        api.git.raw(repo.path, ['reset', '-q', 'HEAD', '--']).catch(() => {});
-        for (const line of unstagedOut.split('\n').filter(Boolean)) {
+    if (!repo?.path || !status) return;
+    // Get deleted (D in working_dir) tracked files
+    const deletedFiles = status.files.filter(f => {
+      const wd = f.working_dir as string;
+      return wd === 'D';
+    });
+    // Get untracked files
+    const untrackedFiles = status.files.filter(f => {
+      const idx = f.index as string;
+      const wd = f.working_dir as string;
+      return idx === '?' && wd === '?';
+    });
+    if (deletedFiles.length === 0 || untrackedFiles.length === 0) {
+      // Also check STAGED renames (index='R')
+      api.git.raw(repo.path, ['diff', '--cached', '--name-status', '--find-renames', '--diff-filter=R']).then(out => {
+        const renames: { oldPath: string; newPath: string }[] = [];
+        for (const line of out.split('\n').filter(Boolean)) {
           const parts = line.split('\t');
           if (parts.length >= 3 && parts[0].startsWith('R')) {
-            // Only add if not already in staged renames
-            if (!renames.some(r => r.newPath === parts[2])) {
-              renames.push({ oldPath: parts[1], newPath: parts[2] });
-            }
+            renames.push({ oldPath: parts[1], newPath: parts[2] });
           }
         }
         setDetectedRenames(renames);
-      }).catch(() => {
-        // Reset on error too
-        api.git.raw(repo.path, ['reset', '-q', 'HEAD', '--']).catch(() => {});
-        setDetectedRenames(renames);
-      });
-    }).catch(() => setDetectedRenames([]));
+      }).catch(() => setDetectedRenames([]));
+      return;
+    }
+    // Use a single git command to get blob hashes of all deleted files from HEAD:
+    // `git cat-file --batch-check` with input from `git ls-tree`
+    // Simpler: use `git diff --cached --find-renames` on staged renames + 
+    // content-hash matching for unstaged
+    const checkRenames = async () => {
+      const renames: { oldPath: string; newPath: string }[] = [];
+      // 1. Staged renames
+      try {
+        const stagedOut = await api.git.raw(repo.path, ['diff', '--cached', '--name-status', '--find-renames', '--diff-filter=R']);
+        for (const line of stagedOut.split('\n').filter(Boolean)) {
+          const parts = line.split('\t');
+          if (parts.length >= 3 && parts[0].startsWith('R')) {
+            renames.push({ oldPath: parts[1], newPath: parts[2] });
+          }
+        }
+      } catch { /* ignore */ }
+      // 2. Unstaged renames via content-hash matching
+      // For each deleted tracked file, get its hash from HEAD
+      // For each untracked file, compute its hash on disk
+      // If they match → it's a rename
+      try {
+        // Get blob hashes of deleted files from HEAD
+        const hashPromises = deletedFiles.map(async (df) => {
+          try {
+            const hash = await api.git.raw(repo.path, ['hash-object', '--', df.path]);
+            return { path: df.path, hash: hash.trim() };
+          } catch { return null; }
+        });
+        const deletedHashes = (await Promise.all(hashPromises)).filter(Boolean) as { path: string; hash: string }[];
+        // Get blob hashes of untracked files from disk
+        const untrackedPromises = untrackedFiles.map(async (uf) => {
+          try {
+            const hash = await api.git.raw(repo.path, ['hash-object', '--', uf.path]);
+            return { path: uf.path, hash: hash.trim() };
+          } catch { return null; }
+        });
+        const untrackedHashes = (await Promise.all(untrackedPromises)).filter(Boolean) as { path: string; hash: string }[];
+        // Match by hash
+        for (const dh of deletedHashes) {
+          const match = untrackedHashes.find(uh => uh.hash === dh.hash);
+          if (match && !renames.some(r => r.newPath === match.path)) {
+            renames.push({ oldPath: dh.path, newPath: match.path });
+          }
+        }
+      } catch { /* ignore */ }
+      setDetectedRenames(renames);
+    };
+    checkRenames();
   }, [repo?.path, status]);
 
   // Sets of old/new paths for detected renames — used to filter out the
@@ -1339,29 +1377,43 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     const idx = file.index as string;
     const wd = file.working_dir as string;
 
-    // Determine the display status code from BOTH index and working_dir.
-    // Priority: conflicted > untracked > renamed/copied > deleted > added > modified > unmodified > ignored
-    // This gives the user the most actionable status for the file.
+    // Status letter shown in the gutter — single char for git porcelain codes,
+    // custom letters for our synthetic statuses (unchanged/ignored).
     const isUntracked = idx === '?' && wd === '?';
     const isConflicted = idx === 'U' || wd === 'U';
-    // For staged files, the index code is the primary status.
-    // For unstaged files, the working_dir code is the primary status.
-    // When BOTH have changes (e.g. index='M' + wd='M'), the index code wins
-    // because staged changes are more 'committed' than unstaged ones.
-    const code = isStaged
-      ? (idx !== ' ' && idx !== '?' ? idx : wd)  // staged: prefer index code
-      : (wd !== ' ' && wd !== '?' ? wd : idx);    // unstaged: prefer working_dir code
+    const isIgnored = idx === 'ignored' || wd === 'ignored';
+    const isUnmodified = idx === 'unmodified' || wd === 'unmodified';
+
+    // Status code for color + label
     const statusCode =
       isUntracked ? 'untracked' :
       isConflicted ? 'conflicted' :
-      code === 'M' ? 'modified' :
-      code === 'A' ? 'added' :
-      code === 'D' ? 'deleted' :
-      (code === 'R' || code === 'renamed') ? 'renamed' :
-      (code === 'C' || code === 'copied') ? 'copied' :
-      code === 'unmodified' ? 'unmodified' :
-      code === 'ignored' ? 'ignored' :
+      isIgnored ? 'ignored' :
+      isUnmodified ? 'unmodified' :
+      idx === 'R' || idx === 'renamed' ? 'renamed' :
+      idx === 'C' || idx === 'copied' ? 'copied' :
+      wd === 'R' || wd === 'renamed' ? 'renamed' :
+      wd === 'C' || wd === 'copied' ? 'copied' :
+      (isStaged ? idx : wd) === 'A' ? 'added' :
+      (isStaged ? idx : wd) === 'D' ? 'deleted' :
+      (isStaged ? idx : wd) === 'M' ? 'modified' :
       'modified';
+
+    // Single-char status letter for the gutter
+    const statusLetter =
+      isUntracked ? '?' :
+      isConflicted ? 'U' :
+      isIgnored ? 'I' :
+      isUnmodified ? '-' :
+      statusCode === 'renamed' ? 'R' :
+      statusCode === 'copied' ? 'C' :
+      statusCode === 'added' ? 'A' :
+      statusCode === 'deleted' ? 'D' :
+      statusCode === 'modified' ? 'M' :
+      '?';
+
+    // Row opacity — ignored and unchanged files are dimmed (grayed out)
+    const isDimmed = isIgnored || isUnmodified;
     const stateKeys: Record<string, string> = {
       untracked: 'changes.statusUntracked',
       conflicted: 'changes.conflicted',
@@ -1400,7 +1452,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         key={file.path}
         className={cn(
           'group flex items-center gap-2 px-2 py-1 cursor-pointer text-xs border-b border-border-subtle',
-          isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover'
+          isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
+          isDimmed && 'opacity-50',
         )}
         draggable
         onDragStart={(e) => {
@@ -1492,7 +1545,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           className="w-4 text-center font-bold flex-shrink-0"
           style={{ color: getStatusColor(statusCode) }}
         >
-          {code}
+          {statusLetter}
         </span>
         {/* Name */}
         <span className="flex-1 truncate font-mono whitespace-nowrap" title={renameTitle}>{renameLabel}</span>
