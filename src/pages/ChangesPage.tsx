@@ -1760,7 +1760,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           <span className="text-xs font-medium">{t('changes.files')}</span>
           {totalChanged > 0 && (
             <span className="text-2xs text-text-tertiary">
-              {t('changes.stagedUnstagedCounts', { staged: stagedFiles.length, unstaged: unstagedFiles.length + untrackedFiles.length })}
+              {t('changes.stagedUnstagedCounts', { staged: stagedFiles.length, unstaged: unstagedFiles.length + renamedFiles.length + untrackedFiles.length })}
             </span>
           )}
           {hiddenCount > 0 && !hasFlag('unchanged') && (
@@ -2058,6 +2058,12 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 ...unchangedFiles, // unchanged always last
               ];
               if (combined.length === 0) return null;
+              // Count only actual changes (modified/added/deleted/renamed/
+              // untracked) — NOT ignored/assume-unchanged/skipped/submodule/
+              // unchanged, which are shown in the same section when their
+              // respective display flags are ON but are not "changes".
+              const changesCount =
+                unstagedFiles.length + renamedFiles.length + untrackedFiles.length;
               return (
                 <>
                   <div
@@ -2069,7 +2075,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                     }}
                     title={t('changes.clickToStageAll')}
                   >
-                    <span>{t('changes.changesCount', { count: combined.length })}</span>
+                    <span>{t('changes.changesCount', { count: changesCount })}</span>
                     <span className="text-text-tertiary normal-case font-normal">{t('changes.clickToStageAllHint')}</span>
                   </div>
                   <LazyFileList files={combined} isStaged={false} renderRow={renderFileRow} />
