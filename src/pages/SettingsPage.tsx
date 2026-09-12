@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { Folder, Github, Loader, LogOut, Moon, Plus, RefreshCw, Settings as SettingsIcon, Sun, Trash, GitBranch, Palette } from '../components/icons';
+import { Folder, Github, Loader, LogOut, Moon, Plus, RefreshCw, Settings as SettingsIcon, Sun, Trash, GitBranch, Palette, Sparkles } from '../components/icons';
 import { api, type GitConfigEntry } from '../lib/api';
 import { THEMES, type ThemeId, getThemeMeta } from '../lib/themes';
 import { cn } from '../lib/utils';
@@ -20,10 +20,11 @@ export function SettingsPage() {
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
   // Top-level tab: Application Settings vs Project Settings vs Themes
-  const [activeTab, setActiveTab] = useState<'application' | 'project' | 'themes'>('application');
+  const [activeTab, setActiveTab] = useState<'application' | 'project' | 'themes' | 'ai'>('application');
   const showApp = activeTab === 'application';
   const showProject = activeTab === 'project' && !!currentRepo;
   const showThemes = activeTab === 'themes';
+  const showAi = activeTab === 'ai';
 
   // === Git Config section state ===
   const [configScope, setConfigScope] = useState<'local' | 'global' | 'system'>('local');
@@ -214,6 +215,18 @@ export function SettingsPage() {
           >
             <Palette size={14} />
             {t('settings.themes')}
+          </button>
+          <button
+            className={cn(
+              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              showAi
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            )}
+            onClick={() => setActiveTab('ai')}
+          >
+            <Sparkles size={14} />
+            {t('settings.ai')}
           </button>
         </div>
 
@@ -1108,82 +1121,109 @@ smartgit.refresh.inspectEol=true
         </section>
         )}
 
-        {/* SmartGit Manual: AI Commit Messages (v25+) */}
-        {showApp && (
+        {/* SmartGit Manual: AI Commit Messages (v25+) — now on its own 'AI' tab */}
+        {showAi && (
         <section className="panel mb-4">
-          <div className="panel-header">{t('settings.aiCommitMessages')}</div>
-          <div className="p-5 text-sm space-y-3">
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.aiCommitMessagesEnabled ?? false}
-                onChange={(e) => setSetting('aiCommitMessagesEnabled', e.target.checked)}
-              />
-              <div className="flex-1">
-                <div>{t('settings.enableAi')}</div>
-                <div className="text-2xs text-text-tertiary mt-0.5">
-                  {t('settings.aiHintUse')} <code className="mono">@ai</code> {t('settings.aiHintOr')} <code className="mono">WIP</code> {t('settings.aiHintWipSuffix')}
+          <div className="panel-header flex items-center gap-2">
+            <Sparkles size={16} />
+            {t('settings.aiCommitMessages')}
+          </div>
+          <div className="p-5 text-sm space-y-4">
+            {/* Provider + Model — primary config */}
+            <div>
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                {t('settings.aiProviderSection') || 'Provider'}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.provider')}</label>
+                  <select
+                    className="w-full text-sm bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
+                    value={settings.aiProvider || ''}
+                    onChange={(e) => setSetting('aiProvider', e.target.value)}
+                  >
+                    <option value="">{t('settings.disabledOption')}</option>
+                    <option value="openai">OpenAI (gpt-4o-mini)</option>
+                    <option value="anthropic">Anthropic (Claude)</option>
+                    <option value="github">GitHub Models</option>
+                    <option value="mistral">Mistral</option>
+                    <option value="ollama">{t('settings.aiProviderOllamaLocal')}</option>
+                    <option value="custom">{t('settings.aiProviderCustom')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.model')}</label>
+                  <input
+                    type="text"
+                    className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
+                    placeholder="gpt-4o-mini"
+                    defaultValue={settings.aiModel || ''}
+                    onBlur={(e) => setSetting('aiModel', e.target.value)}
+                  />
                 </div>
               </div>
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-text-tertiary block mb-1">{t('settings.provider')}</label>
-                <select
-                  className="w-full text-sm"
-                  value={settings.aiProvider || ''}
-                  onChange={(e) => setSetting('aiProvider', e.target.value)}
-                >
-                  <option value="">{t('settings.disabledOption')}</option>
-                  <option value="openai">OpenAI (gpt-4o-mini)</option>
-                  <option value="anthropic">Anthropic (Claude)</option>
-                  <option value="github">GitHub Models</option>
-                  <option value="mistral">Mistral</option>
-                  <option value="ollama">{t('settings.aiProviderOllamaLocal')}</option>
-                  <option value="custom">{t('settings.aiProviderCustom')}</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-text-tertiary block mb-1">{t('settings.model')}</label>
-                <input
-                  type="text"
-                  className="w-full text-sm font-mono"
-                  placeholder="gpt-4o-mini"
-                  defaultValue={settings.aiModel || ''}
-                  onBlur={(e) => setSetting('aiModel', e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiUrl')}</label>
-                <input
-                  type="text"
-                  className="w-full text-sm font-mono"
-                  placeholder="https://api.openai.com/v1/chat/completions (default for OpenAI)"
-                  defaultValue={settings.aiUrl || ''}
-                  onBlur={(e) => setSetting('aiUrl', e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiKey')}</label>
-                <input
-                  type="password"
-                  className="w-full text-sm font-mono"
-                  placeholder="sk-..."
-                  defaultValue={settings.aiApiKey || ''}
-                  onBlur={(e) => setSetting('aiApiKey', e.target.value)}
-                />
-              </div>
             </div>
-            <div className="text-2xs text-text-tertiary">
-              {t('settings.ollamaHint')} <code>http://localhost:11434</code>. {t('settings.ollamaPullHint')} (<code className="mono">ollama pull llama3.2</code>).
-            </div>
-            {/* SmartGit Manual v26: Custom AI Prompts with template vars */}
+
+            {/* Connection — URL + API key */}
             <div>
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                {t('settings.aiConnectionSection') || 'Connection'}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiUrl')}</label>
+                  <input
+                    type="text"
+                    className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
+                    placeholder="https://api.openai.com/v1/chat/completions"
+                    defaultValue={settings.aiUrl || ''}
+                    onBlur={(e) => setSetting('aiUrl', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiKey')}</label>
+                  <input
+                    type="password"
+                    className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
+                    placeholder="sk-..."
+                    defaultValue={settings.aiApiKey || ''}
+                    onBlur={(e) => setSetting('aiApiKey', e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="text-2xs text-text-tertiary mt-2">
+                {t('settings.ollamaHint')} <code className="mono bg-bg-tertiary px-1 rounded">http://localhost:11434</code>. {t('settings.ollamaPullHint')} (<code className="mono bg-bg-tertiary px-1 rounded">ollama pull llama3.2</code>).
+              </div>
+            </div>
+
+            {/* Enable toggle */}
+            <div className="pt-3 border-t border-border-subtle">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.aiCommitMessagesEnabled ?? false}
+                  onChange={(e) => setSetting('aiCommitMessagesEnabled', e.target.checked)}
+                  className="w-4 h-4"
+                />
+                <div className="flex-1">
+                  <div className="font-medium">{t('settings.enableAi')}</div>
+                  <div className="text-2xs text-text-tertiary mt-0.5">
+                    {t('settings.aiHintUse')} <code className="mono bg-bg-tertiary px-1 rounded">@ai</code> {t('settings.aiHintOr')} <code className="mono bg-bg-tertiary px-1 rounded">WIP</code> {t('settings.aiHintWipSuffix')}
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            {/* SmartGit Manual v26: Custom AI Prompts with template vars */}
+            <div className="pt-3 border-t border-border-subtle">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                {t('settings.aiCustomPromptSection') || 'Custom Prompt'}
+              </div>
               <label className="text-xs text-text-tertiary block mb-1">
                 {t('settings.customPromptLabel')} {'{{branch}}'}, {'{{author}}'}, {'{{date}}'}, {'{{repository}}'}{t('settings.customPromptSuffix')}
               </label>
               <textarea
-                className="w-full font-mono text-xs h-16 resize-none p-2 border border-border-default rounded bg-bg-tertiary"
+                className="w-full font-mono text-xs h-20 resize-none p-2 border border-border-default rounded bg-bg-tertiary"
                 placeholder="Leave empty for default prompt. Example: 'You are a senior developer working on the {{repository}} project. Write commit messages in conventional commits format.'"
                 defaultValue={settings.aiCustomPrompt || ''}
                 onBlur={(e) => setSetting('aiCustomPrompt', e.target.value)}
@@ -1340,7 +1380,7 @@ smartgit.refresh.inspectEol=true
           <div className="p-5 text-sm space-y-2">
             <div className="flex justify-between">
               <span className="text-text-tertiary">{t('settings.version')}</span>
-              <span className="font-mono">2.0.0</span>
+              <span className="font-mono">2.0.1</span>
             </div>
             <div className="flex justify-between">
               <span className="text-text-tertiary">{t('settings.platform')}</span>

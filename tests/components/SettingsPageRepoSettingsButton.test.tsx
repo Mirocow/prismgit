@@ -97,21 +97,19 @@ describe('SettingsPage — Repository Settings header button', () => {
     currentRepo = null;
   });
 
-  it('is visible when a repository is open and dispatches the shared repo-settings event', () => {
+  it('Project tab becomes available when a repository is open', () => {
     currentRepo = { path: '/test/repo', name: 'test-repo' };
-    const listener = vi.fn();
-    window.addEventListener('prismgit:repo-settings', listener);
-
     renderPage();
-    const btn = screen.getByRole('button', { name: /Repository Settings/i });
-    fireEvent.click(btn);
-
-    expect(listener).toHaveBeenCalledTimes(1);
-    window.removeEventListener('prismgit:repo-settings', listener);
+    // After the Settings redesign, the 'Repository Settings' button was
+    // removed from the header. Instead, the Project tab becomes clickable
+    // when a repo is open. Verify the Project tab exists and is not disabled.
+    const projectTab = screen.getByRole('button', { name: /Project/i });
+    expect(projectTab).not.toBeDisabled();
   });
 
-  it('is hidden when no repository is open', () => {
+  it('Project tab is disabled when no repository is open', () => {
     renderPage();
-    expect(screen.queryByRole('button', { name: /Repository Settings/i })).toBeNull();
+    const projectTab = screen.getByRole('button', { name: /Project/i });
+    expect(projectTab).toBeDisabled();
   });
 });

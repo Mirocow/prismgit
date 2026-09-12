@@ -29,6 +29,10 @@ export const en: Record<string, string> = {
   'settings.darkMode': 'Dark',
   // Themes tab
   'settings.themes': 'Themes',
+  'settings.ai': 'AI',
+  'settings.aiProviderSection': 'Provider',
+  'settings.aiConnectionSection': 'Connection',
+  'settings.aiCustomPromptSection': 'Custom Prompt',
   'settings.themePicker': 'Theme Picker',
   'settings.themePickerHint': 'Click a card to apply the theme instantly',
   'settings.quickToggle': 'Quick Light/Dark Toggle',
@@ -267,6 +271,10 @@ export const ru: Record<string, string> = {
   'settings.darkMode': 'Тёмная',
   // Themes tab
   'settings.themes': 'Темы',
+  'settings.ai': 'ИИ',
+  'settings.aiProviderSection': 'Провайдер',
+  'settings.aiConnectionSection': 'Подключение',
+  'settings.aiCustomPromptSection': 'Пользовательский промпт',
   'settings.themePicker': 'Выбор темы',
   'settings.themePickerHint': 'Нажмите на карточку, чтобы применить тему мгновенно',
   'settings.quickToggle': 'Быстрое переключение светлая/тёмная',
@@ -505,6 +513,10 @@ export const zh: Record<string, string> = {
   'settings.darkMode': '深色',
   // Themes tab
   'settings.themes': '主题',
+  'settings.ai': 'AI',
+  'settings.aiProviderSection': '提供商',
+  'settings.aiConnectionSection': '连接',
+  'settings.aiCustomPromptSection': '自定义提示词',
   'settings.themePicker': '主题选择器',
   'settings.themePickerHint': '点击卡片即时应用主题',
   'settings.quickToggle': '快速切换 浅色/深色',
@@ -743,6 +755,10 @@ export const de: Record<string, string> = {
   'settings.darkMode': 'Dunkel',
   // Themes tab
   'settings.themes': 'Designs',
+  'settings.ai': 'KI',
+  'settings.aiProviderSection': 'Anbieter',
+  'settings.aiConnectionSection': 'Verbindung',
+  'settings.aiCustomPromptSection': 'Benutzerdefinierter Prompt',
   'settings.themePicker': 'Design-Auswahl',
   'settings.themePickerHint': 'Auf eine Karte klicken, um das Design sofort anzuwenden',
   'settings.quickToggle': 'Schnelle Hell/Dunkel-Umschaltung',
