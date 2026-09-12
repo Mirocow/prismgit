@@ -166,16 +166,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const setColWidth = useSelectionStore((s) => s.setColWidth);
 
   // Sync 'subdirectories' flag with file scope:
-  //   subdirectories ON  → fileScopeDir=null (show files from ALL directories)
-  //   subdirectories OFF → fileScopeDir='' (only root-level files, no subdirectories)
-  useEffect(() => {
-    const showSubdirs = fileDisplayFlags.has('subdirectories');
-    if (showSubdirs && fileScopeDir !== null) {
-      setFileScopeDir(null);
-    } else if (!showSubdirs && fileScopeDir === null) {
-      setFileScopeDir('');
-    }
-  }, [fileDisplayFlags]); // eslint-disable-line react-hooks/exhaustive-deps
+  //   subdirectories ON  → show files from current dir AND all subdirectories
+  //   subdirectories OFF → show files from current dir ONLY (no subdirectories)
+  //   The "current dir" is fileScopeDir (null = repo root, or a folder selected
+  //   in the directory tree panel).
+  //
+  //   We store this as a separate flag `showSubdirs` and use it in matchesDirScope
+  //   rather than overwriting fileScopeDir — that way the user's tree-panel
+  //   selection is preserved when toggling subdirectories on/off.
+  const showSubdirs = fileDisplayFlags.has('subdirectories');
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const fileExtensionFilter = useSelectionStore((s) => s.fileExtensionFilter);
   const setFileExtensionFilter = useSelectionStore((s) => s.setFileExtensionFilter);
@@ -1010,13 +1009,28 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   };
 
   // Directory scope helper:
-  //   fileScopeDir === null  → show ALL files (subdirectories flag ON)
-  //   fileScopeDir === ''    → show only root-level files (no '/' in path)
-  //   fileScopeDir === 'src' → show files inside src/ (tree panel scope)
+  //   fileScopeDir === null  → current dir is repo root
+  //   fileScopeDir === 'src' → current dir is src/
+  //   showSubdirs = true     → include files from subdirectories of the current dir
+  //   showSubdirs = false    → only files directly in the current dir (no subdirs)
   const matchesDirScope = (path: string): boolean => {
-    if (fileScopeDir === null) return true;
-    if (fileScopeDir === '') return !path.includes('/');
-    return path === fileScopeDir || path.startsWith(`${fileScopeDir}/`);
+    const currentDir = fileScopeDir ?? '';  // null = repo root = ''
+    if (showSubdirs) {
+      // ON: show files from current dir AND all subdirectories
+      if (currentDir === '') return true;  // root + all subdirs = everything
+      return path === currentDir || path.startsWith(`${currentDir}/`);
+    } else {
+      // OFF: show files directly in the current dir only (no subdirectories)
+      // A file is "directly in" currentDir if it has no '/' after the dir prefix.
+      if (currentDir === '') {
+        // Root: file must not contain '/' at all
+        return !path.includes('/');
+      }
+      // Non-root: file must be inside currentDir but NOT in a subdirectory of it
+      if (!path.startsWith(`${currentDir}/`)) return false;
+      const remainder = path.slice(currentDir.length + 1);
+      return !remainder.includes('/');
+    }
   };
 
   // Sort helper for the Changes table (Name / State / Relative Directory).
