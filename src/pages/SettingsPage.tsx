@@ -9,6 +9,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useI18n, LOCALES } from '../lib/i18n';
+import { OllamaModelPicker } from '../components/OllamaModelPicker';
 
 export function SettingsPage() {
   const { settings, theme, setSetting, toggleTheme, setTheme } = useSettingsStore();
@@ -1195,6 +1196,17 @@ smartgit.refresh.inspectEol=true
                 {t('settings.ollamaHint')} <code className="mono bg-bg-tertiary px-1 rounded">http://localhost:11434</code>. {t('settings.ollamaPullHint')} (<code className="mono bg-bg-tertiary px-1 rounded">ollama pull llama3.2</code>).
               </div>
             </div>
+
+            {/* Ollama model picker — fetches /api/tags from the Ollama server,
+                shows a dropdown of available models. User can select instead of
+                typing the model name manually. */}
+            {settings.aiProvider === 'ollama' && (
+              <OllamaModelPicker
+                url={settings.aiUrl || 'http://localhost:11434'}
+                selectedModel={settings.aiModel || ''}
+                onSelect={(model) => setSetting('aiModel', model)}
+              />
+            )}
 
             {/* Enable toggle */}
             <div className="pt-3 border-t border-border-subtle">
