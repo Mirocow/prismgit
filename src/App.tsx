@@ -70,14 +70,11 @@ const BranchesPage = lazy(() => import('./pages/BranchesPage').then(m => ({ defa
 const StashesPage = lazy(() => import('./pages/StashesPage').then(m => ({ default: m.StashesPage })));
 const TagsPage = lazy(() => import('./pages/TagsPage').then(m => ({ default: m.TagsPage })));
 const SubmodulesPage = lazy(() => import('./pages/SubmodulesPage').then(m => ({ default: m.SubmodulesPage })));
-const WorktreesPage = lazy(() => import('./pages/WorktreesPage').then(m => ({ default: m.WorktreesPage })));
 const ReflogPage = lazy(() => import('./pages/ReflogPage').then(m => ({ default: m.ReflogPage })));
 const RecyclablePage = lazy(() => import('./pages/RecyclablePage').then(m => ({ default: m.RecyclablePage })));
 const RemotesPage = lazy(() => import('./pages/RemotesPage').then(m => ({ default: m.RemotesPage })));
 const BisectPage = lazy(() => import('./pages/BisectPage').then(m => ({ default: m.BisectPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const NotesPage = lazy(() => import('./pages/NotesPage').then(m => ({ default: m.NotesPage })));
-const SubtreesPage = lazy(() => import('./pages/SubtreesPage').then(m => ({ default: m.SubtreesPage })));
 
 function PageLoader() {
   return (
@@ -1268,13 +1265,10 @@ export default function App() {
               <Route path="/stashes" element={<StashesPage />} />
               <Route path="/tags" element={<TagsPage />} />
               <Route path="/submodules" element={<SubmodulesPage />} />
-              <Route path="/subtrees" element={<SubtreesPage />} />
-              <Route path="/worktrees" element={<WorktreesPage />} />
               <Route path="/reflog" element={<ReflogPage />} />
               <Route path="/recyclable" element={<RecyclablePage />} />
               <Route path="/remotes" element={<RemotesPage />} />
               <Route path="/bisect" element={<BisectPage />} />
-              <Route path="/notes" element={<NotesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </Suspense>

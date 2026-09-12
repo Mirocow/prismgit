@@ -253,8 +253,12 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const [draggedFile, setDraggedFile] = useState<string | null>(null);
   const [journal, setJournal] = useState<LogEntry[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
-  // Journal panel collapsed state — when true, only the header bar is shown
-  const [journalCollapsed, setJournalCollapsed] = useState(false);
+  // Journal panel collapsed state — when true, only the header bar is shown.
+  // Task 9 — default to COLLAPSED so the journal doesn't grab vertical
+  // real estate from the diff/commit-message editor on first open.
+  // Users who expand it will get the persisted expanded state (saved by
+  // the projectPrefs effect below).
+  const [journalCollapsed, setJournalCollapsed] = useState(true);
   const [showSplitView, setShowSplitView] = useState(false);
   const { width: leftWidth, setWidth: setLeftWidth, handleResize: handleLeftResize } = useResizableWidth(500, 250, 800);
   const { width: treeWidth, setWidth: setTreeWidth, handleResize: handleTreeResize } = useResizableWidth(210, 140, 380);

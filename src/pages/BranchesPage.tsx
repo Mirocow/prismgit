@@ -1041,6 +1041,10 @@ export function BranchesPage() {
       items.push({ label: t('branches.pushToGerrit'), clickId: 'push-gerrit' });
       items.push({ type: 'separator' });
 
+      // Task 14 — Worktree actions (moved from the deleted Worktrees page).
+      items.push({ label: t('branches.createWorktree'), clickId: 'create-worktree', enabled: !isInProgress });
+      items.push({ type: 'separator' });
+
       // Group 3: Log / Reset
       items.push({ label: t('branches.log'), accelerator: 'CmdOrCtrl+L', clickId: 'log' });
       items.push({ type: 'separator' });
@@ -1074,6 +1078,25 @@ export function BranchesPage() {
       showContextMenu(items, async (action) => {
         // === Checkout ===
         if (action === 'checkout') handleCheckout(b);
+
+        // Task 14 — Create worktree from this branch.
+        // Uses git worktree add <path> <branch>; prompts for the path.
+        else if (action === 'create-worktree') {
+          const defaultPath = `${repo.path}-wt-${b.name.replace('/', '-')}`;
+          const wtPath = await promptDialog({
+            title: t('branches.createWorktreeTitle', { name: b.name }),
+            message: t('branches.createWorktreeMessage'),
+            input: { initialValue: defaultPath },
+            confirmLabel: t('common.create'),
+          });
+          if (!wtPath) return;
+          try {
+            await api.git.raw(repo.path, ['worktree', 'add', wtPath, b.name]);
+            toast.success(t('branches.worktreeCreated', { path: wtPath }));
+          } catch (e) {
+            toast.error(t('branches.worktreeCreateFailed'), String(e));
+          }
+        }
 
         // === Checkout remote (create local tracking branch) ===
         else if (action === 'checkout-remote') {

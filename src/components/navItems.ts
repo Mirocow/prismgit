@@ -1,4 +1,4 @@
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, FolderTree, RotateCcw, FileText, Search, CloudDownload, Filter, Recycle, StickyNote, GitMerge } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, RotateCcw, FileText, Search, CloudDownload, Filter, Recycle } from './icons';
 
 /**
  * Single source of truth for the app navigation.
@@ -11,6 +11,16 @@ import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, FolderTree
  *   - Journal → merged into Reflog (Reflog now has Journal's action-type
  *     filters + cherry-pick/reset actions)
  *   - Investigate → renamed to "Search" (grep-focused, rev-parse removed)
+ *
+ * Task 14 / 19 / 21 — REMOVED:
+ *   - Worktrees → functionality moved into Branches page (the natural
+ *     home; worktrees are per-branch anyway, so 'create worktree from
+ *     this branch' now appears in the branch context menu).
+ *   - Subtrees → removed entirely (subtree workflow is rarely used and
+ *     outside the scope of a daily-driver Git GUI).
+ *   - Notes → removed entirely (git notes are obscure; distributed
+ *     reviews in /reviews already cover the 'metadata on a commit'
+ *     use case with a richer UI).
  */
 export interface NavItem {
   path: string;
@@ -46,13 +56,11 @@ export const NAV_ITEMS: NavItem[] = [
 
   // === Refs ===
   { path: '/branches', label: 'Branches', icon: GitBranch, group: 'Refs',
-    description: 'Create, checkout, merge, rename, and delete branches. Drag a branch onto another to merge. Ctrl+click to filter History.' },
+    description: 'Create, checkout, merge, rename, and delete branches. Drag a branch onto another to merge. Ctrl+click to filter History. Right-click for worktree actions.' },
   { path: '/tags', label: 'Tags', icon: Tag, group: 'Refs',
     description: 'Create lightweight or annotated tags. Click a tag to jump to its commit in History.' },
   { path: '/remotes', label: 'Remotes', icon: CloudDownload, group: 'Refs',
     description: 'Add, remove, and rename remotes. Edit fetch/push URLs. Fetch from all remotes or preview remote refs.' },
-  { path: '/worktrees', label: 'Worktrees', icon: FolderTree, group: 'Refs',
-    description: 'Multiple working directories for the same repo. Useful for working on a feature while keeping main checked out.' },
   { path: '/reflog', label: 'Reflog', icon: RotateCcw, group: 'Refs',
     description: 'Reference log for HEAD and other refs. Shows every checkout, commit, merge, reset. Cherry-pick or reset to any entry.' },
   { path: '/recyclable', label: 'Recyclable', icon: Recycle, group: 'Refs',
@@ -61,12 +69,8 @@ export const NAV_ITEMS: NavItem[] = [
     description: 'Saved stashes. Click a stash to view its diff (compared to its parent, not HEAD). Apply, pop, or drop.' },
   { path: '/submodules', label: 'Submodules', icon: Package, group: 'Refs',
     description: 'Manage git submodules: init, update, sync. View submodule status and commit hashes.' },
-  { path: '/subtrees', label: 'Subtrees', icon: GitMerge, group: 'Refs',
-    description: 'Integrate other repositories into subfolders (subtree add/pull/push/split). An alternative to submodules.' },
   { path: '/lfs', label: 'Git LFS', icon: Package, group: 'Refs',
     description: 'Large File Storage management. Track patterns, pull/push LFS objects, manage file locks, view tracked files with sizes.' },
-  { path: '/notes', label: 'Notes', icon: StickyNote, group: 'Refs',
-    description: 'Git notes: attach metadata to commits without rewriting history. Categories via smartgit-notes config. Sync notes refs with remotes.' },
 ];
 
 /**
