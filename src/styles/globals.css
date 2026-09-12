@@ -1885,6 +1885,24 @@ html.sidebar-light aside {
 }
 
 /* ===========================================================================
+ * Settings redesign — UI density.
+ * Compact:  tighter row padding (matches SmartGit/Fork compact mode).
+ * Comfortable:  default with extra breathing room.
+ * Controlled via AppSettings.uiDensity + applyUiDensityToDOM().
+ * ===========================================================================
+ */
+html.density-compact {
+  --row-padding-y: 2px;
+  --row-padding-x: 6px;
+  --row-min-height: 22px;
+}
+html.density-comfortable {
+  --row-padding-y: 6px;
+  --row-padding-x: 8px;
+  --row-min-height: 28px;
+}
+
+/* ===========================================================================
  * BUG FIX: Tailwind opacity modifier doesn't work with CSS var colors.
  *
  * When tailwind.config.js defines `status: { added: 'var(--status-added)' }`

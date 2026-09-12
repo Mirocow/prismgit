@@ -66,14 +66,25 @@ export interface AppSettings {
   sidebarWidth: number;
   /**
    * Sidebar visual mode — Discord/Slack-style dim sidebar.
-   *   'default' — sidebar uses the active theme's normal bg color.
-   *   'dim'      — sidebar gets a darker overlay (delta ~8% lightness)
-   *                so it visually separates from the main content area,
-   *                matching the channel-sidebar look in Discord/Slack.
-   *   'light'    — sidebar gets a lighter overlay (useful on dark themes
-   *                where the sidebar would otherwise disappear).
    */
   sidebarMode?: 'default' | 'dim' | 'light';
+  /**
+   * Settings redesign — UI density: Compact (less padding, IDE feel)
+   * or Comfortable (default, more breathing room). Affects list rows
+   * and toolbars. Compact = py-0.5 → py-1; Comfortable = py-1.5.
+   */
+  uiDensity?: 'compact' | 'comfortable';
+  /**
+   * Settings redesign — date format: Relative (e.g. "5m ago"),
+   * Absolute (e.g. "2024-09-12"), or Both (relative + tooltip).
+   */
+  dateFormat?: 'relative' | 'absolute' | 'both';
+  /**
+   * Settings redesign — zoom level (60-240%). Stored as integer
+   * percentage. Maps to document.documentElement.style.zoom.
+   * Keyboard shortcuts: Ctrl+= / Ctrl+- / Ctrl+0.
+   */
+  zoomLevel?: number;
   /**
    * UI contrast level — 100 = default, lower = softer, higher = punchier.
    * Range 50–150. Applied as `filter: contrast(N%)` on the root element via

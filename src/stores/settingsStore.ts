@@ -56,15 +56,32 @@ function applyThemeToDOM(theme: Theme) {
  *   - Low contrast target: the background color (fades text into bg)
  */
 function applySidebarModeToDOM(mode: 'default' | 'dim' | 'light') {
-  // Apply a CSS class on <html> so globals.css can override sidebar bg.
-  // Three modes:
-  //   default — no override (use the active theme's bg colors as-is)
-  //   dim     — sidebar gets a darker overlay (Discord/Slack channel-sidebar look)
-  //   light   — sidebar gets a lighter overlay (useful on very dark themes)
   const html = document.documentElement;
   html.classList.remove('sidebar-dim', 'sidebar-light');
   if (mode === 'dim') html.classList.add('sidebar-dim');
   else if (mode === 'light') html.classList.add('sidebar-light');
+}
+
+/**
+ * Settings redesign — UI density (Compact / Comfortable).
+ * Affects row padding: Compact → py-1, Comfortable → py-1.5.
+ * Applied via CSS class on <html> so globals.css can target it.
+ */
+function applyUiDensityToDOM(density: 'compact' | 'comfortable') {
+  const html = document.documentElement;
+  html.classList.remove('density-compact', 'density-comfortable');
+  html.classList.add(density === 'compact' ? 'density-compact' : 'density-comfortable');
+}
+
+/**
+ * Settings redesign — zoom level (60-240%). Maps directly to
+ * document.documentElement.style.zoom (Chromium-only; Electron/Tauri
+ * both run on Chromium). Keyboard shortcuts Ctrl+= / Ctrl+- / Ctrl+0
+ * call setSetting('zoomLevel', ...) in App.tsx.
+ */
+function applyZoomToDOM(zoomPct: number) {
+  const clamped = Math.max(60, Math.min(240, zoomPct));
+  document.documentElement.style.zoom = `${clamped / 100}`;
 }
 
 function applyContrastToDOM(contrast: number) {
@@ -175,6 +192,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       applyContrastToDOM(settings.contrast ?? 100);
       // Apply sidebar dim mode (Discord/Slack-style channel sidebar)
       applySidebarModeToDOM(settings.sidebarMode ?? 'default');
+      // Settings redesign — apply UI density + zoom on load
+      applyUiDensityToDOM(settings.uiDensity ?? 'comfortable');
+      applyZoomToDOM(settings.zoomLevel ?? 100);
     } catch {
       set({ loading: false });
     }
@@ -216,6 +236,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     // Apply sidebar visual mode live (Discord/Slack-style dim)
     if (key === 'sidebarMode') {
       applySidebarModeToDOM(value as 'default' | 'dim' | 'light');
+    }
+    // Settings redesign — apply UI density live
+    if (key === 'uiDensity') {
+      applyUiDensityToDOM(value as 'compact' | 'comfortable');
+    }
+    // Settings redesign — apply zoom level live
+    if (key === 'zoomLevel') {
+      applyZoomToDOM(value as number);
     }
   },
 

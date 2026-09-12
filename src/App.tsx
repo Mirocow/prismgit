@@ -945,6 +945,25 @@ export default function App() {
     const handleKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      // Settings redesign — Zoom shortcuts (Ctrl+= / Ctrl+- / Ctrl+0).
+      // Applies even from inputs (matches VS Code behavior).
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        const cur = useSettingsStore.getState().settings.zoomLevel ?? 100;
+        void useSettingsStore.getState().setSetting('zoomLevel', Math.min(240, cur + 10));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === '-') {
+        e.preventDefault();
+        const cur = useSettingsStore.getState().settings.zoomLevel ?? 100;
+        void useSettingsStore.getState().setSetting('zoomLevel', Math.max(60, cur - 10));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === '0') {
+        e.preventDefault();
+        void useSettingsStore.getState().setSetting('zoomLevel', 100);
+        return;
+      }
       // Command palette — works even from inputs (standard UX), toggles
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'k' || e.key === 'p')) {
         e.preventDefault();
