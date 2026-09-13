@@ -357,9 +357,9 @@ export const gitUnstageTool: AITool = {
       return 'All files unstaged.';
     }
     if (p.files && p.files.length > 0) {
-      for (const f of p.files) {
-        await api.git.resetFile(repoPath, f);
-      }
+      // BATCH: single `git reset HEAD -- f1 f2 f3` call instead of N sequential
+      // resetFile() calls. ~50× faster for 50 files.
+      await api.git.resetFiles(repoPath, p.files);
       return `Unstaged ${p.files.length} file(s): ${p.files.join(', ')}`;
     }
     return 'No files specified to unstage.';

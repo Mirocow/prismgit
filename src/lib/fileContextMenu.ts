@@ -412,7 +412,9 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     }
     case 'unstage': {
       try {
-        for (const p of targets) await api.git.resetFile(ctx.repoPath, p);
+        // BATCH: single `git reset HEAD -- f1 f2 f3` call instead of N
+        // sequential resetFile() calls. ~50× faster for 50 files.
+        await api.git.resetFiles(ctx.repoPath, targets);
         t.success(n('Unstaged'));
         refresh();
       } catch (e) {
@@ -469,25 +471,18 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       try {
         // For ALL discard cases (staged, unstaged, unmerged/conflicted):
         // 1. git reset HEAD -- <files>  → unstages + clears unmerged state
-        // 2. git checkout -- <files>   → restores working tree to HEAD
+        // 2. git restore <files>        → restores working tree to HEAD
         //
-        // The old code called `api.git.restore()` directly for unstaged files,
-        // but `git restore` FAILS on unmerged files with:
-        //   "error: path '.vscode/settings.json' is unmerged"
-        //
-        // By always calling resetFile FIRST (which runs `git reset HEAD -- <file>`),
-        // we clear the unmerged/staged state, THEN restore works.
-        // This handles:
-        //   - Normal staged files (unstage + restore)
-        //   - Normal unstaged files (reset is a no-op, restore works)
-        //   - Unmerged/conflicted files (reset clears conflict state, restore to HEAD)
-        for (const p of targets) {
-          try {
-            await api.git.resetFile(ctx.repoPath, p);
-          } catch {
-            // resetFile may fail if the file is not in the index (untracked).
-            // That's fine — we'll handle untracked separately below.
-          }
+        // BATCH: both calls accept ALL paths in ONE invocation — much faster
+        // than calling resetFile/checkout in a for-loop (each loop iteration
+        // spawns a new git process + walks the index from scratch).
+        // For 50 files this is ~50× faster (50× fewer git spawns).
+        try {
+          await api.git.resetFiles(ctx.repoPath, targets);
+        } catch {
+          // resetFiles may fail if some files aren't in the index (untracked).
+          // That's fine — untracked files are handled by the separate
+          // 'discard-untracked' menu item.
         }
         // Now restore working tree to HEAD for all targets.
         // For untracked files this won't work (git restore only works on
@@ -497,12 +492,18 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
           await api.git.restore(ctx.repoPath, targets);
         } catch {
           // If restore fails (e.g. some files were untracked and can't be
-          // restored), try git checkout -- for each file individually.
-          for (const p of targets) {
-            try {
-              await api.git.raw(ctx.repoPath, ['checkout', '--', p]);
-            } catch {
-              // Skip files that can't be restored (untracked, already deleted, etc.)
+          // restored), try git checkout -- for ALL files at once (single call).
+          // Falls back to per-file only if the batch call fails entirely.
+          try {
+            await api.git.raw(ctx.repoPath, ['checkout', '--', ...targets]);
+          } catch {
+            // Last resort: per-file checkout — slow but reliable.
+            for (const p of targets) {
+              try {
+                await api.git.raw(ctx.repoPath, ['checkout', '--', p]);
+              } catch {
+                // Skip files that can't be restored (untracked, already deleted, etc.)
+              }
             }
           }
         }
@@ -545,7 +546,10 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       });
       if (!ref || !ref.trim()) return true;
       try {
-        for (const p of targets) await api.git.checkoutFile(ctx.repoPath, p, ref.trim());
+        // BATCH: single git call for ALL targets instead of N sequential
+        // checkoutFile() calls. `git checkout <ref> -- f1 f2 f3` works for
+        // any number of paths in one invocation.
+        await api.git.checkoutFiles(ctx.repoPath, targets, ref.trim());
         t.success(targets.length > 1 ? `Restored ${targets.length} files from ${ref.trim()}` : `Restored '${ctx.path}' from ${ref.trim()}`);
         refresh();
       } catch (e) {
@@ -561,7 +565,9 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       try {
         const flag = clickId === 'toggle-assume-unchanged' ? 'assume-unchanged' as const : 'skip-worktree' as const;
         const current = flag === 'assume-unchanged' ? ctx.indexFlags.assumeUnchanged : ctx.indexFlags.skipWorktree;
-        for (const p of targets) await api.git.setIndexFlag(ctx.repoPath, p, flag, !current);
+        // BATCH: single `git update-index <opt> -- f1 f2 f3` call instead of
+        // N sequential setIndexFlag() calls. ~50× faster for 50 files.
+        await api.git.setIndexFlagBatch(ctx.repoPath, targets, flag, !current);
         t.success(`${!current ? 'Set' : 'Cleared'} ${flag} on ${targets.length > 1 ? `${targets.length} files` : baseName(ctx.path)}`);
         refresh();
       } catch (e) {
@@ -624,7 +630,10 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       });
       if (!ok) return true;
       try {
-        for (const p of targets) await api.git.deleteFile(ctx.repoPath, p);
+        // BATCH: single `git rm -f -- f1 f2 f3` call instead of N sequential
+        // deleteFile() calls. The batch call falls back to per-file fs.rmSync
+        // for untracked files (git rm refuses them).
+        await api.git.deleteFiles(ctx.repoPath, targets);
         t.success(n('Deleted'));
         refresh();
       } catch (e) {

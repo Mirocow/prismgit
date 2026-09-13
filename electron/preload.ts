@@ -48,6 +48,7 @@ const api = {
     checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) =>
       ipcRenderer.invoke('git:checkout', repoPath, branch, options),
     checkoutFile: (repoPath: string, file: string, ref?: string) => ipcRenderer.invoke('git:checkoutFile', repoPath, file, ref),
+    checkoutFiles: (repoPath: string, files: string[], ref?: string) => ipcRenderer.invoke('git:checkoutFiles', repoPath, files, ref),
     createBranch: (repoPath: string, name: string, startPoint?: string, force?: boolean, track?: boolean) =>
       ipcRenderer.invoke('git:createBranch', repoPath, name, startPoint, force, track),
     deleteBranch: (repoPath: string, name: string, force?: boolean, remote?: boolean) =>
@@ -180,6 +181,8 @@ const api = {
       ipcRenderer.invoke('git:reset', repoPath, mode, ref),
     resetFile: (repoPath: string, file: string, ref?: string) =>
       ipcRenderer.invoke('git:resetFile', repoPath, file, ref),
+    resetFiles: (repoPath: string, files: string[], ref?: string) =>
+      ipcRenderer.invoke('git:resetFiles', repoPath, files, ref),
     extractRepoInfo: (repoPath: string) => ipcRenderer.invoke('git:extractRepoInfo', repoPath),
     revealInFileManager: (fullPath: string) => ipcRenderer.invoke('git:revealInFileManager', fullPath),
     openFile: (fullPath: string) => ipcRenderer.invoke('git:openFile', fullPath),
@@ -189,7 +192,10 @@ const api = {
       ipcRenderer.invoke('git:getIndexFlags', repoPath, file),
     setIndexFlag: (repoPath: string, file: string, flag: 'assume-unchanged' | 'skip-worktree', value: boolean) =>
       ipcRenderer.invoke('git:setIndexFlag', repoPath, file, flag, value),
+    setIndexFlagBatch: (repoPath: string, files: string[], flag: 'assume-unchanged' | 'skip-worktree', value: boolean) =>
+      ipcRenderer.invoke('git:setIndexFlagBatch', repoPath, files, flag, value),
     deleteFile: (repoPath: string, file: string) => ipcRenderer.invoke('git:deleteFile', repoPath, file),
+    deleteFiles: (repoPath: string, files: string[]) => ipcRenderer.invoke('git:deleteFiles', repoPath, files),
 
     // LFS support
     lfsStatus: (repoPath: string) => ipcRenderer.invoke('git:lfsStatus', repoPath),

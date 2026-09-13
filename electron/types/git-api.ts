@@ -330,6 +330,7 @@ export interface GitApi {
   remotes: (repoPath: string) => Promise<RemoteInfo[]>;
   checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) => Promise<void>;
   checkoutFile: (repoPath: string, file: string, ref?: string) => Promise<void>;
+  checkoutFiles: (repoPath: string, files: string[], ref?: string) => Promise<void>;
   createBranch: (repoPath: string, name: string, startPoint?: string, force?: boolean, track?: boolean) => Promise<void>;
   deleteBranch: (repoPath: string, name: string, force?: boolean, remote?: boolean) => Promise<void>;
   renameBranch: (repoPath: string, oldName: string, newName: string) => Promise<void>;
@@ -469,6 +470,7 @@ export interface GitApi {
 
   reset: (repoPath: string, mode: 'soft' | 'mixed' | 'hard' | 'keep', ref?: string) => Promise<void>;
   resetFile: (repoPath: string, file: string, ref?: string) => Promise<void>;
+  resetFiles: (repoPath: string, files: string[], ref?: string) => Promise<void>;
 
   clean: (repoPath: string, paths: string[], dryRun?: boolean, force?: boolean, directories?: boolean) => Promise<string[]>;
 
@@ -486,8 +488,12 @@ export interface GitApi {
   getIndexFlags: (repoPath: string, file: string) => Promise<{ assumeUnchanged: boolean; skipWorktree: boolean; tracked: boolean }>;
   /** Set/clear assume-unchanged or skip-worktree on a tracked file. */
   setIndexFlag: (repoPath: string, file: string, flag: 'assume-unchanged' | 'skip-worktree', value: boolean) => Promise<void>;
+  /** Set/clear assume-unchanged or skip-worktree on MULTIPLE files in one git call (much faster than N sequential calls). */
+  setIndexFlagBatch: (repoPath: string, files: string[], flag: 'assume-unchanged' | 'skip-worktree', value: boolean) => Promise<void>;
   /** Delete file: `git rm -f` when tracked, fs removal for untracked. */
   deleteFile: (repoPath: string, file: string) => Promise<void>;
+  /** Delete MULTIPLE files in one git call (much faster than N sequential calls). */
+  deleteFiles: (repoPath: string, files: string[]) => Promise<void>;
 
   // LFS support
   lfsStatus: (repoPath: string) => Promise<{ installed: boolean; files: { path: string; size: string; status: string }[] }>;

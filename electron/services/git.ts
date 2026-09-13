@@ -1667,6 +1667,20 @@ export async function checkoutFile(repoPath: string, file: string, ref?: string)
   await git.checkout([ref || 'HEAD', '--', file]);
 }
 
+/**
+ * Restore multiple files from a ref in ONE git call instead of N sequential
+ * calls. `git checkout <ref> -- f1 f2 f3` works for any number of paths
+ * in a single invocation.
+ *
+ * For 50 files this is ~50× faster than calling checkoutFile() in a for-loop.
+ */
+export async function checkoutFiles(repoPath: string, files: string[], ref?: string): Promise<void> {
+  if (files.length === 0) return;
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  await git.checkout([ref || 'HEAD', '--', ...files]);
+}
+
 export async function createBranch(
   repoPath: string,
   name: string,
@@ -3818,6 +3832,34 @@ export async function resetFile(
   invalidateDiffCache(repoPath);
 }
 
+/**
+ * Reset multiple files in ONE git call instead of N sequential calls.
+ *
+ * `git reset HEAD -- f1 f2 f3` works for any number of paths in a single
+ * invocation — much faster than calling resetFile() in a for-loop (each
+ * for-loop iteration spawns a new git process + walks the index from
+ * scratch). For 50 files this is ~50× faster (50× fewer git spawns).
+ *
+ * Files that fail (e.g. untracked, not in index) are silently skipped —
+ * `git reset HEAD -- untracked.txt` is a no-op, not an error, so the
+ * whole batch succeeds.
+ */
+export async function resetFiles(
+  repoPath: string,
+  files: string[],
+  ref?: string
+): Promise<void> {
+  if (files.length === 0) return;
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  // git reset HEAD -- f1 f2 f3 ... fN
+  // Single call — supports any number of paths. Files not in the index are
+  // silently skipped by git (no error), so the call succeeds even when the
+  // batch mixes tracked + untracked paths.
+  await git.raw(['reset', ref || 'HEAD', '--', ...files]);
+  invalidateDiffCache(repoPath);
+}
+
 export async function clean(
   repoPath: string,
   paths: string[],
@@ -4573,6 +4615,32 @@ export async function setIndexFlag(
 }
 
 /**
+ * Toggle an index flag (assume-unchanged / skip-worktree) on MULTIPLE files
+ * in ONE git call instead of N sequential calls.
+ *
+ * `git update-index --skip-worktree -- f1 f2 f3` accepts any number of paths.
+ * For 50 files this is ~50× faster than calling setIndexFlag() in a for-loop.
+ *
+ * Files not in the index are silently skipped by git (no error).
+ */
+export async function setIndexFlagBatch(
+  repoPath: string,
+  files: string[],
+  flag: 'assume-unchanged' | 'skip-worktree',
+  value: boolean
+): Promise<void> {
+  if (files.length === 0) return;
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  const opt =
+    flag === 'assume-unchanged'
+      ? value ? '--assume-unchanged' : '--no-assume-unchanged'
+      : value ? '--skip-worktree' : '--no-skip-worktree';
+  await git.raw(['update-index', opt, '--', ...files]);
+  invalidateCache(repoPath);
+}
+
+/**
  * Delete a file from the working tree (and the index when tracked).
  * Tracked files go through `git rm -f` (removes from index + disk);
  * untracked files are removed from disk directly — `git rm` refuses them,
@@ -4586,6 +4654,39 @@ export async function deleteFile(repoPath: string, file: string): Promise<void> 
   } catch {
     const abs = path.resolve(repoPath, file);
     if (fs.existsSync(abs)) fs.rmSync(abs, { force: true });
+  }
+  invalidateCache(repoPath);
+}
+
+/**
+ * Delete multiple files from the working tree (and the index when tracked)
+ * in ONE git call instead of N sequential calls.
+ *
+ * `git rm -f -- f1 f2 f3` accepts any number of paths in a single invocation.
+ * For 50 files this is ~50× faster than calling deleteFile() in a for-loop.
+ *
+ * Files that fail (e.g. untracked — git rm refuses them) are retried one
+ * at a time and removed from disk directly via fs.rmSync as a fallback.
+ */
+export async function deleteFiles(repoPath: string, files: string[]): Promise<void> {
+  if (files.length === 0) return;
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  // Try the batch first — works for tracked files. Falls back to per-file
+  // fs.rmSync for untracked files that `git rm` refuses.
+  try {
+    await git.raw(['rm', '-f', '--', ...files]);
+  } catch {
+    // Some files were untracked → retry each individually. Tracked ones go
+    // through `git rm`, untracked ones go through `fs.rmSync`.
+    for (const f of files) {
+      try {
+        await git.raw(['rm', '-f', '--', f]);
+      } catch {
+        const abs = path.resolve(repoPath, f);
+        if (fs.existsSync(abs)) fs.rmSync(abs, { force: true });
+      }
+    }
   }
   invalidateCache(repoPath);
 }

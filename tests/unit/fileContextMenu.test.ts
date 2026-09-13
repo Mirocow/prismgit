@@ -22,8 +22,10 @@ const apiVscodeMock = vi.hoisted(() => ({
 const apiGitMock = vi.hoisted(() => ({
   add: vi.fn().mockResolvedValue(undefined),
   resetFile: vi.fn().mockResolvedValue(undefined),
+  resetFiles: vi.fn().mockResolvedValue(undefined),
   restore: vi.fn().mockResolvedValue(undefined),
   checkoutFile: vi.fn().mockResolvedValue(undefined),
+  checkoutFiles: vi.fn().mockResolvedValue(undefined),
   stashPush: vi.fn().mockResolvedValue('stash@{0}'),
   ignore: vi.fn().mockResolvedValue(undefined),
   editIgnoreFile: vi.fn().mockResolvedValue('/repo/.gitignore'),
@@ -31,8 +33,11 @@ const apiGitMock = vi.hoisted(() => ({
   revealInFileManager: vi.fn().mockResolvedValue(true),
   moveFile: vi.fn().mockResolvedValue(undefined),
   deleteFile: vi.fn().mockResolvedValue(undefined),
+  deleteFiles: vi.fn().mockResolvedValue(undefined),
   setIndexFlag: vi.fn().mockResolvedValue(undefined),
+  setIndexFlagBatch: vi.fn().mockResolvedValue(undefined),
   getIndexFlags: vi.fn().mockResolvedValue({ assumeUnchanged: false, skipWorktree: false, tracked: true }),
+  raw: vi.fn().mockResolvedValue(''),
 }));
 
 vi.mock('../../src/lib/api', () => ({ api: { git: apiGitMock, vscode: apiVscodeMock } }));
@@ -205,9 +210,10 @@ describe('runFileAction', () => {
     expect(ctx.refresh).toHaveBeenCalled();
   });
 
-  it('unstages via api.git.resetFile', async () => {
+  it('unstages via api.git.resetFiles batch call', async () => {
     await runFileAction('unstage', baseCtx({ isStaged: true }));
-    expect(apiGitMock.resetFile).toHaveBeenCalledWith('/repo', 'src/app/main.ts');
+    // BATCH: single resetFiles call with one path (was resetFile before)
+    expect(apiGitMock.resetFiles).toHaveBeenCalledWith('/repo', ['src/app/main.ts']);
   });
 
   it('discards only after confirmation', async () => {
@@ -223,7 +229,7 @@ describe('runFileAction', () => {
 
   it('discarding a staged file unstages AND restores', async () => {
     await runFileAction('discard', baseCtx({ isStaged: true }));
-    expect(apiGitMock.resetFile).toHaveBeenCalledWith('/repo', 'src/app/main.ts');
+    expect(apiGitMock.resetFiles).toHaveBeenCalledWith('/repo', ['src/app/main.ts']);
     expect(apiGitMock.restore).toHaveBeenCalledWith('/repo', ['src/app/main.ts']);
   });
 
@@ -251,28 +257,28 @@ describe('runFileAction', () => {
 
   it('toggling skip-worktree flips the current flag value', async () => {
     await runFileAction('toggle-skip-worktree', baseCtx()); // currently false → set true
-    expect(apiGitMock.setIndexFlag).toHaveBeenCalledWith('/repo', 'src/app/main.ts', 'skip-worktree', true);
+    expect(apiGitMock.setIndexFlagBatch).toHaveBeenCalledWith('/repo', ['src/app/main.ts'], 'skip-worktree', true);
 
     await runFileAction(
       'toggle-skip-worktree',
       baseCtx({ indexFlags: { assumeUnchanged: false, skipWorktree: true, tracked: true } })
     );
-    expect(apiGitMock.setIndexFlag).toHaveBeenLastCalledWith('/repo', 'src/app/main.ts', 'skip-worktree', false);
+    expect(apiGitMock.setIndexFlagBatch).toHaveBeenLastCalledWith('/repo', ['src/app/main.ts'], 'skip-worktree', false);
   });
 
-  it('deletes through the universal deleteFile (tracked and untracked)', async () => {
+  it('deletes through the universal deleteFiles batch call (tracked and untracked)', async () => {
     confirmAnswer = true;
     await runFileAction('delete-file', baseCtx());
-    expect(apiGitMock.deleteFile).toHaveBeenCalledWith('/repo', 'src/app/main.ts');
+    expect(apiGitMock.deleteFiles).toHaveBeenCalledWith('/repo', ['src/app/main.ts']);
 
     await runFileAction('delete-file', baseCtx({ isUntracked: true, indexFlags: undefined }));
-    expect(apiGitMock.deleteFile).toHaveBeenCalledTimes(2);
+    expect(apiGitMock.deleteFiles).toHaveBeenCalledTimes(2);
   });
 
   it('does not delete when the confirmation is declined', async () => {
     confirmAnswer = false;
     await runFileAction('delete-file', baseCtx());
-    expect(apiGitMock.deleteFile).not.toHaveBeenCalled();
+    expect(apiGitMock.deleteFiles).not.toHaveBeenCalled();
   });
 
   it('copies name / relative path / full path to the clipboard', async () => {
@@ -383,11 +389,11 @@ describe('multi-selection — runFileAction bulk operations', () => {
     expect(ctx.refresh).toHaveBeenCalled();
   });
 
-  it('unstages EVERY selected file', async () => {
+  it('unstages EVERY selected file in one batch resetFiles call', async () => {
     await runFileAction('unstage', baseCtx({ ...multi, isStaged: true }));
-    expect(apiGitMock.resetFile).toHaveBeenCalledTimes(3);
-    expect(apiGitMock.resetFile).toHaveBeenCalledWith('/repo', 'a.ts');
-    expect(apiGitMock.resetFile).toHaveBeenCalledWith('/repo', 'c.ts');
+    // BATCH: one call with all paths (was 3 sequential resetFile calls before)
+    expect(apiGitMock.resetFiles).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.resetFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
   });
 
   it('stashes EVERY selected file with one prompt', async () => {
@@ -403,31 +409,35 @@ describe('multi-selection — runFileAction bulk operations', () => {
     expect(apiGitMock.restore).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
   });
 
-  it('discarding a multi staged selection unstages AND restores all', async () => {
+  it('discarding a multi staged selection unstages AND restores all in ONE batch call', async () => {
     confirmAnswer = true;
     await runFileAction('discard', baseCtx({ ...multi, isStaged: true }));
-    expect(apiGitMock.resetFile).toHaveBeenCalledTimes(3);
+    // BATCH: one resetFiles call with all paths (was 3 sequential resetFile calls)
+    expect(apiGitMock.resetFiles).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.resetFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
     expect(apiGitMock.restore).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
   });
 
-  it('restores EVERY selected file from the prompted ref', async () => {
+  it('restores EVERY selected file from the prompted ref in ONE batch checkoutFiles call', async () => {
     promptAnswer = 'HEAD~1';
     await runFileAction('restore-from-ref', baseCtx(multi));
-    expect(apiGitMock.checkoutFile).toHaveBeenCalledTimes(3);
-    expect(apiGitMock.checkoutFile).toHaveBeenCalledWith('/repo', 'c.ts', 'HEAD~1');
+    // BATCH: one call with all paths (was 3 sequential checkoutFile calls)
+    expect(apiGitMock.checkoutFiles).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.checkoutFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts'], 'HEAD~1');
   });
 
-  it('deletes EVERY selected file after ONE confirmation', async () => {
+  it('deletes EVERY selected file in ONE batch deleteFiles call after ONE confirmation', async () => {
     confirmAnswer = true;
     await runFileAction('delete-file', baseCtx(multi));
-    expect(apiGitMock.deleteFile).toHaveBeenCalledTimes(3);
-    expect(apiGitMock.deleteFile).toHaveBeenCalledWith('/repo', 'b.ts');
+    // BATCH: one call with all paths (was 3 sequential deleteFile calls)
+    expect(apiGitMock.deleteFiles).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.deleteFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
   });
 
   it('does not delete anything when the bulk confirmation is declined', async () => {
     confirmAnswer = false;
     await runFileAction('delete-file', baseCtx(multi));
-    expect(apiGitMock.deleteFile).not.toHaveBeenCalled();
+    expect(apiGitMock.deleteFiles).not.toHaveBeenCalled();
   });
 
   it('ignores EVERY selected untracked file', async () => {
@@ -435,11 +445,11 @@ describe('multi-selection — runFileAction bulk operations', () => {
     expect(apiGitMock.ignore).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
   });
 
-  it('toggles an index flag on EVERY selected file', async () => {
+  it('toggles an index flag on EVERY selected file in ONE batch setIndexFlagBatch call', async () => {
     await runFileAction('toggle-skip-worktree', baseCtx(multi));
-    expect(apiGitMock.setIndexFlag).toHaveBeenCalledTimes(3);
-    expect(apiGitMock.setIndexFlag).toHaveBeenCalledWith('/repo', 'a.ts', 'skip-worktree', true);
-    expect(apiGitMock.setIndexFlag).toHaveBeenCalledWith('/repo', 'b.ts', 'skip-worktree', true);
+    // BATCH: one call with all paths (was 3 sequential setIndexFlag calls)
+    expect(apiGitMock.setIndexFlagBatch).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.setIndexFlagBatch).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts'], 'skip-worktree', true);
   });
 
   it('copies ALL selected paths (one per line) in the three copy variants', async () => {
@@ -476,7 +486,8 @@ describe('multi-selection — runFileAction bulk operations', () => {
     expect(apiGitMock.add).toHaveBeenCalledWith('/repo', ['src/app/main.ts']);
 
     await runFileAction('delete-file', baseCtx());
-    expect(apiGitMock.deleteFile).toHaveBeenCalledTimes(1);
-    expect(apiGitMock.deleteFile).toHaveBeenCalledWith('/repo', 'src/app/main.ts');
+    // BATCH: single deleteFiles call with one path in the array
+    expect(apiGitMock.deleteFiles).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.deleteFiles).toHaveBeenCalledWith('/repo', ['src/app/main.ts']);
   });
 });

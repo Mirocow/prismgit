@@ -50,13 +50,18 @@ export function registerGitIpc(): void {
     gitService.checkout(p, b, o)
   );
   ipcMain.handle('git:checkoutFile', (_e, p: string, f: string, ref?: string) => gitService.checkoutFile(p, f, ref));
+  ipcMain.handle('git:checkoutFiles', (_e, p: string, files: string[], ref?: string) => gitService.checkoutFiles(p, files, ref));
   // Working-tree file operations (file context menu)
   ipcMain.handle('git:moveFile', (_e, p: string, from: string, to: string) => gitService.moveFile(p, from, to));
   ipcMain.handle('git:getIndexFlags', (_e, p: string, f: string) => gitService.getIndexFlags(p, f));
   ipcMain.handle('git:setIndexFlag', (_e, p: string, f: string, flag: 'assume-unchanged' | 'skip-worktree', v: boolean) =>
     gitService.setIndexFlag(p, f, flag, v)
   );
+  ipcMain.handle('git:setIndexFlagBatch', (_e, p: string, files: string[], flag: 'assume-unchanged' | 'skip-worktree', v: boolean) =>
+    gitService.setIndexFlagBatch(p, files, flag, v)
+  );
   ipcMain.handle('git:deleteFile', (_e, p: string, f: string) => gitService.deleteFile(p, f));
+  ipcMain.handle('git:deleteFiles', (_e, p: string, files: string[]) => gitService.deleteFiles(p, files));
   ipcMain.handle('git:createBranch', (_e, p: string, n: string, sp?: string, f?: boolean, t?: boolean) =>
     gitService.createBranch(p, n, sp, f, t)
   );
@@ -258,6 +263,7 @@ export function registerGitIpc(): void {
     gitService.reset(p, mode, ref)
   );
   ipcMain.handle('git:resetFile', (_e, p: string, f: string, ref?: string) => gitService.resetFile(p, f, ref));
+  ipcMain.handle('git:resetFiles', (_e, p: string, files: string[], ref?: string) => gitService.resetFiles(p, files, ref));
 
   // Extract repo info (SmartGit 24+ "Open in Browser")
   ipcMain.handle('git:extractRepoInfo', (_e, p: string) => gitService.extractRepoInfo(p));
