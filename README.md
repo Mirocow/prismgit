@@ -2,7 +2,9 @@
 
 A modern, cross-platform Git client built on Electron + React + TypeScript, inspired by SmartGit 20–24 with **Ollama-code** design language (Ayu Dark/Light palettes).
 
-[![Tests](https://img.shields.io/badge/tests-161%20passing-brightgreen)](tests/) [![Bundle](https://img.shields.io/badge/bundle-240KB%20gzip%2072KB-blue)](#) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![PrismGit — Light Theme](docs/screenshot-light.png)
+
+[![Version](https://img.shields.io/badge/version-2.1.0-blue)](#) [![Tests](https://img.shields.io/badge/tests-748%20passing-brightgreen)](tests/) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![AI](https://img.shields.io/badge/AI%20Assistant-12%20providers-purple)](#)
 
 ## Quick Start
 
