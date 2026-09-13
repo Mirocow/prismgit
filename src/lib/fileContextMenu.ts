@@ -211,6 +211,14 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
         clickId: 'discard',
       });
       items.push({ label: `Restore from Ref...${bulk}`, clickId: 'restore-from-ref' });
+    } else {
+      // Untracked files — "Discard" means deleting the file (git clean).
+      // Show it as "Discard (Delete)" so the user understands what happens.
+      items.push({ type: 'separator' });
+      items.push({
+        label: `Discard (Delete)...${bulk}`,
+        clickId: 'discard-untracked',
+      });
     }
     items.push({ type: 'separator' });
 
@@ -469,6 +477,29 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
         refresh();
       } catch (e) {
         t.error('Discard failed', String(e));
+      }
+      return true;
+    }
+    case 'discard-untracked': {
+      // Discard for untracked files = delete the file(s) from disk.
+      // Uses git clean -f for tracked safety (won't touch .gitignored files).
+      const what =
+        targets.length > 1
+          ? `${targets.length} selected files`
+          : `'${ctx.path}'`;
+      const ok = await confirmDialog({
+        title: 'Discard untracked files',
+        message: `Delete ${what}?\nThese files are NOT tracked by git — deleting them is permanent and cannot be undone.`,
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!ok) return true;
+      try {
+        await api.git.clean(ctx.repoPath, targets, false, true, false);
+        t.success(targets.length > 1 ? `Deleted ${targets.length} files` : `Deleted '${ctx.path}'`);
+        refresh();
+      } catch (e) {
+        t.error('Delete failed', String(e));
       }
       return true;
     }
