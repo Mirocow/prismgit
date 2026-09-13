@@ -35,17 +35,39 @@ const isDev = !!process.env.VITE_DEV_SERVER_URL;
 // throttling saves CPU and battery when the user switches away.
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc');
 
-// Suppress the EGL/GL driver error:
-//   ERROR:gl_display.cc(497) EGL Driver message (Error) eglQueryDeviceAttribEXT: Bad attribute.
-// This is a known Chromium/Electron issue with certain GPU drivers — observed on
-// Linux (NVIDIA) as well as on macOS (ANGLE/Metal EGL device query). The error
-// is cosmetic (doesn't affect functionality) but clutters stderr on every launch.
-// Disabling hardware acceleration eliminates the EGL init path that triggers it.
-// PrismGit is a plain 2D UI (no WebGL/GPU usage anywhere), so software rendering
-// has no noticeable impact on this app.
-// NOTE: must be applied on ALL platforms (not only Linux) — the macOS ANGLE/EGL
-// path produces the same message; keep this call unconditional.
+// ── Suppress Chromium/Electron console errors ────────────────────────────
+//
+// PrismGit is a plain 2D UI (no WebGL, no GPU, no Autofill). The following
+// switches eliminate ALL known Chromium noise that clutters stderr during
+// `make dev` and production:
+//
+// 1. disableHardwareAcceleration() — kills EGL/GL driver errors:
+//      "EGL Driver message (Error) eglQueryDeviceAttribEXT: Bad attribute."
+//    (observed on Linux/NVIDIA and macOS/ANGLE)
+//
+// 2. --disable-features=AutofillServerCommunication — kills:
+//      "Request Autofill.enable failed. 'Autofill.enable' wasn't found"
+//      "Request Autofill.setAddresses failed. 'Autofill.setAddresses' wasn't found"
+//    These appear when DevTools is open — Chromium DevTools tries to enable
+//    the Autofill CDP domain, but Electron doesn't implement it. Disabling
+//    the feature entirely prevents DevTools from even trying.
+//
+// 3. --disable-gpu / --disable-software-rasterizer — kills:
+//      "SharedImageManager::ProduceMemory: Trying to Produce a Memory
+//       representation from a non-existent mailbox."
+//    These GPU compositing errors appear when DevTools opens/closes or
+//    when a BrowserWindow is recreated. Disabling GPU compositing entirely
+//    (we already use software rendering) prevents SharedImageManager from
+//    being involved.
+//
+// 4. --disable-dev-shm-usage — prevents /dev/shm exhaustion warnings on
+//    Linux containers (Docker/CI). Forces Chromium to use /tmp instead.
+//
 app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication,Translate,MediaRouter');
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-software-rasterizer');
+app.commandLine.appendSwitch('disable-dev-shm-usage');
 
 // Window state persistence
 interface WindowState {
@@ -252,6 +274,23 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(buildAppMenu(() => mainWindow));
 
   mainWindow = createWindow();
+
+  // ── Filter benign Chromium console messages ─────────────────────────────
+  // Even with --disable-features and --disable-gpu, some Chromium internals
+  // still log to the renderer console. These are caught here and suppressed
+  // before they reach the DevTools console output.
+  mainWindow.webContents.on('console-message', (_event, _level, message) => {
+    // Suppress known-benign Chromium noise:
+    //   - Autofill CDP errors (already disabled via --disable-features, but
+    //     some Electron versions still log them)
+    //   - SharedImageManager GPU errors (already disabled via --disable-gpu,
+    //     but some Chromium versions still log them)
+    //   - Deprecation warnings from Chromium internals
+    const benign = /Autofill\.|SharedImageManager|ProduceMemory|non-existent mailbox|deprecated/i;
+    if (benign.test(message)) {
+      _event.preventDefault();
+    }
+  });
 
   // SmartGit Manual: Command-Line Options
   // Parse process.argv for --open, --log, --blame, --anchor-commit, etc.
