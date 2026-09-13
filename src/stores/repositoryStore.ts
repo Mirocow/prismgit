@@ -123,13 +123,17 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
         api.fs.pathBasename(path),
       ]);
       if (!isRepo) {
-        // Show a friendly toast directly — avoids the "unhandled rejection"
-        // path where the global error handler shows a SECOND generic toast.
+        // Show a friendly toast directly — the ONLY toast the user sees.
         useToastStore.getState().error(
           'Not a Git repository',
           `The selected directory is not a Git repository:\n${path}\n\nInitialize one with 'git init' or select a different directory.`,
         );
-        throw new Error('Selected directory is not a Git repository');
+        set({ loading: false });
+        // Return WITHOUT throwing — the toast is shown, the state is reset.
+        // Throwing would propagate to callers that don't .catch(), triggering
+        // the global unhandledrejection handler which shows a SECOND generic
+        // "Operation failed (unhandled)" toast — confusing.
+        return;
       }
       await api.settings.addRepo({ path, name });
       // Refresh stats in background (don't block UI)
