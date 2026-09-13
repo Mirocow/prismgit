@@ -321,6 +321,16 @@ export const Zap = (p: IconProps) => (
   </Icon>
 );
 
+// Square — used as the "Stop" button icon in the AI Assistant. The CSS
+// class `fill-current` fills the square (solid), distinguishing it from
+// the empty outline that the default stroke-only icon would produce.
+export const Square = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="5" y="5" width="14" height="14" rx="1" />
+  </Icon>
+);
+
+
 
 
 export const CloudDownload = (p: IconProps) => (

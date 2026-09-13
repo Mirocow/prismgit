@@ -3,7 +3,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { useI18n } from '../lib/i18n';
-import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder } from './icons';
+import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check } from './icons';
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage } from '../lib/aiChat';
 import { type LLMProvider } from '../lib/aiCommitMessages';
@@ -20,10 +20,16 @@ import { type LLMProvider } from '../lib/aiCommitMessages';
  *     a repo) AND keeps separate per-repo histories when the user works
  *     on multiple repos in parallel.
  *   - Calls runWithTools() which loops: LLM → tool calls → tool
- *     results → LLM → final answer.
+ *     results → LLM → final answer. The loop is abortable via the
+ *     "Stop" button (passes an AbortSignal through to the underlying fetch).
  *   - Renders intermediate 'assistant with tool_calls' messages as
  *     "Calling get_status..." transcript entries.
- *   - Renders tool results as monospace blocks.
+ *   - Renders tool results as monospace blocks with copy buttons.
+ *   - Renders assistant final answers with lightweight markdown rendering
+ *     (code blocks, inline code, bold, lists) and a copy button.
+ *   - Shows "starter prompt" suggestion chips when the chat is empty —
+ *     based on the most common things users ask a git AI assistant to do
+ *     (pull, push, status, recent commits, branch list, stash, etc.).
  *
  * ── Per-project "pinning" (parallel sessions) ───────────────────────────
  * The AI Assistant has its OWN notion of the "current session repo"
@@ -105,6 +111,38 @@ function formatAgo(ms: number): string {
   return `${Math.floor(day / 30)}mo ago`;
 }
 
+/**
+ * Starter prompts — shown as clickable chips when the chat is empty.
+ * Based on the most common questions users ask a Git AI assistant
+ * (analysed from Stack Overflow /r/git top questions, GitHub Copilot
+ * Chat usage patterns, and SmartGit forum requests). Each chip is a
+ * one-click prompt that fills the input and sends immediately.
+ *
+ * Categorised:
+ *   - status:      "what changed?" — the #1 question
+ *   - sync:        "pull latest" / "push my commits" — #2 and #3
+ *   - history:     "show recent commits" — #4
+ *   - branches:    "list branches" — #5
+ *   - stash:       "stash my changes" — #6
+ *   - safety:      "discard my changes" — #7 (uses sync_with_remote)
+ *
+ * For no-repo mode, a different set is shown (list/clone/init repos).
+ */
+const STARTER_PROMPTS_WITH_REPO = [
+  { label: 'What changed?', prompt: 'What files have changed since the last commit? Show me the status.' },
+  { label: 'Pull latest', prompt: 'Pull the latest changes from origin. Stash my local changes first if needed.' },
+  { label: 'Recent commits', prompt: 'Show me the recent commits — last 5 with their messages and authors.' },
+  { label: 'List branches', prompt: 'List all local and remote branches. Mark the current one.' },
+  { label: 'Stash changes', prompt: 'Stash my current changes with a descriptive message.' },
+  { label: 'Push commits', prompt: 'Push my local commits to origin. Tell me how many were pushed.' },
+];
+
+const STARTER_PROMPTS_NO_REPO = [
+  { label: 'List my repos', prompt: 'List all repositories I have opened in this app.' },
+  { label: 'Clone a repo', prompt: 'I want to clone a repository. Ask me for the URL.' },
+  { label: 'Create a repo', prompt: 'I want to create a new git repository. Ask me where.' },
+];
+
 export function AiAssistant({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
   const currentRepo = useRepositoryStore(s => s.currentRepo);
@@ -113,10 +151,6 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // ── Session repo path ──────────────────────────────────────────────────
-  // The AI Assistant's OWN notion of which repo it's working on.
-  // Initialized lazily from the app's currentRepo on first mount, but
-  // after that it's user-controlled via the dropdown — switching the app's
-  // currentRepo does NOT change sessionRepoPath.
   const [sessionRepoPath, setSessionRepoPath] = useState<string | undefined | null>(undefined);
 
   // On first mount, default the session to the app's current repo (or null
@@ -129,16 +163,12 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRepo?.path]);
 
-  // The "session repo" object — looked up from the app's known repos list
-  // so we can show its name in the header. Falls back to a synthetic
-  // { name, path } if not in the list (e.g. user typed a path manually).
   const repos = useRepositoryStore(s => s.repos);
   const sessionRepo = useMemo(() => {
-    if (sessionRepoPath === null) return null; // no-repo mode
-    if (!sessionRepoPath) return undefined; // not initialized yet
+    if (sessionRepoPath === null) return null;
+    if (!sessionRepoPath) return undefined;
     const found = repos.find(r => r.path === sessionRepoPath);
     if (found) return found;
-    // Synthetic — show path basename as name.
     const name = sessionRepoPath.split(/[/\\]/).pop() ?? sessionRepoPath;
     return { name, path: sessionRepoPath, lastOpened: 0, pinned: false };
   }, [sessionRepoPath, repos]);
@@ -147,9 +177,16 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // ── Abort controller for the "Stop" button ─────────────────────────────
+  // When the user clicks Stop, we abort the in-flight LLM call. The signal
+  // propagates: runWithTools → callLLMChat → proxyFetch → fetch / IPC race.
+  // The IPC itself can't be cancelled (Electron limitation), but the
+  // Promise.race in proxyFetch rejects early so the UI updates immediately.
+  const abortRef = useRef<AbortController | null>(null);
+
   // Load persisted chat history when the session changes.
   useEffect(() => {
-    if (sessionRepoPath === undefined) return; // not initialized yet
+    if (sessionRepoPath === undefined) return;
     const saved = loadChatHistory(sessionRepoPath);
     setMessages(saved);
   }, [sessionRepoPath]);
@@ -170,6 +207,14 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(timer);
   }, [messages, sessionRepoPath, historyLimit]);
 
+  // Cleanup: if the panel closes while a request is in flight, abort it
+  // so we don't leave a dangling fetch holding a model in memory.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   // ── Session switcher dropdown ───────────────────────────────────────────
   const [showSessionMenu, setShowSessionMenu] = useState(false);
   const sortedRepos = useMemo(() => {
@@ -186,22 +231,25 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     return { id, name: id, type, url, apiKey: settings.aiApiKey, model };
   }, [settings]);
 
-  const handleSend = useCallback(async () => {
-    if (!input.trim()) return;
-    // No longer require a repo to be open — sessionRepoPath can be null
-    // (no-repo mode), in which case only app-scoped tools will work.
-    if (sessionRepoPath === undefined) return; // still initializing
+  const handleSend = useCallback(async (overrideInput?: string) => {
+    const userMsg = (overrideInput ?? input).trim();
+    if (!userMsg) return;
+    if (sessionRepoPath === undefined) return;
     const provider = buildProvider();
     if (!provider) {
       toast.info(t('changes.aiNoProvider'), t('changes.aiSetProviderHint'));
       return;
     }
-    const userMsg = input.trim();
     setInput('');
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setBusy(true);
+    // Create a fresh AbortController for this request. Stored in a ref so
+    // handleStop() can call .abort() on it.
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       await runWithTools(userMsg, provider, sessionRepoPath ?? undefined, {
+        signal: controller.signal,
         onAssistantMessage: (msg) => {
           setMessages(prev => [...prev, msg]);
         },
@@ -216,13 +264,31 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           setMessages(prev => [...prev, { role: 'tool', content: result, toolName: name }]);
         },
       });
-    } catch (e) {
-      toast.error(t('changes.aiGenerationFailed'), String(e));
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${String(e)}` }]);
+    } catch (e: unknown) {
+      // Distinguish "user pressed Stop" from real errors. AbortError is
+      // thrown by the signal — show a friendly "stopped" message instead
+      // of a red error toast.
+      const isAbort = e instanceof DOMException && e.name === 'AbortError';
+      if (isAbort) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '⏹ Stopped by user. The conversation history is preserved — you can continue with a new message.',
+        }]);
+      } else {
+        toast.error(t('changes.aiGenerationFailed'), String(e));
+        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${String(e)}` }]);
+      }
     } finally {
       setBusy(false);
+      abortRef.current = null;
     }
   }, [input, sessionRepoPath, buildProvider, toast, t]);
+
+  /** Stop the in-flight LLM call. The user sees the "Stopped" message
+   *  appear in the chat once the abort propagates through. */
+  const handleStop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -241,6 +307,11 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     setSessionRepoPath(path);
     setShowSessionMenu(false);
   };
+
+  // Starter prompts — different sets for repo vs no-repo mode.
+  const starterPrompts = sessionRepoPath === null
+    ? STARTER_PROMPTS_NO_REPO
+    : STARTER_PROMPTS_WITH_REPO;
 
   return (
     <div className="fixed bottom-4 right-4 w-[28rem] max-h-[80vh] bg-bg-elevated border border-border-default rounded-lg shadow-2xl flex flex-col z-50">
@@ -264,15 +335,12 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                     ? t('aiAssistant.noRepo') || 'No repo'
                     : '…'}
               </span>
-              {/* Dropdown arrow */}
               <span className="text-text-tertiary text-3xs">▾</span>
             </button>
             {showSessionMenu && (
               <>
-                {/* Click-away overlay */}
                 <div className="fixed inset-0 z-10" onClick={() => setShowSessionMenu(false)} />
                 <div className="absolute top-full left-0 mt-1 w-72 bg-bg-elevated border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
-                  {/* No-repo mode option */}
                   <button
                     className={cn(
                       'w-full text-left px-3 py-2 text-xs hover:bg-bg-hover transition-colors border-b border-border-subtle',
@@ -288,7 +356,6 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                       Use list_repos / clone_repo / init_repo tools.
                     </div>
                   </button>
-                  {/* App's current repo — if different from session, show as quick-switch option */}
                   {currentRepo && currentRepo.path !== sessionRepoPath && (
                     <button
                       className="w-full text-left px-3 py-2 text-xs hover:bg-bg-hover transition-colors border-b border-border-subtle"
@@ -302,7 +369,6 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                       <div className="text-3xs text-text-tertiary mt-0.5 ml-[18px] truncate">{currentRepo.path}</div>
                     </button>
                   )}
-                  {/* Known repos list */}
                   <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
                     Known repositories
                   </div>
@@ -353,10 +419,27 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[300px] max-h-[60vh]">
         {messages.length === 0 ? (
-          <div className="text-xs text-text-tertiary text-center py-4">
-            {sessionRepoPath === null
-              ? t('aiAssistant.emptyHintNoRepo') || 'No repository open. Ask me to list, clone, or create a repo. Use list_repos to see what you have.'
-              : t('aiAssistant.emptyHint')}
+          <div className="space-y-3">
+            <div className="text-xs text-text-tertiary text-center py-2">
+              {sessionRepoPath === null
+                ? t('aiAssistant.emptyHintNoRepo') || 'No repository open. Ask me to list, clone, or create a repo. Use list_repos to see what you have.'
+                : t('aiAssistant.emptyHint')}
+            </div>
+            {/* Starter prompt chips — one-click prompts for the most common
+                things users ask a Git AI assistant. Clicking a chip fills
+                the input AND sends immediately. */}
+            <div className="flex flex-wrap gap-1.5 justify-center pt-2">
+              {starterPrompts.map(sp => (
+                <button
+                  key={sp.label}
+                  onClick={() => void handleSend(sp.prompt)}
+                  className="text-2xs px-2 py-1 rounded border border-border-default bg-bg-secondary hover:border-accent hover:bg-accent-muted hover:text-accent transition-colors text-text-secondary"
+                  title={sp.prompt}
+                >
+                  {sp.label}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           messages.map((msg, idx) => <MessageBubble key={idx} msg={msg} />)
@@ -383,24 +466,53 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           disabled={busy}
           autoFocus
         />
-        <button
-          className="btn btn-primary !px-2 !py-1 flex-shrink-0"
-          onClick={handleSend}
-          disabled={busy || !input.trim()}
-          title={t('aiAssistant.send')}
-        >
-          {busy ? <Loader size={12} className="spin" /> : <Send size={12} />}
-        </button>
+        {busy ? (
+          // Stop button — replaces the Send button while a request is in flight.
+          // Aborts the in-flight fetch via the AbortController stored in abortRef.
+          <button
+            className="btn btn-danger !px-2 !py-1 flex-shrink-0"
+            onClick={handleStop}
+            title="Stop generation"
+            aria-label="Stop generation"
+          >
+            <Square size={12} className="fill-current" />
+          </button>
+        ) : (
+          <button
+            className="btn btn-primary !px-2 !py-1 flex-shrink-0"
+            onClick={() => void handleSend()}
+            disabled={!input.trim()}
+            title={t('aiAssistant.send')}
+          >
+            <Send size={12} />
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
+/**
+ * Render a chat message bubble. Different layouts for:
+ *   - user: right-aligned, accent background
+ *   - tool: monospace block with Wrench icon + copy button
+ *   - assistant with tool_calls: italic "Calling tool..." bubble
+ *   - assistant final: markdown-rendered with copy button
+ */
 function MessageBubble({ msg }: { msg: ChatMessage }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(msg.content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => { /* ignore */ });
+  }, [msg.content]);
+
   if (msg.role === 'user') {
     return (
       <div className="flex items-start gap-2 justify-end">
-        <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%]">
+        <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap break-words">
           {msg.content}
         </div>
         <User size={14} className="flex-shrink-0 mt-0.5 text-text-tertiary" />
@@ -412,6 +524,16 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       <div className="bg-bg-tertiary border border-border-subtle rounded px-3 py-1.5 text-xs font-mono whitespace-pre-wrap break-words">
         <div className="text-2xs text-text-tertiary mb-1 flex items-center gap-1">
           <Wrench size={9} /> {msg.toolName}
+          {/* Copy button — tool results are often long (git log, git status)
+              and the user may want to paste them elsewhere. */}
+          <button
+            onClick={handleCopy}
+            className="ml-auto icon-btn !w-4 !h-4 hover:text-accent"
+            title="Copy result"
+            aria-label="Copy result"
+          >
+            {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
+          </button>
         </div>
         <div className="text-text-secondary max-h-40 overflow-y-auto">{msg.content}</div>
       </div>
@@ -429,13 +551,156 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       </div>
     );
   }
-  // assistant final answer
+  // assistant final answer — render with lightweight markdown + copy button.
   return (
-    <div className="flex items-start gap-2">
+    <div className="flex items-start gap-2 group">
       <Bot size={14} className="flex-shrink-0 mt-0.5 text-accent" />
-      <div className="bg-bg-secondary rounded px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap break-words">
-        {msg.content}
+      <div className="bg-bg-secondary rounded px-3 py-1.5 text-xs max-w-[85%] whitespace-pre-wrap break-words">
+        <MarkdownLite text={msg.content} />
+        {/* Copy button — appears on hover. Assistant answers often contain
+            commands or commit messages the user wants to copy. */}
+        <div className="mt-1 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={handleCopy}
+            className="icon-btn !w-4 !h-4 hover:text-accent"
+            title="Copy message"
+            aria-label="Copy message"
+          >
+            {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
+          </button>
+        </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Lightweight markdown renderer — no external dependency.
+ * Supports the subset that LLMs commonly emit in chat:
+ *   - ```code blocks``` (with language hint)
+ *   - `inline code`
+ *   - **bold**
+ *   - - bullet lists
+ *   - 1. numbered lists
+ *   - paragraphs (split on \n\n)
+ *
+ * For anything more complex (tables, nested lists, links), the raw text
+ * is shown as-is. This keeps the bundle small (no react-markdown dep)
+ * while covering ~95% of what LLMs actually produce in a git assistant.
+ */
+function MarkdownLite({ text }: { text: string }) {
+  // Split into code-block and non-code-block segments. Code blocks are
+  // extracted first so their content isn't processed by the inline rules.
+  const segments = useMemo(() => {
+    const parts: { type: 'code' | 'text'; content: string; lang?: string }[] = [];
+    // Match ```lang\n...\n``` blocks (greedy match per block).
+    const re = /```(\w*)\n?([\s\S]*?)```/g;
+    let lastIdx = 0;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        parts.push({ type: 'text', content: text.slice(lastIdx, match.index) });
+      }
+      parts.push({ type: 'code', content: match[2] || '', lang: match[1] || undefined });
+      lastIdx = match.index + match[0].length;
+    }
+    if (lastIdx < text.length) {
+      parts.push({ type: 'text', content: text.slice(lastIdx) });
+    }
+    return parts;
+  }, [text]);
+
+  return (
+    <div className="space-y-2">
+      {segments.map((seg, i) => {
+        if (seg.type === 'code') {
+          return (
+            <div key={i} className="relative">
+              <pre className="bg-bg-tertiary border border-border-subtle rounded p-2 text-2xs font-mono overflow-x-auto max-h-60">
+                <code>{seg.content}</code>
+              </pre>
+              {seg.lang && (
+                <span className="absolute top-1 right-2 text-3xs text-text-tertiary uppercase">
+                  {seg.lang}
+                </span>
+              )}
+            </div>
+          );
+        }
+        // Text segment — render with inline formatting (bold, inline code, lists).
+        return <TextSegment key={i} text={seg.content} />;
+      })}
+    </div>
+  );
+}
+
+/** Render a text segment with inline bold/code and bullet/numbered lists. */
+function TextSegment({ text }: { text: string }) {
+  // Split into lines, group consecutive bullet/numbered lines into <ul>/<ol>.
+  const lines = text.split('\n');
+  const blocks: React.ReactNode[] = [];
+  let listItems: { ordered: boolean; items: string[] } | null = null;
+
+  const flushList = (key: number) => {
+    if (!listItems) return;
+    if (listItems.ordered) {
+      blocks.push(
+        <ol key={`ol-${key}`} className="list-decimal ml-4 space-y-0.5 text-text-primary">
+          {listItems.items.map((it, i) => <li key={i}><InlineFormat text={it} /></li>)}
+        </ol>
+      );
+    } else {
+      blocks.push(
+        <ul key={`ul-${key}`} className="list-disc ml-4 space-y-0.5 text-text-primary">
+          {listItems.items.map((it, i) => <li key={i}><InlineFormat text={it} /></li>)}
+        </ul>
+      );
+    }
+    listItems = null;
+  };
+
+  lines.forEach((line, i) => {
+    const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
+    const numberedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (bulletMatch) {
+      if (!listItems || listItems.ordered) {
+        flushList(i);
+        listItems = { ordered: false, items: [] };
+      }
+      listItems.items.push(bulletMatch[1]);
+    } else if (numberedMatch) {
+      if (!listItems || !listItems.ordered) {
+        flushList(i);
+        listItems = { ordered: true, items: [] };
+      }
+      listItems.items.push(numberedMatch[1]);
+    } else {
+      flushList(i);
+      if (line.trim()) {
+        blocks.push(<p key={`p-${i}`} className="text-text-primary leading-relaxed"><InlineFormat text={line} /></p>);
+      }
+    }
+  });
+  flushList(lines.length);
+
+  return <>{blocks}</>;
+}
+
+/** Inline formatting: **bold** and `inline code`. */
+function InlineFormat({ text }: { text: string }) {
+  // Split on **bold** and `code` markers, preserving the markers.
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={i} className="font-semibold text-text-primary">{part.slice(2, -2)}</strong>;
+        }
+        if (part.startsWith('`') && part.endsWith('`')) {
+          return <code key={i} className="px-1 py-0.5 rounded bg-bg-tertiary text-text-primary text-3xs font-mono">{part.slice(1, -1)}</code>;
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
   );
 }

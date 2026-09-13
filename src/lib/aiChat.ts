@@ -76,24 +76,55 @@ async function proxyFetch(
   url: string,
   headers: Record<string, string>,
   body: string,
+  signal?: AbortSignal,
 ): Promise<{ ok: boolean; status: number; statusText: string; body: string }> {
   let lastError: { ok: boolean; status: number; statusText: string; body: string } | null = null;
   let backoff = INITIAL_BACKOFF_MS;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // If the user pressed Stop, abort immediately — don't start another
+    // retry attempt. The caller (runWithTools) will surface this as an
+    // AbortError that the UI distinguishes from a real failure.
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
     let result: { ok: boolean; status: number; statusText: string; body: string };
     // Try IPC proxy first (Electron main process — no CORS restriction)
     try {
-      const r = await api.ai?.chat?.({ url, headers, body, method: 'POST' });
-      if (!r) throw new Error('IPC returned empty');
-      result = r;
-    } catch {
+      // Race the IPC call against the abort signal. Electron IPC itself
+      // doesn't support cancellation, but if the user presses Stop, the
+      // signal fires and we reject early — the in-flight IPC result is
+      // discarded. For Ollama (which can take 30-300s for a slow model),
+      // this is the difference between "instant stop" and "wait 5 minutes".
+      const ipcPromise = api.ai?.chat?.({ url, headers, body, method: 'POST' });
+      if (signal) {
+        result = await Promise.race([
+          ipcPromise as Promise<typeof result>,
+          new Promise<typeof result>((_, reject) => {
+            signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+          }),
+        ]);
+      } else {
+        const r = await ipcPromise;
+        if (!r) throw new Error('IPC returned empty');
+        result = r;
+      }
+    } catch (e) {
+      // If the user aborted, rethrow the AbortError immediately — don't
+      // fall through to the retry/model-loading logic below.
+      if (signal?.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
       // Fallback: direct fetch (works in Tauri and browser contexts without CORS)
       try {
-        const res = await fetch(url, { method: 'POST', headers, body });
+        const res = await fetch(url, { method: 'POST', headers, body, signal });
         const text = await res.text();
         result = { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
-      } catch (e) {
+      } catch (e2) {
+        // If the abort happened during the direct fetch, rethrow.
+        if (signal?.aborted || (e2 instanceof DOMException && e2.name === 'AbortError')) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
         // Network-level failure (server killed connection mid-load, ECONNRESET,
         // fetch abort on the long initial wait). If we haven't exhausted retries,
         // treat as model-loading and retry.
@@ -102,7 +133,7 @@ async function proxyFetch(
           backoff *= 2;
           continue;
         }
-        throw e;
+        throw e2;
       }
     }
 
@@ -208,6 +239,17 @@ Rules:
  * (list_repos, search_repos, clone_repo, init_repo, open_repo) can run
  * successfully. The system prompt tells the LLM which tools are available
  * and what context (repo or no-repo) it's operating in.
+ *
+ * ── Abort / Stop ──────────────────────────────────────────────────────
+ * Pass an `AbortSignal` via `options.signal` to cancel the loop mid-flight.
+ * The signal is forwarded to `callLLMChat()` and from there to the
+ * underlying fetch. When aborted:
+ *   - If the LLM call is in flight: fetch is aborted, the awaited promise
+ *     rejects with an AbortError, and runWithTools re-throws it (the UI's
+ *     catch block decides whether to show "stopped by user" or "error").
+ *   - If a tool call is in flight: the IPC call cannot be aborted (Electron
+ *     IPC doesn't support cancellation), but the loop checks `signal.aborted`
+ *     before each iteration and bails out cleanly.
  */
 export async function runWithTools(
   userMessage: string,
@@ -218,6 +260,9 @@ export async function runWithTools(
     onToolCall?: (name: string, args: Record<string, unknown>) => void;
     onToolResult?: (name: string, result: string) => void;
     maxIterations?: number;
+    /** Abort signal — when aborted, the loop bails out and the in-flight
+     *  fetch is cancelled. Used by the AI Assistant "Stop" button. */
+    signal?: AbortSignal;
   },
 ): Promise<{ finalMessage: string; history: ChatMessage[] }> {
   const history: ChatMessage[] = [
@@ -225,9 +270,15 @@ export async function runWithTools(
     { role: 'user', content: userMessage },
   ];
   const maxIterations = options?.maxIterations ?? 5;
+  const signal = options?.signal;
   for (let i = 0; i < maxIterations; i++) {
+    // Check abort BEFORE each LLM call — if the user pressed Stop during
+    // a tool execution, we don't want to start another expensive LLM call.
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
     // Call the LLM with the current history.
-    const assistantMessage = await callLLMChat(history, provider);
+    const assistantMessage = await callLLMChat(history, provider, signal);
     options?.onAssistantMessage?.(assistantMessage);
     history.push(assistantMessage);
     // If no tool calls, we're done — return the final message.
@@ -236,6 +287,12 @@ export async function runWithTools(
     }
     // Execute each requested tool call.
     for (const call of assistantMessage.toolCalls) {
+      // Check abort before each tool call — long-running tools (clone_repo,
+      // sync_with_remote) can be interrupted between consecutive tool calls
+      // even if the in-flight one can't be cancelled.
+      if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
       const tool = getTool(call.name);
       options?.onToolCall?.(call.name, call.arguments);
       if (!tool) {
@@ -253,6 +310,9 @@ export async function runWithTools(
         options?.onToolResult?.(call.name, result);
         history.push({ role: 'tool', content: result, toolName: call.name });
       } catch (e) {
+        // If the abort happened DURING tool execution (Electron IPC can't
+        // be cancelled, but the NEXT iteration check above will catch it),
+        // we still record the partial result so the user sees what happened.
         const errMsg = `Tool '${call.name}' failed: ${String(e)}`;
         options?.onToolResult?.(call.name, errMsg);
         history.push({ role: 'tool', content: errMsg, toolName: call.name });
@@ -267,10 +327,15 @@ export async function runWithTools(
 /**
  * One-shot chat completion (non-streaming). Returns the assistant's
  * message — content + any parsed tool_calls.
+ *
+ * The optional `signal` is forwarded to the underlying fetch — when
+ * aborted, the fetch is cancelled and the promise rejects with an
+ * AbortError. Used by runWithTools to support the "Stop" button.
  */
 export async function callLLMChat(
   messages: ChatMessage[],
   provider: LLMProvider,
+  signal?: AbortSignal,
 ): Promise<ChatMessage> {
   // Dispatch by provider type.
   switch (provider.type) {
@@ -278,17 +343,17 @@ export async function callLLMChat(
     case 'custom':
     case 'github':
     case 'mistral':
-      return callOpenAIChat(messages, provider);
+      return callOpenAIChat(messages, provider, signal);
     case 'anthropic':
-      return callAnthropicChat(messages, provider);
+      return callAnthropicChat(messages, provider, signal);
     case 'ollama':
-      return callOllamaChat(messages, provider);
+      return callOllamaChat(messages, provider, signal);
     default:
       throw new Error(`Unsupported provider type for chat: ${provider.type}`);
   }
 }
 
-async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider): Promise<ChatMessage> {
+async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<ChatMessage> {
   const url = provider.url || 'https://api.openai.com/v1/chat/completions';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
@@ -318,7 +383,7 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider): P
     max_tokens: 1024,
     temperature: provider.temperature ?? 0.4,
   });
-  const res = await proxyFetch(url, headers, body);
+  const res = await proxyFetch(url, headers, body, signal);
   if (!res.ok) {
     throw new Error(`OpenAI chat error ${res.status}: ${res.body}`);
   }
@@ -341,7 +406,7 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider): P
   };
 }
 
-async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider): Promise<ChatMessage> {
+async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<ChatMessage> {
   const url = provider.url || 'https://api.anthropic.com/v1/messages';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -380,7 +445,7 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider)
     tools: AI_TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters })),
     max_tokens: 1024,
   });
-  const res = await proxyFetch(url, headers, body);
+  const res = await proxyFetch(url, headers, body, signal);
   if (!res.ok) {
     throw new Error(`Anthropic chat error ${res.status}: ${res.body}`);
   }
@@ -402,7 +467,7 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider)
   };
 }
 
-async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider): Promise<ChatMessage> {
+async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<ChatMessage> {
   const url = (provider.url || 'http://localhost:11434') + '/api/chat';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
@@ -463,7 +528,7 @@ async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider): P
       },
     })),
   });
-  const res = await proxyFetch(url, headers, body);
+  const res = await proxyFetch(url, headers, body, signal);
   if (!res.ok) {
     throw new Error(`Ollama chat error ${res.status}: ${res.body}`);
   }
