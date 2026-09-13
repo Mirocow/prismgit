@@ -1239,17 +1239,18 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // hash-object server-side — see electron/services/git.ts
   // detectWorkingTreeRenames()).
   //
-  // The effect is debounced 200ms to coalesce rapid status updates (auto-
+  // The effect is debounced 500ms to coalesce rapid status updates (auto-
   // refresh, user actions firing several status changes in a row), and
   // aborts any in-flight check when the inputs change so stale results
   // never overwrite fresh ones.
   //
-  // A spinner overlay is shown in the center of the file list while the
-  // detection is in flight. The spinner is itself delayed 300ms so it
-  // doesn't flash on fast (<300ms) checks — it only appears for genuinely
-  // slow detections (large working trees).
+  // No spinner overlay — detection is fully background. The file list
+  // just updates in place when results arrive (deleted + untracked rows
+  // collapse into a single Renamed row). The previous spinner was
+  // annoying users ("бесит крутилка Detecting renames") because it
+  // appeared on every status refresh, not just when renames were
+  // actually being detected.
   const [detectedRenames, setDetectedRenames] = useState<{ oldPath: string; newPath: string }[]>([]);
-  const [isDetectingRenames, setIsDetectingRenames] = useState(false);
   useEffect(() => {
     if (!repo?.path || !status) return;
     const deletedFiles = status.files
@@ -1274,35 +1275,19 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       // change, preventing unnecessary re-renders of downstream memos and
       // LazyFileList resets.
       setDetectedRenames(prev => prev.length === 0 ? prev : []);
-      setIsDetectingRenames(false);
       return;
     }
 
-    // Debounce 200ms — coalesce bursts of status updates into one detection
+    // Debounce 500ms — coalesce bursts of status updates into one detection
     // pass. Without this, a fast-refresh loop (auto-refresh + user actions)
     // would fire one detection per status change, piling up IPC calls.
+    // (Was 200ms — still too aggressive on repos with frequent watcher
+    // events; 500ms gives the system time to settle before the expensive
+    // hash-object calls fire.)
     let cancelled = false;
-    // Spinner delay: only show the spinner if detection takes longer than
-    // 300ms. Fast detections (typical case after the perf optimization)
-    // shouldn't flash any UI.
-    let spinnerTimer: ReturnType<typeof setTimeout> | undefined;
-    const armSpinner = () => {
-      spinnerTimer = setTimeout(() => {
-        if (!cancelled) setIsDetectingRenames(true);
-      }, 300);
-    };
-    const disarmSpinner = () => {
-      if (spinnerTimer) {
-        clearTimeout(spinnerTimer);
-        spinnerTimer = undefined;
-      }
-    };
-
     const timer = setTimeout(async () => {
-      armSpinner();
       try {
         const result = await api.git.detectWorkingTreeRenames(repo.path, deletedFiles, untrackedFiles);
-        disarmSpinner();
         if (!cancelled) {
           // Only update state if the result actually changed. Returning the
           // previous reference skips the re-render entirely when the detected
@@ -1323,22 +1308,17 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             }
             return result;
           });
-          setIsDetectingRenames(false);
         }
       } catch {
-        disarmSpinner();
         if (!cancelled) {
           setDetectedRenames(prev => prev.length === 0 ? prev : []);
-          setIsDetectingRenames(false);
         }
       }
-    }, 200);
+    }, 500);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
-      disarmSpinner();
-      setIsDetectingRenames(false);
     };
   }, [repo?.path, status]);
 
@@ -1372,7 +1352,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
-    ), [status, sortFiles, fileDisplayFlags, renamedOldPaths, renamedNewPaths]);
+    ), [status, sortFiles, fileDisplayFlags, renamedOldPaths, renamedNewPaths, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs]);
 
   // Detected rename entries — shown in the unstaged section as Renamed rows.
   // Each entry has the new path as the file path and old_path set.
@@ -1395,7 +1375,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     return idx === 'U' || wd === 'U';
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-    .filter((f) => matchesDirScope(f.path))), [status, sortFiles]);
+    .filter((f) => matchesDirScope(f.path))), [status, sortFiles, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs]);
 
   // Untracked files — shown only when 'unversioned' flag is ON.
   // Exclude files that are the NEW path of a detected rename — they show
@@ -2039,23 +2019,29 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           {/* File list with table header */}
           {/* SmartGit background color highlighting: light red = committable files hidden,
               light yellow = name-filtered, gray = unchanged files shown by name match */}
-          <div className={cn(
-            'relative flex-1 overflow-y-auto transition-colors',
-            // Light yellow: files are being name-filtered
-            (fileFilter.trim().length > 0) ? 'bg-yellow-50 dark:bg-yellow-950/10' : '',
-          )}>
-            {/* Rename detection spinner — centered overlay shown only while
-                detection is in flight (and only after 300ms so fast checks
-                don't flash the UI). Pointer-events-none so user clicks pass
-                through to the file list underneath. */}
-            {isDetectingRenames && (
-              <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
-                <div className="flex flex-col items-center gap-2 px-4 py-3 rounded-md bg-bg-secondary/90 backdrop-blur-sm shadow-lg border border-border-subtle">
-                  <Loader size={20} className="animate-spin text-text-secondary" />
-                  <span className="text-2xs text-text-secondary">{t('changes.detectingRenames')}</span>
-                </div>
-              </div>
+          <div
+            className={cn(
+              'relative flex-1 overflow-y-auto transition-colors',
+              // Light yellow: files are being name-filtered
+              (fileFilter.trim().length > 0) ? 'bg-yellow-50 dark:bg-yellow-950/10' : '',
             )}
+            data-file-scroll-container={true}
+          >
+            {/* Rename detection is now fully background — no spinner.
+                The previous centered spinner overlay was annoying users
+                ("бесит крутилка Detecting renames") because:
+                  1. It appeared on every status refresh (watcher events,
+                     post-commit auto-refresh, etc.) — not just when renames
+                     were actually being detected.
+                  2. The 300ms delay before showing it still flashed on
+                     slow machines / large repos.
+                  3. Even when it didn't flash, it occupied visual space
+                     with a centered overlay that blocked clicks (despite
+                     pointer-events-none) for ~300ms.
+                Detection still runs in the background; the file list just
+                updates in place when results arrive. If a rename is found,
+                the deleted + untracked rows collapse into a single Renamed
+                row — a benign visual update, no spinner needed. */}
             {/* Table header — click a column to sort (SmartGit-style) */}
             <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary sticky top-0 z-10">
               <span className="w-4"></span>
