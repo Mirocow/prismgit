@@ -129,7 +129,7 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
     if (stepIdx < TOUR_STEPS.length - 1) {
       setStepIdx(stepIdx + 1);
     } else {
-      if (dontShowAgain) markTourCompleted();
+      markTourCompleted();
       onClose();
     }
   };
@@ -137,8 +137,16 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
     if (stepIdx > 0) setStepIdx(stepIdx - 1);
   };
   const handleSkip = () => {
-    if (dontShowAgain) markTourCompleted();
+    markTourCompleted();
     onClose();
+  };
+
+  // When the checkbox is toggled ON, immediately mark tour as completed
+  // so even if the user closes the window without clicking Done/Skip,
+  // the tour won't reappear.
+  const handleDontShowChange = (checked: boolean) => {
+    setDontShowAgain(checked);
+    if (checked) markTourCompleted();
   };
 
   return (
@@ -235,7 +243,7 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
             <input
               type="checkbox"
               checked={dontShowAgain}
-              onChange={(e) => setDontShowAgain(e.target.checked)}
+              onChange={(e) => handleDontShowChange(e.target.checked)}
               className="w-3 h-3"
             />
             {t('tour.dontShowAgain')}

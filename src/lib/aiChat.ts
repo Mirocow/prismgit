@@ -75,20 +75,20 @@ export function buildToolSystemPrompt(tools: AITool[] = AI_TOOLS): string {
   const toolDocs = tools.map(t => `- ${t.name}: ${t.description}\n  Parameters: ${JSON.stringify(t.parameters)}`).join('\n');
   return `You are PrismGit's AI assistant — you help the user manage their Git repository.
 
-You have access to the following tools. When the user asks a question or requests an action, you MUST call the appropriate tool to get real data — NEVER make up or hallucinate results.
+You have access to tools for reading repository data and performing git actions.
 
 Available tools:
 ${toolDocs}
 
-CRITICAL RULES:
-1. NEVER fabricate data. If you need repository info, CALL the tool — do not guess.
-2. For read-only questions (status, log, diff, branches, stashes, tags), call the appropriate get_* tool FIRST, then answer based on the real results.
-3. For write actions (stage, unstage, commit, push, pull, fetch, checkout, merge, tag, stash), call the tool directly.
+Rules:
+1. For greetings or general conversation (e.g. "hello", "how are you"), respond directly without calling any tools.
+2. For git-related questions, CALL the appropriate tool FIRST — never fabricate results.
+3. For write actions (stage, commit, push, etc.), call the tool directly.
 4. After tools return, summarize the result in 1-3 sentences based on ACTUAL data.
 5. If a tool fails, report the error and suggest what the user should do.
 6. For commit messages, use imperative mood: "Add feature X", "Fix bug Y".
 7. You can chain multiple tool calls: e.g. get_status → stage_files → commit → push.
-8. If you don't have enough information to answer, say so — don't make things up.
+8. Be concise — users want quick answers, not essays.
 `;
 }
 
@@ -297,29 +297,26 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider)
 async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider): Promise<ChatMessage> {
   const url = (provider.url || 'http://localhost:11434') + '/api/chat';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  // Ollama 0.3.0+ supports native tool calling via the 'tools' parameter.
-  // Pass the tool definitions so the LLM can call them properly instead of
-  // hallucinating results in plain text.
+  // Ollama's tool format differs from OpenAI:
+  //   - tools: [{ type: 'function', function: { name, description, parameters } }]
+  //   - tool_calls in response: [{ function: { name, arguments: <object> } }]
+  //   - tool result messages: role='tool', content=string
+  // Note: Ollama expects arguments as an OBJECT, not a JSON string (unlike OpenAI).
+  // Passing a string causes HTTP 400: "Value looks like object, but can't find closing '}'"
   const body = JSON.stringify({
     model: provider.model,
     messages: messages.map(m => {
-      // Include tool_calls in assistant messages so the LLM sees the
-      // conversation history with tool results.
       if (m.toolCalls && m.toolCalls.length > 0) {
         return {
           role: m.role,
           content: m.content || '',
           tool_calls: m.toolCalls.map(tc => ({
-            function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+            function: { name: tc.name, arguments: tc.arguments },
           })),
         };
       }
-      // Tool result messages
       if (m.role === 'tool') {
-        return {
-          role: 'tool',
-          content: m.content,
-        };
+        return { role: 'tool', content: m.content };
       }
       return { role: m.role, content: m.content };
     }),
