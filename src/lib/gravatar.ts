@@ -199,15 +199,16 @@ export async function gravatarUrl(email: string | undefined, size = 24): Promise
 }
 
 /**
- * Decide whether a given email is likely to have a real Gravatar account.
- * Conservative: only obvious patterns like 'user@github.com' (GitHub
- * generates default avatars via Gravatar) and 'noreply@github.com'.
+ * Decide whether a given email is likely to have a Gravatar.
+ * Changed: now returns true for ALL valid emails — Gravatar returns
+ * an identicon (auto-generated avatar) for emails without an account,
+ * so the image always loads. Previously limited to GitHub/GitLab
+ * addresses, which meant most commit authors showed initials instead
+ * of Gravatar images.
  */
 export function likelyHasGravatar(email: string | undefined): boolean {
   if (!email) return false;
-  const e = email.toLowerCase();
-  if (e.endsWith('@github.com')) return true;
-  if (e.endsWith('@users.noreply.github.com')) return true;
-  if (e.endsWith('@gitlab.com')) return true;
-  return false;
+  const e = email.trim().toLowerCase();
+  if (!e || !e.includes('@')) return false;
+  return true;
 }

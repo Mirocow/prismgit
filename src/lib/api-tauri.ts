@@ -777,6 +777,20 @@ export const tauriApi = {
         return { ok: false, error: String(e), models: [] };
       }
     },
+    chat: async (config: { url: string; headers: Record<string, string>; body: string; method?: string }): Promise<{ ok: boolean; status: number; statusText: string; body: string }> => {
+      // Tauri has no CORS restriction — direct fetch works
+      try {
+        const res = await fetch(config.url, {
+          method: config.method || 'POST',
+          headers: config.headers,
+          body: config.body,
+        });
+        const text = await res.text();
+        return { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
+      } catch (e) {
+        return { ok: false, status: 0, statusText: String(e), body: '' };
+      }
+    },
   },
 
   github: {

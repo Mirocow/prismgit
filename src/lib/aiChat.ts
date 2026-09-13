@@ -22,6 +22,27 @@
 
 import type { LLMProvider } from './aiCommitMessages';
 import { AI_TOOLS, getTool, type AITool } from './aiTools';
+import { api } from './api';
+
+/**
+ * Proxy fetch through the Electron main process (IPC) to bypass CORS.
+ * Ollama and other local LLM servers don't send Access-Control-Allow-Origin
+ * headers, so the renderer's fetch() is blocked. The main process has no
+ * CORS restriction.
+ *
+ * Returns { ok, status, statusText, body } where body is the raw response text.
+ * The caller parses JSON from body as needed.
+ */
+async function proxyFetch(url: string, headers: Record<string, string>, body: string): Promise<{ ok: boolean; status: number; statusText: string; body: string }> {
+  // Check if we're in Electron (window.smartgit exists with ai.chat)
+  if (typeof window !== 'undefined' && (window as { smartgit?: { ai?: { chat?: unknown } } }).smartgit?.ai?.chat) {
+    return api.ai.chat({ url, headers, body, method: 'POST' }) as Promise<{ ok: boolean; status: number; statusText: string; body: string }>;
+  }
+  // Fallback: direct fetch (works in Tauri and browser contexts without CORS)
+  const res = await fetch(url, { method: 'POST', headers, body });
+  const text = await res.text();
+  return { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
+}
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -181,12 +202,11 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider): P
     max_tokens: 1024,
     temperature: provider.temperature ?? 0.4,
   });
-  const res = await fetch(url, { method: 'POST', headers, body });
+  const res = await proxyFetch(url, headers, body);
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`OpenAI chat error ${res.status}: ${text}`);
+    throw new Error(`OpenAI chat error ${res.status}: ${res.body}`);
   }
-  const data = await res.json();
+  const data = JSON.parse(res.body);
   const msg = data.choices?.[0]?.message ?? {};
   const toolCalls: ToolCall[] | undefined = msg.tool_calls?.map((tc: { id: string; function: { name: string; arguments: string } }) => {
     let parsed: Record<string, unknown> = {};
@@ -244,12 +264,11 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider)
     tools: AI_TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters })),
     max_tokens: 1024,
   });
-  const res = await fetch(url, { method: 'POST', headers, body });
+  const res = await proxyFetch(url, headers, body);
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Anthropic chat error ${res.status}: ${text}`);
+    throw new Error(`Anthropic chat error ${res.status}: ${res.body}`);
   }
-  const data = await res.json();
+  const data = JSON.parse(res.body);
   // Anthropic returns content as an array of blocks (text + tool_use).
   const blocks = data.content ?? [];
   const textParts = blocks.filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('');
@@ -275,12 +294,11 @@ async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider): P
     messages: messages.map(m => ({ role: m.role, content: m.content })),
     stream: false,
   });
-  const res = await fetch(url, { method: 'POST', headers, body });
+  const res = await proxyFetch(url, headers, body);
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Ollama chat error ${res.status}: ${text}`);
+    throw new Error(`Ollama chat error ${res.status}: ${res.body}`);
   }
-  const data = await res.json();
+  const data = JSON.parse(res.body);
   // Ollama doesn't natively support tool calls — best-effort regex parse.
   const content: string = data.message?.content ?? '';
   const toolCalls = parseOllamaToolCalls(content);

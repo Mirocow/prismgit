@@ -60,11 +60,13 @@ describe('Gravatar integration', () => {
     expect(likelyHasGravatar('user@gitlab.com')).toBe(true);
   });
 
-  it('likelyHasGravatar returns false for generic emails', () => {
-    expect(likelyHasGravatar('user@example.com')).toBe(false);
-    expect(likelyHasGravatar('user@gmail.com')).toBe(false);
+  it('likelyHasGravatar returns true for all valid emails, false for invalid', () => {
+    // Changed: all valid emails return true (Gravatar returns identicon for unknown)
+    expect(likelyHasGravatar('user@example.com')).toBe(true);
+    expect(likelyHasGravatar('user@gmail.com')).toBe(true);
     expect(likelyHasGravatar('')).toBe(false);
     expect(likelyHasGravatar(undefined)).toBe(false);
+    expect(likelyHasGravatar('no-email')).toBe(false);
   });
 
   it('produces the same hash for the same input', async () => {
