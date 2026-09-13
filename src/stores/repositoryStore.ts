@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api, type RepositoryEntry, type RepositoryMetadata, type RepoGroup, type RemoteCheckSummary } from '../lib/api';
+import { useToastStore } from './toastStore';
 
 interface RepositoryState {
   repos: RepositoryEntry[];
@@ -122,6 +123,12 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
         api.fs.pathBasename(path),
       ]);
       if (!isRepo) {
+        // Show a friendly toast directly — avoids the "unhandled rejection"
+        // path where the global error handler shows a SECOND generic toast.
+        useToastStore.getState().error(
+          'Not a Git repository',
+          `The selected directory is not a Git repository:\n${path}\n\nInitialize one with 'git init' or select a different directory.`,
+        );
         throw new Error('Selected directory is not a Git repository');
       }
       await api.settings.addRepo({ path, name });
@@ -138,15 +145,26 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       const metadata = get().metadata[path] || null;
       set({ currentRepo: repo, currentMetadata: metadata, loading: false });
     } catch (e) {
-      set({ error: String(e), loading: false });
-      throw e;
+      const errMsg = e instanceof Error ? e.message : String(e);
+      set({ error: errMsg, loading: false });
+      // Re-throw WITHOUT the Error object — just the message string.
+      // Callers that do `.catch((e) => toast.error(..., e))` get the string
+      // directly. Callers that DON'T catch will still propagate, but the
+      // global unhandledrejection handler will show a clean toast instead
+      // of a raw Error stack trace.
+      throw errMsg;
     }
   },
 
   openRepositoryPicker: async () => {
     const path = await api.fs.openRepositoryPicker();
     if (!path) return;
-    await get().openRepository(path);
+    try {
+      await get().openRepository(path);
+    } catch {
+      // openRepository already shows a toast via the caller's .catch().
+      // Swallow here so the rejection doesn't become unhandled.
+    }
   },
 
   closeRepository: () => {
