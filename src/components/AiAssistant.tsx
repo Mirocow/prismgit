@@ -672,28 +672,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <>
-            {messages.map((msg, idx) => <MessageBubble key={idx} msg={msg} />)}
-            {/* Regenerate button — appears under the last assistant message
-                when NOT busy. Re-runs the last user prompt with the same
-                context but different temperature, giving a fresh response. */}
-            {!busy && messages.length >= 2 && (() => {
-              const lastMsg = messages[messages.length - 1];
-              const isLastAssistant = lastMsg?.role === 'assistant' && !lastMsg.toolCalls?.length;
-              if (!isLastAssistant) return null;
-              // Find the last user message for re-sending
-              const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-              if (!lastUserMsg) return null;
-              return (
-                <button
-                  className="flex items-center gap-1 text-2xs text-text-tertiary hover:text-accent transition-colors mt-1"
-                  onClick={() => void handleSend(lastUserMsg.content, true)}
-                  title="Regenerate the last response with a fresh attempt"
-                >
-                  <RefreshCw size={9} />
-                  Regenerate
-                </button>
-              );
-            })()}
+            {messages.map((msg, idx) => <MessageBubble key={idx} msg={msg} onRegenerate={!busy && msg.role === 'user' ? () => void handleSend(msg.content, true) : undefined} />)}
           </>
         )}
         {busy && (
@@ -773,7 +752,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
  *   - assistant with tool_calls: italic "Calling tool..." bubble
  *   - assistant final: markdown-rendered with copy button
  */
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?: () => void }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -785,9 +764,23 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   if (msg.role === 'user') {
     return (
-      <div className="flex items-start gap-2 justify-end">
-        <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap break-words">
-          {msg.content}
+      <div className="flex items-start gap-2 justify-end group">
+        <div className="flex flex-col items-end gap-0.5">
+          <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap break-words">
+            {msg.content}
+          </div>
+          {/* Regenerate button — appears on hover for each user message.
+              Re-sends this specific message to get a fresh AI response. */}
+          {onRegenerate && (
+            <button
+              className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors opacity-0 group-hover:opacity-100"
+              onClick={onRegenerate}
+              title="Resend this message"
+            >
+              <RefreshCw size={8} />
+              Retry
+            </button>
+          )}
         </div>
         <User size={14} className="flex-shrink-0 mt-0.5 text-text-tertiary" />
       </div>
