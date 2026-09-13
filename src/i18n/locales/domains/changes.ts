@@ -94,6 +94,7 @@ export const en: Record<string, string> = {
 
   // ChangesPage — actions & toasts
   'changes.loadDiffFailed': 'Failed to load diff',
+  'changes.loadJournalFailed': 'Failed to load commit history',
   'changes.allChangesStaged': 'All changes staged',
   'changes.stageFailed': 'Failed to stage',
   'changes.stageFileFailed': 'Failed to stage file',
@@ -371,6 +372,7 @@ export const ru: Record<string, string> = {
 
   // ChangesPage — действия и тосты
   'changes.loadDiffFailed': 'Не удалось загрузить diff',
+  'changes.loadJournalFailed': 'Не удалось загрузить историю коммитов',
   'changes.allChangesStaged': 'Все изменения проиндексированы',
   'changes.stageFailed': 'Не удалось индексировать',
   'changes.stageFileFailed': 'Не удалось индексировать файл',
@@ -648,6 +650,7 @@ export const zh: Record<string, string> = {
 
   // ChangesPage — 操作与提示
   'changes.loadDiffFailed': '加载差异失败',
+  'changes.loadJournalFailed': '加载提交历史失败',
   'changes.allChangesStaged': '所有更改已暂存',
   'changes.stageFailed': '暂存失败',
   'changes.stageFileFailed': '暂存文件失败',
@@ -925,6 +928,7 @@ export const de: Record<string, string> = {
 
   // ChangesPage — Aktionen & Toasts
   'changes.loadDiffFailed': 'Diff konnte nicht geladen werden',
+  'changes.loadJournalFailed': 'Commit-Verlauf konnte nicht geladen werden',
   'changes.allChangesStaged': 'Alle Änderungen indexiert',
   'changes.stageFailed': 'Indexieren fehlgeschlagen',
   'changes.stageFileFailed': 'Datei konnte nicht indexiert werden',

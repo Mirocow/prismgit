@@ -338,12 +338,17 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     try {
       const result = await api.git.log(repo.path, { maxCount: 20 });
       setJournal(result);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      // Previously this was a silent catch — but it hid real bugs (the most
+      // common: index.lock from a previous failed git operation, or the
+      // repo path being inside a parent .git directory). Surface the error
+      // via toast so the user knows WHY their commit history is empty after
+      // they just made a commit.
+      toast.error(t('changes.loadJournalFailed') || 'Failed to load commit history', String(e));
     } finally {
       setJournalLoading(false);
     }
-  }, [repo.path]);
+  }, [repo.path, toast, t]);
 
   // Load diff when selected file changes — debounced to avoid multiple calls
   // when status refreshes or multiple events fire simultaneously.

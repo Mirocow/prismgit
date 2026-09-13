@@ -185,6 +185,9 @@ Rules:
 8. If the user asks to "open" / "switch to" / "find" a repository, use list_repos + search_repos + open_repo.
 9. If the user asks to "clone" or "create" a repo, use clone_repo or init_repo — these work even when no repo is currently open.
 10. Be concise — users want quick answers, not essays.
+11. PREFERRED PULL STRATEGY: when the user says "pull", "слей последние изменения", "update from remote", use the pull tool with default settings — it auto-stashes local changes, runs \`git pull --rebase\`, then restores the stash. This matches the user's preferred workflow and avoids the "unstaged changes" error.
+12. DESTRUCTIVE OPERATIONS: when the user explicitly says "discard", "откатить локальные изменения", "reset to HEAD", "throw away my changes", use discard_changes (permanent) or sync_with_remote (resets to origin/<branch> but keeps a stash as a safety net). NEVER call discard_changes without an explicit user request.
+13. If a git operation fails with "index.lock exists", tell the user another git operation may be running and to wait a moment and retry — do NOT try to delete the lock file automatically.
 `;
 }
 

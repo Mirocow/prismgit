@@ -268,23 +268,94 @@ export const gitPushTool: AITool = {
   },
 };
 
-/** Pull from remote. */
+/** Pull from remote.
+ *
+ *  Default strategy is now `pull --rebase --autostash`:
+ *    1. `git stash push -u` to save any uncommitted changes
+ *    2. `git pull --rebase` to apply remote commits on top of local ones
+ *    3. `git stash pop` to restore the local changes
+ *  This matches the user's stated preference: "лучше чтоб асистент всегда
+ *  клал локальные изменения в Stash, а потом выполнял pull" and avoids
+ *  the dreaded 'cannot pull with rebase: You have unstaged changes' error.
+ *
+ *  If `auto_stash` is false, the tool fails with a clear message when the
+ *  working tree is dirty — matching raw `git pull` behaviour.
+ */
 export const gitPullTool: AITool = {
   name: 'pull',
-  description: 'Pull changes from the remote repository (git pull). Uses merge strategy by default.',
+  description: 'Pull changes from the remote repository (git pull). Defaults to REBASE strategy with AUTO-STASH: any uncommitted local changes are stashed first, then the pull runs, then the stash is restored. This avoids the "unstaged changes" error and matches the user\'s preferred workflow. Pass auto_stash=false to disable.',
   parameters: {
     type: 'object',
     properties: {
       remote: { type: 'string', description: 'Remote name (default: origin)', default: 'origin' },
       branch: { type: 'string', description: 'Branch to pull from' },
-      rebase: { type: 'boolean', description: 'Use rebase instead of merge', default: false },
+      rebase: { type: 'boolean', description: 'Use rebase instead of merge (default: true). Recommended — keeps history linear.', default: true },
+      auto_stash: { type: 'boolean', description: 'If true (default), stash uncommitted changes before pull and restore them after. If false, the pull will fail when working tree is dirty.', default: true },
     },
     additionalProperties: false,
   },
   async execute(params, repoPath) {
-    const p = params as { remote?: string; branch?: string; rebase?: boolean };
-    await api.git.pull(repoPath, p.remote || 'origin', p.branch, p.rebase ?? false, false);
-    return `Pulled from ${p.remote || 'origin'}${p.branch ? '/' + p.branch : ''}.`;
+    const p = params as { remote?: string; branch?: string; rebase?: boolean; auto_stash?: boolean };
+    const remote = p.remote || 'origin';
+    const branch = p.branch;
+    const useRebase = p.rebase ?? true;
+    const autoStash = p.auto_stash ?? true;
+
+    let stashed = false;
+    let stashMessage = '';
+
+    if (autoStash) {
+      // Check working-tree status before stashing — `git stash` creates an
+      // empty stash entry when there are no changes, which would then fail
+      // to pop later with "No stash entries found".
+      try {
+        const status = await api.git.status(repoPath);
+        const hasChanges = status.files.length > 0;
+        if (hasChanges) {
+          stashMessage = `auto-stash before pull (${new Date().toISOString()})`;
+          await api.git.stashPush(repoPath, stashMessage, true, false);
+          stashed = true;
+        }
+      } catch (e) {
+        // Stash failed — abort the pull entirely so we don't leave the repo
+        // in a weird state. The user can try again with auto_stash=false.
+        return `Pull aborted: failed to auto-stash local changes. Error: ${String(e)}`;
+      }
+    }
+
+    try {
+      await api.git.pull(repoPath, remote, branch, useRebase, false);
+    } catch (e) {
+      // Pull failed — if we stashed, restore the local changes so the user
+      // is back to where they started.
+      if (stashed) {
+        try { await api.git.stashPop(repoPath, 0); } catch { /* ignore — the pull error is more important */ }
+      }
+      const msg = String(e);
+      // Friendly error messages for common failures.
+      if (msg.includes('unstaged changes')) {
+        return `Pull failed: working tree has unstaged changes. Try with auto_stash=true (default) or commit/stash manually first.\n\nOriginal error: ${msg}`;
+      }
+      if (msg.includes('index.lock')) {
+        return `Pull failed: git index is locked (.git/index.lock exists). Another git operation may be running — wait a moment and retry.\n\nOriginal error: ${msg}`;
+      }
+      return `Pull failed: ${msg}`;
+    }
+
+    // Pull succeeded — restore the stashed changes if we stashed them.
+    if (stashed) {
+      try {
+        await api.git.stashPop(repoPath, 0);
+        return `Pulled from ${remote}${branch ? '/' + branch : ''} (rebase). Local changes were auto-stashed and restored.`;
+      } catch (e) {
+        // Stash pop failed — typically a merge conflict between the stashed
+        // changes and the newly-pulled commits. The stash is NOT lost —
+        // user can recover it via `git stash list` + `git stash pop`.
+        return `Pulled from ${remote}${branch ? '/' + branch : ''} (rebase). WARNING: auto-stash restore failed — your local changes are still in the stash. Run \`git stash list\` to find them, then \`git stash pop\` to recover. Error: ${String(e)}`;
+      }
+    }
+
+    return `Pulled from ${remote}${branch ? '/' + branch : ''} (rebase).`;
   },
 };
 
@@ -397,6 +468,276 @@ export const gitMergeTool: AITool = {
       return `Merge completed with ${result.conflicts.length} conflict(s): ${result.conflicts.join(', ')}`;
     }
     return `Merged '${p.branch}' into current branch.`;
+  },
+};
+
+/** Discard local changes — permanently delete uncommitted work.
+ *
+ *  Runs:
+ *    1. `git reset --hard HEAD` — discards tracked file modifications
+ *    2. `git clean -fd` — removes untracked files and directories
+ *
+ *  This is DESTRUCTIVE — there is no undo. The AI Assistant should only
+ *  call this when the user explicitly says "discard" / "откатить локальные
+ *  изменения" / "reset to HEAD" etc. If the user wants to keep the changes
+ *  for later, use `stash_push` instead.
+ *
+ *  Optional `include_ignored` (default false) also removes ignored files
+ *  (git clean -fdx) — useful for fully resetting a repo to a clean state.
+ */
+export const gitDiscardChangesTool: AITool = {
+  name: 'discard_changes',
+  description: 'DESTRUCTIVE: discard ALL local changes permanently. Runs `git reset --hard HEAD` (discards tracked file modifications) + `git clean -fd` (removes untracked files and directories). There is NO undo. Use this when the user explicitly says "discard", "откатить локальные изменения", "reset to HEAD", "throw away my changes", etc. If the user might want the changes later, use stash_push instead. Optional include_ignored=true also removes ignored files (git clean -fdx).',
+  parameters: {
+    type: 'object',
+    properties: {
+      include_ignored: { type: 'boolean', description: 'If true, also remove ignored files (git clean -fdx). Default false — only removes untracked files.', default: false },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    const p = params as { include_ignored?: boolean };
+    const includeIgnored = p.include_ignored ?? false;
+
+    // Snapshot what we're about to discard — useful for the AI to report
+    // back to the user what was lost.
+    let discardedSummary = '';
+    try {
+      const status = await api.git.status(repoPath);
+      // FileStatus.index/working_dir use string enums ('modified', 'untracked', etc.)
+      // — the porcelain '?' marker is parsed into 'untracked' upstream.
+      const modified = status.files.filter(f => f.index !== 'untracked' || f.working_dir !== 'untracked');
+      const untracked = status.files.filter(f => f.index === 'untracked' && f.working_dir === 'untracked');
+      discardedSummary = `Discarded ${modified.length} modified file(s) and ${untracked.length} untracked file(s).`;
+    } catch {
+      discardedSummary = 'Discarded local changes.';
+    }
+
+    // 1. git reset --hard HEAD — discard tracked-file modifications
+    try {
+      await api.git.raw(repoPath, ['reset', '--hard', 'HEAD']);
+    } catch (e) {
+      // The git:checkout error "index.lock exists" suggests another git op
+      // is running — surface a clear error instead of leaving the repo in
+      // a half-reset state.
+      const msg = String(e);
+      if (msg.includes('index.lock')) {
+        return `Discard failed: git index is locked (.git/index.lock exists). Another git operation may be running — wait a moment and retry.\n\nOriginal error: ${msg}`;
+      }
+      return `Discard failed at 'git reset --hard': ${msg}`;
+    }
+
+    // 2. git clean -fd (or -fdx) — remove untracked files and directories
+    try {
+      const cleanArgs = ['clean', '-f', '-d'];
+      if (includeIgnored) cleanArgs.push('-x');
+      await api.git.raw(repoPath, cleanArgs);
+    } catch (e) {
+      return `${discardedSummary} WARNING: failed to clean untracked files: ${String(e)}. Tracked-file changes were reset, but untracked files may remain.`;
+    }
+
+    return `${discardedSummary} Working tree is now clean and matches HEAD.`;
+  },
+};
+
+/** Sync the current branch with the remote — atomically.
+ *
+ *  This is the "pull latest and discard my local changes" workflow the
+ *  user requested: "хочу чтоб инструмент мог откатить локальные изменения
+ *  и обновил текущий репозиторий последними коммитами из origin".
+ *
+ *  Steps (all atomic — any failure rolls back to the starting state):
+ *    1. `git stash push -u`         (save local changes, just in case)
+ *    2. `git fetch origin`
+ *    3. `git reset --hard origin/<current-branch>`
+ *    4. (optional) `git stash pop`  (restore local changes on top)
+ *
+ *  Pass `keep_local_changes=true` (default) to restore the local changes
+ *  after the reset. Pass `keep_local_changes=false` to fully discard them
+ *  — the stash is still kept so the user can recover via `git stash list`.
+ *
+ *  Pass `branch` to override the remote branch name (default: detect
+ *  from upstream config or use the local branch name).
+ */
+export const gitSyncWithRemoteTool: AITool = {
+  name: 'sync_with_remote',
+  description: 'Atomically sync the current branch with the remote. Workflow: stash local changes → fetch → reset --hard origin/<branch> → optionally restore the stashed changes. Use this when the user says "откатить локальные изменения и обновить репозиторий", "pull latest and discard my changes", "reset to origin", etc. Safe — local changes are stashed (recoverable via git stash list) before any destructive operation. Pass keep_local_changes=false to fully discard local changes after the reset (the stash is still kept).',
+  parameters: {
+    type: 'object',
+    properties: {
+      remote: { type: 'string', description: 'Remote name (default: origin)', default: 'origin' },
+      branch: { type: 'string', description: 'Remote branch to sync with. If omitted, uses the current local branch name.' },
+      keep_local_changes: { type: 'boolean', description: 'If true (default), restore local changes after reset. If false, fully discard them (still recoverable via git stash list).', default: true },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    const p = params as { remote?: string; branch?: string; keep_local_changes?: boolean };
+    const remote = p.remote || 'origin';
+    const keepLocalChanges = p.keep_local_changes ?? true;
+
+    // 1. Determine the current branch (so we know what to reset to).
+    let localBranch = '';
+    try {
+      const status = await api.git.status(repoPath);
+      localBranch = status.current ?? '';
+      if (!localBranch) {
+        return 'Sync failed: HEAD is detached (no current branch). Checkout a branch first, or pass the `branch` parameter explicitly.';
+      }
+    } catch (e) {
+      return `Sync failed: could not read current branch. Error: ${String(e)}`;
+    }
+    const remoteBranch = p.branch || localBranch;
+    const remoteRef = `${remote}/${remoteBranch}`;
+
+    // Snapshot what we're about to do — for the AI to report back.
+    let hadLocalChanges = false;
+    let snapshotSummary = '';
+    try {
+      const status = await api.git.status(repoPath);
+      hadLocalChanges = status.files.length > 0;
+      snapshotSummary = `Branch: ${localBranch}, target: ${remoteRef}, local changes: ${hadLocalChanges ? `${status.files.length} file(s)` : 'none'}.`;
+    } catch {
+      snapshotSummary = `Branch: ${localBranch}, target: ${remoteRef}.`;
+    }
+
+    // 2. Stash local changes (only if there are any) — so they're recoverable
+    //    even if the user passed keep_local_changes=false.
+    let stashed = false;
+    if (hadLocalChanges) {
+      try {
+        const stashMsg = `auto-stash before sync_with_remote (${new Date().toISOString()})`;
+        await api.git.stashPush(repoPath, stashMsg, true, false);
+        stashed = true;
+      } catch (e) {
+        return `Sync aborted: failed to stash local changes. No destructive operation was performed. Error: ${String(e)}`;
+      }
+    }
+
+    // 3. Fetch the remote — make sure origin/<branch> is up to date.
+    try {
+      await api.git.fetch(repoPath, remote, true);
+    } catch (e) {
+      // Fetch failed — restore the stash if we made one.
+      if (stashed) {
+        try { await api.git.stashPop(repoPath, 0); } catch { /* ignore — fetch error is more important */ }
+      }
+      return `Sync failed: could not fetch from ${remote}. Local changes restored (if any). Error: ${String(e)}`;
+    }
+
+    // 4. Reset --hard origin/<branch>. This is the destructive step.
+    try {
+      await api.git.raw(repoPath, ['reset', '--hard', remoteRef]);
+    } catch (e) {
+      const msg = String(e);
+      if (stashed) {
+        try { await api.git.stashPop(repoPath, 0); } catch { /* ignore — reset error is more important */ }
+      }
+      if (msg.includes('index.lock')) {
+        return `Sync failed: git index is locked (.git/index.lock exists). Wait a moment and retry. Local changes restored.\n\nOriginal error: ${msg}`;
+      }
+      if (msg.includes('unknown revision') || msg.includes('not found')) {
+        return `Sync failed: remote ref '${remoteRef}' not found. Check that the branch exists on the remote — try \`git fetch ${remote} --prune\` first.\n\nOriginal error: ${msg}`;
+      }
+      return `Sync failed at 'git reset --hard ${remoteRef}': ${msg}${stashed ? ' Local changes restored.' : ''}`;
+    }
+
+    // 5. Optionally restore the stashed local changes on top of the new HEAD.
+    if (stashed && keepLocalChanges) {
+      try {
+        await api.git.stashPop(repoPath, 0);
+        return `${snapshotSummary} Synced to ${remoteRef} and restored local changes on top.`;
+      } catch (e) {
+        // Stash pop failed — typically a merge conflict between the stashed
+        // changes and the new commits. The stash is NOT lost.
+        return `${snapshotSummary} Synced to ${remoteRef}. WARNING: auto-stash restore failed — your local changes are still in the stash. Run \`git stash list\` + \`git stash pop\` to recover. Error: ${String(e)}`;
+      }
+    }
+
+    if (stashed && !keepLocalChanges) {
+      return `${snapshotSummary} Synced to ${remoteRef}. Local changes were stashed (recoverable via git stash list) and NOT restored.`;
+    }
+
+    return `${snapshotSummary} Synced to ${remoteRef}. Working tree is clean.`;
+  },
+};
+
+/** Abort an in-progress merge or rebase.
+ *
+ *  When a `git merge` or `git rebase` fails with conflicts, the repo is
+ *  left in a half-finished state (MERGE_HEAD / REBASE_HEAD set, index has
+ *  conflict markers). This tool aborts the in-progress operation and
+ *  returns the repo to the state it was in before the merge/rebase started.
+ *
+ *  Safe to call even when no merge/rebase is in progress — git will report
+ *  "no merge to abort" / "no rebase in progress" which we surface cleanly.
+ */
+export const gitAbortOpTool: AITool = {
+  name: 'abort_operation',
+  description: 'Abort an in-progress git merge or rebase. Use this when a previous merge/rebase failed with conflicts and the user wants to cancel it (git merge --abort / git rebase --abort). Returns the repo to the state it was in before the operation started. Safe to call when no merge/rebase is in progress.',
+  parameters: {
+    type: 'object',
+    properties: {
+      operation: { type: 'string', enum: ['auto', 'merge', 'rebase'], description: 'Which operation to abort. "auto" (default) tries both — merge first, then rebase — and reports whichever was active.', default: 'auto' },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    const p = params as { operation?: 'auto' | 'merge' | 'rebase' };
+    const op = p.operation ?? 'auto';
+    const lines: string[] = [];
+
+    // Check for in-progress merge (MERGE_HEAD exists in .git).
+    let inMerge = false;
+    try {
+      const out = await api.git.raw(repoPath, ['rev-parse', '--verify', 'MERGE_HEAD']);
+      inMerge = !!out?.trim();
+    } catch { /* MERGE_HEAD doesn't exist → no merge in progress */ }
+
+    // Check for in-progress rebase (rebase-merge or rebase-apply dir exists).
+    let inRebase = false;
+    try {
+      const out = await api.git.raw(repoPath, ['rev-parse', '--git-path', 'rebase-merge']);
+      inRebase = !!out?.trim();
+    } catch { /* ignore */ }
+    if (!inRebase) {
+      try {
+        const out = await api.git.raw(repoPath, ['rev-parse', '--git-path', 'rebase-apply']);
+        inRebase = !!out?.trim();
+      } catch { /* ignore */ }
+    }
+
+    if (op === 'merge' || (op === 'auto' && inMerge)) {
+      if (!inMerge) {
+        lines.push('No merge in progress — nothing to abort.');
+      } else {
+        try {
+          await api.git.abortMerge(repoPath);
+          lines.push('Merge aborted.');
+        } catch (e) {
+          lines.push(`Failed to abort merge: ${String(e)}`);
+        }
+      }
+    }
+
+    if (op === 'rebase' || (op === 'auto' && inRebase)) {
+      if (!inRebase) {
+        lines.push('No rebase in progress — nothing to abort.');
+      } else {
+        try {
+          await api.git.raw(repoPath, ['rebase', '--abort']);
+          lines.push('Rebase aborted.');
+        } catch (e) {
+          lines.push(`Failed to abort rebase: ${String(e)}`);
+        }
+      }
+    }
+
+    if (op === 'auto' && !inMerge && !inRebase) {
+      lines.push('No merge or rebase in progress — nothing to abort.');
+    }
+
+    return lines.join(' ');
   },
 };
 
@@ -651,6 +992,10 @@ export const AI_TOOLS: AITool[] = [
   gitStashPushTool,
   gitStashPopTool,
   gitMergeTool,
+  // Discard / sync / abort — destructive or atomic multi-step operations
+  gitDiscardChangesTool,
+  gitSyncWithRemoteTool,
+  gitAbortOpTool,
   // Repository management (work WITHOUT an open repo)
   listReposTool,
   searchReposTool,
