@@ -7,6 +7,7 @@ import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage, type TokenUsage } from '../lib/aiChat';
 import { PROVIDER_PRESETS, getProviderPreset, type LLMProvider } from '../lib/aiCommitMessages';
+import MarkdownRenderer from './MarkdownRenderer';
 import {
   useAiChatStore,
   storageKeyFor, loadChatHistory, saveChatHistory, clearChatHistory,
@@ -884,132 +885,13 @@ export function ToolResultBubble({ msg, t }: { msg: ChatMessage; t?: (key: strin
 }
 
 /**
- * Lightweight markdown renderer — no external dependency.
- * Supports the subset that LLMs commonly emit in chat:
- *   - ```code blocks``` (with language hint)
- *   - `inline code`
- *   - **bold**
- *   - - bullet lists
- *   - 1. numbered lists
- *   - paragraphs (split on \n\n)
+ * Lightweight markdown renderer — DELEGATES to MarkdownRenderer.tsx which has
+ * full support for syntax highlighting, tables, blockquotes, nested lists,
+ * headings, links, and task lists.
  *
- * For anything more complex (tables, nested lists, links), the raw text
- * is shown as-is. This keeps the bundle small (no react-markdown dep)
- * while covering ~95% of what LLMs actually produce in a git assistant.
+ * Kept as a thin wrapper for backwards compatibility (other files import
+ * MarkdownLite from this module).
  */
 export function MarkdownLite({ text }: { text: string }) {
-  // Split into code-block and non-code-block segments. Code blocks are
-  // extracted first so their content isn't processed by the inline rules.
-  const segments = useMemo(() => {
-    const parts: { type: 'code' | 'text'; content: string; lang?: string }[] = [];
-    // Match ```lang\n...\n``` blocks (greedy match per block).
-    const re = /```(\w*)\n?([\s\S]*?)```/g;
-    let lastIdx = 0;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(text)) !== null) {
-      if (match.index > lastIdx) {
-        parts.push({ type: 'text', content: text.slice(lastIdx, match.index) });
-      }
-      parts.push({ type: 'code', content: match[2] || '', lang: match[1] || undefined });
-      lastIdx = match.index + match[0].length;
-    }
-    if (lastIdx < text.length) {
-      parts.push({ type: 'text', content: text.slice(lastIdx) });
-    }
-    return parts;
-  }, [text]);
-
-  return (
-    <div className="space-y-2">
-      {segments.map((seg, i) => {
-        if (seg.type === 'code') {
-          return (
-            <div key={i} className="relative">
-              <pre className="bg-bg-tertiary border border-border-subtle rounded p-2 text-2xs font-mono overflow-x-auto max-h-60">
-                <code>{seg.content}</code>
-              </pre>
-              {seg.lang && (
-                <span className="absolute top-1 right-2 text-3xs text-text-tertiary uppercase">
-                  {seg.lang}
-                </span>
-              )}
-            </div>
-          );
-        }
-        // Text segment — render with inline formatting (bold, inline code, lists).
-        return <TextSegment key={i} text={seg.content} />;
-      })}
-    </div>
-  );
-}
-
-/** Render a text segment with inline bold/code and bullet/numbered lists. */
-function TextSegment({ text }: { text: string }) {
-  // Split into lines, group consecutive bullet/numbered lines into <ul>/<ol>.
-  const lines = text.split('\n');
-  const blocks: React.ReactNode[] = [];
-  let listItems: { ordered: boolean; items: string[] } | null = null;
-
-  const flushList = (key: number) => {
-    if (!listItems) return;
-    if (listItems.ordered) {
-      blocks.push(
-        <ol key={`ol-${key}`} className="list-decimal ml-4 space-y-0.5 text-text-primary">
-          {listItems.items.map((it, i) => <li key={i}><InlineFormat text={it} /></li>)}
-        </ol>
-      );
-    } else {
-      blocks.push(
-        <ul key={`ul-${key}`} className="list-disc ml-4 space-y-0.5 text-text-primary">
-          {listItems.items.map((it, i) => <li key={i}><InlineFormat text={it} /></li>)}
-        </ul>
-      );
-    }
-    listItems = null;
-  };
-
-  lines.forEach((line, i) => {
-    const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
-    const numberedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
-    if (bulletMatch) {
-      if (!listItems || listItems.ordered) {
-        flushList(i);
-        listItems = { ordered: false, items: [] };
-      }
-      listItems.items.push(bulletMatch[1]);
-    } else if (numberedMatch) {
-      if (!listItems || !listItems.ordered) {
-        flushList(i);
-        listItems = { ordered: true, items: [] };
-      }
-      listItems.items.push(numberedMatch[1]);
-    } else {
-      flushList(i);
-      if (line.trim()) {
-        blocks.push(<p key={`p-${i}`} className="text-text-primary leading-relaxed"><InlineFormat text={line} /></p>);
-      }
-    }
-  });
-  flushList(lines.length);
-
-  return <>{blocks}</>;
-}
-
-/** Inline formatting: **bold** and `inline code`. */
-function InlineFormat({ text }: { text: string }) {
-  // Split on **bold** and `code` markers, preserving the markers.
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={i} className="font-semibold text-text-primary">{part.slice(2, -2)}</strong>;
-        }
-        if (part.startsWith('`') && part.endsWith('`')) {
-          return <code key={i} className="px-1 py-0.5 rounded bg-bg-tertiary text-text-primary text-3xs font-mono">{part.slice(1, -1)}</code>;
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </>
-  );
+  return <MarkdownRenderer text={text} />;
 }
