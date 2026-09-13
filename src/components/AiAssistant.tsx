@@ -386,7 +386,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
       setBusy(false);
       abortRef.current = null;
     }
-  }, [input, sessionRepoPath, buildProvider, toast, t]);
+  }, [input, sessionRepoPath, buildProvider, toast, t, messages, settings]);
 
   /** Stop the in-flight LLM call. The user sees the "Stopped" message
    *  appear in the chat once the abort propagates through. */
