@@ -21,15 +21,36 @@ function formatDuration(ms: number): string {
 
 const USER_COMMANDS = new Set([
   'add', 'commit', 'push', 'pull', 'fetch', 'merge', 'rebase', 'checkout',
-  'cherry-pick', 'revert', 'reset', 'stash', 'tag', 'branch', 'clone', 'init',
+  'cherry-pick', 'revert', 'reset', 'stash', 'tag', 'clone', 'init',
   'rm', 'mv', 'clean', 'reflog', 'bisect', 'filter-branch', 'submodule',
   'worktree', 'rebase--interactive', 'notes', 'subtree', 'lfs',
   'apply', 'am', 'format-patch', 'send-pack',
+  // 'branch' is listed because 'git branch <name>' / 'git branch -d' are
+  // user-initiated. But 'git branch' (no args) / 'git branch -a' are
+  // automatic (background listing) — filtered by the 'branch' entry
+  // having no positional arg after the flags.
+]);
+// Commands that are ALWAYS automatic (background polling, never user-initiated)
+const ALWAYS_SYSTEM = new Set([
+  'status', 'log', 'for-each-ref', 'rev-parse', 'rev-list', 'ls-files',
+  'diff-tree', 'diff', 'show', 'ls-remote', 'symbolic-ref', 'config',
+  'stash list', 'describe', 'shortlog', 'name-rev', 'merge-base',
+  'cat-file', 'fsck', 'count-objects', 'reflog show',
 ]);
 
 function isUserCommand(args: string[]): boolean {
-  const cmd = args.find(a => !a.startsWith('-') && !a.startsWith('core.'));
-  return cmd ? USER_COMMANDS.has(cmd) : false;
+  // Skip flags and -C <path> prefixes to find the actual subcommand
+  const positional = args.filter(a => !a.startsWith('-') && !a.startsWith('core.') && a !== '-C');
+  // Skip the repo path that follows -C
+  const cmd = positional[0];
+  if (!cmd) return false;
+  // 'git branch' with no name argument = automatic listing, not user action
+  if (cmd === 'branch' && positional.length === 1) return false;
+  // 'git stash list' = automatic, but 'git stash push' / 'git stash pop' = user
+  if (cmd === 'stash' && positional[1] === 'list') return false;
+  // Always-system commands (read-only queries triggered by background polling)
+  if (ALWAYS_SYSTEM.has(cmd)) return false;
+  return USER_COMMANDS.has(cmd);
 }
 
 function CommandStatusDot({ entry }: { entry: CommandLogEntry }) {

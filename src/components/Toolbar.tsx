@@ -88,6 +88,7 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
   const toast = useToastActions();
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
+  const settings = useSettingsStore((s) => s.settings);
   // Read global selection — show file-history chip in header if set
   const globalPathFilter = useSelectionStore((s) => s.pathFilter);
   const setGlobalPathFilter = useSelectionStore((s) => s.setPathFilter);
@@ -277,11 +278,13 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
             title={t('shell.keyboardShortcutsTooltip')}
           />
         </span>
-        {/* LAR-3 — AI Assistant toggle button. */}
+        {/* LAR-3 — AI Assistant toggle button. Disabled when AI is not
+            enabled in Settings (aiCommitMessagesEnabled). */}
         <IconButton
           icon={Sparkles}
           onClick={() => onToggleAiAssistant && onToggleAiAssistant()}
-          title={t('aiAssistant.toggleTitle')}
+          disabled={!settings?.aiCommitMessagesEnabled}
+          title={settings?.aiCommitMessagesEnabled ? t('aiAssistant.toggleTitle') : t('aiAssistant.disabledHint')}
         />
         <IconButton
           icon={(getThemeMeta(theme)?.isDark ?? false) ? Sun : Moon}
