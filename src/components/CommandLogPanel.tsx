@@ -21,7 +21,7 @@ function formatDuration(ms: number): string {
 
 const USER_COMMANDS = new Set([
   'add', 'commit', 'push', 'pull', 'fetch', 'merge', 'rebase', 'checkout',
-  'cherry-pick', 'revert', 'reset', 'stash', 'tag', 'clone', 'init',
+  'cherry-pick', 'revert', 'reset', 'restore', 'stash', 'tag', 'clone', 'init',
   'rm', 'mv', 'clean', 'reflog', 'bisect', 'filter-branch', 'submodule',
   'worktree', 'rebase--interactive', 'notes', 'subtree', 'lfs',
   'apply', 'am', 'format-patch', 'send-pack',
@@ -33,9 +33,14 @@ const USER_COMMANDS = new Set([
 // Commands that are ALWAYS automatic (background polling, never user-initiated)
 const ALWAYS_SYSTEM = new Set([
   'status', 'log', 'for-each-ref', 'rev-parse', 'rev-list', 'ls-files',
-  'diff-tree', 'diff', 'show', 'ls-remote', 'symbolic-ref', 'config',
+  'diff-tree', 'diff', 'show', 'ls-remote', 'symbolic-ref',
   'stash list', 'describe', 'shortlog', 'name-rev', 'merge-base',
   'cat-file', 'fsck', 'count-objects', 'reflog show',
+  // 'config' is system when it's a read (git config --get), but user
+  // when it's a write (git config --add). We can't tell the difference
+  // here, so we treat ALL config commands as system — the user rarely
+  // needs to see "git config --get user.name" in the output panel.
+  'config',
 ]);
 
 function isUserCommand(args: string[]): boolean {
