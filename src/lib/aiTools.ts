@@ -1115,6 +1115,58 @@ export const openRepoTool: AITool = {
   },
 };
 
+// ── Persistent memory tools ──────────────────────────────────────────────
+// Declared BEFORE AI_TOOLS so the array can reference them.
+
+/** Save a fact about the project to persistent memory. */
+export const saveMemoryTool: AITool = {
+  name: 'save_memory',
+  description: 'Save a fact about this project to persistent memory (.prismgit/ai-memory.json). The fact persists between chat sessions — use this when the user tells you something worth remembering (e.g. "we use conventional commits", "main branch is called develop", "don\'t commit the dist folder"). If the key already exists, the value is updated.',
+  parameters: {
+    type: 'object',
+    properties: {
+      key: { type: 'string', description: 'Short identifier for the fact, e.g. "commit_convention", "branch_strategy", "test_command"' },
+      value: { type: 'string', description: 'The fact itself, e.g. "conventional commits with feat/fix/docs prefixes"' },
+      category: { type: 'string', description: 'Optional category for grouping (e.g. "workflow", "conventions", "commands")' },
+    },
+    required: ['key', 'value'],
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    const p = params as { key: string; value: string; category?: string };
+    if (!repoPath) return 'Error: no repository open. Memory requires an open repo.';
+    try {
+      await api.ai.memorySave(repoPath, p.key, p.value, p.category);
+      return `Saved to memory: ${p.key} = ${p.value}`;
+    } catch (e) {
+      return `Failed to save memory: ${String(e)}`;
+    }
+  },
+};
+
+/** Retrieve all saved facts about the project from persistent memory. */
+export const getMemoryTool: AITool = {
+  name: 'get_memory',
+  description: 'Retrieve all facts saved to persistent memory for this project. Returns a list of key-value pairs the AI previously saved (or the user told the AI to remember). Use this at the start of a conversation to recall project context.',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  async execute(_params, repoPath) {
+    if (!repoPath) return 'No repository open. Memory requires an open repo.';
+    try {
+      const result = await api.ai.memoryLoad(repoPath);
+      if (!result || !result.entries || result.entries.length === 0) {
+        return 'No saved memories for this project yet. Use save_memory to store facts.';
+      }
+      const lines: string[] = [`Saved memories (${result.entries.length}):`];
+      for (const e of result.entries) {
+        lines.push(`  • ${e.key}: ${e.value}${e.category ? ` [${e.category}]` : ''}`);
+      }
+      return lines.join('\n');
+    } catch {
+      return 'No saved memories for this project yet.';
+    }
+  },
+};
+
 /** All registered AI tools. */
 export const AI_TOOLS: AITool[] = [
   // Read-only
@@ -1146,6 +1198,9 @@ export const AI_TOOLS: AITool[] = [
   cloneRepoTool,
   initRepoTool,
   openRepoTool,
+  // Persistent memory (declared below — referenced here for registration)
+  saveMemoryTool,
+  getMemoryTool,
 ];
 
 /** Look up a tool by name. */

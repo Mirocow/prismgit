@@ -1,4 +1,4 @@
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, RotateCcw, FileText, Search, CloudDownload, Filter, Recycle } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, RotateCcw, FileText, Search, CloudDownload, Filter, Recycle, Sparkles } from './icons';
 
 /**
  * Single source of truth for the app navigation.
@@ -53,6 +53,10 @@ export const NAV_ITEMS: NavItem[] = [
     description: 'GitHub pull request integration. Requires a GitHub PAT (Settings → GitHub Integration). View, create, and open PRs.' },
   { path: '/reviews', label: 'Reviews', icon: GitPullRequest, group: 'Workflows',
     description: 'Distributed code reviews stored in git notes. Add comments to commits, files, and lines. Push/fetch to sync with teammates.' },
+
+  // === AI ===
+  { path: '/ai-chat', label: 'AI Chat', icon: Sparkles, group: 'AI',
+    description: 'AI Assistant chat — ask about your repository, stage files, generate commit messages, and more. Conversation history is saved per-project.' },
 
   // === Refs ===
   { path: '/branches', label: 'Branches', icon: GitBranch, group: 'Refs',

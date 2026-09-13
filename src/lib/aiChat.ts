@@ -253,6 +253,10 @@ Rules:
 
 ── Language ──
 22. MATCH THE USER'S LANGUAGE. If the user writes in Russian, respond in Russian. If in English, respond in English. If in Chinese, respond in Chinese. If in German, respond in German. Detect the language from the user's message and use it for ALL your responses — tool descriptions, summaries, explanations. This is critical for a good user experience.
+
+── Persistent memory ──
+23. You have persistent memory via save_memory and get_memory tools. When the user tells you something worth remembering (e.g. "we use conventional commits", "main branch is called develop", "don't commit the dist folder"), call save_memory to store it. The memory persists between sessions in .prismgit/ai-memory.json — next time the user starts a conversation, call get_memory to recall the saved facts.
+24. Use save_memory SPARINGLY — only for facts the user EXPLICITLY asks you to remember, or that are clearly important project conventions. Don't save trivial things.
 `;
 }
 

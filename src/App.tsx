@@ -84,6 +84,7 @@ const RecyclablePage = lazy(() => import('./pages/RecyclablePage').then(m => ({ 
 const RemotesPage = lazy(() => import('./pages/RemotesPage').then(m => ({ default: m.RemotesPage })));
 const BisectPage = lazy(() => import('./pages/BisectPage').then(m => ({ default: m.BisectPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const AiChatPage = lazy(() => import('./pages/AiChatPage'));
 
 function PageLoader() {
   return (
@@ -1313,6 +1314,7 @@ export default function App() {
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/ai-chat" element={<AiChatPage />} />
                 <Route path="*" element={<WelcomeScreen onClone={() => setShowClone(true)} onInit={() => setShowInit(true)} />} />
               </Routes>
             </Suspense>
@@ -1408,6 +1410,7 @@ export default function App() {
               <Route path="/remotes" element={<RemotesPage />} />
               <Route path="/bisect" element={<BisectPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/ai-chat" element={<AiChatPage />} />
             </Routes>
           </Suspense>
         </main>

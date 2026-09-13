@@ -483,6 +483,12 @@ const api = {
       ipcRenderer.invoke('ai:ollamaListLoadedModels', url),
     ollamaKeepAlive: (url: string, model: string, keepAlive?: string) =>
       ipcRenderer.invoke('ai:ollamaKeepAlive', url, model, keepAlive),
+    memoryLoad: (repoPath: string) =>
+      ipcRenderer.invoke('ai:memory:load', repoPath),
+    memorySave: (repoPath: string, key: string, value: string, category?: string) =>
+      ipcRenderer.invoke('ai:memory:save', repoPath, key, value, category),
+    memorySummary: (repoPath: string) =>
+      ipcRenderer.invoke('ai:memory:summary', repoPath),
     chat: (config: { url: string; headers: Record<string, string>; body: string; method?: string }) =>
       ipcRenderer.invoke('ai:chat', config),
   },

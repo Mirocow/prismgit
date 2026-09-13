@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import * as ai from '../services/ai.js';
 import type { AiProviderConfig } from '../services/ai.js';
+import { loadAIMemory, saveAIMemoryEntry, buildMemorySummary } from '../services/aiMemory.js';
 
 export function registerAiIpc(): void {
   ipcMain.handle(
@@ -155,4 +156,26 @@ export function registerAiIpc(): void {
       }
     }
   );
+
+  // ── Persistent AI memory ─────────────────────────────────────────────
+  // Stores facts about a project in .prismgit/ai-memory.json — the AI
+  // "remembers" things between sessions (commit conventions, branch
+  // strategy, etc.). Used by the save_memory / get_memory AI tools.
+
+  // Load all memory entries for a repo.
+  ipcMain.handle('ai:memory:load', (_e, repoPath: string) => {
+    return { entries: loadAIMemory(repoPath) };
+  });
+
+  // Save/update a memory entry.
+  ipcMain.handle('ai:memory:save', (_e, repoPath: string, key: string, value: string, category?: string) => {
+    saveAIMemoryEntry(repoPath, key, value, category);
+    return { ok: true };
+  });
+
+  // Get a text summary of the memory for the system prompt.
+  ipcMain.handle('ai:memory:summary', (_e, repoPath: string) => {
+    const entries = loadAIMemory(repoPath);
+    return buildMemorySummary(entries);
+  });
 }
