@@ -7,6 +7,7 @@ export const de: Record<string, string> = {
   'common.cancel': 'Abbrechen',
   'common.save': 'Speichern',
   'common.delete': 'Löschen',
+  'common.checkout': 'Auschecken',
   'common.remove': 'Entfernen',
   'common.add': 'Hinzufügen',
   'common.create': 'Erstellen',

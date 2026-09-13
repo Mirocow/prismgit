@@ -7,6 +7,7 @@ export const en: Record<string, string> = {
   'common.cancel': 'Cancel',
   'common.save': 'Save',
   'common.delete': 'Delete',
+  'common.checkout': 'Checkout',
   'common.remove': 'Remove',
   'common.add': 'Add',
   'common.create': 'Create',

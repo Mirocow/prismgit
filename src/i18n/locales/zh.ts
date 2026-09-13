@@ -7,6 +7,7 @@ export const zh: Record<string, string> = {
   'common.cancel': '取消',
   'common.save': '保存',
   'common.delete': '删除',
+  'common.checkout': '检出',
   'common.remove': '移除',
   'common.add': '添加',
   'common.create': '创建',

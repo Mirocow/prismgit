@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Tag as TagIcon, Plus, Trash, RefreshCw, Check, Pencil, ChevronDown, ChevronRight, FolderTree } from '../components/icons';
+import { Tag as TagIcon, Plus, Trash, RefreshCw, Check, Pencil, ChevronDown, ChevronRight, FolderTree, GitBranch } from '../components/icons';
 import { EmptyState } from '../components/EmptyState';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
+import { useGitStore } from '../stores/gitStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type TagInfo } from '../lib/api';
 import { shortHash } from '../lib/utils';
@@ -52,6 +53,7 @@ function groupTagsByPattern(tags: TagInfo[]): TagGroup[] {
 export function TagsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastActions();
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
   const { t } = useI18n();
   const showContextMenu = useContextMenu();
   const [tags, setTags] = useState<TagInfo[]>([]);
@@ -109,7 +111,24 @@ export function TagsPage() {
     } finally {
       setLoading(false);
     }
+    // NOTE: `t` is intentionally excluded from deps — `useI18n()` returns a
+    // new function reference on every locale change but the actual t() call
+    // reads the active locale at CALL time, so we don't need to re-create
+    // load() when the locale changes. Excluding `t` avoids an infinite
+    // re-render loop: load() → t in deps → new function → load() again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo.path, toast]);
+
+  // SmartGit Manual: Tag-Grouping — precompute groups whenever tags or the
+  // toggle change. NOTE: previously this useMemo lived INSIDE the render IIFE
+  // (a hooks violation that React 18 silently mishandles, occasionally
+  // re-running on every render even when tags didn't change — perceived as
+  // "Tags tool opens slowly" on repos with many tags). Hoisting to the
+  // component top level fixes both the violation AND the perf issue.
+  const tagGroups = useMemo(
+    () => groupByPattern ? groupTagsByPattern(tags) : [],
+    [groupByPattern, tags],
+  );
 
   useEffect(() => {
     load();
@@ -153,6 +172,55 @@ export function TagsPage() {
       await load();
     } catch (e) {
       toast.error(t('tags.deleteFailed'), String(e));
+    }
+  };
+
+  /**
+   * Checkout a tag — switch the working tree to the tagged commit in
+   * DETACHED HEAD state (this is what `git checkout <tag>` does).
+   *
+   * Detached HEAD is safe — the user can read files, build, etc. They can
+   * switch back to a branch with `git checkout main` later. We DON'T
+   * auto-create a branch because the user might want to peek at the tag
+   * briefly, not start new work on it.
+   *
+   * Confirmation: shows a dialog because the user might have uncommitted
+   * changes (git refuses to checkout in that case — we surface a clear
+   * message instead of letting the raw git error confuse the user).
+   */
+  const handleCheckout = async (tag: TagInfo) => {
+    if (!(await confirmDialog({
+      title: t('tags.checkoutTitle', { name: tag.name }),
+      message: t('tags.checkoutMessage', { name: tag.name }),
+      confirmLabel: t('common.checkout'),
+    }))) return;
+    try {
+      // Wrap with logOperation so the OUTPUT panel shows the command.
+      await useOperationLogStore.getState().logOperation(
+        `Checkout Tag ${tag.name}`,
+        repo.path,
+        `git checkout ${tag.name}`,
+        async () => {
+          // NOTE: simple-git may fail here when git-lfs is configured but
+          // git-lfs is not installed (filter-process error). The error is
+          // caught by the outer try/catch and surfaced as a toast — the
+          // app does NOT crash.
+          await api.git.checkout(repo.path, tag.name);
+        },
+      );
+      toast.success(t('tags.checkedOut', { name: tag.name }));
+      await refreshStatus(repo.path);
+    } catch (e) {
+      const msg = String(e);
+      // Detect the git-lfs filter-process error and show a friendlier message.
+      if (msg.includes('git-lfs') && msg.includes('command not found')) {
+        toast.error(
+          t('tags.checkoutFailed'),
+          t('toast.git.lfsFilterFailed') + '\n\n' + msg,
+        );
+      } else {
+        toast.error(t('tags.checkoutFailed'), msg);
+      }
     }
   };
 
@@ -203,15 +271,15 @@ export function TagsPage() {
             description={t('tags.emptyDesc')}
           />
         ) : groupByPattern ? (
-          // SmartGit Manual: Tag-Grouping display — groups tags by pattern
-          (() => {
-            const groups = useMemo(() => groupTagsByPattern(tags), [tags]);
-            return (
-              <>
-                {groups.map((group) => {
-                  const collapsed = collapsedGroups.has(group.name);
-                  return (
-                    <div key={group.name}>
+          // SmartGit Manual: Tag-Grouping display — groups tags by pattern.
+          // The grouping is precomputed via the top-level `tagGroups` useMemo
+          // (hoisted out of the IIFE — was a hooks violation that occasionally
+          // caused excessive re-rendering).
+          <>
+            {tagGroups.map((group) => {
+              const collapsed = collapsedGroups.has(group.name);
+              return (
+                <div key={group.name}>
                       <div
                         className="flex items-center gap-2 px-3 py-1.5 bg-bg-tertiary border-b border-border-default cursor-pointer hover:bg-bg-hover text-xs font-semibold text-text-primary"
                         onClick={() => {
@@ -240,6 +308,7 @@ export function TagsPage() {
                           setRenamingTag={setRenamingTag}
                           handleRename={handleRename}
                           handleDelete={handleDelete}
+                          handleCheckout={handleCheckout}
                           showContextMenu={showContextMenu}
                           selected={selectedTag === t.name}
                         />
@@ -247,9 +316,7 @@ export function TagsPage() {
                     </div>
                   );
                 })}
-              </>
-            );
-          })()
+          </>
         ) : (
           <>
             {tags.length > 200 && (
@@ -267,6 +334,7 @@ export function TagsPage() {
                 setRenamingTag={setRenamingTag}
                 handleRename={handleRename}
                 handleDelete={handleDelete}
+                handleCheckout={handleCheckout}
                 showContextMenu={showContextMenu}
                 selected={selectedTag === t.name}
               />
@@ -350,6 +418,7 @@ function TagRow({
   setRenamingTag,
   handleRename,
   handleDelete,
+  handleCheckout,
   showContextMenu,
   selected,
 }: {
@@ -360,6 +429,7 @@ function TagRow({
   setRenamingTag: (v: string | null) => void;
   handleRename: (tag: TagInfo) => void;
   handleDelete: (tag: TagInfo) => void;
+  handleCheckout: (tag: TagInfo) => void;
   showContextMenu: ReturnType<typeof useContextMenu>;
   /** Whether this tag is the globally selected tag (Toolbar chip / other tools see it too). */
   selected: boolean;
@@ -379,6 +449,8 @@ function TagRow({
       onContextMenu={(e) => {
         e.preventDefault();
         showContextMenu([
+          { label: t('tags.checkoutTag', { name: t2.name }), clickId: 'checkout' },
+          { type: 'separator' },
           { label: t('tags.copyName'), clickId: 'copy-name' },
           { label: t('tags.copyHash'), clickId: 'copy-hash' },
           { type: 'separator' },
@@ -388,6 +460,7 @@ function TagRow({
           { label: t('tags.viewCommitInHistory'), clickId: 'view-commit' },
         ], (action) => {
           switch (action) {
+            case 'checkout': handleCheckout(t2); break;
             case 'copy-name': copyToClipboard(t2.name); break;
             case 'copy-hash': copyToClipboard(t2.hash); break;
             case 'rename': setRenamingTag(t2.name); setRenameValue(t2.name); break;
@@ -435,6 +508,13 @@ function TagRow({
         </div>
       </div>
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
+        <button
+          className="icon-btn !w-6 !h-6 hover:!text-accent"
+          title={t('tags.checkoutTag', { name: t2.name })}
+          onClick={(e) => { e.stopPropagation(); handleCheckout(t2); }}
+        >
+          <GitBranch size={12} />
+        </button>
         <button
           className="icon-btn !w-6 !h-6"
           title={t('common.rename')}

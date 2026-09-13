@@ -297,6 +297,47 @@ export default function App() {
     setLastSeenErrorPulse(errorPulse);
   }, [errorPulse, lastSeenErrorPulse, showCommandLog]);
 
+  // ── Global error handlers ──────────────────────────────────────────────
+  // Catch UNHANDLED Promise rejections so the app NEVER freezes / hangs on
+  // an unexpected git failure (e.g. `git checkout -- .` returns exit 128
+  // when git-lfs is configured but git-lfs is not installed — the LFS
+  // filter-process crashes mid-checkout, the spawn rejects, and without
+  // this handler the rejection becomes an unhandled promise rejection that
+  // makes the app look frozen even though the page is technically still
+  // responsive).
+  useEffect(() => {
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      // Prevent the default (which logs to console + can crash on Node side).
+      event.preventDefault();
+      const reason = event.reason;
+      const msg = reason instanceof Error ? reason.message : String(reason);
+      // Show a toast so the user knows something went wrong. The toast is
+      // non-blocking — the user can keep working.
+      try {
+        toast.error(i18nT('toast.git.unhandledRejection'), msg);
+      } catch {
+        // toast store unavailable (during initial mount?) — at least we
+        // prevented the rejection from crashing the app.
+      }
+      // Also log to the console for debugging.
+      // eslint-disable-next-line no-console
+      console.error('[PrismGit] Unhandled promise rejection:', reason);
+    };
+    const onError = (event: ErrorEvent) => {
+      // Sync errors (throw inside a callback) — same treatment.
+      const msg = event.message || String(event.error || event);
+      try { toast.error(i18nT('toast.git.uncaughtError'), msg); } catch { /* ignore */ }
+      // eslint-disable-next-line no-console
+      console.error('[PrismGit] Uncaught error:', event.error || event.message);
+    };
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+    window.addEventListener('error', onError);
+    return () => {
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+      window.removeEventListener('error', onError);
+    };
+  }, [toast]);
+
   useEffect(() => {
     loadRepos();
     loadMetadata();
