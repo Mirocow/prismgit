@@ -2,143 +2,175 @@ import { ipcMain, shell } from 'electron';
 import * as path from 'path';
 import * as gitService from '../services/git.js';
 
+/**
+ * Wrap an async git handler so simple-git errors NEVER propagate as
+ * unhandled IPC exceptions that make the app look frozen.
+ *
+ * Problem: simple-git throws on non-zero exit codes. ipcMain.handle
+ * re-throws the error to the renderer, which logs "Error occurred in
+ * handler for 'git:XXX'" to the main-process console. If the renderer
+ * doesn't .catch() the IPC rejection, the app looks frozen.
+ *
+ * Solution: this wrapper catches ALL errors, extracts the useful message
+ * lines (lines containing "error:" or "fatal:"), and re-throws a clean
+ * Error with just those lines. The renderer's .catch() handler then
+ * shows a toast — the app stays responsive.
+ */
+function wrap<T>(fn: (...args: any[]) => Promise<T>): (...args: any[]) => Promise<T> {
+  return async (...args: any[]) => {
+    try {
+      return await fn(...args);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Extract useful lines from git error output (skip the stack trace
+      // and the "task:" dump that simple-git adds).
+      const lines = msg.split('\n').filter(l =>
+        l.includes('error:') || l.includes('fatal:') || l.includes('git-lfs')
+      );
+      const cleanMsg = lines.length > 0 ? lines.join('\n') : msg.split('\n')[0] || msg;
+      throw new Error(cleanMsg);
+    }
+  };
+}
+
+
 export function registerGitIpc(): void {
   // Status & working tree
-  ipcMain.handle('git:status', (_e, p: string) => gitService.status(p));
-  ipcMain.handle('git:listDirectories', (_e, p: string, d?: number) => gitService.listDirectories(p, d));
-  ipcMain.handle('git:listAllDirectories', (_e, p: string, d?: number) => gitService.listAllDirectories(p, d));
-  ipcMain.handle('git:add', (_e, p: string, f: string[]) => gitService.add(p, f));
-  ipcMain.handle('git:addAll', (_e, p: string) => gitService.addAll(p));
-  ipcMain.handle('git:restore', (_e, p: string, f: string[], staged?: boolean) => gitService.restore(p, f, staged));
+  ipcMain.handle('git:status', (_e, p: string) => wrap(gitService.status)(p));
+  ipcMain.handle('git:listDirectories', (_e, p: string, d?: number) => wrap(gitService.listDirectories)(p, d));
+  ipcMain.handle('git:listAllDirectories', (_e, p: string, d?: number) => wrap(gitService.listAllDirectories)(p, d));
+  ipcMain.handle('git:add', (_e, p: string, f: string[]) => wrap(gitService.add)(p, f));
+  ipcMain.handle('git:addAll', (_e, p: string) => wrap(gitService.addAll)(p));
+  ipcMain.handle('git:restore', (_e, p: string, f: string[], staged?: boolean) => wrap(gitService.restore)(p, f, staged));
   ipcMain.handle('git:commit', (_e, p: string, m: string, a?: boolean, so?: boolean, nv?: boolean) =>
-    gitService.commit(p, m, a, so, nv)
+    wrap(gitService.commit)(p, m, a, so, nv)
   );
   ipcMain.handle('git:clean', (_e, p: string, paths: string[], dryRun?: boolean, force?: boolean, dirs?: boolean) =>
-    gitService.clean(p, paths, dryRun, force, dirs)
+    wrap(gitService.clean)(p, paths, dryRun, force, dirs)
   );
 
   // Network
   ipcMain.handle('git:push', (_e, p: string, r?: string, b?: string, u?: boolean, f?: boolean, t?: boolean, tb?: string) =>
-    gitService.push(p, r, b, u, f, t, tb)
+    wrap(gitService.push)(p, r, b, u, f, t, tb)
   );
   ipcMain.handle('git:pull', (_e, p: string, r?: string, b?: string, rb?: boolean, nff?: boolean) =>
-    gitService.pull(p, r, b, rb, nff)
+    wrap(gitService.pull)(p, r, b, rb, nff)
   );
   ipcMain.handle('git:fetch', (_e, p: string, r?: string, pr?: boolean, t?: boolean) =>
-    gitService.fetch(p, r, pr, t)
+    wrap(gitService.fetch)(p, r, pr, t)
   );
-  ipcMain.handle('git:fetchAll', (_e, p: string, pr?: boolean) => gitService.fetchAll(p, pr));
-  ipcMain.handle('git:fetchDeepen', (_e, p: string, r?: string, c?: number) => gitService.fetchDeepen(p, r, c ?? 100));
-  ipcMain.handle('git:setFetchDepth', (_e, p: string, r?: string, d?: number) => gitService.setFetchDepth(p, r, d ?? 0));
-  ipcMain.handle('git:remoteProperties', (_e, p: string, n: string) => gitService.remoteProperties(p, n));
+  ipcMain.handle('git:fetchAll', (_e, p: string, pr?: boolean) => wrap(gitService.fetchAll)(p, pr));
+  ipcMain.handle('git:fetchDeepen', (_e, p: string, r?: string, c?: number) => wrap(gitService.fetchDeepen)(p, r, c ?? 100));
+  ipcMain.handle('git:setFetchDepth', (_e, p: string, r?: string, d?: number) => wrap(gitService.setFetchDepth)(p, r, d ?? 0));
+  ipcMain.handle('git:remoteProperties', (_e, p: string, n: string) => wrap(gitService.remoteProperties)(p, n));
 
   // Log & history
   ipcMain.handle('git:log', (_e, p: string, o?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) =>
-    gitService.log(p, o || {})
+    wrap(gitService.log)(p, o || {})
   );
-  ipcMain.handle('git:findCommit', (_e, p: string, q: string) => gitService.findCommit(p, q));
-  ipcMain.handle('git:commitFiles', (_e, p: string, h: string) => gitService.commitFiles(p, h));
-  ipcMain.handle('git:mergeNestedCommits', (_e, p: string, h: string) => gitService.mergeNestedCommits(p, h));
-  ipcMain.handle('git:tagsAt', (_e, p: string, h: string) => gitService.tagsAt(p, h));
-  ipcMain.handle('git:trackedFiles', (_e, p: string) => gitService.trackedFiles(p));
-  ipcMain.handle('git:diffCommit', (_e, p: string, h: string, ph?: string) => gitService.diffCommit(p, h, ph));
-  ipcMain.handle('git:commitExists', (_e, p: string, h: string) => gitService.commitExists(p, h));
+  ipcMain.handle('git:findCommit', (_e, p: string, q: string) => wrap(gitService.findCommit)(p, q));
+  ipcMain.handle('git:commitFiles', (_e, p: string, h: string) => wrap(gitService.commitFiles)(p, h));
+  ipcMain.handle('git:mergeNestedCommits', (_e, p: string, h: string) => wrap(gitService.mergeNestedCommits)(p, h));
+  ipcMain.handle('git:tagsAt', (_e, p: string, h: string) => wrap(gitService.tagsAt)(p, h));
+  ipcMain.handle('git:trackedFiles', (_e, p: string) => wrap(gitService.trackedFiles)(p));
+  ipcMain.handle('git:diffCommit', (_e, p: string, h: string, ph?: string) => wrap(gitService.diffCommit)(p, h, ph));
+  ipcMain.handle('git:commitExists', (_e, p: string, h: string) => wrap(gitService.commitExists)(p, h));
 
   // Branches
-  ipcMain.handle('git:branches', (_e, p: string) => gitService.branches(p));
+  ipcMain.handle('git:branches', (_e, p: string) => wrap(gitService.branches)(p));
   ipcMain.handle('git:checkout', (_e, p: string, b: string, o?: { newBranch?: boolean; force?: boolean; track?: boolean }) =>
-    gitService.checkout(p, b, o)
+    wrap(gitService.checkout)(p, b, o)
   );
-  ipcMain.handle('git:checkoutFile', (_e, p: string, f: string, ref?: string) => gitService.checkoutFile(p, f, ref));
-  ipcMain.handle('git:checkoutFiles', (_e, p: string, files: string[], ref?: string) => gitService.checkoutFiles(p, files, ref));
+  ipcMain.handle('git:checkoutFile', (_e, p: string, f: string, ref?: string) => wrap(gitService.checkoutFile)(p, f, ref));
+  ipcMain.handle('git:checkoutFiles', (_e, p: string, files: string[], ref?: string) => wrap(gitService.checkoutFiles)(p, files, ref));
   // Working-tree file operations (file context menu)
-  ipcMain.handle('git:moveFile', (_e, p: string, from: string, to: string) => gitService.moveFile(p, from, to));
-  ipcMain.handle('git:getIndexFlags', (_e, p: string, f: string) => gitService.getIndexFlags(p, f));
+  ipcMain.handle('git:moveFile', (_e, p: string, from: string, to: string) => wrap(gitService.moveFile)(p, from, to));
+  ipcMain.handle('git:getIndexFlags', (_e, p: string, f: string) => wrap(gitService.getIndexFlags)(p, f));
   ipcMain.handle('git:setIndexFlag', (_e, p: string, f: string, flag: 'assume-unchanged' | 'skip-worktree', v: boolean) =>
-    gitService.setIndexFlag(p, f, flag, v)
+    wrap(gitService.setIndexFlag)(p, f, flag, v)
   );
   ipcMain.handle('git:setIndexFlagBatch', (_e, p: string, files: string[], flag: 'assume-unchanged' | 'skip-worktree', v: boolean) =>
-    gitService.setIndexFlagBatch(p, files, flag, v)
+    wrap(gitService.setIndexFlagBatch)(p, files, flag, v)
   );
-  ipcMain.handle('git:deleteFile', (_e, p: string, f: string) => gitService.deleteFile(p, f));
-  ipcMain.handle('git:deleteFiles', (_e, p: string, files: string[]) => gitService.deleteFiles(p, files));
+  ipcMain.handle('git:deleteFile', (_e, p: string, f: string) => wrap(gitService.deleteFile)(p, f));
+  ipcMain.handle('git:deleteFiles', (_e, p: string, files: string[]) => wrap(gitService.deleteFiles)(p, files));
   ipcMain.handle('git:createBranch', (_e, p: string, n: string, sp?: string, f?: boolean, t?: boolean) =>
-    gitService.createBranch(p, n, sp, f, t)
+    wrap(gitService.createBranch)(p, n, sp, f, t)
   );
   ipcMain.handle('git:deleteBranch', (_e, p: string, n: string, f?: boolean, r?: boolean) =>
-    gitService.deleteBranch(p, n, f, r)
+    wrap(gitService.deleteBranch)(p, n, f, r)
   );
-  ipcMain.handle('git:renameBranch', (_e, p: string, o: string, n: string) => gitService.renameBranch(p, o, n));
+  ipcMain.handle('git:renameBranch', (_e, p: string, o: string, n: string) => wrap(gitService.renameBranch)(p, o, n));
 
   // Remotes
-  ipcMain.handle('git:remotes', (_e, p: string) => gitService.remotes(p));
-  ipcMain.handle('git:addRemote', (_e, p: string, n: string, u: string) => gitService.addRemote(p, n, u));
-  ipcMain.handle('git:removeRemote', (_e, p: string, n: string) => gitService.removeRemote(p, n));
-  ipcMain.handle('git:renameRemote', (_e, p: string, o: string, n: string) => gitService.renameRemote(p, o, n));
-  ipcMain.handle('git:setRemoteUrl', (_e, p: string, n: string, u: string, pu?: boolean) => gitService.setRemoteUrl(p, n, u, pu));
+  ipcMain.handle('git:remotes', (_e, p: string) => wrap(gitService.remotes)(p));
+  ipcMain.handle('git:addRemote', (_e, p: string, n: string, u: string) => wrap(gitService.addRemote)(p, n, u));
+  ipcMain.handle('git:removeRemote', (_e, p: string, n: string) => wrap(gitService.removeRemote)(p, n));
+  ipcMain.handle('git:renameRemote', (_e, p: string, o: string, n: string) => wrap(gitService.renameRemote)(p, o, n));
+  ipcMain.handle('git:setRemoteUrl', (_e, p: string, n: string, u: string, pu?: boolean) => wrap(gitService.setRemoteUrl)(p, n, u, pu));
 
   // Merge
   ipcMain.handle('git:merge', (_e, p: string, b: string, o?: { noFf?: boolean; squash?: boolean; ffOnly?: boolean; strategy?: string }) =>
-    gitService.merge(p, b, o)
+    wrap(gitService.merge)(p, b, o)
   );
-  ipcMain.handle('git:abortMerge', (_e, p: string) => gitService.abortMerge(p));
-  ipcMain.handle('git:continueMerge', (_e, p: string) => gitService.continueMerge(p));
-  ipcMain.handle('git:mergeTree', (_e, p: string, o: string, t: string) => gitService.mergeTree(p, o, t));
-  ipcMain.handle('git:aheadBehind', (_e, p: string, b: string, c: string) => gitService.aheadBehind(p, b, c));
+  ipcMain.handle('git:abortMerge', (_e, p: string) => wrap(gitService.abortMerge)(p));
+  ipcMain.handle('git:continueMerge', (_e, p: string) => wrap(gitService.continueMerge)(p));
+  ipcMain.handle('git:mergeTree', (_e, p: string, o: string, t: string) => wrap(gitService.mergeTree)(p, o, t));
+  ipcMain.handle('git:aheadBehind', (_e, p: string, b: string, c: string) => wrap(gitService.aheadBehind)(p, b, c));
   // Periodic remote check for the repository list (fetch + incoming/outgoing)
-  ipcMain.handle('git:pollRemoteSummary', (_e, p: string) => gitService.pollRemoteSummary(p));
-  ipcMain.handle('git:pollRemoteSummaries', (_e, paths: string[]) => gitService.pollRemoteSummaries(paths));
+  ipcMain.handle('git:pollRemoteSummary', (_e, p: string) => wrap(gitService.pollRemoteSummary)(p));
+  ipcMain.handle('git:pollRemoteSummaries', (_e, paths: string[]) => wrap(gitService.pollRemoteSummaries)(paths));
 
   // Diff
   ipcMain.handle('git:diff', (_e, p: string, f: string, o?: { staged?: boolean; ref?: string }) =>
-    gitService.diff(p, f, o)
+    wrap(gitService.diff)(p, f, o)
   );
-  ipcMain.handle('git:diffBranches', (_e, p: string, b: string, c: string) => gitService.diffBranches(p, b, c));
+  ipcMain.handle('git:diffBranches', (_e, p: string, b: string, c: string) => wrap(gitService.diffBranches)(p, b, c));
 
   // Stash
-  ipcMain.handle('git:stashList', (_e, p: string) => gitService.stashList(p));
+  ipcMain.handle('git:stashList', (_e, p: string) => wrap(gitService.stashList)(p));
   ipcMain.handle('git:stashPush', (_e, p: string, m?: string, iu?: boolean, ki?: boolean, f?: string[]) =>
-    gitService.stashPush(p, m, iu, ki, f)
+    wrap(gitService.stashPush)(p, m, iu, ki, f)
   );
-  ipcMain.handle('git:stashPop', (_e, p: string, i?: number) => gitService.stashPop(p, i));
-  ipcMain.handle('git:stashApply', (_e, p: string, i?: number) => gitService.stashApply(p, i));
-  ipcMain.handle('git:stashFiles', (_e, p: string, h: string) => gitService.stashFiles(p, h));
-  ipcMain.handle('git:stashFileRawDiff', (_e, p: string, h: string, f: string) => gitService.stashFileRawDiff(p, h, f));
-  ipcMain.handle('git:stashDrop', (_e, p: string, i?: number) => gitService.stashDrop(p, i));
-  ipcMain.handle('git:stashBranch', (_e, p: string, b: string, i?: number) => gitService.stashBranch(p, b, i));
-  ipcMain.handle('git:stashRename', (_e, p: string, i: number, m: string) => gitService.renameStash(p, i, m));
+  ipcMain.handle('git:stashPop', (_e, p: string, i?: number) => wrap(gitService.stashPop)(p, i));
+  ipcMain.handle('git:stashApply', (_e, p: string, i?: number) => wrap(gitService.stashApply)(p, i));
+  ipcMain.handle('git:stashFiles', (_e, p: string, h: string) => wrap(gitService.stashFiles)(p, h));
+  ipcMain.handle('git:stashFileRawDiff', (_e, p: string, h: string, f: string) => wrap(gitService.stashFileRawDiff)(p, h, f));
+  ipcMain.handle('git:stashDrop', (_e, p: string, i?: number) => wrap(gitService.stashDrop)(p, i));
+  ipcMain.handle('git:stashBranch', (_e, p: string, b: string, i?: number) => wrap(gitService.stashBranch)(p, b, i));
+  ipcMain.handle('git:stashRename', (_e, p: string, i: number, m: string) => wrap(gitService.renameStash)(p, i, m));
 
   // Tags
-  ipcMain.handle('git:tags', (_e, p: string) => gitService.tags(p));
+  ipcMain.handle('git:tags', (_e, p: string) => wrap(gitService.tags)(p));
   ipcMain.handle('git:createTag', (_e, p: string, n: string, m?: string, r?: string, f?: boolean, a?: boolean) =>
-    gitService.createTag(p, n, m, r, f, a)
+    wrap(gitService.createTag)(p, n, m, r, f, a)
   );
-  ipcMain.handle('git:deleteTag', (_e, p: string, n: string, r?: boolean) => gitService.deleteTag(p, n, r));
-  ipcMain.handle('git:pushTag', (_e, p: string, n: string, r?: string) => gitService.pushTag(p, n, r));
+  ipcMain.handle('git:deleteTag', (_e, p: string, n: string, r?: boolean) => wrap(gitService.deleteTag)(p, n, r));
+  ipcMain.handle('git:pushTag', (_e, p: string, n: string, r?: string) => wrap(gitService.pushTag)(p, n, r));
 
   // Submodules
-  ipcMain.handle('git:submodules', (_e, p: string) => gitService.submodules(p));
-  ipcMain.handle('git:submoduleInit', (_e, p: string, n?: string) => gitService.submoduleInit(p, n));
+  ipcMain.handle('git:submodules', (_e, p: string) => wrap(gitService.submodules)(p));
+  ipcMain.handle('git:submoduleInit', (_e, p: string, n?: string) => wrap(gitService.submoduleInit)(p, n));
   ipcMain.handle('git:submoduleUpdate', (_e, p: string, n?: string, i?: boolean, r?: boolean) =>
-    gitService.submoduleUpdate(p, n, i, r)
+    wrap(gitService.submoduleUpdate)(p, n, i, r)
   );
-  ipcMain.handle('git:submoduleSync', (_e, p: string, n?: string) => gitService.submoduleSync(p, n));
-  ipcMain.handle('git:submoduleDeinit', (_e, p: string, n: string, f?: boolean) => gitService.submoduleDeinit(p, n, f));
-  ipcMain.handle('git:submoduleAdd', (_e, p: string, u: string, pp: string, b?: string) => gitService.submoduleAdd(p, u, pp, b));
+  ipcMain.handle('git:submoduleSync', (_e, p: string, n?: string) => wrap(gitService.submoduleSync)(p, n));
+  ipcMain.handle('git:submoduleDeinit', (_e, p: string, n: string, f?: boolean) => wrap(gitService.submoduleDeinit)(p, n, f));
+  ipcMain.handle('git:submoduleAdd', (_e, p: string, u: string, pp: string, b?: string) => wrap(gitService.submoduleAdd)(p, u, pp, b));
 
   // Repo management
   ipcMain.handle('git:clone', (_e, u: string, t: string, o?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean }) =>
-    gitService.clone(u, t, o)
+    wrap(gitService.clone)(u, t, o)
   );
-  ipcMain.handle('git:init', (_e, t: string, b?: boolean) => gitService.init(t, b));
-  ipcMain.handle('git:isRepo', (_e, p: string) => gitService.isRepo(p));
-  ipcMain.handle('git:currentBranch', (_e, p: string) => gitService.currentBranch(p));
-  ipcMain.handle('git:revParse', (_e, p: string, r: string) => gitService.revParse(p, r));
-  ipcMain.handle('git:revParseArgs', (_e, p: string, a: string[]) => gitService.revParseArgs(p, a));
+  ipcMain.handle('git:init', (_e, t: string, b?: boolean) => wrap(gitService.init)(t, b));
+  ipcMain.handle('git:isRepo', (_e, p: string) => wrap(gitService.isRepo)(p));
+  ipcMain.handle('git:currentBranch', (_e, p: string) => wrap(gitService.currentBranch)(p));
+  ipcMain.handle('git:revParse', (_e, p: string, r: string) => wrap(gitService.revParse)(p, r));
+  ipcMain.handle('git:revParseArgs', (_e, p: string, a: string[]) => wrap(gitService.revParseArgs)(p, a));
   // Rename detection — single IPC call replaces N+M per-file spawns in the
   // renderer. See services/git.ts detectWorkingTreeRenames() for the strategy.
   ipcMain.handle('git:detectWorkingTreeRenames', (_e, p: string, deleted: string[], untracked: string[]) =>
-    gitService.detectWorkingTreeRenames(p, deleted, untracked)
+    wrap(gitService.detectWorkingTreeRenames)(p, deleted, untracked)
   );
   // git:raw — suppress noisy "path does not exist" errors that flood the
   // main-process console. ConflictMergeView intentionally probes stages
@@ -149,7 +181,7 @@ export function registerGitIpc(): void {
   // still propagating real errors (network failures, bad git invocations).
   ipcMain.handle('git:raw', async (_e, p: string, a: string[]) => {
     try {
-      return await gitService.raw(p, a);
+      return await wrap(gitService.raw)(p, a);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       // Benign errors that shouldn't flood the console:
@@ -170,103 +202,103 @@ export function registerGitIpc(): void {
     }
   });
   // New: full git CLI surface coverage (added per simple-git comprehensive test spec)
-  ipcMain.handle('git:grep', (_e, p: string, pat: string, opts?: string[], pathspec?: string) => gitService.grep(p, pat, opts, pathspec));
-  ipcMain.handle('git:applyPatch', (_e, p: string, patch: string | string[], opts?: Record<string, null> | string[]) => gitService.applyPatch(p, patch, opts));
-  ipcMain.handle('git:show', (_e, p: string, a: string[]) => gitService.show(p, a));
-  ipcMain.handle('git:showBuffer', (_e, p: string, a: string[]) => gitService.showBuffer(p, a));
-  ipcMain.handle('git:mirror', (_e, url: string, target: string) => gitService.mirror(url, target));
-  ipcMain.handle('git:countObjects', (_e, p: string, verbose?: boolean) => gitService.countObjects(p, verbose));
-  ipcMain.handle('git:updateServerInfo', (_e, p: string) => gitService.updateServerInfo(p));
-  ipcMain.handle('git:listRemote', (_e, p: string, remote?: string) => gitService.listRemote(p, remote));
-  ipcMain.handle('git:addAnnotatedTag', (_e, p: string, name: string, msg: string, ref?: string) => gitService.addAnnotatedTag(p, name, msg, ref));
+  ipcMain.handle('git:grep', (_e, p: string, pat: string, opts?: string[], pathspec?: string) => wrap(gitService.grep)(p, pat, opts, pathspec));
+  ipcMain.handle('git:applyPatch', (_e, p: string, patch: string | string[], opts?: Record<string, null> | string[]) => wrap(gitService.applyPatch)(p, patch, opts));
+  ipcMain.handle('git:show', (_e, p: string, a: string[]) => wrap(gitService.show)(p, a));
+  ipcMain.handle('git:showBuffer', (_e, p: string, a: string[]) => wrap(gitService.showBuffer)(p, a));
+  ipcMain.handle('git:mirror', (_e, url: string, target: string) => wrap(gitService.mirror)(url, target));
+  ipcMain.handle('git:countObjects', (_e, p: string, verbose?: boolean) => wrap(gitService.countObjects)(p, verbose));
+  ipcMain.handle('git:updateServerInfo', (_e, p: string) => wrap(gitService.updateServerInfo)(p));
+  ipcMain.handle('git:listRemote', (_e, p: string, remote?: string) => wrap(gitService.listRemote)(p, remote));
+  ipcMain.handle('git:addAnnotatedTag', (_e, p: string, name: string, msg: string, ref?: string) => wrap(gitService.addAnnotatedTag)(p, name, msg, ref));
 
   // Worktrees (SmartGit 20+)
-  ipcMain.handle('git:worktrees', (_e, p: string) => gitService.worktrees(p));
+  ipcMain.handle('git:worktrees', (_e, p: string) => wrap(gitService.worktrees)(p));
   ipcMain.handle('git:worktreeAdd', (_e, p: string, tp: string, b?: string, c?: string, d?: boolean) =>
-    gitService.worktreeAdd(p, tp, b, c, d)
+    wrap(gitService.worktreeAdd)(p, tp, b, c, d)
   );
-  ipcMain.handle('git:worktreeRemove', (_e, p: string, tp: string, f?: boolean) => gitService.worktreeRemove(p, tp, f));
-  ipcMain.handle('git:worktreePrune', (_e, p: string) => gitService.worktreePrune(p));
-  ipcMain.handle('git:worktreeMove', (_e, p: string, op: string, np: string) => gitService.worktreeMove(p, op, np));
+  ipcMain.handle('git:worktreeRemove', (_e, p: string, tp: string, f?: boolean) => wrap(gitService.worktreeRemove)(p, tp, f));
+  ipcMain.handle('git:worktreePrune', (_e, p: string) => wrap(gitService.worktreePrune)(p));
+  ipcMain.handle('git:worktreeMove', (_e, p: string, op: string, np: string) => wrap(gitService.worktreeMove)(p, op, np));
 
   // Reflog (SmartGit 20+)
-  ipcMain.handle('git:reflog', (_e, p: string, r?: string, m?: number) => gitService.reflog(p, r, m));
-  ipcMain.handle('git:reflogDelete', (_e, p: string, i: number, r?: string) => gitService.reflogDelete(p, i, r));
+  ipcMain.handle('git:reflog', (_e, p: string, r?: string, m?: number) => wrap(gitService.reflog)(p, r, m));
+  ipcMain.handle('git:reflogDelete', (_e, p: string, i: number, r?: string) => wrap(gitService.reflogDelete)(p, i, r));
 
   // Cherry Pick (SmartGit 20+)
-  ipcMain.handle('git:cherryPick', (_e, p: string, h: string[], nc?: boolean) => gitService.cherryPick(p, h, nc));
-  ipcMain.handle('git:cherryPickAbort', (_e, p: string) => gitService.cherryPickAbort(p));
-  ipcMain.handle('git:cherryPickContinue', (_e, p: string, allowEmpty?: boolean) => gitService.cherryPickContinue(p, allowEmpty));
-  ipcMain.handle('git:cherryPickSkip', (_e, p: string) => gitService.cherryPickSkip(p));
+  ipcMain.handle('git:cherryPick', (_e, p: string, h: string[], nc?: boolean) => wrap(gitService.cherryPick)(p, h, nc));
+  ipcMain.handle('git:cherryPickAbort', (_e, p: string) => wrap(gitService.cherryPickAbort)(p));
+  ipcMain.handle('git:cherryPickContinue', (_e, p: string, allowEmpty?: boolean) => wrap(gitService.cherryPickContinue)(p, allowEmpty));
+  ipcMain.handle('git:cherryPickSkip', (_e, p: string) => wrap(gitService.cherryPickSkip)(p));
 
   // Revert (SmartGit 20+)
-  ipcMain.handle('git:revert', (_e, p: string, h: string[], nc?: boolean) => gitService.revert(p, h, nc));
-  ipcMain.handle('git:revertAbort', (_e, p: string) => gitService.revertAbort(p));
-  ipcMain.handle('git:revertContinue', (_e, p: string) => gitService.revertContinue(p));
-  ipcMain.handle('git:revertSkip', (_e, p: string) => gitService.revertSkip(p));
+  ipcMain.handle('git:revert', (_e, p: string, h: string[], nc?: boolean) => wrap(gitService.revert)(p, h, nc));
+  ipcMain.handle('git:revertAbort', (_e, p: string) => wrap(gitService.revertAbort)(p));
+  ipcMain.handle('git:revertContinue', (_e, p: string) => wrap(gitService.revertContinue)(p));
+  ipcMain.handle('git:revertSkip', (_e, p: string) => wrap(gitService.revertSkip)(p));
 
   // Rebase (SmartGit 20+)
   ipcMain.handle('git:rebase', (_e, p: string, o: string, opts?: { interactive?: boolean; autosquash?: boolean; abort?: boolean; continue?: boolean; skip?: boolean }) =>
-    gitService.rebase(p, o, opts)
+    wrap(gitService.rebase)(p, o, opts)
   );
 
   // Bisect (SmartGit 20+)
-  ipcMain.handle('git:bisectStart', (_e, p: string) => gitService.bisectStart(p));
-  ipcMain.handle('git:bisectGood', (_e, p: string, r?: string) => gitService.bisectGood(p, r));
-  ipcMain.handle('git:bisectBad', (_e, p: string, r?: string) => gitService.bisectBad(p, r));
-  ipcMain.handle('git:bisectSkip', (_e, p: string) => gitService.bisectSkip(p));
-  ipcMain.handle('git:bisectReset', (_e, p: string) => gitService.bisectReset(p));
-  ipcMain.handle('git:bisectLog', (_e, p: string) => gitService.bisectLog(p));
-  ipcMain.handle('git:bisectStatus', (_e, p: string) => gitService.bisectStatus(p));
+  ipcMain.handle('git:bisectStart', (_e, p: string) => wrap(gitService.bisectStart)(p));
+  ipcMain.handle('git:bisectGood', (_e, p: string, r?: string) => wrap(gitService.bisectGood)(p, r));
+  ipcMain.handle('git:bisectBad', (_e, p: string, r?: string) => wrap(gitService.bisectBad)(p, r));
+  ipcMain.handle('git:bisectSkip', (_e, p: string) => wrap(gitService.bisectSkip)(p));
+  ipcMain.handle('git:bisectReset', (_e, p: string) => wrap(gitService.bisectReset)(p));
+  ipcMain.handle('git:bisectLog', (_e, p: string) => wrap(gitService.bisectLog)(p));
+  ipcMain.handle('git:bisectStatus', (_e, p: string) => wrap(gitService.bisectStatus)(p));
 
   // Blame (SmartGit 20+)
-  ipcMain.handle('git:blame', (_e, p: string, f: string, r?: string) => gitService.blame(p, f, r));
+  ipcMain.handle('git:blame', (_e, p: string, f: string, r?: string) => wrap(gitService.blame)(p, f, r));
 
   // Ignore (SmartGit 20+)
   ipcMain.handle('git:ignore', (_e, p: string, patterns: string[], localOnly?: boolean) =>
-    gitService.ignore(p, patterns, localOnly)
+    wrap(gitService.ignore)(p, patterns, localOnly)
   );
-  ipcMain.handle('git:isIgnored', (_e, p: string, f: string) => gitService.isIgnored(p, f));
+  ipcMain.handle('git:isIgnored', (_e, p: string, f: string) => wrap(gitService.isIgnored)(p, f));
   ipcMain.handle('git:editIgnoreFile', (_e, p: string, scope: 'local' | 'global') =>
-    gitService.editIgnoreFile(p, scope)
+    wrap(gitService.editIgnoreFile)(p, scope)
   );
 
   // Edit commit message (SmartGit 20+)
   ipcMain.handle('git:editCommitMessage', (_e, p: string, h: string, m: string) =>
-    gitService.editCommitMessage(p, h, m)
+    wrap(gitService.editCommitMessage)(p, h, m)
   );
 
   // Split off files (SmartGit 22+)
   ipcMain.handle('git:splitOffFiles', (_e, p: string, h: string, f: string[], m: string) =>
-    gitService.splitOffFiles(p, h, f, m)
+    wrap(gitService.splitOffFiles)(p, h, f, m)
   );
 
   // Config (SmartGit 20+)
   ipcMain.handle('git:configGet', (_e, p: string, k: string, s?: 'system' | 'global' | 'local') =>
-    gitService.configGet(p, k, s)
+    wrap(gitService.configGet)(p, k, s)
   );
   ipcMain.handle('git:configSet', (_e, p: string, k: string, v: string, s?: 'system' | 'global' | 'local') =>
-    gitService.configSet(p, k, v, s)
+    wrap(gitService.configSet)(p, k, v, s)
   );
   ipcMain.handle('git:configList', (_e, p: string, s?: 'system' | 'global' | 'local') =>
-    gitService.configList(p, s)
+    wrap(gitService.configList)(p, s)
   );
   ipcMain.handle('git:configUnset', (_e, p: string, k: string, s?: 'system' | 'global' | 'local') =>
-    gitService.configUnset(p, k, s)
+    wrap(gitService.configUnset)(p, k, s)
   );
 
   // Find ref (SmartGit 22+)
-  ipcMain.handle('git:findRef', (_e, p: string, q: string) => gitService.findRef(p, q));
+  ipcMain.handle('git:findRef', (_e, p: string, q: string) => wrap(gitService.findRef)(p, q));
 
   // Reset (SmartGit 20+)
   ipcMain.handle('git:reset', (_e, p: string, mode: 'soft' | 'mixed' | 'hard' | 'keep', ref?: string) =>
-    gitService.reset(p, mode, ref)
+    wrap(gitService.reset)(p, mode, ref)
   );
-  ipcMain.handle('git:resetFile', (_e, p: string, f: string, ref?: string) => gitService.resetFile(p, f, ref));
-  ipcMain.handle('git:resetFiles', (_e, p: string, files: string[], ref?: string) => gitService.resetFiles(p, files, ref));
+  ipcMain.handle('git:resetFile', (_e, p: string, f: string, ref?: string) => wrap(gitService.resetFile)(p, f, ref));
+  ipcMain.handle('git:resetFiles', (_e, p: string, files: string[], ref?: string) => wrap(gitService.resetFiles)(p, files, ref));
 
   // Extract repo info (SmartGit 24+ "Open in Browser")
-  ipcMain.handle('git:extractRepoInfo', (_e, p: string) => gitService.extractRepoInfo(p));
+  ipcMain.handle('git:extractRepoInfo', (_e, p: string) => wrap(gitService.extractRepoInfo)(p));
 
   // Reveal in file manager
   ipcMain.handle('git:revealInFileManager', async (_e, fullPath: string) => {
@@ -290,157 +322,157 @@ export function registerGitIpc(): void {
   });
 
   // LFS support
-  ipcMain.handle('git:lfsStatus', (_e, p: string) => gitService.lfsStatus(p));
-  ipcMain.handle('git:isLfsInstalled', (_e, p: string) => gitService.isLfsInstalled(p));
-  ipcMain.handle('git:lfsPull', (_e, p: string, f?: string[]) => gitService.lfsPull(p, f));
-  ipcMain.handle('git:lfsPush', (_e, p: string) => gitService.lfsPush(p));
-  ipcMain.handle('git:lfsFetch', (_e, p: string) => gitService.lfsFetch(p));
-  ipcMain.handle('git:lfsInstall', (_e, p: string) => gitService.lfsInstall(p));
-  ipcMain.handle('git:lfsTrack', (_e, p: string, patterns: string[]) => gitService.lfsTrack(p, patterns));
-  ipcMain.handle('git:lfsList', (_e, p: string) => gitService.lfsList(p));
+  ipcMain.handle('git:lfsStatus', (_e, p: string) => wrap(gitService.lfsStatus)(p));
+  ipcMain.handle('git:isLfsInstalled', (_e, p: string) => wrap(gitService.isLfsInstalled)(p));
+  ipcMain.handle('git:lfsPull', (_e, p: string, f?: string[]) => wrap(gitService.lfsPull)(p, f));
+  ipcMain.handle('git:lfsPush', (_e, p: string) => wrap(gitService.lfsPush)(p));
+  ipcMain.handle('git:lfsFetch', (_e, p: string) => wrap(gitService.lfsFetch)(p));
+  ipcMain.handle('git:lfsInstall', (_e, p: string) => wrap(gitService.lfsInstall)(p));
+  ipcMain.handle('git:lfsTrack', (_e, p: string, patterns: string[]) => wrap(gitService.lfsTrack)(p, patterns));
+  ipcMain.handle('git:lfsList', (_e, p: string) => wrap(gitService.lfsList)(p));
 
   // Split commit
-  ipcMain.handle('git:splitCommit', (_e, p: string, h: string) => gitService.splitCommit(p, h));
+  ipcMain.handle('git:splitCommit', (_e, p: string, h: string) => wrap(gitService.splitCommit)(p, h));
 
   // Stage/unstage specific lines
   ipcMain.handle('git:stageLines', (_e, p: string, f: string, ranges: { start: number; end: number }[]) =>
-    gitService.stageLines(p, f, ranges)
+    wrap(gitService.stageLines)(p, f, ranges)
   );
   ipcMain.handle('git:unstageLines', (_e, p: string, f: string, ranges: { start: number; end: number }[]) =>
-    gitService.unstageLines(p, f, ranges)
+    wrap(gitService.unstageLines)(p, f, ranges)
   );
 
   // ===== Git Notes (SmartGit Notes feature) =====
-  ipcMain.handle('git:noteCategories', (_e, p: string) => gitService.noteCategories(p));
+  ipcMain.handle('git:noteCategories', (_e, p: string) => wrap(gitService.noteCategories)(p));
   ipcMain.handle('git:notesList', (_e, p: string, ref: string, maxCount?: number) =>
-    gitService.notesList(p, ref, maxCount ?? 500)
+    wrap(gitService.notesList)(p, ref, maxCount ?? 500)
   );
-  ipcMain.handle('git:notesShow', (_e, p: string, ref: string, c: string) => gitService.notesShow(p, ref, c));
+  ipcMain.handle('git:notesShow', (_e, p: string, ref: string, c: string) => wrap(gitService.notesShow)(p, ref, c));
   ipcMain.handle('git:notesAdd', (_e, p: string, ref: string, c: string, m: string, force?: boolean) =>
-    gitService.notesAdd(p, ref, c, m, force ?? false)
+    wrap(gitService.notesAdd)(p, ref, c, m, force ?? false)
   );
-  ipcMain.handle('git:notesRemove', (_e, p: string, ref: string, c: string) => gitService.notesRemove(p, ref, c));
+  ipcMain.handle('git:notesRemove', (_e, p: string, ref: string, c: string) => wrap(gitService.notesRemove)(p, ref, c));
 
   // ===== Subtrees (Remote | Subtree) =====
-  ipcMain.handle('git:subtrees', (_e, p: string) => gitService.subtrees(p));
+  ipcMain.handle('git:subtrees', (_e, p: string) => wrap(gitService.subtrees)(p));
   ipcMain.handle('git:subtreeAdd', (_e, p: string, opts: { name: string; path: string; remote: string; branch: string; squash?: boolean; remoteUrl?: string }) =>
-    gitService.subtreeAdd(p, opts)
+    wrap(gitService.subtreeAdd)(p, opts)
   );
-  ipcMain.handle('git:subtreePull', (_e, p: string, n: string) => gitService.subtreePull(p, n));
-  ipcMain.handle('git:subtreePush', (_e, p: string, n: string) => gitService.subtreePush(p, n));
+  ipcMain.handle('git:subtreePull', (_e, p: string, n: string) => wrap(gitService.subtreePull)(p, n));
+  ipcMain.handle('git:subtreePush', (_e, p: string, n: string) => wrap(gitService.subtreePush)(p, n));
   ipcMain.handle('git:subtreeSplit', (_e, p: string, n: string, opts?: { rejoin?: boolean; annotate?: string }) =>
-    gitService.subtreeSplit(p, n, opts)
+    wrap(gitService.subtreeSplit)(p, n, opts)
   );
-  ipcMain.handle('git:subtreeRemove', (_e, p: string, n: string) => gitService.subtreeRemove(p, n));
+  ipcMain.handle('git:subtreeRemove', (_e, p: string, n: string) => wrap(gitService.subtreeRemove)(p, n));
 
   // ===== LFS locks =====
-  ipcMain.handle('git:lfsLocks', (_e, p: string, local?: boolean) => gitService.lfsLocks(p, local ?? false));
-  ipcMain.handle('git:lfsLock', (_e, p: string, f: string) => gitService.lfsLock(p, f));
+  ipcMain.handle('git:lfsLocks', (_e, p: string, local?: boolean) => wrap(gitService.lfsLocks)(p, local ?? false));
+  ipcMain.handle('git:lfsLock', (_e, p: string, f: string) => wrap(gitService.lfsLock)(p, f));
   ipcMain.handle('git:lfsUnlock', (_e, p: string, f: string, force?: boolean) =>
-    gitService.lfsUnlock(p, f, force ?? false)
+    wrap(gitService.lfsUnlock)(p, f, force ?? false)
   );
 
   // ===== Format Patch =====
   ipcMain.handle('git:formatPatch', (_e, p: string, opts: { outputDir: string; commit?: string; from?: string; to?: string }) =>
-    gitService.formatPatch(p, opts)
+    wrap(gitService.formatPatch)(p, opts)
   );
 
   // ===== Edit commit author =====
   ipcMain.handle('git:editCommitAuthor', (_e, p: string, h: string, n: string, e2: string) =>
-    gitService.editCommitAuthor(p, h, n, e2)
+    wrap(gitService.editCommitAuthor)(p, h, n, e2)
   );
 
   // ===== Verify Database / GC / Recyclable commits =====
-  ipcMain.handle('git:verifyDatabase', (_e, p: string) => gitService.verifyDatabase(p));
+  ipcMain.handle('git:verifyDatabase', (_e, p: string) => wrap(gitService.verifyDatabase)(p));
   ipcMain.handle('git:garbageCollect', (_e, p: string, aggressive?: boolean) =>
-    gitService.garbageCollect(p, aggressive ?? false)
+    wrap(gitService.garbageCollect)(p, aggressive ?? false)
   );
-  ipcMain.handle('git:unreachableCommits', (_e, p: string) => gitService.unreachableCommits(p));
+  ipcMain.handle('git:unreachableCommits', (_e, p: string) => wrap(gitService.unreachableCommits)(p));
 
   // ===== Bugtraq =====
-  ipcMain.handle('git:bugtraqConfig', (_e, p: string) => gitService.bugtraqConfig(p));
+  ipcMain.handle('git:bugtraqConfig', (_e, p: string) => wrap(gitService.bugtraqConfig)(p));
 
   // ===== Index Editor helpers =====
   ipcMain.handle('git:setIndexContent', (_e, p: string, f: string, c: string) =>
-    gitService.setIndexContent(p, f, c)
+    wrap(gitService.setIndexContent)(p, f, c)
   );
-  ipcMain.handle('git:showFile', (_e, p: string, ref: string, f: string) => gitService.showFile(p, ref, f));
+  ipcMain.handle('git:showFile', (_e, p: string, ref: string, f: string) => wrap(gitService.showFile)(p, ref, f));
 
 
   // ===== SmartGit Manual — Power User batch (merged) =====
   // Recyclable commits
-  ipcMain.handle('git:recyclableCommits', (_e, p: string) => gitService.recyclableCommits(p));
+  ipcMain.handle('git:recyclableCommits', (_e, p: string) => wrap(gitService.recyclableCommits)(p));
   // LFS Locks
-  ipcMain.handle('git:lfsListLocks', (_e, p: string, r?: string) => gitService.lfsListLocks(p, r));
-  ipcMain.handle('git:noteShow', (_e, p: string, c: string, r?: string) => gitService.noteShow(p, c, r));
+  ipcMain.handle('git:lfsListLocks', (_e, p: string, r?: string) => wrap(gitService.lfsListLocks)(p, r));
+  ipcMain.handle('git:noteShow', (_e, p: string, c: string, r?: string) => wrap(gitService.noteShow)(p, c, r));
   ipcMain.handle('git:noteAdd', (_e, p: string, c: string, content: string, r?: string, f?: boolean) =>
-    gitService.noteAdd(p, c, content, r, f)
+    wrap(gitService.noteAdd)(p, c, content, r, f)
   );
-  ipcMain.handle('git:noteRemove', (_e, p: string, c: string, r?: string) => gitService.noteRemove(p, c, r));
+  ipcMain.handle('git:noteRemove', (_e, p: string, c: string, r?: string) => wrap(gitService.noteRemove)(p, c, r));
   // Force compare
   ipcMain.handle('git:forceCompare', (_e, p: string, f: string, o?: { staged?: boolean; ref?: string }) =>
-    gitService.forceCompare(p, f, o)
+    wrap(gitService.forceCompare)(p, f, o)
   );
   // EOL-only change detection
-  ipcMain.handle('git:isEolOnlyChange', (_e, p: string, f: string) => gitService.isEolOnlyChange(p, f));
+  ipcMain.handle('git:isEolOnlyChange', (_e, p: string, f: string) => wrap(gitService.isEolOnlyChange)(p, f));
   // Push to Gerrit
   ipcMain.handle('git:pushToGerrit', (_e, p: string, b?: string, r?: string, o?: { draft?: boolean; reviewers?: string[]; topic?: string }) =>
-    gitService.pushToGerrit(p, b, r, o)
+    wrap(gitService.pushToGerrit)(p, b, r, o)
   );
   // Partial clone
   ipcMain.handle('git:clonePartial', (_e, u: string, t: string, f?: 'blob:none' | 'tree:0' | 'blob:limit=1m', o?: { depth?: number; branch?: string; recursive?: boolean }) =>
-    gitService.clonePartial(u, t, f || 'blob:none', o)
+    wrap(gitService.clonePartial)(u, t, f || 'blob:none', o)
   );
   // Credential helper
-  ipcMain.handle('git:setupCredentialHelper', (_e, p: string) => gitService.setupCredentialHelper(p));
+  ipcMain.handle('git:setupCredentialHelper', (_e, p: string) => wrap(gitService.setupCredentialHelper)(p));
   // Bidirectional blame
   ipcMain.handle('git:blameBidirectional', (_e, p: string, f: string, r?: string) =>
-    gitService.blameBidirectional(p, f, r)
+    wrap(gitService.blameBidirectional)(p, f, r)
   );
   // Pickaxe search
   ipcMain.handle('git:pickaxeSearch', (_e, p: string, f: string, s: string, o?: { regex?: boolean; ignoreCase?: boolean }) =>
-    gitService.pickaxeSearch(p, f, s, o)
+    wrap(gitService.pickaxeSearch)(p, f, s, o)
   );
   // Detect renames
   ipcMain.handle('git:detectRenames', (_e, p: string, o?: { threshold?: number; ref?: string }) =>
-    gitService.detectRenames(p, o)
+    wrap(gitService.detectRenames)(p, o)
   );
   // Is commit pushed
-  ipcMain.handle('git:isCommitPushed', (_e, p: string, h: string) => gitService.isCommitPushed(p, h));
+  ipcMain.handle('git:isCommitPushed', (_e, p: string, h: string) => wrap(gitService.isCommitPushed)(p, h));
   // Squash commits
   ipcMain.handle('git:squashCommits', (_e, p: string, fromHash: string, toHash: string, m?: string) =>
-    gitService.squashCommits(p, fromHash, toHash, m)
+    wrap(gitService.squashCommits)(p, fromHash, toHash, m)
   );
   // Coalesce commits
   ipcMain.handle('git:coalesceCommits', (_e, p: string, firstHash: string, secondHash: string) =>
-    gitService.coalesceCommits(p, firstHash, secondHash)
+    wrap(gitService.coalesceCommits)(p, firstHash, secondHash)
   );
 
   // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
-  ipcMain.handle('git:smartPull', (_e, p: string, r?: string, b?: string) => gitService.smartPull(p, r, b));
-  ipcMain.handle('git:octopusMerge', (_e, p: string, branches: string[]) => gitService.octopusMerge(p, branches));
+  ipcMain.handle('git:smartPull', (_e, p: string, r?: string, b?: string) => wrap(gitService.smartPull)(p, r, b));
+  ipcMain.handle('git:octopusMerge', (_e, p: string, branches: string[]) => wrap(gitService.octopusMerge)(p, branches));
   // isForcePushAllowed is synchronous — wrap in Promise
   ipcMain.handle('git:isForcePushAllowed', (_e, branch: string | undefined, policy: 'deny' | 'feature-only' | 'allow', protectedBranches?: string[]) =>
     Promise.resolve(gitService.isForcePushAllowed(branch, policy, protectedBranches))
   );
   ipcMain.handle('git:applyLineEdit', (_e, p: string, f: string, ln: number, content: string, staged?: boolean) =>
-    gitService.applyLineEdit(p, f, ln, content, staged)
+    wrap(gitService.applyLineEdit)(p, f, ln, content, staged)
   );
-  ipcMain.handle('git:editInfoExclude', (_e, p: string) => gitService.editInfoExclude(p));
-  ipcMain.handle('git:traceIgnoreRule', (_e, p: string, f: string) => gitService.traceIgnoreRule(p, f));
-  ipcMain.handle('git:detectRepoFormat', (_e, p: string) => gitService.detectRepoFormat(p));
+  ipcMain.handle('git:editInfoExclude', (_e, p: string) => wrap(gitService.editInfoExclude)(p));
+  ipcMain.handle('git:traceIgnoreRule', (_e, p: string, f: string) => wrap(gitService.traceIgnoreRule)(p, f));
+  ipcMain.handle('git:detectRepoFormat', (_e, p: string) => wrap(gitService.detectRepoFormat)(p));
   ipcMain.handle('git:commitSigned', (_e, p: string, m: string, o?: { gpgSign?: boolean; sshSign?: boolean; signingKey?: string; noVerify?: boolean }) =>
-    gitService.commitSigned(p, m, o)
+    wrap(gitService.commitSigned)(p, m, o)
   );
   ipcMain.handle('git:createSignedTag', (_e, p: string, name: string, msg: string, ref?: string, sshSign?: boolean) =>
-    gitService.createSignedTag(p, name, msg, ref, sshSign)
+    wrap(gitService.createSignedTag)(p, name, msg, ref, sshSign)
   );
-  ipcMain.handle('git:lfsFsck', (_e, p: string) => gitService.lfsFsck(p));
+  ipcMain.handle('git:lfsFsck', (_e, p: string) => wrap(gitService.lfsFsck)(p));
   ipcMain.handle('git:batchOperation', (_e, repos: string[], op: 'fetch' | 'pull' | 'push' | 'status', o?: { remote?: string; branch?: string; force?: boolean }) =>
-    gitService.batchOperation(repos, op, o)
+    wrap(gitService.batchOperation)(repos, op, o)
   );
-  ipcMain.handle('git:exportConfig', (_e, p: string | null) => gitService.exportConfig(p));
-  ipcMain.handle('git:importConfig', (_e, p: string, config: any) => gitService.importConfig(p, config));
+  ipcMain.handle('git:exportConfig', (_e, p: string | null) => wrap(gitService.exportConfig)(p));
+  ipcMain.handle('git:importConfig', (_e, p: string, config: any) => wrap(gitService.importConfig)(p, config));
 
   // Memory: invalidate the cached SimpleGit instance for a repo. Called by
   // the renderer when a repo is closed (repositoryStore.closeRepository) —

@@ -380,7 +380,23 @@ export async function restore(repoPath: string, files: string[], staged = false)
   const args = ['restore'];
   if (staged) args.push('--staged');
   args.push('--', ...files);
-  await git.raw(args);
+  try {
+    await git.raw(args);
+  } catch (e) {
+    // If the failure is caused by git-lfs filter-process (git-lfs not
+    // installed but .gitattributes configures LFS filters), retry with
+    // LFS smudge disabled so the restore can complete without the LFS
+    // filter. The LFS-tracked files will get their pointer content (not
+    // the real binary), but the REST of the files are restored correctly.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('git-lfs') || msg.includes('filter-process')) {
+      const gitNoLfs = simpleGit({ baseDir: repoPath, binary: 'git' })
+        .env({ GIT_LFS_SKIP_SMUDGE: '1' });
+      await gitNoLfs.raw(args);
+    } else {
+      throw e;
+    }
+  }
   invalidateDiffCache(repoPath);
 }
 
@@ -3139,7 +3155,22 @@ export async function revParse(repoPath: string, ref: string): Promise<string> {
 
 export async function raw(repoPath: string, args: string[]): Promise<string> {
   const git = getGit(repoPath);
-  return git.raw(args);
+  try {
+    return await git.raw(args);
+  } catch (e) {
+    // If the failure is caused by git-lfs filter-process (git-lfs not
+    // installed but .gitattributes configures LFS filters), retry with
+    // LFS smudge disabled. This is common for `git checkout -- .` and
+    // `git checkout -- <files>` when the repo has LFS-tracked files but
+    // git-lfs is not installed on the user's machine.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('git-lfs') || msg.includes('filter-process')) {
+      const gitNoLfs = simpleGit({ baseDir: repoPath, binary: 'git' })
+        .env({ GIT_LFS_SKIP_SMUDGE: '1' });
+      return await gitNoLfs.raw(args);
+    }
+    throw e;
+  }
 }
 
 // ============= SmartGit 20-24 Extended Features =============
