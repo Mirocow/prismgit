@@ -1269,6 +1269,38 @@ smartgit.refresh.inspectEol=true
               </div>
             </div>
 
+            {/* Context Size — controls when conversation history gets
+                compressed. When the total character count of prior messages
+                exceeds this threshold, old messages are replaced with a
+                text summary to keep the context window manageable.
+                Length-based (not message-count) — a single get_status
+                result with 500 lines takes more context than 10 short
+                chat messages. */}
+            <div className="pt-3 border-t border-border-subtle">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                Context Size
+              </div>
+              <label className="flex items-center gap-2 text-xs">
+                <span className="text-text-tertiary">Max context (characters)</span>
+                <input
+                  type="number"
+                  min={5000}
+                  max={200000}
+                  step={5000}
+                  className="w-24 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                  value={settings.aiContextMaxChars ?? 20000}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    setSetting('aiContextMaxChars', Number.isFinite(v) ? v : 20000);
+                  }}
+                />
+                <span className="text-2xs text-text-tertiary">chars (~{Math.round((settings.aiContextMaxChars ?? 20000) / 4)} tokens)</span>
+              </label>
+              <div className="text-2xs text-text-tertiary mt-1">
+                When the conversation history exceeds this size (in characters, not messages), old messages are compressed into a short summary. Higher = AI remembers more, but costs more tokens. Lower = cheaper, but AI forgets older context faster. Default: 20,000 chars (~5,000 tokens).
+              </div>
+            </div>
+
             {/* Request Timeout — aborts the LLM call after N seconds.
                 Applies to BOTH commit-message generation and AI Assistant
                 chat. Default 300 (5 min) — slow local Ollama models on CPU

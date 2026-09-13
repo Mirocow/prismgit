@@ -157,6 +157,16 @@ export interface AppSettings {
   /** Max AI Assistant chat messages to persist per-project (default: 100). */
   aiChatHistoryLimit?: number;
   /**
+   * AI context compression threshold in CHARACTERS (not messages).
+   * When the total character count of prior conversation history exceeds
+   * this limit, old messages are compressed into a text summary. This is
+   * more accurate than a message-count limit — a single get_status result
+   * with 500 lines takes more context than 10 short chat messages.
+   * Default: 20,000 chars (~5,000 tokens). User-configurable via
+   * Settings → AI → Context Size.
+   */
+  aiContextMaxChars?: number;
+  /**
    * AI request timeout in seconds. Applied to:
    *   - commit-message generation (ai:generateCommitMessage IPC)
    *   - AI Assistant chat (ai:chat IPC proxy)

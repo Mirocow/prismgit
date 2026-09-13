@@ -282,8 +282,25 @@ Rules:
  *     IPC doesn't support cancellation), but the loop checks `signal.aborted`
  *     before each iteration and bails out cleanly.
  */
-const COMPRESS_THRESHOLD = 20;
+const DEFAULT_CONTEXT_MAX_CHARS = 20_000; // ~5,000 tokens
 const COMPRESS_KEEP_RECENT = 6;
+
+/** Estimate the total character count of a list of ChatMessages.
+ *  Used for length-based context compression — more accurate than
+ *  counting messages (a single get_status result with 500 lines
+ *  takes more context than 10 short chat messages). */
+function estimateHistoryLength(messages: ChatMessage[]): number {
+  let total = 0;
+  for (const m of messages) {
+    total += (m.content?.length ?? 0);
+    if (m.toolCalls?.length) {
+      for (const tc of m.toolCalls) {
+        total += JSON.stringify(tc.arguments).length;
+      }
+    }
+  }
+  return total;
+}
 
 export async function runWithTools(
   userMessage: string,
@@ -295,23 +312,44 @@ export async function runWithTools(
     onToolResult?: (name: string, result: string) => void;
     maxIterations?: number;
     signal?: AbortSignal;
-    /** Prior conversation history (without system prompt). When provided,
-     *  the AI remembers what was said/done before in this chat session. */
+    /** Prior conversation history (without system prompt). */
     priorHistory?: ChatMessage[];
     /** Called after each LLM response with token usage stats. */
     onTokenUsage?: (usage: TokenUsage) => void;
+    /** Max total characters of prior history before compression kicks in.
+     *  Default: 20,000 chars (~5,000 tokens). When exceeded, old messages
+     *  are compressed into a text summary. User-configurable via Settings. */
+    contextMaxChars?: number;
   },
 ): Promise<{ finalMessage: string; history: ChatMessage[] }> {
   const systemPrompt = buildToolSystemPrompt(AI_TOOLS, repoPath);
   const priorMessages = options?.priorHistory ?? [];
+  const maxChars = options?.contextMaxChars ?? DEFAULT_CONTEXT_MAX_CHARS;
 
-  // ── Context compression ────────────────────────────────────────────
-  // When history exceeds COMPRESS_THRESHOLD messages, compress old ones
-  // into a text summary to keep the context window manageable.
+  // ── Context compression (length-based) ─────────────────────────────
+  // When the total character count of prior history exceeds maxChars,
+  // compress old messages into a text summary. We keep the most recent
+  // messages that fit within the budget (COMPRESS_KEEP_RECENT minimum).
+  //
+  // Length-based is more accurate than count-based: a single get_status
+  // result with 500 lines takes more context than 10 short chat messages.
   let compressedPrior: ChatMessage[];
-  if (priorMessages.length > COMPRESS_THRESHOLD) {
-    const toCompress = priorMessages.slice(0, priorMessages.length - COMPRESS_KEEP_RECENT);
-    const toKeep = priorMessages.slice(-COMPRESS_KEEP_RECENT);
+  const priorLen = estimateHistoryLength(priorMessages);
+  if (priorLen > maxChars) {
+    // Walk backwards from the most recent message, accumulating length
+    // until we hit the budget. Everything older gets compressed.
+    let keptLen = 0;
+    let keepFromIdx = priorMessages.length;
+    for (let i = priorMessages.length - 1; i >= 0; i--) {
+      const msgLen = (priorMessages[i].content?.length ?? 0) + 50; // +50 overhead per msg
+      if (keptLen + msgLen > maxChars && (priorMessages.length - i) >= COMPRESS_KEEP_RECENT) {
+        keepFromIdx = i + 1;
+        break;
+      }
+      keptLen += msgLen;
+    }
+    const toCompress = priorMessages.slice(0, keepFromIdx);
+    const toKeep = priorMessages.slice(keepFromIdx);
     const summaryLines: string[] = ['[Previous conversation summary — compressed to save context]:'];
     for (const m of toCompress) {
       if (m.role === 'system') continue;
@@ -324,7 +362,7 @@ export async function runWithTools(
         summaryLines.push(`  [${m.role}] ${firstLine}`);
       }
     }
-    summaryLines.push(`(${toCompress.length} messages compressed — ${toKeep.length} recent kept)`);
+    summaryLines.push(`(${toCompress.length} messages compressed — ${toKeep.length} recent kept, ${keptLen} chars in recent)`);
     compressedPrior = [
       { role: 'system' as const, content: summaryLines.join('\n') },
       ...toKeep,

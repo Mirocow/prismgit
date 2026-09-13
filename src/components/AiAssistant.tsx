@@ -349,11 +349,11 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
       await runWithTools(userMsg, provider, sessionRepoPath ?? undefined, {
         signal: controller.signal,
         // ── Pass prior conversation history so the AI remembers context ──
-        // Without this, each message starts with a blank slate — the AI
-        // has no memory of what it said or did before. We pass the current
-        // messages array (minus the new user message we just added, since
-        // runWithTools adds its own user message).
         priorHistory: messages,
+        // ── Context compression threshold (user-configurable via Settings).
+        //  When total character count of prior history exceeds this, old
+        //  messages are compressed into a text summary.
+        contextMaxChars: settings?.aiContextMaxChars ?? 20_000,
         // ── Token usage callback — updates the UI with input/output token
         // counts and context size after each LLM response.
         onTokenUsage: (usage) => {
