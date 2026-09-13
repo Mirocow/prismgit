@@ -350,11 +350,13 @@ export async function add(repoPath: string, files: string[]): Promise<void> {
       throw e;
     }
   }
+  invalidateDiffCache(repoPath);
 }
 
 export async function addAll(repoPath: string): Promise<void> {
   const git = getGit(repoPath);
   await git.add('-A');
+  invalidateDiffCache(repoPath);
 }
 
 export async function restore(repoPath: string, files: string[], staged = false): Promise<void> {
@@ -363,6 +365,7 @@ export async function restore(repoPath: string, files: string[], staged = false)
   if (staged) args.push('--staged');
   args.push('--', ...files);
   await git.raw(args);
+  invalidateDiffCache(repoPath);
 }
 
 export async function commit(
@@ -383,6 +386,8 @@ export async function commit(
   if (signoff) args.push('--signoff');
   if (noVerify) args.push('--no-verify');
   const output = await git.raw(args);
+  // Bust the diff cache — HEAD has moved, every cached diff is now stale.
+  invalidateDiffCache(repoPath);
   // Extract commit hash from output: "[main abc1234] message"
   const match = output.match(/\[([a-z0-9_-]+)(?:\s+\(root-commit\))?\s+([a-f0-9]{7,40})\]/);
   return match ? match[2] : '';
@@ -1949,6 +1954,24 @@ export async function diff(
   file: string,
   options: { staged?: boolean; ref?: string } = {}
 ): Promise<DiffResult> {
+  // ── In-memory diff cache ──────────────────────────────────────────────
+  // The Changes page calls api.git.diff() every time the user selects a
+  // file in the list. After a commit / stage / unstage, the renderer's
+  // `lastLoadedFileRef` cache is busted — but if the user clicks back to
+  // the same file with no underlying change, we end up running
+  // `git diff -- <path>` + `git show HEAD:<path>` + readFile again, even
+  // though the result is identical to the last call ~50ms ago.
+  //
+  // Cache key: repoPath + file + staged + ref. TTL: 1500ms — long enough
+  // to absorb back-to-back clicks on the same file, short enough that
+  // actual file changes (which the watcher notifies) get a fresh diff
+  // on the next call.
+  const cacheKey = `${repoPath}|${file}|staged=${!!options.staged}|ref=${options.ref || ''}`;
+  const cached = diffCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 1500) {
+    return cached.result;
+  }
+
   const git = getGit(repoPath);
   const args = ['diff', '--no-color'];
   if (options.staged) args.push('--cached');
@@ -1962,40 +1985,60 @@ export async function diff(
     args.push('--', '.');
   }
 
-  const rawDiff = await git.raw(args);
-  const oldPath = file;
-  const newPath = file;
+  // Run the diff + the HEAD:file show in parallel — they're independent
+  // commands and previously ran sequentially, doubling latency for large
+  // diffs. (Was: `await git.raw(args)` THEN `await git.raw(['show', ...])`.)
+  const MAX_INLINE_FILE_BYTES = 1_048_576; // 1 MiB — above this we skip inline content
+  const rawDiffPromise = git.raw(args);
+  const oldContentPromise = (async () => {
+    try {
+      return await git.raw(['show', `${options.ref || 'HEAD'}:${file}`]);
+    } catch {
+      return '';
+    }
+  })();
 
-  let oldContent = '';
+  const [rawDiff, oldContentStr] = await Promise.all([rawDiffPromise, oldContentPromise]);
+
+  let oldContent = oldContentStr || '';
   let newContent = '';
   let binary = false;
 
-  try {
-    const stat = await git.raw(['show', `${options.ref || 'HEAD'}:${file}`]);
-    oldContent = stat || '';
-  } catch {
-    oldContent = '';
-  }
+  // Read the working-tree file ASYNCHRONOUSLY (was: fs.readFileSync —
+  // blocked the event loop for ~50–500ms on large files, which froze the
+  // Electron IPC queue and made the whole app feel sluggish while a diff
+  // was loading). Also cap at MAX_INLINE_FILE_BYTES — anything larger
+  // gets an empty newContent (the diff hunks are still rendered from the
+  // rawDiff output above, so the user still sees WHAT changed — just
+  // without the inline word-diff comparison).
   try {
     const abs = path.join(repoPath, file);
-    if (fs.existsSync(abs)) {
-      const buf = fs.readFileSync(abs);
-      if (buf.toString('utf8', 0, Math.min(8000, buf.length)).includes('\u0000')) {
-        binary = true;
+    const stat = await fs.promises.stat(abs).catch(() => null);
+    if (stat && stat.isFile()) {
+      if (stat.size > MAX_INLINE_FILE_BYTES) {
+        // Too large for inline word-diff — skip reading, mark as "large".
+        // The diff hunks themselves are still parsed from rawDiff.
+        newContent = '';
       } else {
-        newContent = buf.toString('utf8');
+        const buf = await fs.promises.readFile(abs);
+        // Quick binary check — first 8KB only, not the whole file.
+        if (buf.toString('utf8', 0, Math.min(8000, buf.length)).includes('\u0000')) {
+          binary = true;
+        } else {
+          newContent = buf.toString('utf8');
+        }
       }
     }
   } catch {
     newContent = '';
   }
 
-  const parsed = parseDiff(rawDiff, oldPath, newPath);
-  return {
+  const parsed = parseDiff(rawDiff, file, file);
+  const result: DiffResult = {
     oldContent,
     newContent,
-    oldPath,
-    newPath,
+    oldPath: file,
+    newPath: file,
     hunks: parsed.hunks,
     binary: binary || rawDiff.includes('Binary files'),
     newFile: parsed.newFile,
@@ -2003,6 +2046,36 @@ export async function diff(
     renamedFile: parsed.renamedFile,
     modeChange: parsed.modeChange,
   };
+
+  // Store in cache — see comment at the top of diff() for the rationale.
+  // Cap at 64 entries so the cache can't grow unbounded on a long session.
+  if (diffCache.size >= 64) {
+    // Evict the oldest entry (Maps iterate in insertion order).
+    const firstKey = diffCache.keys().next().value;
+    if (firstKey) diffCache.delete(firstKey);
+  }
+  diffCache.set(cacheKey, { ts: Date.now(), result });
+
+  return result;
+}
+
+/** In-memory cache for the `diff()` function — see comment inside. */
+const diffCache = new Map<string, { ts: number; result: DiffResult }>();
+
+/**
+ * Invalidate cached diff results for a given repo. Call this from any
+ * write operation that changes the working tree or index (commit, stage,
+ * unstage, restore, stash, checkout, merge, etc.) — otherwise the next
+ * diff() call for the same file may return the pre-change result.
+ *
+ * Implementation: walk the cache keys and delete any that start with
+ * `${repoPath}|`. O(n) in cache size (≤64 entries) so cheap.
+ */
+export function invalidateDiffCache(repoPath: string): void {
+  const prefix = `${repoPath}|`;
+  for (const key of diffCache.keys()) {
+    if (key.startsWith(prefix)) diffCache.delete(key);
+  }
 }
 
 export async function diffBranches(
@@ -2496,6 +2569,7 @@ export async function stashPush(
     args.push(...files);
   }
   const out = await git.raw(args);
+  invalidateDiffCache(repoPath);
   // Returns the stash hash if successful, empty if no changes
   return out.trim();
 }
@@ -2503,11 +2577,13 @@ export async function stashPush(
 export async function stashPop(repoPath: string, index = 0): Promise<void> {
   const git = getGit(repoPath);
   await git.raw(['stash', 'pop', `stash@{${index}}`]);
+  invalidateDiffCache(repoPath);
 }
 
 export async function stashApply(repoPath: string, index = 0): Promise<void> {
   const git = getGit(repoPath);
   await git.raw(['stash', 'apply', `stash@{${index}}`]);
+  invalidateDiffCache(repoPath);
 }
 
 export async function stashDrop(repoPath: string, index = 0): Promise<void> {
@@ -3638,6 +3714,7 @@ export async function resetFile(
 ): Promise<void> {
   const git = getGit(repoPath);
   await git.raw(['reset', ref || 'HEAD', '--', file]);
+  invalidateDiffCache(repoPath);
 }
 
 export async function clean(
@@ -3964,6 +4041,7 @@ export async function stageLines(repoPath: string, file: string, lineRanges: { s
   if (!diffOut.trim()) {
     // Untracked or unchanged file — partial staging impossible, stage whole file.
     await git.add(file);
+    invalidateDiffCache(repoPath);
     return;
   }
   const { header, hunks } = parseUnifiedZero(diffOut);
@@ -3973,6 +4051,7 @@ export async function stageLines(repoPath: string, file: string, lineRanges: { s
   if (body.length === 0) return; // nothing matched the selection
   const patch = `${header}\n${body.join('\n')}\n`;
   await applyPatchToIndex(git, patch, false);
+  invalidateDiffCache(repoPath);
 }
 
 /**
@@ -3990,6 +4069,7 @@ export async function unstageLines(repoPath: string, file: string, lineRanges: {
   if (body.length === 0) return;
   const patch = `${header}\n${body.join('\n')}\n`;
   await applyPatchToIndex(git, patch, true);
+  invalidateDiffCache(repoPath);
 }
 
 // ============= Repository directory tree =============

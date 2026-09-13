@@ -58,9 +58,20 @@ export function FooterCounters() {
         if (!cancelled) setStashes(count);
       } catch { if (!cancelled) setStashes(null); }
 
-      // Submodules.
+      // Submodules — count entries in .gitmodules directly.
+      // Why not `git submodule status`:
+      //   1. It fails with "no submodule mapping found in .gitmodules" when
+      //      the index has a gitlink (mode 160000) for a path no longer in
+      //      .gitmodules — common after manual submodule removal, filter
+      //      clones, or corrupted repos. The error floods the dev console.
+      //   2. It's slower than reading a single file.
+      //   3. We only need a COUNT here — full status (with commit hashes,
+      //      dirty state, etc.) is loaded on demand by the Submodules page.
       try {
-        const out = await api.git.raw(repo.path, ['submodule', 'status']);
+        // Use git config to list submodule paths — works even when the
+        // gitlink in the index points to a path no longer in .gitmodules
+        // (we only count what's actually configured).
+        const out = await api.git.raw(repo.path, ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$']);
         const count = out.split('\n').filter(Boolean).length;
         if (!cancelled) setSubmodules(count);
       } catch { if (!cancelled) setSubmodules(null); }
