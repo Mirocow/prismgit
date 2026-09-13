@@ -1,6 +1,6 @@
 {
   "version": "3.1.1",
-  "lastModified": "2026-09-11T21:40:58.011Z",
+  "lastModified": "2026-09-13T14:44:05.219Z",
   "folders": [],
   "bookmarks": [
     {
@@ -83,6 +83,24 @@
       "character": 13,
       "lineContent": "<span className='text-accent font-medium'>{meta?.name}</span>",
       "sortOrder": 8
+    },
+    {
+      "id": "mtzxcgpphh8fg4q6mg6",
+      "name": "restore: (repoPath: string, files: string[], staged?: boolean) => Promise<void>;",
+      "file": "electron/types/git-api.ts",
+      "line": 313,
+      "character": 16,
+      "lineContent": "restore: (repoPath: string, files: string[], staged?: boolean) => Promise<void>;",
+      "sortOrder": 9
+    },
+    {
+      "id": "mtzxcxybuxv0rest198",
+      "name": "reset: (repoPath: string, mode: 'soft' | 'mixed' | 'hard' | 'keep', ref?: string) => Promise<void>;",
+      "file": "electron/types/git-api.ts",
+      "line": 469,
+      "character": 11,
+      "lineContent": "reset: (repoPath: string, mode: 'soft' | 'mixed' | 'hard' | 'keep', ref?: string) => Promise<void>;",
+      "sortOrder": 10
     }
   ]
 }

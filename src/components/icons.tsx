@@ -2,6 +2,7 @@
 // Only icons we actually use, tree-shakeable, no runtime deps
 
 import type { SVGProps } from 'react';
+import React from 'react';
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -262,46 +263,34 @@ export const ArrowDown = (p: IconProps) => (
   </Icon>
 );
 
+const svgStyle = {
+  display: 'inline-block',
+  verticalAlign: 'middle',
+  height: '18px',
+  width: 'auto',
+  flexShrink: 0,
+};
+
 // PlugConnected — plug inserted INTO socket (синхронизировано).
 // Shows a plug (two prongs) going INTO a socket on the right side.
 // Lucide-style 24x24 viewBox, stroke-based.
 export const PlugConnected = (p: IconProps) => (
-  <Icon {...p}>
-    {/* Left: plug with two prongs */}
-    <path d="M9 2v6" />
-    <path d="M13 2v6" />
-    <path d="M7 8h8v3a4 4 0 0 1-4 4H7a4 4 0 0 1-0-4z" />
-    {/* Right: socket receiving the prongs — connected */}
-    <path d="M15 11h4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-4" />
-    {/* Small connection line showing they're joined */}
-    <path d="M15 15h2" />
-  </Icon>
+  <svg viewBox="0 0 24 24" style={svgStyle} {...p}>
+    <circle cx="4"  cy="12" r="3" fill="currentColor" />
+    <circle cx="20" cy="12" r="3" fill="currentColor" />
+    <rect x="7" y="10.5" width="10" height="3" rx="1.5" fill="currentColor" />
+  </svg>
 );
 
 // PlugDisconnected — plug pulled AWAY from socket (рассинхронизировано).
 // Shows a plug on the left, socket on the right, with a gap between them.
 export const PlugDisconnected = (p: IconProps) => (
-  <Icon {...p}>
-    {/* Left: plug with two prongs */}
-    <path d="M7 2v6" />
-    <path d="M11 2v6" />
-    <path d="M5 8h8v3a4 4 0 0 1-4 4H5a4 4 0 0 1-0-4z" />
-    {/* Gap (disconnected) */}
-    {/* Right: socket — not connected to the plug */}
-    <path d="M17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2" />
-    {/* Small lightning/dash indicating disconnect */}
-    <path d="M14 12l2-2" />
-  </Icon>
-);
-
-// Plug — kept for backward compat (raw plug without socket).
-export const Plug = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M12 22v-5" />
-    <path d="M9 8V2" />
-    <path d="M15 8V2" />
-    <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
-  </Icon>
+  <svg viewBox="0 0 24 24" style={svgStyle} {...p}>
+    <circle cx="4"  cy="12" r="3" fill="currentColor" />
+    <circle cx="20" cy="12" r="3" fill="currentColor" />
+    <rect x="7"  y="10.5" width="5" height="3" rx="1.5" fill="currentColor" />
+    <rect x="24" y="10.5" width="5" height="3" rx="1.5" fill="currentColor" />
+  </svg>
 );
 
 // PlugZap — kept for backward compat.
