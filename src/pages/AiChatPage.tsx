@@ -17,6 +17,7 @@ import {
   exportChatLog, formatAgo, MessageBubble, ToolResultBubble,
 } from '../components/AiAssistant';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
+import { useAiChatStore } from '../stores/aiChatStore';
 
 /**
  * Full-page version of the AI Assistant chat.
@@ -48,51 +49,11 @@ import { ResizableSplitter, useResizableWidth } from '../components/ResizableSpl
  *                  ▲
  *                  └── ResizableSplitter (drag left/right to resize)
  *
- * Both surfaces (popup + page) share the same per-project localStorage
- * history key, so a conversation started in the popup can be continued
- * here and vice-versa.
+ * State sync: the popup and the page share `useAiChatStore` — messages,
+ * busy, input, tokenUsage, sessionRepoPath are all kept in sync without
+ * explicit event handling. Whatever the user types in the popup is visible
+ * in the page (and vice-versa).
  */
-
-const STORAGE_KEY_PREFIX = 'prismgit-ai-chat-';
-const NO_REPO_KEY = '__no_repo__';
-const DEFAULT_HISTORY_LIMIT = 100;
-
-/** Build the localStorage key for a given session (repo path or no-repo). */
-function storageKeyFor(sessionRepoPath: string | null | undefined): string {
-  return STORAGE_KEY_PREFIX + (sessionRepoPath ?? NO_REPO_KEY);
-}
-
-/** Load persisted chat messages for a given session. */
-function loadChatHistory(sessionRepoPath: string | null | undefined): ChatMessage[] {
-  try {
-    const raw = localStorage.getItem(storageKeyFor(sessionRepoPath));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-/** Save chat messages for a given session, capped to the limit. */
-function saveChatHistory(sessionRepoPath: string | null | undefined, messages: ChatMessage[], limit: number): void {
-  try {
-    const trimmed = messages.length > limit ? messages.slice(-limit) : messages;
-    localStorage.setItem(storageKeyFor(sessionRepoPath), JSON.stringify(trimmed));
-  } catch {
-    // localStorage might be full — silently ignore
-  }
-}
-
-/** Clear chat history for a given session. */
-function clearChatHistory(sessionRepoPath: string | null | undefined): void {
-  try {
-    localStorage.removeItem(storageKeyFor(sessionRepoPath));
-  } catch {
-    // ignore
-  }
-}
 
 /**
  * Starter prompts — same as the floating panel for consistency.
@@ -121,17 +82,23 @@ export default function AiChatPage() {
   const toast = useToastActions();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // ── Session repo path ──────────────────────────────────────────────────
-  const [sessionRepoPath, setSessionRepoPath] = useState<string | null>(
-    currentRepo?.path ?? null,
-  );
-
-  // Follow the app's current repo (so the AI page tracks the sidebar).
-  useEffect(() => {
-    setSessionRepoPath(currentRepo?.path ?? null);
-  }, [currentRepo?.path]);
-
   const repos = useRepositoryStore(s => s.repos);
+
+  // ── Shared chat state — synced with the AiAssistant popup via useAiChatStore.
+  // Both surfaces subscribe to the same store, so messages / busy / input /
+  // tokenUsage / sessionRepoPath stay in sync without explicit event handling.
+  const sessionRepoPath = useAiChatStore((s) => s.sessionRepoPath);
+  const messages = useAiChatStore((s) => s.messages);
+  const input = useAiChatStore((s) => s.input);
+  const busy = useAiChatStore((s) => s.busy);
+  const tokenUsage = useAiChatStore((s) => s.tokenUsage);
+  const setSessionRepoPath = useAiChatStore((s) => s.setSessionRepoPath);
+  const setInput = useAiChatStore((s) => s.setInput);
+  const setBusy = useAiChatStore((s) => s.setBusy);
+  const setTokenUsage = useAiChatStore((s) => s.setTokenUsage);
+  const storeAppendMessage = useAiChatStore((s) => s.appendMessage);
+  const storeClearMessages = useAiChatStore((s) => s.clearMessages);
+
   const sessionRepo = useMemo(() => {
     if (sessionRepoPath === null) return null;
     if (!sessionRepoPath) return undefined;
@@ -141,13 +108,10 @@ export default function AiChatPage() {
     return { name, path: sessionRepoPath, lastOpened: 0, pinned: false };
   }, [sessionRepoPath, repos]);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [tokenUsage, setTokenUsage] = useState<{ input: number; output: number; contextSize: number }>({ input: 0, output: 0, contextSize: 0 });
   const abortRef = useRef<AbortController | null>(null);
 
   // ── Chat search state — filters messages by text, highlights matches.
+  // Local-only (not shared with the popup — search is page-specific).
   const [searchQuery, setSearchQuery] = useState('');
 
   // ── Resizable chat panel width (search panel takes the remainder).
@@ -155,26 +119,15 @@ export default function AiChatPage() {
   // drag left grows chat. Chat width is the user-controlled value.
   const { width: chatWidth, handleResize: handleChatResize } = useResizableWidth(900, 400, 1400);
 
-  // Load persisted chat history when the session changes.
+  // Follow the app's currentRepo (so the AI page tracks the sidebar).
   useEffect(() => {
-    const saved = loadChatHistory(sessionRepoPath);
-    setMessages(saved);
-  }, [sessionRepoPath]);
+    setSessionRepoPath(currentRepo?.path ?? null);
+  }, [currentRepo?.path, setSessionRepoPath]);
 
   // Auto-scroll to bottom when messages change.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
-
-  // Persist messages to localStorage whenever they change (debounced).
-  const historyLimit = settings?.aiChatHistoryLimit ?? DEFAULT_HISTORY_LIMIT;
-  useEffect(() => {
-    if (messages.length === 0) return;
-    const timer = setTimeout(() => {
-      saveChatHistory(sessionRepoPath, messages, historyLimit);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [messages, sessionRepoPath, historyLimit]);
 
   // Cleanup: if the page unmounts while a request is in flight, abort it.
   useEffect(() => {
@@ -209,7 +162,7 @@ export default function AiChatPage() {
     }
     if (!isRegenerate) {
       setInput('');
-      setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+      storeAppendMessage({ role: 'user', content: userMsg });
     }
     setBusy(true);
     const controller = new AbortController();
@@ -233,35 +186,35 @@ export default function AiChatPage() {
           });
         },
         onAssistantMessage: (msg) => {
-          setMessages(prev => [...prev, msg]);
+          storeAppendMessage(msg);
         },
         onToolCall: (name, args) => {
-          setMessages(prev => [...prev, {
+          storeAppendMessage({
             role: 'assistant',
             content: `Calling tool: ${name}${Object.keys(args).length ? ` (${JSON.stringify(args)})` : ''}`,
             toolCalls: [{ name, arguments: args }],
-          }]);
+          });
         },
         onToolResult: (name, result) => {
-          setMessages(prev => [...prev, { role: 'tool', content: result, toolName: name }]);
+          storeAppendMessage({ role: 'tool', content: result, toolName: name });
         },
       });
     } catch (e: unknown) {
       const isAbort = e instanceof DOMException && e.name === 'AbortError';
       if (isAbort) {
-        setMessages(prev => [...prev, {
+        storeAppendMessage({
           role: 'assistant',
           content: t('aiAssistant.stoppedByUser'),
-        }]);
+        });
       } else {
         toast.error(t('changes.aiGenerationFailed'), String(e));
-        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${String(e)}` }]);
+        storeAppendMessage({ role: 'assistant', content: `Error: ${String(e)}` });
       }
     } finally {
       setBusy(false);
       abortRef.current = null;
     }
-  }, [input, messages, sessionRepoPath, buildProvider, toast, t, settings]);
+  }, [input, messages, sessionRepoPath, buildProvider, toast, t, settings, storeAppendMessage, setInput, setBusy, setTokenUsage]);
 
   /** Stop the in-flight LLM call. */
   const handleStop = useCallback(() => {
@@ -276,8 +229,7 @@ export default function AiChatPage() {
   };
 
   const handleClear = () => {
-    setMessages([]);
-    clearChatHistory(sessionRepoPath);
+    storeClearMessages();
   };
 
   // Switch the AI session to a different repo (or to "no repo" mode).

@@ -272,9 +272,9 @@ export default function App() {
   // lastSeenErrorPulse we only react to NEW errors — not the same error
   // re-rendering the component.
   //
-  // When triggered: opens the panel + sets errorsOnly=true so the user
-  // immediately sees the failed command (not the full command list). The
-  // panel auto-scrolls to the top (newest = the failed entry).
+  // When triggered: opens the panel + sets errorsOnly=true ONLY when the
+  // panel was previously closed (so the user's manual filter choice is
+  // preserved while the panel is open).
   //
   // QW-5 — snooze: if the user manually closed the panel less than 30s
   // ago, suppress the auto-open. We still bump lastSeenErrorPulse so the
@@ -286,6 +286,10 @@ export default function App() {
       const sinceClose = Date.now() - useCommandLogStore.getState().lastManualCloseAt;
       const SNOOZE_MS = 30_000;
       if (sinceClose >= SNOOZE_MS) {
+        // Auto-open — set errors-only so the user immediately sees the
+        // failed command (not the full command list). This only fires
+        // when the panel was closed, so it never overwrites a filter
+        // the user is actively using.
         setCommandLogErrorsOnly(true);
         setShowCommandLog(true);
       }

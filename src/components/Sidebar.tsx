@@ -107,6 +107,9 @@ export function Sidebar() {
   const openRepository = useRepositoryStore((s) => s.openRepository);
   const removeRepo = useRepositoryStore((s) => s.removeRepo);
   const pinRepo = useRepositoryStore((s) => s.pinRepo);
+  // Repo-level favorite (star) — persists to settings.metadata, moves the
+  // repo to the top of its group on toggle (sorted by repoTree.compareRepos).
+  const toggleFavoriteRepo = useRepositoryStore((s) => s.toggleFavorite);
   const checkRemotes = useRepositoryStore((s) => s.checkRemotes);
   const loadRepos = useRepositoryStore((s) => s.loadRepos);
   const createGroup = useRepositoryStore((s) => s.createGroup);
@@ -431,21 +434,28 @@ export function Sidebar() {
     e.preventDefault();
     e.stopPropagation();
     const moveTargets = flattenGroupOptions(groups, repos, repoGroupId ?? undefined);
+    const repoMeta = metadata[repoPath];
+    const isFav = !!repoMeta?.favorite;
     const items = [
+      // Pin/Favorite at the top — most-used actions.
+      { label: isFav ? t('shell.unfavorite') : t('shell.favorite'), clickId: isFav ? 'unfavorite' : 'favorite' },
+      ...(repoGroupId
+        ? [{ label: t('shell.removeFromGroup'), clickId: 'ungroup' }]
+        : []),
+      { type: 'separator' as const },
       ...moveTargets.map((mt) => ({
         label: `${'\u00A0'.repeat(mt.depth * 3)}${mt.isRoot ? '· ' : ''}${mt.name}`,
         clickId: `move:${mt.id ?? 'root'}`,
       })),
       { type: 'separator' as const },
-      ...(repoGroupId
-        ? [{ label: t('shell.removeFromGroup'), clickId: 'ungroup' }]
-        : []),
       { label: t('shell.checkRemotesNow'), clickId: 'check' },
       { type: 'separator' as const },
       { label: t('shell.repoSettingsMenu'), clickId: 'repo-settings' },
     ];
     void showContextMenu(items, (clickId) => {
-      if (clickId.startsWith('move:')) {
+      if (clickId === 'favorite' || clickId === 'unfavorite') {
+        void toggleFavoriteRepo(repoPath);
+      } else if (clickId.startsWith('move:')) {
         const target = clickId.slice('move:'.length);
         void dropRepoIntoGroup(repoPath, target === 'root' ? null : target);
       } else if (clickId === 'ungroup') {
@@ -460,7 +470,7 @@ export function Sidebar() {
         });
       }
     });
-  }, [showContextMenu, groups, repos, dropRepoIntoGroup, checkRemotes, openRepository, t]);
+  }, [showContextMenu, groups, repos, metadata, dropRepoIntoGroup, checkRemotes, openRepository, toggleFavoriteRepo, t]);
 
   // In-progress sequencer state for the CURRENT repo only — shown as a small
   // warning dot on the active repo row. Per-repo status for inactive repos
@@ -481,6 +491,7 @@ export function Sidebar() {
     const showInProgressBadge = isActive && currentInProgress;
     const showBisectBadge = isActive && currentBisecting;
     const showDetachedBadge = isActive && currentDetached;
+    const isFavorite = Boolean(meta?.favorite);
     return (
       <div
         key={repo.path}
@@ -505,7 +516,17 @@ export function Sidebar() {
         data-testid={`repo-item-${repo.name}`}
       >
         {isActive ? <FolderGitOpen size={13} className="text-accent flex-shrink-0" /> : <FolderGit size={13} className="text-text-tertiary flex-shrink-0" />}
-        <span className={cn('flex-1 truncate', isActive && 'text-accent font-medium')}>{repo.name}</span>
+        <span
+          className={cn(
+            'flex-1 truncate',
+            isActive && 'text-accent font-medium',
+            // Favorites within a group are rendered BOLD so they stand out
+            // visually after being sorted to the top of the group.
+            !isActive && isFavorite && 'font-semibold',
+          )}
+        >
+          {repo.name}
+        </span>
         {/* In-progress state badge — only on the active repo, only when one
             of the sequencer flags is true. */}
         {showInProgressBadge && (
@@ -536,9 +557,25 @@ export function Sidebar() {
           />
         )}
         <RemoteBadges check={remoteChecks[repo.path]} />
-        {meta?.favorite && (
-          <Star size={10} className="text-status-modified fill-current flex-shrink-0" />
-        )}
+        {/* Favorite button — always visible for favorites, hover for others.
+            Toggling moves the repo to the top of its group (sorting handled
+            by repoTree's compareRepos). */}
+        <button
+          className={cn(
+            'icon-btn !w-5 !h-5 transition-opacity hover:!text-status-modified',
+            isFavorite ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+          )}
+          title={isFavorite ? t('shell.unfavorite') : t('shell.favorite')}
+          onClick={(e) => {
+            e.stopPropagation();
+            void toggleFavoriteRepo(repo.path);
+          }}
+        >
+          <Star
+            size={11}
+            className={cn(isFavorite && 'fill-current text-status-modified')}
+          />
+        </button>
         {meta?.tags && meta.tags.length > 0 && (
           <span className="text-2xs text-text-tertiary flex-shrink-0 px-1.5 py-0.5 rounded-full bg-bg-tertiary">
             {meta.tags.length}

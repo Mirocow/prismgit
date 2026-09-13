@@ -46,6 +46,8 @@ export const en: Record<string, string> = {
   // Sidebar — repo rows / group rows
   'shell.pin': 'Pin',
   'shell.unpin': 'Unpin',
+  'shell.favorite': 'Add to favorites',
+  'shell.unfavorite': 'Remove from favorites',
   'shell.removeFromList': 'Remove from list',
   'shell.groupSuffix': '(group)',
   'shell.groupTooltip': '{name} — {count} repo(s). Drag repos or groups here; double-click to rename.',
@@ -352,6 +354,8 @@ export const ru: Record<string, string> = {
   // Sidebar — repo rows / group rows
   'shell.pin': 'Закрепить',
   'shell.unpin': 'Открепить',
+  'shell.favorite': 'В избранное',
+  'shell.unfavorite': 'Убрать из избранного',
   'shell.removeFromList': 'Убрать из списка',
   'shell.groupSuffix': '(группа)',
   'shell.groupTooltip': '{name} — репозиториев: {count}. Перетащите сюда репозитории или группы; двойной клик — переименовать.',
@@ -658,6 +662,8 @@ export const zh: Record<string, string> = {
   // Sidebar — repo rows / group rows
   'shell.pin': '置顶',
   'shell.unpin': '取消置顶',
+  'shell.favorite': '添加到收藏',
+  'shell.unfavorite': '从收藏中移除',
   'shell.removeFromList': '从列表中移除',
   'shell.groupSuffix': '(分组)',
   'shell.groupTooltip': '{name} — {count} 个仓库。将仓库或分组拖到此处；双击可重命名。',
@@ -964,6 +970,8 @@ export const de: Record<string, string> = {
   // Sidebar — repo rows / group rows
   'shell.pin': 'Anheften',
   'shell.unpin': 'Lösen',
+  'shell.favorite': 'Zu Favoriten hinzufügen',
+  'shell.unfavorite': 'Aus Favoriten entfernen',
   'shell.removeFromList': 'Aus Liste entfernen',
   'shell.groupSuffix': '(Gruppe)',
   'shell.groupTooltip': '{name} — {count} Repo(s). Repositories oder Gruppen hierher ziehen; zum Umbenennen doppelklicken.',
