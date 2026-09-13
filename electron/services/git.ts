@@ -1316,10 +1316,10 @@ export function fetchAll(repoPath: string, prune = false): Promise<void> {
 
 export async function log(
   repoPath: string,
-  options: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean } = {}
+  options: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean } = {}
 ): Promise<LogEntry[]> {
   const git = getGit(repoPath);
-  const { maxCount = 500, branch, branches, file, follow = false, all = false, grep, grepIgnoreCase = false } = options;
+  const { maxCount = 500, skip = 0, branch, branches, file, follow = false, all = false, grep, grepIgnoreCase = false } = options;
 
   // Use a custom pretty format with record separator \x1e between commits and \x00 between fields.
   // simple-git's built-in log() uses \n\n to split commits which breaks when body contains blank lines.
@@ -1342,6 +1342,14 @@ export async function log(
   // interleave commits from different branches in a way that makes the
   // graph look messy with unnecessary lane crossings.
   const rawArgs = ['log', `-${maxCount}`, `--pretty=format:${pretty}${commitSep}`, '--date=iso-strict', '--decorate=full', '--topo-order'];
+
+  // Skip — for lazy-loading the next page of commits without refetching
+  // the ones we already have. `--skip=N` tells git to skip the first N
+  // commits in the rev-walk, so the returned list starts at commit N+1.
+  // Used by the History page's infinite-scroll: initial load fetches the
+  // first 100 commits; when the user scrolls near the bottom, we fetch
+  // the next 100 with skip=100, append to entries, and so on.
+  if (skip > 0) rawArgs.push(`--skip=${skip}`);
 
   // Multi-branch mode: pass explicit refs to git log.
   // `git log ref1 ref2 ref3` shows the union of all commits reachable from any of these refs,

@@ -256,8 +256,11 @@ export const tauriApi = {
       });
     },
 
-    log: async (repoPath: string, opts?: { maxCount?: number }): Promise<RawLogEntry[]> => {
-      const out = await callGit('git_log', repoPath, [opts?.maxCount]);
+    log: async (repoPath: string, opts?: { maxCount?: number; skip?: number }): Promise<RawLogEntry[]> => {
+      // Pass both maxCount and skip to the Rust side. The Rust git_log
+      // command supports an optional 2nd arg as `skip` for lazy-loading
+      // older pages — when None, no --skip is added.
+      const out = await callGit('git_log', repoPath, [opts?.maxCount, opts?.skip]);
       // The Rust git_log format is: %H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%b%x00%D
       // That's 11 fields (0-10). The body (%b) is field 9, refs (%D) is field 10.
       // Split by record separator \x1e first (handles bodies with newlines), then by \x00.

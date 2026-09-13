@@ -150,10 +150,14 @@ export function registerGitIpc(): void {
       // Benign errors that shouldn't flood the console:
       //   - "path '...' does not exist (neither on disk nor in the index)"
       //   - "pathspec '...' did not match any file(s) known to git"
+      //   - "no submodule mapping found in .gitmodules for path '...'"
       // These happen when probing for stage versions (:1/:2/:3) that may
-      // not exist. Return empty string — same as what the renderer's
-      // .catch(() => '') would have produced.
-      if (/does not exist|did not match any file|not in the index/i.test(msg)) {
+      // not exist, or when `git submodule status` is run on a repo whose
+      // index has a directory recorded as a submodule (mode 160000) but
+      // `.gitmodules` no longer references it. Returning an empty string
+      // matches what the renderer's .catch(() => '') would have produced
+      // and keeps the dev console quiet.
+      if (/does not exist|did not match any file|not in the index|no submodule mapping found/i.test(msg)) {
         return '';
       }
       // Real error — re-throw so the renderer can handle it.

@@ -65,6 +65,14 @@ export function HistoryPage() {
   // in the graph, like VS Code does for incoming commits.
   const [incomingHashes, setIncomingHashes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  // ── Lazy-loading state ────────────────────────────────────────────────
+  // The History list now loads in pages (initial: 100 commits, then 100 more
+  // each time the user scrolls near the bottom). This avoids the 500-commit
+  // hard cap that previously hid older commits — the user can now scroll
+  // all the way back to the very first commit in the repo.
+  const PAGE_SIZE = 100;
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   // Debounced search — avoids re-filtering on every keystroke for large repos.
@@ -189,12 +197,15 @@ export function HistoryPage() {
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
+    // Reset lazy-load state on every fresh load (filter change, repo switch,
+    // manual refresh) — the user might now be looking at a different history.
+    setHasMore(true);
     try {
-      // Load commits — use a higher limit when --all is set so incoming
-      // (remote-only) commits are more likely to be included in the visible
-      // window. Without this, a busy local history can push remote-only
-      // commits past the 200-commit cutoff, making them invisible.
-      const logOpts: { maxCount: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = { maxCount: (branchFilter === 'all' || !branchFilter) ? 500 : 200 };
+      // Initial page: PAGE_SIZE commits (100). Lazy-load older pages on
+      // scroll via loadMore(). Previously this loaded up to 500 commits
+      // upfront, hiding anything older — the user could not scroll back to
+      // the first commit. With paging, the user can scroll indefinitely.
+      const logOpts: { maxCount: number; skip?: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = { maxCount: PAGE_SIZE };
       // Multi-branch selection takes precedence over single branch filter
       if (selectedBranches.size > 0) {
         logOpts.branches = Array.from(selectedBranches);
@@ -211,6 +222,9 @@ export function HistoryPage() {
       }
       const result = await api.git.log(repo.path, logOpts);
       setEntries(result);
+      // If we got fewer than PAGE_SIZE commits, there are no more to load.
+      // Otherwise assume more exist (we'll discover the end on the next fetch).
+      setHasMore(result.length >= PAGE_SIZE);
       // Compute incoming commits: reachable from remote-tracking refs
       // (refs/remotes/*) but NOT from any local branch (refs/heads/*).
       // These are "not yet pulled" commits — drawn dashed/hollow in graph.
@@ -270,6 +284,64 @@ export function HistoryPage() {
     } catch (e) { toast.error('Failed to load history', String(e)); }
     finally { setLoading(false); }
   }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit]);
+
+  // ── Lazy-load older commits on scroll ───────────────────────────────────
+  // When the user scrolls near the bottom of the commit list, fetch the
+  // next PAGE_SIZE commits using `git log --skip=<currentLen> -<PAGE_SIZE>`.
+  // Append them to `entries` and update `hasMore` accordingly.
+  //
+  // NB: --skip is sensitive to filter changes — we re-derive the same
+  // branch/file options as loadHistory. If filters change while a loadMore
+  // is in-flight, the result is appended but may be momentarily out of
+  // order; loadHistory() runs on filter change and resets the list, so this
+  // self-corrects.
+  const loadMore = useCallback(async () => {
+    // Guard against duplicate fetches + the "no more pages" case.
+    if (loadingMore || !hasMore || loading) return;
+    setLoadingMore(true);
+    try {
+      // Snapshot the current entries length — we'll skip past these.
+      const currentLen = entries.length;
+      if (currentLen === 0) return; // nothing loaded yet — let loadHistory handle it
+      const logOpts: { maxCount: number; skip: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = {
+        maxCount: PAGE_SIZE,
+        skip: currentLen,
+      };
+      if (selectedBranches.size > 0) {
+        logOpts.branches = Array.from(selectedBranches);
+      } else if (branchFilter === 'all' || !branchFilter) {
+        logOpts.all = true;
+      } else {
+        logOpts.branch = branchFilter;
+      }
+      if (globalPathFilter) {
+        logOpts.file = globalPathFilter;
+        logOpts.follow = true;
+      }
+      const nextPage = await api.git.log(repo.path, logOpts);
+      if (nextPage.length === 0) {
+        // No more commits — reached the end of history.
+        setHasMore(false);
+        return;
+      }
+      // Deduplicate: in rare cases (concurrent refresh + loadMore), git log
+      // may return commits we already have. Filter by hash before appending.
+      setEntries(prev => {
+        const seen = new Set(prev.map(e => e.hash));
+        const merged = [...prev, ...nextPage.filter(e => !seen.has(e.hash))];
+        return merged;
+      });
+      // If we got fewer than PAGE_SIZE, this was the last page.
+      setHasMore(nextPage.length >= PAGE_SIZE);
+    } catch (e) {
+      // Surface as toast so the user knows the next page failed to load —
+      // otherwise they'd think the list "ended" when it actually didn't.
+      toast.error('Failed to load more commits', String(e));
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, loading, entries.length, repo.path, branchFilter, selectedBranches, globalPathFilter, toast]);
 
   // Recyclable commits are opt-in — only load `git reflog --all` + `git rev-list --all`
   // when the user expands the section. Previously this fired on every History
@@ -536,6 +608,47 @@ export function HistoryPage() {
   scrollToIndexRef.current = lazyList.scrollToIndex;
   // Override scrollRef to use lazyList's ref (which tracks scroll position)
   const listScrollRef = lazyList.scrollRef;
+
+  // ── Infinite scroll: detect when the user is near the bottom ─────────────
+  // Attaches a 'scroll' listener to the list container. When scrollTop is
+  // within ~3 viewports of the bottom AND there are more commits to load,
+  // calls loadMore(). The useLazyList hook already tracks scroll position
+  // for virtualization, but it doesn't expose scroll-bottom detection —
+  // we use a separate listener here so we don't disturb virtualization.
+  //
+  // Threshold = max(300px, 3 * viewportHeight) from the bottom — early
+  // enough that the next page is loaded before the user reaches the very
+  // bottom, avoiding a visible "loading…" gap on fast scroll.
+  //
+  // We use a ref to hold the latest loadMore so the effect can be attached
+  // ONCE (on mount) without re-attaching on every loadMore identity change
+  // — re-attaching the scroll listener on every render would drop the
+  // user's scroll position in some browsers.
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+  useEffect(() => {
+    const el = listScrollRef.current;
+    if (!el) return;
+    let rafId: number | null = null;
+    const onScroll = () => {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const e = listScrollRef.current;
+        if (!e) return;
+        const distanceFromBottom = e.scrollHeight - e.scrollTop - e.clientHeight;
+        const threshold = Math.max(300, e.clientHeight * 3);
+        if (distanceFromBottom < threshold) {
+          void loadMoreRef.current();
+        }
+      });
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, [listScrollRef]);
 
   useEffect(() => {
     if (selectedIdx === null || selectedIdx < 0) { setCommitFiles([]); return; }
@@ -1679,6 +1792,22 @@ export function HistoryPage() {
               })}
                 </div>
               </div>
+
+              {/* Lazy-load indicator — shown at the bottom of the list when
+                  more commits are being fetched OR when we've reached the end
+                  of history. Rendered as a normal block (not virtualized) so
+                  it stays visible after the last row scrolls into view. */}
+              {loadingMore && (
+                <div className="flex items-center justify-center gap-2 py-3 text-xs text-text-tertiary">
+                  <span className="spinner" />
+                  <span>Loading more commits…</span>
+                </div>
+              )}
+              {!loadingMore && !hasMore && filtered.length > 0 && (
+                <div className="py-3 text-center text-2xs text-text-tertiary italic">
+                  End of history — reached the very first commit.
+                </div>
+              )}
             </div>
           )}
         </div>
