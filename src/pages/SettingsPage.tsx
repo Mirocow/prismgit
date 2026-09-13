@@ -1087,14 +1087,15 @@ smartgit.refresh.inspectEol=true
                       const newProviderId = e.target.value;
                       const oldProviderId = settings.aiProvider || '';
                       // ── Save the CURRENT provider's config before switching ──
-                      // This preserves URL + API key + model so the user can
-                      // switch back without re-entering them.
+                      // Only save non-empty values — don't overwrite a previously
+                      // saved config with empty values if the user hasn't set them.
                       if (oldProviderId) {
                         const configs = { ...(settings.aiProviderConfigs || {}) };
+                        const existing = configs[oldProviderId] || {};
                         configs[oldProviderId] = {
-                          url: settings.aiUrl,
-                          apiKey: settings.aiApiKey,
-                          model: settings.aiModel,
+                          url: settings.aiUrl || existing.url || undefined,
+                          apiKey: settings.aiApiKey || existing.apiKey || undefined,
+                          model: settings.aiModel || existing.model || undefined,
                         };
                         setSetting('aiProviderConfigs', configs);
                       }
@@ -1102,13 +1103,20 @@ smartgit.refresh.inspectEol=true
                       setSetting('aiProvider', newProviderId);
                       if (newProviderId) {
                         const preset = getProviderPreset(newProviderId);
-                        // Check if we have a SAVED config for this provider
-                        // (from a previous session). If so, restore it.
-                        // Otherwise, use the preset defaults.
                         const savedConfig = settings.aiProviderConfigs?.[newProviderId];
+                        // Restore saved config OR use preset defaults.
+                        // DON'T overwrite with empty string if there's no saved
+                        // API key — leave the field as-is so the user can type it.
                         setSetting('aiUrl', savedConfig?.url ?? preset.defaultUrl);
                         setSetting('aiModel', savedConfig?.model ?? preset.defaultModel);
-                        setSetting('aiApiKey', savedConfig?.apiKey ?? '');
+                        // Only set API key if we have a SAVED one — don't clear
+                        // the field if the user hasn't saved one yet.
+                        if (savedConfig?.apiKey) {
+                          setSetting('aiApiKey', savedConfig.apiKey);
+                        }
+                        // If switching to a provider that has NO saved config,
+                        // don't clear the API key — it might be the same key
+                        // (e.g. OpenRouter and Z.ai could share a key).
                       }
                     }}
                   >

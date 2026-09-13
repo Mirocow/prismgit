@@ -433,13 +433,15 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const switchProvider = useCallback((newProviderId: string) => {
     const oldProviderId = settings?.aiProvider || '';
-    // Save current provider's config.
+    // Save current provider's config — only non-empty values, don't
+    // overwrite previously saved config with empty values.
     if (oldProviderId && setSetting) {
       const configs = { ...(settings.aiProviderConfigs || {}) };
+      const existing = configs[oldProviderId] || {};
       configs[oldProviderId] = {
-        url: settings.aiUrl,
-        apiKey: settings.aiApiKey,
-        model: settings.aiModel,
+        url: settings.aiUrl || existing.url || undefined,
+        apiKey: settings.aiApiKey || existing.apiKey || undefined,
+        model: settings.aiModel || existing.model || undefined,
       };
       setSetting('aiProviderConfigs', configs);
     }
@@ -449,7 +451,11 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     const savedConfig = settings?.aiProviderConfigs?.[newProviderId];
     setSetting('aiUrl', savedConfig?.url ?? preset.defaultUrl);
     setSetting('aiModel', savedConfig?.model ?? preset.defaultModel);
-    setSetting('aiApiKey', savedConfig?.apiKey ?? '');
+    // Only set API key if we have a SAVED one — don't clear the field
+    // if the user hasn't saved one for this provider yet.
+    if (savedConfig?.apiKey) {
+      setSetting('aiApiKey', savedConfig.apiKey);
+    }
     setShowProviderMenu(false);
   }, [settings, setSetting]);
 
