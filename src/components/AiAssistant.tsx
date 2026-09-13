@@ -31,18 +31,12 @@ import { PROVIDER_PRESETS, getProviderPreset, type LLMProvider } from '../lib/ai
  *     based on the most common things users ask a git AI assistant to do
  *     (pull, push, status, recent commits, branch list, stash, etc.).
  *
- * ── Per-project "pinning" (parallel sessions) ───────────────────────────
- * The AI Assistant has its OWN notion of the "current session repo"
- * (`sessionRepoPath`), which is INDEPENDENT from the app's currently-open
- * repository (`useRepositoryStore.currentRepo`). When the user opens the
- * AI Assistant on repo A and then switches the app to repo B, the AI
- * Assistant keeps working on repo A — its chat history, context, and
- * tool calls all still target A. The user can manually switch the AI
- * session to B (or to "no repo") via the dropdown in the panel header.
- *
- * This mirrors how a developer might have two terminals open, one per
- * repo, and an AI helper pinned to each — switching the IDE's active
- * project doesn't kill either terminal.
+ * ── Project switching ──────────────────────────────────────────────────
+ * The AI Assistant FOLLOWS the app's currently-open repository. When
+ * the user switches projects in the sidebar, the AI Assistant switches
+ * too — loading the new project's chat history and scoping tool calls
+ * to the new repo. The user can also manually switch via the dropdown
+ * in the panel header (e.g. to "no repo" mode for clone/init tasks).
  *
  * ── No-repo mode ─────────────────────────────────────────────────────────
  * When `sessionRepoPath` is null, the AI Assistant operates in "no-repo"
@@ -246,16 +240,12 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // ── Session repo path ──────────────────────────────────────────────────
+  // FOLLOWS the app's currentRepo — when the user switches projects,
+  // the AI Assistant switches too (loads that project's chat history).
   const [sessionRepoPath, setSessionRepoPath] = useState<string | undefined | null>(undefined);
 
-  // On first mount, default the session to the app's current repo (or null
-  // if no repo is open). After this, sessionRepoPath only changes when the
-  // user explicitly switches via the dropdown.
   useEffect(() => {
-    if (sessionRepoPath === undefined) {
-      setSessionRepoPath(currentRepo?.path ?? null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setSessionRepoPath(currentRepo?.path ?? null);
   }, [currentRepo?.path]);
 
   const repos = useRepositoryStore(s => s.repos);
