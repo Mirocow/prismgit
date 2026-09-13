@@ -27,6 +27,17 @@ export const en = {
   'search.groupStashes': 'Stashes',
   'search.toolbarButtonTitle': 'Global Search (Ctrl+Shift+F)',
   'search.toolbarButton': 'Search',
+
+  // ── FindObjectDialog (Ctrl+F) ──
+  'search.findObject.placeholder': 'Find branch, tag, or ref...',
+  'search.findObject.searching': 'searching...',
+  'search.findObject.noRefs': 'No refs found',
+  'search.findObject.startTyping': 'Start typing to search...',
+  'search.findObject.navigate': '↑↓ navigate',
+  'search.findObject.select': '↵ select',
+  'search.findObject.close': 'esc close',
+  'search.findObject.results': '{count} results',
+  'search.findObject.searchFailed': 'Search failed',
 };
 
 // ─── Russian ─────────────────────────────────────────────────────────────────
@@ -50,6 +61,17 @@ export const ru = {
   'search.groupStashes': 'Стэши',
   'search.toolbarButtonTitle': 'Глобальный поиск (Ctrl+Shift+F)',
   'search.toolbarButton': 'Поиск',
+
+  // ── FindObjectDialog (Ctrl+F) ──
+  'search.findObject.placeholder': 'Найти ветку, тег или ref...',
+  'search.findObject.searching': 'поиск...',
+  'search.findObject.noRefs': 'Refs не найдены',
+  'search.findObject.startTyping': 'Начните вводить для поиска...',
+  'search.findObject.navigate': '↑↓ навигация',
+  'search.findObject.select': '↵ выбрать',
+  'search.findObject.close': 'esc закрыть',
+  'search.findObject.results': '{count} результатов',
+  'search.findObject.searchFailed': 'Поиск не удался',
 };
 
 // ─── Chinese ─────────────────────────────────────────────────────────────────
@@ -73,6 +95,17 @@ export const zh = {
   'search.groupStashes': '贮藏',
   'search.toolbarButtonTitle': '全局搜索 (Ctrl+Shift+F)',
   'search.toolbarButton': '搜索',
+
+  // ── FindObjectDialog (Ctrl+F) ──
+  'search.findObject.placeholder': '查找分支、标签或引用...',
+  'search.findObject.searching': '搜索中...',
+  'search.findObject.noRefs': '未找到引用',
+  'search.findObject.startTyping': '开始输入以搜索...',
+  'search.findObject.navigate': '↑↓ 导航',
+  'search.findObject.select': '↵ 选择',
+  'search.findObject.close': 'esc 关闭',
+  'search.findObject.results': '{count} 个结果',
+  'search.findObject.searchFailed': '搜索失败',
 };
 
 // ─── German ──────────────────────────────────────────────────────────────────
@@ -96,4 +129,15 @@ export const de = {
   'search.groupStashes': 'Stashes',
   'search.toolbarButtonTitle': 'Globale Suche (Strg+Umschalt+F)',
   'search.toolbarButton': 'Suche',
+
+  // ── FindObjectDialog (Ctrl+F) ──
+  'search.findObject.placeholder': 'Branch, Tag oder Ref finden...',
+  'search.findObject.searching': 'suchen...',
+  'search.findObject.noRefs': 'Keine Refs gefunden',
+  'search.findObject.startTyping': 'Tippen Sie, um zu suchen...',
+  'search.findObject.navigate': '↑↓ navigieren',
+  'search.findObject.select': '↵ auswählen',
+  'search.findObject.close': 'esc schließen',
+  'search.findObject.results': '{count} Ergebnisse',
+  'search.findObject.searchFailed': 'Suche fehlgeschlagen',
 };

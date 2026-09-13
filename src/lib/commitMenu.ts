@@ -20,6 +20,7 @@ import { copyToClipboard, shortHash } from './utils';
 import { useToastStore } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import type { ParsedRef } from './refBadge';
+import { t as i18nT } from './i18n';
 
 const toast = () => useToastStore.getState();
 
@@ -46,13 +47,13 @@ export interface HashMenuCtx {
 
 export function buildHashMenu(ctx: HashMenuCtx): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
-    { label: 'Copy Short Hash', clickId: 'copy-short' },
-    { label: 'Copy Full Hash', clickId: 'copy-full' },
+    { label: i18nT('ctx.commit.copyShortHash'), clickId: 'copy-short' },
+    { label: i18nT('ctx.commit.copyFullHash'), clickId: 'copy-full' },
   ];
-  if (ctx.subject) items.push({ label: 'Copy Commit Message', clickId: 'copy-msg' });
+  if (ctx.subject) items.push({ label: i18nT('ctx.commit.copyCommitMessage'), clickId: 'copy-msg' });
   items.push({ type: 'separator' });
-  items.push({ label: 'View Commit in History', clickId: 'view-history' });
-  if (ctx.repoPath) items.push({ label: 'Open in Browser', clickId: 'browser' });
+  items.push({ label: i18nT('ctx.commit.viewInHistory'), clickId: 'view-history' });
+  if (ctx.repoPath) items.push({ label: i18nT('ctx.commit.openInBrowser'), clickId: 'browser' });
   return items;
 }
 
@@ -60,16 +61,16 @@ export async function runHashMenuAction(clickId: string, ctx: HashMenuCtx): Prom
   switch (clickId) {
     case 'copy-short':
       copyToClipboard(shortHash(ctx.hash));
-      toast().success('Copied');
+      toast().success(i18nT('ctx.confirm.copied'));
       return true;
     case 'copy-full':
       copyToClipboard(ctx.hash);
-      toast().success('Copied');
+      toast().success(i18nT('ctx.confirm.copied'));
       return true;
     case 'copy-msg':
       if (ctx.subject) {
         copyToClipboard(ctx.subject);
-        toast().success('Copied');
+        toast().success(i18nT('ctx.confirm.copied'));
       }
       return true;
     case 'view-history':
@@ -82,10 +83,10 @@ export async function runHashMenuAction(clickId: string, ctx: HashMenuCtx): Prom
         if (info.webUrl) {
           await api.app.openExternal(`${info.webUrl}/commit/${ctx.hash}`);
         } else {
-          toast().info('No remote web URL configured for this repository');
+          toast().info(i18nT('ctx.commit.noRemoteUrl'));
         }
       } catch (e) {
-        toast().error('Failed to open in browser', String(e));
+        toast().error(i18nT('ctx.commit.openInBrowserFailed'), String(e));
       }
       return true;
     }
@@ -112,20 +113,20 @@ export interface RefMenuCtx {
 export function buildRefMenu(ctx: RefMenuCtx): ContextMenuItem[] {
   const { parsed } = ctx;
   const items: ContextMenuItem[] = [
-    { label: 'Copy Name', clickId: 'copy-name' },
-    { label: 'Copy Full Ref', clickId: 'copy-full-ref' },
+    { label: i18nT('ctx.commit.copyName'), clickId: 'copy-name' },
+    { label: i18nT('ctx.commit.copyFullRef'), clickId: 'copy-full-ref' },
   ];
   items.push({ type: 'separator' });
   if (parsed.kind === 'branch' && ctx.repoPath) {
-    items.push({ label: `Checkout '${parsed.label}'...`, clickId: 'checkout-branch' });
-    items.push({ label: `Delete Branch '${parsed.label}'...`, clickId: 'delete-branch' });
+    items.push({ label: i18nT('ctx.commit.checkoutName').replace('{name}', parsed.label), clickId: 'checkout-branch' });
+    items.push({ label: i18nT('ctx.commit.deleteBranchName').replace('{name}', parsed.label), clickId: 'delete-branch' });
     items.push({ type: 'separator' });
   }
   if (parsed.kind === 'tag' && ctx.repoPath) {
-    items.push({ label: `Delete Tag '${parsed.label}'...`, clickId: 'delete-tag' });
+    items.push({ label: i18nT('ctx.commit.deleteTagName').replace('{name}', parsed.label), clickId: 'delete-tag' });
     items.push({ type: 'separator' });
   }
-  if (ctx.hash) items.push({ label: 'View Commit in History', clickId: 'view-commit' });
+  if (ctx.hash) items.push({ label: i18nT('ctx.commit.viewInHistory'), clickId: 'view-commit' });
   return items;
 }
 
@@ -134,59 +135,59 @@ export async function runRefMenuAction(clickId: string, ctx: RefMenuCtx): Promis
   switch (clickId) {
     case 'copy-name':
       copyToClipboard(parsed.label);
-      toast().success('Copied');
+      toast().success(i18nT('ctx.confirm.copied'));
       return true;
     case 'copy-full-ref':
       copyToClipboard(parsed.raw);
-      toast().success('Copied');
+      toast().success(i18nT('ctx.confirm.copied'));
       return true;
     case 'checkout-branch': {
       if (!ctx.repoPath || parsed.kind !== 'branch') return false;
       if (!(await confirmDialog({
-        title: `Checkout '${parsed.label}'`,
-        message: 'Switch the working tree to this branch?\nUncommitted changes are kept if they do not conflict.',
-        confirmLabel: 'Checkout',
+        title: i18nT('ctx.commit.checkoutTitle').replace('{name}', parsed.label),
+        message: i18nT('ctx.commit.checkoutMessage'),
+        confirmLabel: i18nT('ctx.confirm.checkoutLabel'),
       }))) return true;
       try {
         await api.git.checkout(ctx.repoPath, parsed.label);
-        toast().success(`Checked out '${parsed.label}'`);
+        toast().success(i18nT('ctx.commit.checkedOut').replace('{name}', parsed.label));
         ctx.onChanged?.();
       } catch (e) {
-        toast().error(`Failed to checkout '${parsed.label}'`, String(e));
+        toast().error(i18nT('ctx.commit.checkoutFailed').replace('{name}', parsed.label), String(e));
       }
       return true;
     }
     case 'delete-branch': {
       if (!ctx.repoPath || parsed.kind !== 'branch') return false;
       if (!(await confirmDialog({
-        title: `Delete branch '${parsed.label}'`,
-        message: 'This removes the branch pointer. Commits reachable from other branches or HEAD are not affected.',
-        confirmLabel: 'Delete',
+        title: i18nT('ctx.commit.deleteBranchTitle').replace('{name}', parsed.label),
+        message: i18nT('ctx.commit.deleteBranchMessage'),
+        confirmLabel: i18nT('ctx.confirm.deleteLabel'),
         danger: true,
       }))) return true;
       try {
         await api.git.deleteBranch(ctx.repoPath, parsed.label);
-        toast().success(`Branch '${parsed.label}' deleted`);
+        toast().success(i18nT('ctx.commit.branchDeleted').replace('{name}', parsed.label));
         ctx.onChanged?.();
       } catch (e) {
-        toast().error(`Failed to delete branch '${parsed.label}'`, String(e));
+        toast().error(i18nT('ctx.commit.deleteBranchFailed').replace('{name}', parsed.label), String(e));
       }
       return true;
     }
     case 'delete-tag': {
       if (!ctx.repoPath || parsed.kind !== 'tag') return false;
       if (!(await confirmDialog({
-        title: `Delete tag '${parsed.label}'`,
-        message: 'This permanently removes the tag reference. The tagged commit is not affected.',
-        confirmLabel: 'Delete',
+        title: i18nT('ctx.commit.deleteTagTitle').replace('{name}', parsed.label),
+        message: i18nT('ctx.commit.deleteTagMessage'),
+        confirmLabel: i18nT('ctx.confirm.deleteLabel'),
         danger: true,
       }))) return true;
       try {
         await api.git.deleteTag(ctx.repoPath, parsed.label);
-        toast().success(`Tag '${parsed.label}' deleted`);
+        toast().success(i18nT('ctx.commit.tagDeleted').replace('{name}', parsed.label));
         ctx.onChanged?.();
       } catch (e) {
-        toast().error(`Failed to delete tag '${parsed.label}'`, String(e));
+        toast().error(i18nT('ctx.commit.deleteTagFailed').replace('{name}', parsed.label), String(e));
       }
       return true;
     }

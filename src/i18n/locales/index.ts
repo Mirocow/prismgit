@@ -30,6 +30,7 @@ import * as tour from './domains/tour';
 import * as aiassistant from './domains/aiassistant';
 import * as toasts from './domains/toasts';
 import * as actions from './domains/actions';
+import * as contextMenus from './domains/contextMenus';
 import * as banner from './domains/banner';
 import * as conflict from './domains/conflict';
 import * as iRebase from './domains/iRebase';
@@ -55,6 +56,7 @@ export const DOMAINS: Record<string, { en: Record<string, string>; ru: Record<st
   aiassistant,
   toasts,
   actions,
+  contextMenus,
   banner,
   conflict,
   iRebase,

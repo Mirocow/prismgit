@@ -266,7 +266,7 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
               {!oursEmpty && (
                 <button
                   className="btn btn-secondary text-xs"
-                  title="Keep our version (git checkout --ours)"
+                  title={t('action.title.takeOurs')}
                   onClick={async () => {
                     try {
                       await api.git.raw(repo.path, ['checkout', '--ours', '--', filePath]);
@@ -283,7 +283,7 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
               {!theirsEmpty && (
                 <button
                   className="btn btn-secondary text-xs"
-                  title="Keep their version (git checkout --theirs)"
+                  title={t('action.title.takeTheirs')}
                   onClick={async () => {
                     try {
                       await api.git.raw(repo.path, ['checkout', '--theirs', '--', filePath]);
@@ -300,7 +300,7 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
               {/* Resolve as deleted — git rm the file */}
               <button
                 className="btn btn-danger text-xs"
-                title="Resolve as deleted (git rm)"
+                title={t('action.title.resolveAsDeleted')}
                 onClick={async () => {
                   try {
                     await api.git.raw(repo.path, ['rm', '--', filePath]);

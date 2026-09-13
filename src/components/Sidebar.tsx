@@ -513,13 +513,18 @@ export function Sidebar() {
             href="#/changes"
             onClick={(e) => e.stopPropagation()}
             className="flex-shrink-0 w-1.5 h-1.5"
-            title={`Working tree is in ${status?.isMerging ? 'merging' : status?.isRebasing ? 'rebasing' : status?.isCherryPicking ? 'cherry-picking' : 'reverting'} state. Click to open Changes.`}
+            title={t('banner.stateTooltip').replace('{label}',
+              status?.isMerging ? t('banner.mergingLabel').toLowerCase()
+              : status?.isRebasing ? t('banner.rebasingLabel').toLowerCase()
+              : status?.isCherryPicking ? t('banner.cherryPickingLabel').toLowerCase()
+              : t('banner.revertingStatusBarLabel').toLowerCase()
+            )}
           />
         )}
         {showBisectBadge && !showInProgressBadge && (
           <span
             className="flex-shrink-0 text-2xs text-status-info font-semibold"
-            title="Bisect in progress — see the Bisect page"
+            title={t('banner.bisectInProgressTooltip')}
           >
             bisect
           </span>
@@ -527,7 +532,7 @@ export function Sidebar() {
         {showDetachedBadge && !showInProgressBadge && (
           <span
             className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning inline-block"
-            title="HEAD is detached — commits won't belong to any branch"
+            title={t('banner.detachedHeadTooltip')}
           />
         )}
         <RemoteBadges check={remoteChecks[repo.path]} />

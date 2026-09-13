@@ -38,6 +38,17 @@ export const en: Record<string, string> = {
   'banner.testing': 'Testing',
   'banner.rebaseInProgress': 'Rebase in progress',
   'banner.stepXOfY': 'Step {step} of {total}',
+
+  // ── StatusBar / Sidebar state labels ──
+  'banner.mergingLabel': 'Merging',
+  'banner.rebasingLabel': 'Rebasing',
+  'banner.cherryPickingLabel': 'Cherry-picking',
+  'banner.revertingStatusBarLabel': 'Reverting',
+  'banner.bisectingLabel': 'Bisecting',
+  'banner.stateInProgress': '{label} in progress',
+  'banner.stateTooltip': 'Working tree is in {label} state. Click to open Changes and Continue / Skip / Abort.',
+  'banner.bisectInProgressTooltip': 'Bisect in progress — see the Bisect page',
+  'banner.detachedHeadTooltip': "HEAD is detached — commits won't belong to any branch",
 };
 
 export const ru: Record<string, string> = {
@@ -68,6 +79,17 @@ export const ru: Record<string, string> = {
   'banner.testing': 'Проверяется',
   'banner.rebaseInProgress': 'Rebase в процессе',
   'banner.stepXOfY': 'Шаг {step} из {total}',
+
+  // ── StatusBar / Sidebar state labels ──
+  'banner.mergingLabel': 'Слияние',
+  'banner.rebasingLabel': 'Rebase',
+  'banner.cherryPickingLabel': 'Cherry-pick',
+  'banner.revertingStatusBarLabel': 'Revert',
+  'banner.bisectingLabel': 'Bisect',
+  'banner.stateInProgress': '{label} в процессе',
+  'banner.stateTooltip': 'Рабочее дерево в состоянии {label}. Нажмите, чтобы открыть Changes и Continue / Skip / Abort.',
+  'banner.bisectInProgressTooltip': 'Bisect в процессе — см. страницу Bisect',
+  'banner.detachedHeadTooltip': 'HEAD отсоединён — коммиты не будут принадлежать какой-либо ветке',
 };
 
 export const zh: Record<string, string> = {
@@ -98,6 +120,17 @@ export const zh: Record<string, string> = {
   'banner.testing': '正在测试',
   'banner.rebaseInProgress': '变基进行中',
   'banner.stepXOfY': '第 {step} 步，共 {total} 步',
+
+  // ── StatusBar / Sidebar state labels ──
+  'banner.mergingLabel': '合并中',
+  'banner.rebasingLabel': '变基中',
+  'banner.cherryPickingLabel': '优选',
+  'banner.revertingStatusBarLabel': '撤销',
+  'banner.bisectingLabel': '二分查找',
+  'banner.stateInProgress': '{label} 进行中',
+  'banner.stateTooltip': '工作树处于 {label} 状态。点击打开 Changes 并 继续 / 跳过 / 中止。',
+  'banner.bisectInProgressTooltip': '二分查找进行中 — 见 Bisect 页面',
+  'banner.detachedHeadTooltip': 'HEAD 已分离 — 提交将不属于任何分支',
 };
 
 export const de: Record<string, string> = {
@@ -128,4 +161,15 @@ export const de: Record<string, string> = {
   'banner.testing': 'Testet',
   'banner.rebaseInProgress': 'Rebase läuft',
   'banner.stepXOfY': 'Schritt {step} von {total}',
+
+  // ── StatusBar / Sidebar state labels ──
+  'banner.mergingLabel': 'Mergen',
+  'banner.rebasingLabel': 'Rebasen',
+  'banner.cherryPickingLabel': 'Cherry-Pick',
+  'banner.revertingStatusBarLabel': 'Revert',
+  'banner.bisectingLabel': 'Bisect',
+  'banner.stateInProgress': '{label} läuft',
+  'banner.stateTooltip': 'Arbeitsbaum ist im {label}-Zustand. Klicken, um Changes zu öffnen und Continue / Skip / Abort.',
+  'banner.bisectInProgressTooltip': 'Bisect läuft — siehe Bisect-Seite',
+  'banner.detachedHeadTooltip': 'HEAD ist detached — Commits gehören zu keinem Branch',
 };

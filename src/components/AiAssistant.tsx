@@ -119,7 +119,7 @@ function clearChatHistory(sessionRepoPath: string | null | undefined): void {
  * calls, tool results, errors. Nothing is truncated, so the developer
  * sees exactly what the AI saw and did.
  */
-function exportChatLog(
+export function exportChatLog(
   messages: ChatMessage[],
   sessionRepoPath: string | null | undefined,
   sessionRepoName: string | undefined,
@@ -187,7 +187,7 @@ function exportChatLog(
 }
 
 /** Format milliseconds as a human-readable "Xm ago" string for the header badge. */
-function formatAgo(ms: number): string {
+export function formatAgo(ms: number): string {
   const sec = Math.floor(ms / 1000);
   if (sec < 60) return 'just now';
   const min = Math.floor(sec / 60);
@@ -376,7 +376,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
       if (isAbort) {
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: '⏹ Stopped by user. The conversation history is preserved — you can continue with a new message.',
+          content: t('aiAssistant.stoppedByUser'),
         }]);
       } else {
         toast.error(t('changes.aiGenerationFailed'), String(e));
@@ -508,9 +508,9 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                       <Folder size={11} className="text-text-tertiary" />
                       <span>{t('aiAssistant.noRepoMode') || 'No repository (app-level mode)'}</span>
                     </div>
-                    <div className="text-3xs text-text-tertiary mt-0.5 ml-[18px]">
-                      Use list_repos / clone_repo / init_repo tools.
-                    </div>
+                    <span className="text-3xs text-text-tertiary mt-0.5 ml-[18px]">
+                      {t('aiAssistant.noRepoToolsHint')}
+                    </span>
                   </button>
                   {currentRepo && currentRepo.path !== sessionRepoPath && (
                     <button
@@ -520,17 +520,17 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                       <div className="flex items-center gap-2">
                         <Folder size={11} className="text-accent" />
                         <span className="font-medium">{currentRepo.name}</span>
-                        <span className="text-3xs text-accent ml-auto">current</span>
+                        <span className="text-3xs text-accent ml-auto">{t('aiAssistant.currentRepo')}</span>
                       </div>
                       <div className="text-3xs text-text-tertiary mt-0.5 ml-[18px] truncate">{currentRepo.path}</div>
                     </button>
                   )}
                   <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
-                    Known repositories
+                    {t('aiAssistant.knownRepositories')}
                   </div>
                   {sortedRepos.length === 0 ? (
                     <div className="px-3 py-2 text-2xs text-text-tertiary italic">
-                      No repositories yet. Switch to "No repository" mode and use clone_repo or init_repo.
+                      {t('aiAssistant.noRepositoriesYet')}
                     </div>
                   ) : (
                     sortedRepos.map(r => (
@@ -563,12 +563,12 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
             <button
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs bg-bg-secondary border border-border-subtle hover:border-accent transition-colors"
               onClick={() => setShowProviderMenu(v => !v)}
-              title={settings?.aiProvider ? `Provider: ${getProviderPreset(settings.aiProvider).label}` : 'No provider selected'}
+              title={settings?.aiProvider ? `${t('aiAssistant.providerTitle')}: ${getProviderPreset(settings.aiProvider).label}` : t('aiAssistant.noProviderSelected')}
             >
               <span className="truncate max-w-20">
                 {settings?.aiProvider
                   ? getProviderPreset(settings.aiProvider).label.split(' ')[0]
-                  : 'no provider'}
+                  : t('aiAssistant.noProviderSelected')}
               </span>
               <span className="text-text-tertiary text-3xs">▾</span>
             </button>
@@ -577,7 +577,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                 <div className="fixed inset-0 z-10" onClick={() => setShowProviderMenu(false)} />
                 <div className="absolute top-full right-0 mt-1 w-64 bg-bg-elevated border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
                   <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
-                    Switch AI Provider
+                    {t('aiAssistant.switchProvider')}
                   </div>
                   {PROVIDER_PRESETS.map(p => (
                     <button
@@ -598,7 +598,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                     </button>
                   ))}
                   <div className="text-3xs text-text-tertiary px-3 py-1.5 border-t border-border-subtle">
-                    Switching preserves the conversation — the new provider continues the chat.
+                    {t('aiAssistant.switchProviderHint')}
                   </div>
                 </div>
               </>
@@ -615,8 +615,8 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
               <button
                 className="icon-btn !w-5 !h-5 hover:!text-accent"
                 onClick={() => exportChatLog(messages, sessionRepoPath, sessionRepo?.name)}
-                title="Export chat log as Markdown (for debugging / sharing)"
-                aria-label="Export chat log"
+                title={t('aiAssistant.exportChatLog')}
+                aria-label={t('aiAssistant.exportChatLabel')}
               >
                 <Download size={11} />
               </button>
@@ -680,7 +680,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                   if (lastUserMsg) retryHandler = () => void handleSend(lastUserMsg!, true);
                 }
               }
-              return <MessageBubble key={idx} msg={msg} onRegenerate={retryHandler} />;
+              return <MessageBubble key={idx} msg={msg} onRegenerate={retryHandler} t={t} />;
             })}
           </>
         )}
@@ -697,18 +697,18 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           consumed and whether the context is getting too large. */}
       {(tokenUsage.input > 0 || tokenUsage.output > 0) && (
         <div className="flex items-center gap-3 px-3 py-1 border-t border-border-subtle bg-bg-tertiary text-3xs text-text-tertiary">
-          <span title="Input tokens (sent to the model)">
-            <span className="text-text-secondary font-medium">↓ {tokenUsage.input.toLocaleString()}</span> in
+          <span title={t('aiAssistant.tokensInput')}>
+            <span className="text-text-secondary font-medium">↓ {tokenUsage.input.toLocaleString()}</span> {t('aiAssistant.tokensIn')}
           </span>
-          <span title="Output tokens (generated by the model)">
-            <span className="text-text-secondary font-medium">↑ {tokenUsage.output.toLocaleString()}</span> out
+          <span title={t('aiAssistant.tokensOutput')}>
+            <span className="text-text-secondary font-medium">↑ {tokenUsage.output.toLocaleString()}</span> {t('aiAssistant.tokensOut')}
           </span>
-          <span title="Total context size (all messages + tools sent to the model)">
-            <span className="text-text-secondary font-medium">∑ {tokenUsage.contextSize.toLocaleString()}</span> ctx
+          <span title={t('aiAssistant.tokensContext')}>
+            <span className="text-text-secondary font-medium">∑ {tokenUsage.contextSize.toLocaleString()}</span> {t('aiAssistant.tokensCtx')}
           </span>
           {tokenUsage.contextSize > 50000 && (
-            <span className="text-status-warning" title="Context is getting large — consider starting a new conversation">
-              ⚠ large context
+            <span className="text-status-warning" title={t('aiAssistant.largeContextTitle')}>
+              ⚠ {t('aiAssistant.largeContextWarn')}
             </span>
           )}
         </div>
@@ -734,8 +734,8 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           <button
             className="btn btn-danger !px-2 !py-1 flex-shrink-0"
             onClick={handleStop}
-            title="Stop generation"
-            aria-label="Stop generation"
+            title={t('aiAssistant.stopGeneration')}
+            aria-label={t('aiAssistant.stopGeneration')}
           >
             <Square size={12} className="fill-current" />
           </button>
@@ -761,7 +761,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
  *   - assistant with tool_calls: italic "Calling tool..." bubble
  *   - assistant final: markdown-rendered with copy button
  */
-function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?: () => void }) {
+export function MessageBubble({ msg, onRegenerate, t }: { msg: ChatMessage; onRegenerate?: () => void; t: (key: string) => string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -784,10 +784,10 @@ function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?:
             <button
               className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
               onClick={onRegenerate}
-              title="Resend this message"
+              title={t('aiAssistant.resendMessage')}
             >
               <RefreshCw size={9} />
-              Retry
+              {t('aiAssistant.retry')}
             </button>
           )}
         </div>
@@ -796,7 +796,7 @@ function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?:
     );
   }
   if (msg.role === 'tool') {
-    return <ToolResultBubble msg={msg} />;
+    return <ToolResultBubble msg={msg} t={t} />;
   }
   if (msg.role === 'assistant' && msg.toolCalls?.length) {
     // "Calling tool: get_status" — kept VERY compact (single line, no bubble,
@@ -830,19 +830,19 @@ function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?:
             <button
               onClick={onRegenerate}
               className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
-              title="Regenerate this response"
+              title={t('aiAssistant.regenerateResponse')}
             >
               <RefreshCw size={9} />
-              Retry
+              {t('aiAssistant.retry')}
             </button>
           )}
           <button
             onClick={handleCopy}
             className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
-            title="Copy message"
+            title={t('aiAssistant.copyMessage')}
           >
             {copied ? <Check size={9} className="text-status-added" /> : <Copy size={9} />}
-            {copied ? 'Copied' : 'Copy'}
+            {copied ? t('aiAssistant.copied') : t('aiAssistant.copy')}
           </button>
         </div>
       </div>
@@ -865,9 +865,10 @@ function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?:
  * When expanded, the full content is shown in a scrollable monospace block
  * (max-h-60 so even 1000-line outputs don't take over the chat).
  */
-function ToolResultBubble({ msg }: { msg: ChatMessage }) {
+export function ToolResultBubble({ msg, t }: { msg: ChatMessage; t?: (key: string) => string }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const tFn = t ?? ((k: string) => k);
 
   const handleCopy = useCallback((e: React.MouseEvent) => {
     e.stopPropagation(); // don't toggle expand when clicking copy
@@ -880,9 +881,9 @@ function ToolResultBubble({ msg }: { msg: ChatMessage }) {
   // One-line preview — first non-empty line, truncated.
   const firstLine = useMemo(() => {
     const line = msg.content.split('\n').find(l => l.trim());
-    if (!line) return '(empty result)';
+    if (!line) return tFn('aiAssistant.emptyResult');
     return line.length > 80 ? line.slice(0, 80) + '…' : line;
-  }, [msg.content]);
+  }, [msg.content, tFn]);
 
   // Total line count — shown as a badge so the user knows how much is hidden.
   const lineCount = useMemo(() => msg.content.split('\n').length, [msg.content]);
@@ -903,13 +904,13 @@ function ToolResultBubble({ msg }: { msg: ChatMessage }) {
         )}
         {/* Line count badge — tells the user how much is hidden. */}
         <span className="text-3xs text-text-tertiary flex-shrink-0 ml-auto px-1 rounded bg-bg-secondary">
-          {lineCount} {lineCount === 1 ? 'line' : 'lines'}
+          {lineCount} {lineCount === 1 ? tFn('aiAssistant.line') : tFn('aiAssistant.lines')}
         </span>
         {/* Copy button — always visible, stops propagation so it doesn't toggle. */}
         <span
           onClick={handleCopy}
           className="icon-btn !w-4 !h-4 hover:text-accent flex-shrink-0 cursor-pointer"
-          title="Copy result"
+          title={tFn('aiAssistant.copyResult')}
         >
           {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
         </span>
@@ -938,7 +939,7 @@ function ToolResultBubble({ msg }: { msg: ChatMessage }) {
  * is shown as-is. This keeps the bundle small (no react-markdown dep)
  * while covering ~95% of what LLMs actually produce in a git assistant.
  */
-function MarkdownLite({ text }: { text: string }) {
+export function MarkdownLite({ text }: { text: string }) {
   // Split into code-block and non-code-block segments. Code blocks are
   // extracted first so their content isn't processed by the inline rules.
   const segments = useMemo(() => {

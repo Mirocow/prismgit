@@ -1,5 +1,6 @@
 import type { RemoteInfo } from './api';
 import type { ContextMenuItem } from './useContextMenu';
+import { t as i18nT } from './i18n';
 
 /**
  * State snapshot needed to build the Remotes tool's right-click menu.
@@ -26,28 +27,30 @@ export function buildRemoteContextMenu(
 ): ContextMenuItem[] {
   const hasSeparatePushUrl = Boolean(remote.refs.push) && remote.refs.push !== remote.refs.fetch;
   return [
-    { label: `Fetch '${remote.name}' (with prune)`, clickId: 'fetch', enabled: !state.busy },
+    { label: i18nT('ctx.remote.fetchWithPrune').replace('{name}', remote.name), clickId: 'fetch', enabled: !state.busy },
     {
-      label: state.expanded ? 'Hide remote refs' : 'Preview remote refs (ls-remote)',
+      label: state.expanded
+        ? i18nT('ctx.remote.hideRemoteRefs')
+        : i18nT('ctx.remote.previewRemoteRefs'),
       clickId: 'preview',
     },
-    { label: 'Copy fetch URL', clickId: 'copy-fetch' },
+    { label: i18nT('ctx.remote.copyFetchUrl'), clickId: 'copy-fetch' },
     ...(hasSeparatePushUrl
-      ? [{ label: 'Copy push URL', clickId: 'copy-push' } as ContextMenuItem]
+      ? [{ label: i18nT('ctx.remote.copyPushUrl'), clickId: 'copy-push' } as ContextMenuItem]
       : []),
     { type: 'separator' },
-    { label: 'Browse branches', clickId: 'branches' },
-    { label: `Edit '${remote.name}'...`, clickId: 'edit' },
-    { label: `Rename '${remote.name}'...`, clickId: 'rename' },
+    { label: i18nT('ctx.remote.browseBranches'), clickId: 'branches' },
+    { label: i18nT('ctx.remote.edit').replace('{name}', remote.name), clickId: 'edit' },
+    { label: i18nT('ctx.remote.rename').replace('{name}', remote.name), clickId: 'rename' },
     { type: 'separator' },
     {
-      label: 'Perform background Poll or Fetch',
+      label: i18nT('ctx.remote.backgroundPollOrFetch'),
       type: 'checkbox',
       checked: state.backgroundFetch,
       clickId: 'toggle-background',
     },
-    { label: 'Repository Settings...', clickId: 'repo-settings' },
+    { label: i18nT('ctx.remote.repositorySettings'), clickId: 'repo-settings' },
     { type: 'separator' },
-    { label: `Remove remote '${remote.name}'...`, clickId: 'remove' },
+    { label: i18nT('ctx.remote.removeRemote').replace('{name}', remote.name), clickId: 'remove' },
   ];
 }

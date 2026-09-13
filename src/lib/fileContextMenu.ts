@@ -157,7 +157,7 @@ export function actionTargets(ctx: Pick<FileMenuCtx, 'path' | 'paths'>): string[
 /** Human label suffix for bulk operations: " (3 files)". */
 export function bulkSuffix(ctx: Pick<FileMenuCtx, 'path' | 'paths'>): string {
   const n = actionTargets(ctx).length;
-  return n > 1 ? ` (${n} files)` : '';
+  return n > 1 ? i18nT('ctx.bulkSuffix').replace('{n}', String(n)) : '';
 }
 
 /** Build the menu items for a file (pure — no side effects). */
@@ -172,17 +172,17 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
   const bulk = bulkSuffix(ctx);
 
   // --- Open (opens EVERY selected file, like a file manager) ----------------
-  items.push({ label: `Open${bulk}`, clickId: 'open' });
+  items.push({ label: `${i18nT('ctx.file.open')}${bulk}`, clickId: 'open' });
   items.push({ label: i18nT('vscode.openInVscode'), clickId: 'open-vscode' });
-  items.push({ label: `Reveal in File Manager${bulk}`, clickId: 'reveal' });
+  items.push({ label: `${i18nT('ctx.file.revealInFileManager')}${bulk}`, clickId: 'reveal' });
   items.push({ type: 'separator' });
 
   // --- Inspect ------------------------------------------------------------
   if (ctx.mode === 'changes' && ctx.onShowChanges) {
-    items.push({ label: 'Show Changes', clickId: 'show-changes' });
+    items.push({ label: i18nT('ctx.file.showChanges'), clickId: 'show-changes' });
   }
   if ((ctx.mode === 'history' || ctx.mode === 'changes') && ctx.onOpenDiff) {
-    items.push({ label: 'Open in Diff tool', clickId: 'open-diff' });
+    items.push({ label: i18nT('ctx.file.openInDiffTool'), clickId: 'open-diff' });
   }
   if (ctx.mode === 'changes') {
     items.push({ label: i18nT('vscode.openDiffInVscode'), clickId: 'open-vscode-diff' });
@@ -191,32 +191,32 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
     items.push({ label: i18nT('vscode.openCommitFileDiff'), clickId: 'open-vscode-commit-diff' });
     items.push({ label: i18nT('vscode.openFileVersion'), clickId: 'open-vscode-version' });
   }
-  items.push({ label: 'File History (Log)', clickId: 'file-history' });
-  items.push({ label: 'Blame this file', clickId: 'blame' });
+  items.push({ label: i18nT('ctx.file.fileHistory'), clickId: 'file-history' });
+  items.push({ label: i18nT('ctx.file.blameThisFile'), clickId: 'blame' });
   items.push({ type: 'separator' });
 
   // --- Working-tree operations (Changes mode only) -------------------------
   if (ctx.mode === 'changes') {
     if (ctx.isStaged) {
-      items.push({ label: `Unstage${bulk}`, clickId: 'unstage' });
+      items.push({ label: `${i18nT('ctx.file.unstage')}${bulk}`, clickId: 'unstage' });
     } else {
-      items.push({ label: `Stage${bulk}`, clickId: 'stage' });
+      items.push({ label: `${i18nT('ctx.file.stage')}${bulk}`, clickId: 'stage' });
     }
-    items.push({ label: 'Commit...', clickId: 'commit' });
+    items.push({ label: i18nT('ctx.file.commit'), clickId: 'commit' });
     if (!untracked) {
-      items.push({ label: `Stash Selection...${bulk}`, clickId: 'stash-file' });
+      items.push({ label: `${i18nT('ctx.file.stashSelection')}${bulk}`, clickId: 'stash-file' });
       items.push({ type: 'separator' });
       items.push({
-        label: ctx.isStaged ? `Discard Staged Changes...${bulk}` : `Discard Changes...${bulk}`,
+        label: ctx.isStaged ? `${i18nT('ctx.file.discardStagedChanges')}${bulk}` : `${i18nT('ctx.file.discardChanges')}${bulk}`,
         clickId: 'discard',
       });
-      items.push({ label: `Restore from Ref...${bulk}`, clickId: 'restore-from-ref' });
+      items.push({ label: `${i18nT('ctx.file.restoreFromRef')}${bulk}`, clickId: 'restore-from-ref' });
     } else {
       // Untracked files — "Discard" means deleting the file (git clean).
       // Show it as "Discard (Delete)" so the user understands what happens.
       items.push({ type: 'separator' });
       items.push({
-        label: `Discard (Delete)...${bulk}`,
+        label: `${i18nT('ctx.file.discardDelete')}${bulk}`,
         clickId: 'discard-untracked',
       });
     }
@@ -225,13 +225,13 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
     // --- Index flags (tracked files only, live checkbox state) ------------
     if (ctx.indexFlags) {
       items.push({
-        label: "Toggle 'Assume Unchanged'",
+        label: i18nT('ctx.file.toggleAssumeUnchanged'),
         type: 'checkbox',
         checked: ctx.indexFlags.assumeUnchanged,
         clickId: 'toggle-assume-unchanged',
       });
       items.push({
-        label: "Toggle 'Skip Worktree'",
+        label: i18nT('ctx.file.toggleSkipWorktree'),
         type: 'checkbox',
         checked: ctx.indexFlags.skipWorktree,
         clickId: 'toggle-skip-worktree',
@@ -241,27 +241,27 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
 
     // --- File operations --------------------------------------------------
     if (untracked) {
-      items.push({ label: `Add to .gitignore${bulk}`, clickId: 'ignore' });
-      items.push({ label: 'Edit .gitignore', clickId: 'edit-ignore-local' });
-      items.push({ label: 'Edit global ignore file', clickId: 'edit-ignore-global' });
+      items.push({ label: `${i18nT('ctx.file.addToGitignore')}${bulk}`, clickId: 'ignore' });
+      items.push({ label: i18nT('ctx.file.editGitignore'), clickId: 'edit-ignore-local' });
+      items.push({ label: i18nT('ctx.file.editGlobalIgnore'), clickId: 'edit-ignore-global' });
     }
-    items.push({ label: 'Move or Rename...', clickId: 'move-rename' });
+    items.push({ label: i18nT('ctx.file.moveOrRename'), clickId: 'move-rename' });
     items.push({
-      label: `${tracked ? 'Remove...' : 'Delete File...'}${bulk}`,
+      label: `${tracked ? i18nT('ctx.file.remove') : i18nT('ctx.file.deleteFile')}${bulk}`,
       clickId: 'delete-file',
     });
     if (ctx.isConflicted) {
       items.push({ type: 'separator' });
-      items.push({ label: 'Resolve Conflict...', clickId: 'resolve-conflict' });
+      items.push({ label: i18nT('ctx.file.resolveConflict'), clickId: 'resolve-conflict' });
       // SmartGit-style "Resolve" submenu: Take Ours / Take Theirs
       items.push({
-        label: 'Resolve',
+        label: i18nT('ctx.file.resolve'),
         clickId: '_submenu_resolve',
         submenu: [
-          { label: 'Take Ours', clickId: 'resolve-take-ours', title: 'git checkout --ours -- <file> + git add' },
-          { label: 'Take Theirs', clickId: 'resolve-take-theirs', title: 'git checkout --theirs -- <file> + git add' },
+          { label: i18nT('ctx.file.takeOurs'), clickId: 'resolve-take-ours', title: 'git checkout --ours -- <file> + git add' },
+          { label: i18nT('ctx.file.takeTheirs'), clickId: 'resolve-take-theirs', title: 'git checkout --theirs -- <file> + git add' },
           { type: 'separator' },
-          { label: 'Use External Merge Tool', clickId: 'resolve-mergetool', title: 'git mergetool -- <file> (uses configured merge.tool)' },
+          { label: i18nT('ctx.file.useExternalMergeTool'), clickId: 'resolve-mergetool', title: 'git mergetool -- <file> (uses configured merge.tool)' },
         ],
       });
       items.push({ label: i18nT('vscode.resolveInVscode'), clickId: 'open-vscode-merge' });
@@ -270,15 +270,15 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
   }
 
   // --- Clipboard ------------------------------------------------------------
-  items.push({ label: 'Copy Name', clickId: 'copy-name' });
-  items.push({ label: 'Copy Relative Path', clickId: 'copy-rel-path' });
-  items.push({ label: 'Copy Full Path', clickId: 'copy-full-path' });
+  items.push({ label: i18nT('ctx.file.copyName'), clickId: 'copy-name' });
+  items.push({ label: i18nT('ctx.file.copyRelativePath'), clickId: 'copy-rel-path' });
+  items.push({ label: i18nT('ctx.file.copyFullPath'), clickId: 'copy-full-path' });
 
   // --- Directory scoping (Changes mode) --------------------------------------
   if (ctx.mode === 'changes' && ctx.onSelectDirectory) {
     items.push({ type: 'separator' });
-    items.push({ label: 'Select Directory', clickId: 'select-directory' });
-    items.push({ label: 'Select Repository Root', clickId: 'select-root' });
+    items.push({ label: i18nT('ctx.file.selectDirectory'), clickId: 'select-directory' });
+    items.push({ label: i18nT('ctx.file.selectRepoRoot'), clickId: 'select-root' });
   }
   return items;
 }

@@ -6,41 +6,51 @@ import { useI18n } from '../lib/i18n';
 import {
   Sparkles, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder,
   Square, Copy, Check, ChevronRight, ChevronDown, Search, X,
+  Download, RefreshCw,
 } from '../components/icons';
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage, type TokenUsage } from '../lib/aiChat';
-import { type LLMProvider } from '../lib/aiCommitMessages';
+import {
+  PROVIDER_PRESETS, getProviderPreset, type LLMProvider,
+} from '../lib/aiCommitMessages';
+import {
+  exportChatLog, formatAgo, MessageBubble, ToolResultBubble,
+} from '../components/AiAssistant';
+import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 
 /**
  * Full-page version of the AI Assistant chat.
  *
- * The floating AiAssistant.tsx panel is great for quick one-shot questions,
- * but for longer conversations the user wants a full page with more room —
- * that's what this page provides. It reuses the same runWithTools agentic
- * loop and the same per-project localStorage history key scheme, so a
- * conversation started in the floating panel can be continued here (and
- * vice-versa).
+ * Same feature set as the floating popup AiAssistant.tsx:
+ *   - 12-provider switcher (switch provider on the fly, mid-conversation)
+ *   - Per-provider configs saved in aiProviderConfigs
+ *   - Retry + Copy buttons on every message (user + assistant)
+ *   - Export chat log as Markdown
+ *   - Tool results collapsed by default with line-count badge
+ *   - Token usage bar (input / output / context)
+ *   - Stop button (AbortController)
+ *   - Project switching — follows the app's current repo
+ *   - Session switcher dropdown (switch between known repos or "no repo")
+ *   - Starter prompt chips (different sets for repo vs no-repo)
  *
- * Layout:
+ * Layout (with vertical ResizableSplitter between chat and search):
  *   ┌──────────────────────────────────────────────────────────────┐
- *   │  Header: AI Chat • <repo name>           [Clear] [Stop/Send]  │
- *   ├────────────────────────────────┬─────────────────────────────┤
- *   │  Messages (70%)                │  Chat Search (30%)           │
- *   │  - user / assistant / tool     │  Filter messages by text    │
- *   │  - markdown rendering         │  (case-insensitive,          │
- *   │  - tool-call transcript        │   highlights matches)       │
- *   │  - starter prompts (when empty)│                             │
- *   │                                │                             │
- *   ├────────────────────────────────┤  Match list (filtered)       │
- *   │  Token usage bar               │                             │
- *   ├────────────────────────────────┴─────────────────────────────┤
- *   │  Input: textarea + Send/Stop                                  │
- *   └──────────────────────────────────────────────────────────────┘
+ *   │  Header: AI Chat • <repo> [provider ▾]      [Export] [Clear] │
+ *   ├──────────────────────────────────┬───────────────────────────┤
+ *   │  Chat panel (resizable)          │  Chat Search (resizable)   │
+ *   │  - user / assistant / tool       │  - search input           │
+ *   │  - Retry + Copy on each msg      │  - filtered results list  │
+ *   │  - markdown rendering           │                           │
+ *   │  - starter prompts (when empty)  │                           │
+ *   │  - token usage bar               │                           │
+ *   │  - input + Stop/Send             │                           │
+ *   └──────────────────────────────────┴───────────────────────────┘
+ *                  ▲
+ *                  └── ResizableSplitter (drag left/right to resize)
  *
- * IMPORTANT: This page does NOT replace the floating AiAssistant panel —
- * both coexist. The panel is for quick access; this page is for longer
- * conversations. They share localStorage history so the user can switch
- * between them mid-conversation.
+ * Both surfaces (popup + page) share the same per-project localStorage
+ * history key, so a conversation started in the popup can be continued
+ * here and vice-versa.
  */
 
 const STORAGE_KEY_PREFIX = 'prismgit-ai-chat-';
@@ -85,42 +95,38 @@ function clearChatHistory(sessionRepoPath: string | null | undefined): void {
 }
 
 /**
- * Starter prompts — shown as clickable chips when the chat is empty.
- * Same set as the floating AiAssistant panel for consistency.
+ * Starter prompts — same as the floating panel for consistency.
+ * Labels are localized via the t() function at render time.
  */
 const STARTER_PROMPTS_WITH_REPO = [
-  { label: 'What changed?', prompt: 'What files have changed since the last commit? Show me the status.' },
-  { label: 'Pull latest', prompt: 'Pull the latest changes from origin. Stash my local changes first if needed.' },
-  { label: 'Recent commits', prompt: 'Show me the recent commits — last 5 with their messages and authors.' },
-  { label: 'List branches', prompt: 'List all local and remote branches. Mark the current one.' },
-  { label: 'Stash changes', prompt: 'Stash my current changes with a descriptive message.' },
-  { label: 'Push commits', prompt: 'Push my local commits to origin. Tell me how many were pushed.' },
+  { labelKey: 'aiAssistant.starterWhatChanged', prompt: 'What files have changed since the last commit? Show me the status.' },
+  { labelKey: 'aiAssistant.starterPullLatest', prompt: 'Pull the latest changes from origin. Stash my local changes first if needed.' },
+  { labelKey: 'aiAssistant.starterRecentCommits', prompt: 'Show me the recent commits — last 5 with their messages and authors.' },
+  { labelKey: 'aiAssistant.starterListBranches', prompt: 'List all local and remote branches. Mark the current one.' },
+  { labelKey: 'aiAssistant.starterStashChanges', prompt: 'Stash my current changes with a descriptive message.' },
+  { labelKey: 'aiAssistant.starterPushCommits', prompt: 'Push my local commits to origin. Tell me how many were pushed.' },
 ];
 
 const STARTER_PROMPTS_NO_REPO = [
-  { label: 'List my repos', prompt: 'List all repositories I have opened in this app.' },
-  { label: 'Clone a repo', prompt: 'I want to clone a repository. Ask me for the URL.' },
-  { label: 'Create a repo', prompt: 'I want to create a new git repository. Ask me where.' },
+  { labelKey: 'aiAssistant.starterListRepos', prompt: 'List all repositories I have opened in this app.' },
+  { labelKey: 'aiAssistant.starterCloneRepo', prompt: 'I want to clone a repository. Ask me for the URL.' },
+  { labelKey: 'aiAssistant.starterCreateRepo', prompt: 'I want to create a new git repository. Ask me where.' },
 ];
 
 export default function AiChatPage() {
   const { t } = useI18n();
   const currentRepo = useRepositoryStore(s => s.currentRepo);
   const settings = useSettingsStore(s => s.settings);
+  const setSetting = useSettingsStore(s => s.setSetting);
   const toast = useToastActions();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // ── Session repo path ──────────────────────────────────────────────────
-  // Default to the app's current repo (or null if no repo is open).
   const [sessionRepoPath, setSessionRepoPath] = useState<string | null>(
     currentRepo?.path ?? null,
   );
 
-  // When the user opens a different repo in the app, follow along —
-  // UNLESS they've manually switched the session via the dropdown. For
-  // simplicity in the full-page version, we always follow the app's
-  // current repo. If the user wants to keep a session pinned to a
-  // different repo, they can use the floating panel.
+  // Follow the app's current repo (so the AI page tracks the sidebar).
   useEffect(() => {
     setSessionRepoPath(currentRepo?.path ?? null);
   }, [currentRepo?.path]);
@@ -138,14 +144,16 @@ export default function AiChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  // ── Token usage tracking — same as the floating panel.
   const [tokenUsage, setTokenUsage] = useState<{ input: number; output: number; contextSize: number }>({ input: 0, output: 0, contextSize: 0 });
-
-  // ── Abort controller for the "Stop" button.
   const abortRef = useRef<AbortController | null>(null);
 
   // ── Chat search state — filters messages by text, highlights matches.
   const [searchQuery, setSearchQuery] = useState('');
+
+  // ── Resizable chat panel width (search panel takes the remainder).
+  // ResizableSplitter sits BETWEEN chat and search — drag right shrinks chat,
+  // drag left grows chat. Chat width is the user-controlled value.
+  const { width: chatWidth, handleResize: handleChatResize } = useResizableWidth(900, 400, 1400);
 
   // Load persisted chat history when the session changes.
   useEffect(() => {
@@ -191,7 +199,7 @@ export default function AiChatPage() {
     return { id, name: id, type, url, apiKey: settings.aiApiKey, model };
   }, [settings]);
 
-  const handleSend = useCallback(async (overrideInput?: string) => {
+  const handleSend = useCallback(async (overrideInput?: string, isRegenerate = false) => {
     const userMsg = (overrideInput ?? input).trim();
     if (!userMsg) return;
     const provider = buildProvider();
@@ -199,20 +207,23 @@ export default function AiChatPage() {
       toast.info(t('changes.aiNoProvider'), t('changes.aiSetProviderHint'));
       return;
     }
-    setInput('');
-    // Capture the current message list BEFORE appending the new user
-    // message — this is what we pass as priorHistory to runWithTools.
-    // (Using the functional update form would give us the new array, not
-    // the pre-send history we want.)
-    const priorHistory = messages;
-    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    if (!isRegenerate) {
+      setInput('');
+      setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    }
     setBusy(true);
     const controller = new AbortController();
     abortRef.current = controller;
     try {
+      // For regenerate: pass messages WITHOUT the last assistant response
+      // so the AI generates a fresh answer. The user message is already
+      // in the history, so we DON'T add a duplicate.
+      const historyForContext = isRegenerate
+        ? messages.slice(0, messages.length - 1) // drop last assistant msg
+        : messages;
       await runWithTools(userMsg, provider, sessionRepoPath ?? undefined, {
         signal: controller.signal,
-        priorHistory,
+        priorHistory: historyForContext,
         contextMaxChars: settings?.aiContextMaxChars ?? 20_000,
         onTokenUsage: (usage: TokenUsage) => {
           setTokenUsage({
@@ -240,7 +251,7 @@ export default function AiChatPage() {
       if (isAbort) {
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: '⏹ Stopped by user. The conversation history is preserved — you can continue with a new message.',
+          content: t('aiAssistant.stoppedByUser'),
         }]);
       } else {
         toast.error(t('changes.aiGenerationFailed'), String(e));
@@ -280,15 +291,51 @@ export default function AiChatPage() {
     ? STARTER_PROMPTS_NO_REPO
     : STARTER_PROMPTS_WITH_REPO;
 
+  // ── Provider switcher ──────────────────────────────────────────────────
+  // Switch LLM provider ON THE FLY — mid-conversation. The conversation
+  // history and context are preserved (they're passed as priorHistory to
+  // runWithTools, which doesn't depend on the provider). The new provider
+  // continues the conversation from where the old one left off.
+  const [showProviderMenu, setShowProviderMenu] = useState(false);
+  const switchProvider = useCallback(async (newProviderId: string) => {
+    const oldProviderId = settings?.aiProvider || '';
+    // ── 1. Save current provider's config to aiProviderConfigs ──
+    const currentUrl = settings?.aiUrl || '';
+    const currentApiKey = settings?.aiApiKey || '';
+    const currentModel = settings?.aiModel || '';
+    const existingConfigs = settings?.aiProviderConfigs || {};
+    const updatedConfigs = { ...existingConfigs };
+    if (oldProviderId) {
+      const existing = updatedConfigs[oldProviderId] || {};
+      updatedConfigs[oldProviderId] = {
+        url: currentUrl || existing.url,
+        apiKey: currentApiKey || existing.apiKey,
+        model: currentModel || existing.model,
+      };
+    }
+    // ── 2. Get the new provider's saved config or defaults ──
+    const preset = getProviderPreset(newProviderId);
+    const savedConfig = updatedConfigs[newProviderId];
+    const newUrl = savedConfig?.url || preset.defaultUrl;
+    const newModel = savedConfig?.model || preset.defaultModel;
+    const newApiKey = savedConfig?.apiKey || '';
+    // ── 3. Apply ALL settings in one batch (atomic — no flicker) ──
+    await Promise.all([
+      setSetting('aiProviderConfigs', updatedConfigs),
+      setSetting('aiProvider', newProviderId),
+      setSetting('aiUrl', newUrl),
+      setSetting('aiModel', newModel),
+      setSetting('aiApiKey', newApiKey),
+    ]);
+    setShowProviderMenu(false);
+  }, [settings, setSetting]);
+
   // ── Search filtering ────────────────────────────────────────────────────
-  // Filter which messages are shown based on the search query. Case-
-  // insensitive. When the search is empty, all messages are shown.
   const searchLower = searchQuery.trim().toLowerCase();
   const filteredMessages = useMemo(() => {
     if (!searchLower) return messages;
     return messages.filter(m => m.content?.toLowerCase().includes(searchLower));
   }, [messages, searchLower]);
-
   const matchCount = searchLower ? filteredMessages.length : 0;
 
   return (
@@ -328,10 +375,10 @@ export default function AiChatPage() {
                   >
                     <div className="flex items-center gap-2">
                       <Folder size={12} className="text-text-tertiary" />
-                      <span>{t('aiAssistant.noRepoMode') || 'No repository (app-level mode)'}</span>
+                      <span>{t('aiAssistant.sessionNoRepo')}</span>
                     </div>
                     <div className="text-3xs text-text-tertiary mt-0.5 ml-[20px]">
-                      Use list_repos / clone_repo / init_repo tools.
+                      {t('aiAssistant.noRepoToolsHint')}
                     </div>
                   </button>
                   {currentRepo && currentRepo.path !== sessionRepoPath && (
@@ -342,17 +389,17 @@ export default function AiChatPage() {
                       <div className="flex items-center gap-2">
                         <Folder size={12} className="text-accent" />
                         <span className="font-medium">{currentRepo.name}</span>
-                        <span className="text-3xs text-accent ml-auto">current</span>
+                        <span className="text-3xs text-accent ml-auto">{t('aiAssistant.currentRepo')}</span>
                       </div>
                       <div className="text-3xs text-text-tertiary mt-0.5 ml-[20px] truncate">{currentRepo.path}</div>
                     </button>
                   )}
                   <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
-                    Known repositories
+                    {t('aiAssistant.knownRepositories')}
                   </div>
                   {sortedRepos.length === 0 ? (
                     <div className="px-3 py-2 text-2xs text-text-tertiary italic">
-                      No repositories yet. Switch to “No repository” mode and use clone_repo or init_repo.
+                      {t('aiAssistant.noRepositoriesYet')}
                     </div>
                   ) : (
                     sortedRepos.map(r => (
@@ -367,6 +414,7 @@ export default function AiChatPage() {
                         <div className="flex items-center gap-2 min-w-0">
                           <Folder size={12} className="text-text-tertiary flex-shrink-0" />
                           <span className="truncate flex-1">{r.name}</span>
+                          <span className="text-3xs text-text-tertiary flex-shrink-0">{formatAgo(Date.now() - r.lastOpened)}</span>
                         </div>
                         <div className="text-3xs text-text-tertiary mt-0.5 ml-[20px] truncate">{r.path}</div>
                       </button>
@@ -376,63 +424,149 @@ export default function AiChatPage() {
               </>
             )}
           </div>
+          {/* Provider switcher — same as popup. Saves current provider's
+              config (URL+key+model) and restores the new provider's saved
+              config. Conversation history is preserved. */}
+          <div className="relative ml-1">
+            <button
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-bg-secondary border border-border-subtle hover:border-accent transition-colors"
+              onClick={() => setShowProviderMenu(v => !v)}
+              title={settings?.aiProvider
+                ? `${t('aiAssistant.providerTitle')}: ${getProviderPreset(settings.aiProvider).label}`
+                : t('aiAssistant.noProviderSelected')}
+            >
+              <span className="truncate max-w-28">
+                {settings?.aiProvider
+                  ? getProviderPreset(settings.aiProvider).label.split(' ')[0]
+                  : t('aiAssistant.noProviderSelected')}
+              </span>
+              <span className="text-text-tertiary text-3xs">▾</span>
+            </button>
+            {showProviderMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowProviderMenu(false)} />
+                <div className="absolute top-full left-0 mt-1 w-72 bg-bg-elevated border border-border-default rounded shadow-xl z-20 max-h-96 overflow-y-auto">
+                  <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
+                    {t('aiAssistant.switchProvider')}
+                  </div>
+                  {PROVIDER_PRESETS.map(p => (
+                    <button
+                      key={p.id}
+                      className={cn(
+                        'w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors flex items-center gap-2',
+                        settings?.aiProvider === p.id && 'bg-accent-muted text-accent',
+                      )}
+                      onClick={() => switchProvider(p.id)}
+                    >
+                      <span className="flex-1 truncate">{p.label}</span>
+                      {p.freeTier && (
+                        <span className="text-3xs px-1 rounded bg-status-added/15 text-status-added">FREE</span>
+                      )}
+                      {settings?.aiProviderConfigs?.[p.id]?.apiKey && (
+                        <span className="text-3xs text-status-added" title="API key saved">✓</span>
+                      )}
+                    </button>
+                  ))}
+                  <div className="text-3xs text-text-tertiary px-3 py-1.5 border-t border-border-subtle">
+                    {t('aiAssistant.switchProviderHint')}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
           {/* Message count badge */}
           {messages.length > 0 && (
             <span className="text-3xs text-text-tertiary px-1.5 py-0.5 rounded bg-bg-secondary border border-border-subtle flex-shrink-0">
-              {messages.length} {messages.length === 1 ? 'message' : 'messages'}
+              {messages.length} {messages.length === 1 ? t('aiAssistant.message') : t('aiAssistant.messages')}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {messages.length > 0 && (
-            <button
-              className="btn btn-ghost !px-2 !py-1 text-xs flex items-center gap-1"
-              onClick={handleClear}
-              title={t('aiAssistant.clearHistory')}
-            >
-              <Trash size={11} />
-              <span className="hidden sm:inline">Clear chat</span>
-            </button>
+            <>
+              {/* Export chat log — same as popup. */}
+              <button
+                className="btn btn-ghost !px-2 !py-1 text-xs flex items-center gap-1"
+                onClick={() => exportChatLog(messages, sessionRepoPath, sessionRepo?.name)}
+                title={t('aiAssistant.exportChatLog')}
+                aria-label={t('aiAssistant.exportChatLabel')}
+              >
+                <Download size={11} />
+              </button>
+              <button
+                className="btn btn-ghost !px-2 !py-1 text-xs flex items-center gap-1"
+                onClick={handleClear}
+                title={t('aiAssistant.clearHistory')}
+              >
+                <Trash size={11} />
+                <span className="hidden sm:inline">{t('aiAssistant.clearChat')}</span>
+              </button>
+            </>
           )}
         </div>
       </div>
 
-      {/* Body: chat (70%) + search sidebar (30%) */}
+      {/* Body: chat panel (left, resizable) + splitter + search panel (right) */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Chat panel — 70% width */}
-        <div className="flex flex-col flex-[7] min-w-0 border-r border-border-default">
+        {/* Chat panel — width controlled by chatWidth state */}
+        <div className="flex flex-col min-w-0 border-r border-border-default" style={{ width: chatWidth }}>
           {/* Messages */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
             {messages.length === 0 ? (
               <div className="space-y-4 h-full flex flex-col justify-center max-w-2xl mx-auto">
                 <div className="text-sm text-text-tertiary text-center py-4">
                   {sessionRepoPath === null
-                    ? (t('aiAssistant.emptyHintNoRepo') || 'No repository open. Ask me to list, clone, or create a repo. Use list_repos to see what you have.')
+                    ? (t('aiAssistant.emptyHintNoRepo') || 'No repository open.')
                     : t('aiAssistant.emptyHint')}
                 </div>
                 {/* Starter prompt chips */}
                 <div className="flex flex-wrap gap-2 justify-center">
                   {starterPrompts.map(sp => (
                     <button
-                      key={sp.label}
+                      key={sp.labelKey}
                       onClick={() => void handleSend(sp.prompt)}
                       className="text-xs px-3 py-1.5 rounded border border-border-default bg-bg-secondary hover:border-accent hover:bg-accent-muted hover:text-accent transition-colors text-text-secondary"
                       title={sp.prompt}
                     >
-                      {sp.label}
+                      {t(sp.labelKey)}
                     </button>
                   ))}
                 </div>
               </div>
             ) : filteredMessages.length === 0 && searchLower ? (
               <div className="text-sm text-text-tertiary text-center py-8">
-                No messages match “{searchQuery}”.
+                {t('aiAssistant.noMessagesMatch').replace('{query}', searchQuery)}
               </div>
             ) : (
               <>
-                {filteredMessages.map((msg, idx) => (
-                  <MessageBubble key={idx} msg={msg} highlight={searchLower || undefined} />
-                ))}
+                {filteredMessages.map((msg, idx) => {
+                  // Build the retry handler — same logic as the popup.
+                  // For user messages: re-send that message.
+                  // For assistant final answers: find the last user message
+                  // BEFORE this answer and re-send it (isRegenerate=true).
+                  const canRetry = !busy && (msg.role === 'user' || (msg.role === 'assistant' && !msg.toolCalls?.length));
+                  let retryHandler: (() => void) | undefined;
+                  if (canRetry) {
+                    if (msg.role === 'user') {
+                      retryHandler = () => void handleSend(msg.content, true);
+                    } else {
+                      // Find the last user message before this assistant message
+                      let lastUserMsg: string | null = null;
+                      for (let i = idx - 1; i >= 0; i--) {
+                        if (messages[i].role === 'user') { lastUserMsg = messages[i].content; break; }
+                      }
+                      if (lastUserMsg) retryHandler = () => void handleSend(lastUserMsg!, true);
+                    }
+                  }
+                  return (
+                    <MessageBubble
+                      key={idx}
+                      msg={msg}
+                      onRegenerate={retryHandler}
+                      t={t}
+                    />
+                  );
+                })}
                 {busy && (
                   <div className="flex items-center gap-2 text-xs text-text-tertiary pl-2">
                     <Loader size={12} className="spin" />
@@ -443,21 +577,21 @@ export default function AiChatPage() {
             )}
           </div>
 
-          {/* Token usage bar */}
+          {/* Token usage bar — same as popup. */}
           {(tokenUsage.input > 0 || tokenUsage.output > 0) && (
             <div className="flex items-center gap-4 px-4 py-1 border-t border-border-subtle bg-bg-tertiary text-3xs text-text-tertiary flex-shrink-0">
-              <span title="Input tokens (sent to the model)">
-                <span className="text-text-secondary font-medium">↓ {tokenUsage.input.toLocaleString()}</span> in
+              <span title={t('aiAssistant.tokensInput')}>
+                <span className="text-text-secondary font-medium">↓ {tokenUsage.input.toLocaleString()}</span> {t('aiAssistant.tokensIn')}
               </span>
-              <span title="Output tokens (generated by the model)">
-                <span className="text-text-secondary font-medium">↑ {tokenUsage.output.toLocaleString()}</span> out
+              <span title={t('aiAssistant.tokensOutput')}>
+                <span className="text-text-secondary font-medium">↑ {tokenUsage.output.toLocaleString()}</span> {t('aiAssistant.tokensOut')}
               </span>
-              <span title="Total context size (all messages + tools sent to the model)">
-                <span className="text-text-secondary font-medium">∑ {tokenUsage.contextSize.toLocaleString()}</span> ctx
+              <span title={t('aiAssistant.tokensContext')}>
+                <span className="text-text-secondary font-medium">∑ {tokenUsage.contextSize.toLocaleString()}</span> {t('aiAssistant.tokensCtx')}
               </span>
               {tokenUsage.contextSize > 50000 && (
-                <span className="text-status-warning" title="Context is getting large — consider starting a new conversation">
-                  ⚠ large context
+                <span className="text-status-warning" title={t('aiAssistant.largeContextTitle')}>
+                  ⚠ {t('aiAssistant.largeContextWarn')}
                 </span>
               )}
             </div>
@@ -480,8 +614,8 @@ export default function AiChatPage() {
               <button
                 className="btn btn-danger !px-3 !py-2 flex-shrink-0"
                 onClick={handleStop}
-                title="Stop generation"
-                aria-label="Stop generation"
+                title={t('aiAssistant.stopGeneration')}
+                aria-label={t('aiAssistant.stopGeneration')}
               >
                 <Square size={14} className="fill-current" />
               </button>
@@ -498,13 +632,22 @@ export default function AiChatPage() {
           </div>
         </div>
 
-        {/* Search panel — 30% width */}
-        <div className="flex flex-col flex-[3] min-w-0 bg-bg-secondary">
+        {/* ── Vertical ResizableSplitter ────────────────────────────────────
+            Drag left → chat shrinks, search grows.
+            Drag right → chat grows, search shrinks.
+            onResize(delta) updates chatWidth by +delta (because chat is on
+            the LEFT of the splitter, per the ResizableSplitter convention). */}
+        <ResizableSplitter direction="horizontal" onResize={handleChatResize} />
+
+        {/* Search panel — takes the remaining width (flex-1) */}
+        <div className="flex flex-col min-w-0 flex-1 bg-bg-secondary">
           <div className="px-3 py-2 border-b border-border-default flex items-center gap-2 bg-bg-elevated">
             <Search size={12} className="text-text-tertiary flex-shrink-0" />
-            <span className="text-xs font-medium text-text-secondary">Chat Search</span>
+            <span className="text-xs font-medium text-text-secondary">{t('aiAssistant.chatSearch')}</span>
             <span className="text-3xs text-text-tertiary ml-auto">
-              {searchLower ? `${matchCount} ${matchCount === 1 ? 'match' : 'matches'}` : `${messages.length} total`}
+              {searchLower
+                ? `${matchCount} ${matchCount === 1 ? t('aiAssistant.match') : t('aiAssistant.matches')}`
+                : `${messages.length} ${t('aiAssistant.total')}`}
             </span>
           </div>
           <div className="p-2 border-b border-border-subtle">
@@ -514,15 +657,15 @@ export default function AiChatPage() {
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search messages…"
+                placeholder={t('aiAssistant.searchPlaceholder')}
                 className="w-full text-xs pl-7 pr-7 py-1.5 bg-bg-primary border border-border-default rounded outline-none focus:border-accent"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
                   className="absolute right-1.5 top-1/2 -translate-y-1/2 icon-btn !w-4 !h-4 text-text-tertiary hover:text-text-primary"
-                  title="Clear search"
-                  aria-label="Clear search"
+                  title={t('aiAssistant.clearSearch')}
+                  aria-label={t('aiAssistant.clearSearch')}
                 >
                   <X size={10} />
                 </button>
@@ -534,12 +677,11 @@ export default function AiChatPage() {
           <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
             {!searchLower ? (
               <div className="text-2xs text-text-tertiary text-center py-6 px-3 leading-relaxed">
-                Type to search through the chat history. Matching messages are filtered in the chat
-                panel on the left, and listed here as quick previews.
+                {t('aiAssistant.searchHintEmpty')}
               </div>
             ) : filteredMessages.length === 0 ? (
               <div className="text-2xs text-text-tertiary text-center py-6">
-                No matches found.
+                {t('aiAssistant.noMatchesFound')}
               </div>
             ) : (
               filteredMessages.map((msg, idx) => {
@@ -579,130 +721,6 @@ export default function AiChatPage() {
 }
 
 /**
- * Render a chat message bubble. Different layouts for:
- *   - user: right-aligned, accent background
- *   - tool: monospace block with Wrench icon + copy button (collapsible)
- *   - assistant with tool_calls: italic "Calling tool..." bubble
- *   - assistant final: markdown-rendered with copy button
- *
- * When `highlight` is set (a lowercase search query), matching substrings
- * are wrapped in <mark> elements.
- */
-function MessageBubble({ msg, highlight }: { msg: ChatMessage; highlight?: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(msg.content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }).catch(() => { /* ignore */ });
-  }, [msg.content]);
-
-  if (msg.role === 'user') {
-    return (
-      <div className="flex items-start gap-2 justify-end">
-        <div className="bg-accent text-text-inverse rounded-lg px-3 py-2 text-sm max-w-[80%] whitespace-pre-wrap break-words">
-          {highlight ? highlightMatch(msg.content, highlight) : msg.content}
-        </div>
-        <User size={16} className="flex-shrink-0 mt-0.5 text-text-tertiary" />
-      </div>
-    );
-  }
-  if (msg.role === 'tool') {
-    return <ToolResultBubble msg={msg} highlight={highlight} />;
-  }
-  if (msg.role === 'assistant' && msg.toolCalls?.length) {
-    const content = msg.content?.trim();
-    if (!content) return null;
-    return (
-      <div className="flex items-center gap-1.5 pl-1 text-2xs text-text-tertiary italic opacity-70">
-        <ArrowRight size={10} />
-        <span>{highlight ? highlightMatch(content, highlight) : content}</span>
-      </div>
-    );
-  }
-  // assistant final answer
-  return (
-    <div className="flex items-start gap-2 group">
-      <Bot size={16} className="flex-shrink-0 mt-0.5 text-accent" />
-      <div className="bg-bg-secondary rounded-lg px-3 py-2 text-sm max-w-[85%] min-w-0 break-words">
-        {highlight
-          ? <MarkdownLiteWithHighlight text={msg.content} highlight={highlight} />
-          : <MarkdownLite text={msg.content} />}
-        <div className="mt-1.5 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            onClick={handleCopy}
-            className="icon-btn !w-5 !h-5 hover:text-accent"
-            title="Copy message"
-            aria-label="Copy message"
-          >
-            {copied ? <Check size={12} className="text-status-added" /> : <Copy size={12} />}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Tool result bubble — ALWAYS COLLAPSED by default (same as the floating
- * panel). Clicking the header toggles expand/collapse.
- */
-function ToolResultBubble({ msg, highlight }: { msg: ChatMessage; highlight?: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(msg.content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }).catch(() => { /* ignore */ });
-  }, [msg.content]);
-
-  const firstLine = useMemo(() => {
-    const line = msg.content.split('\n').find(l => l.trim());
-    if (!line) return '(empty result)';
-    return line.length > 80 ? line.slice(0, 80) + '…' : line;
-  }, [msg.content]);
-
-  const lineCount = useMemo(() => msg.content.split('\n').length, [msg.content]);
-
-  return (
-    <div className="bg-bg-tertiary border border-border-subtle rounded text-xs font-mono">
-      <button
-        onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-2xs text-text-tertiary hover:bg-bg-hover transition-colors rounded-t"
-      >
-        {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-        <Wrench size={10} />
-        <span className="font-medium text-text-secondary">{msg.toolName}</span>
-        {!expanded && (
-          <span className="text-text-tertiary truncate flex-1 ml-1 opacity-70">
-            {highlight ? highlightMatch(firstLine, highlight) : firstLine}
-          </span>
-        )}
-        <span className="text-3xs text-text-tertiary flex-shrink-0 ml-auto px-1 rounded bg-bg-secondary">
-          {lineCount} {lineCount === 1 ? 'line' : 'lines'}
-        </span>
-        <span
-          onClick={handleCopy}
-          className="icon-btn !w-4 !h-4 hover:text-accent flex-shrink-0 cursor-pointer"
-          title="Copy result"
-        >
-          {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
-        </span>
-      </button>
-      {expanded && (
-        <div className="px-2.5 pb-2 text-text-secondary max-h-72 overflow-y-auto whitespace-pre-wrap break-words border-t border-border-subtle">
-          {highlight ? highlightMatch(msg.content, highlight) : msg.content}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
  * Highlight all case-insensitive occurrences of `query` in `text` by
  * wrapping them in <mark> elements. Returns a React fragment.
  */
@@ -722,235 +740,4 @@ function highlightMatch(text: string, query: string): React.ReactNode {
     }
     return <span key={i}>{part}</span>;
   });
-}
-
-/**
- * Markdown renderer that highlights matches inside text segments (not
- * inside code blocks — preserves their formatting as-is).
- */
-function MarkdownLiteWithHighlight({ text, highlight }: { text: string; highlight: string }) {
-  const segments = useMemo(() => {
-    const parts: { type: 'code' | 'text'; content: string; lang?: string }[] = [];
-    const re = /```(\w*)\n?([\s\S]*?)```/g;
-    let lastIdx = 0;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(text)) !== null) {
-      if (match.index > lastIdx) {
-        parts.push({ type: 'text', content: text.slice(lastIdx, match.index) });
-      }
-      parts.push({ type: 'code', content: match[2] || '', lang: match[1] || undefined });
-      lastIdx = match.index + match[0].length;
-    }
-    if (lastIdx < text.length) {
-      parts.push({ type: 'text', content: text.slice(lastIdx) });
-    }
-    return parts;
-  }, [text]);
-
-  return (
-    <div className="space-y-2">
-      {segments.map((seg, i) => {
-        if (seg.type === 'code') {
-          return (
-            <div key={i} className="relative">
-              <pre className="bg-bg-tertiary border border-border-subtle rounded p-2 text-2xs font-mono overflow-x-auto max-h-72">
-                <code>{seg.content}</code>
-              </pre>
-              {seg.lang && (
-                <span className="absolute top-1 right-2 text-3xs text-text-tertiary uppercase">
-                  {seg.lang}
-                </span>
-              )}
-            </div>
-          );
-        }
-        return <TextSegmentWithHighlight key={i} text={seg.content} highlight={highlight} />;
-      })}
-    </div>
-  );
-}
-
-/** Render a text segment with inline formatting AND match highlighting. */
-function TextSegmentWithHighlight({ text, highlight }: { text: string; highlight: string }) {
-  const lines = text.split('\n');
-  const blocks: React.ReactNode[] = [];
-  let listItems: { ordered: boolean; items: string[] } | null = null;
-
-  const flushList = (key: number) => {
-    if (!listItems) return;
-    if (listItems.ordered) {
-      blocks.push(
-        <ol key={`ol-${key}`} className="list-decimal ml-4 space-y-0.5 text-text-primary">
-          {listItems.items.map((it, i) => <li key={i}><InlineFormatWithHighlight text={it} highlight={highlight} /></li>)}
-        </ol>
-      );
-    } else {
-      blocks.push(
-        <ul key={`ul-${key}`} className="list-disc ml-4 space-y-0.5 text-text-primary">
-          {listItems.items.map((it, i) => <li key={i}><InlineFormatWithHighlight text={it} highlight={highlight} /></li>)}
-        </ul>
-      );
-    }
-    listItems = null;
-  };
-
-  lines.forEach((line, i) => {
-    const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
-    const numberedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
-    if (bulletMatch) {
-      if (!listItems || listItems.ordered) {
-        flushList(i);
-        listItems = { ordered: false, items: [] };
-      }
-      listItems.items.push(bulletMatch[1]);
-    } else if (numberedMatch) {
-      if (!listItems || !listItems.ordered) {
-        flushList(i);
-        listItems = { ordered: true, items: [] };
-      }
-      listItems.items.push(numberedMatch[1]);
-    } else {
-      flushList(i);
-      if (line.trim()) {
-        blocks.push(<p key={`p-${i}`} className="text-text-primary leading-relaxed"><InlineFormatWithHighlight text={line} highlight={highlight} /></p>);
-      }
-    }
-  });
-  flushList(lines.length);
-
-  return <>{blocks}</>;
-}
-
-/** Inline formatting: **bold** and `inline code`, with match highlighting. */
-function InlineFormatWithHighlight({ text, highlight }: { text: string; highlight: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={i} className="font-semibold text-text-primary">{highlightMatch(part.slice(2, -2), highlight)}</strong>;
-        }
-        if (part.startsWith('`') && part.endsWith('`')) {
-          return <code key={i} className="px-1 py-0.5 rounded bg-bg-tertiary text-text-primary text-3xs font-mono">{part.slice(1, -1)}</code>;
-        }
-        return <span key={i}>{highlightMatch(part, highlight)}</span>;
-      })}
-    </>
-  );
-}
-
-/**
- * Lightweight markdown renderer — no external dependency.
- * Same as the one in AiAssistant.tsx (copied here because AiAssistant
- * doesn't export its helpers).
- */
-function MarkdownLite({ text }: { text: string }) {
-  const segments = useMemo(() => {
-    const parts: { type: 'code' | 'text'; content: string; lang?: string }[] = [];
-    const re = /```(\w*)\n?([\s\S]*?)```/g;
-    let lastIdx = 0;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(text)) !== null) {
-      if (match.index > lastIdx) {
-        parts.push({ type: 'text', content: text.slice(lastIdx, match.index) });
-      }
-      parts.push({ type: 'code', content: match[2] || '', lang: match[1] || undefined });
-      lastIdx = match.index + match[0].length;
-    }
-    if (lastIdx < text.length) {
-      parts.push({ type: 'text', content: text.slice(lastIdx) });
-    }
-    return parts;
-  }, [text]);
-
-  return (
-    <div className="space-y-2">
-      {segments.map((seg, i) => {
-        if (seg.type === 'code') {
-          return (
-            <div key={i} className="relative">
-              <pre className="bg-bg-tertiary border border-border-subtle rounded p-2 text-2xs font-mono overflow-x-auto max-h-72">
-                <code>{seg.content}</code>
-              </pre>
-              {seg.lang && (
-                <span className="absolute top-1 right-2 text-3xs text-text-tertiary uppercase">
-                  {seg.lang}
-                </span>
-              )}
-            </div>
-          );
-        }
-        return <TextSegment key={i} text={seg.content} />;
-      })}
-    </div>
-  );
-}
-
-/** Render a text segment with inline bold/code and bullet/numbered lists. */
-function TextSegment({ text }: { text: string }) {
-  const lines = text.split('\n');
-  const blocks: React.ReactNode[] = [];
-  let listItems: { ordered: boolean; items: string[] } | null = null;
-
-  const flushList = (key: number) => {
-    if (!listItems) return;
-    if (listItems.ordered) {
-      blocks.push(
-        <ol key={`ol-${key}`} className="list-decimal ml-4 space-y-0.5 text-text-primary">
-          {listItems.items.map((it, i) => <li key={i}><InlineFormat text={it} /></li>)}
-        </ol>
-      );
-    } else {
-      blocks.push(
-        <ul key={`ul-${key}`} className="list-disc ml-4 space-y-0.5 text-text-primary">
-          {listItems.items.map((it, i) => <li key={i}><InlineFormat text={it} /></li>)}
-        </ul>
-      );
-    }
-    listItems = null;
-  };
-
-  lines.forEach((line, i) => {
-    const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
-    const numberedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
-    if (bulletMatch) {
-      if (!listItems || listItems.ordered) {
-        flushList(i);
-        listItems = { ordered: false, items: [] };
-      }
-      listItems.items.push(bulletMatch[1]);
-    } else if (numberedMatch) {
-      if (!listItems || !listItems.ordered) {
-        flushList(i);
-        listItems = { ordered: true, items: [] };
-      }
-      listItems.items.push(numberedMatch[1]);
-    } else {
-      flushList(i);
-      if (line.trim()) {
-        blocks.push(<p key={`p-${i}`} className="text-text-primary leading-relaxed"><InlineFormat text={line} /></p>);
-      }
-    }
-  });
-  flushList(lines.length);
-
-  return <>{blocks}</>;
-}
-
-/** Inline formatting: **bold** and `inline code`. */
-function InlineFormat({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={i} className="font-semibold text-text-primary">{part.slice(2, -2)}</strong>;
-        }
-        if (part.startsWith('`') && part.endsWith('`')) {
-          return <code key={i} className="px-1 py-0.5 rounded bg-bg-tertiary text-text-primary text-3xs font-mono">{part.slice(1, -1)}</code>;
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </>
-  );
 }

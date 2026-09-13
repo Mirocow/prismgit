@@ -156,19 +156,19 @@ export function StatusBar({
           const m = status?.isMerging, r = status?.isRebasing, c = status?.isCherryPicking, v = status?.isReverting, b = status?.isBisecting;
           if (!m && !r && !c && !v && !b) return null;
           let label = '';
-          if (m) label = 'Merging';
-          else if (r) label = 'Rebasing';
-          else if (c) label = 'Cherry-picking';
-          else if (v) label = 'Reverting';
-          else if (b) label = 'Bisecting';
+          if (m) label = t('banner.mergingLabel');
+          else if (r) label = t('banner.rebasingLabel');
+          else if (c) label = t('banner.cherryPickingLabel');
+          else if (v) label = t('banner.revertingStatusBarLabel');
+          else if (b) label = t('banner.bisectingLabel');
           return (
             <a
               href="#/changes"
               className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-status-warning/15 border border-status-warning/50 text-status-warning font-medium hover:bg-status-warning/25 transition-colors"
-              title={`Working tree is in ${label.toLowerCase()} state. Click to open Changes and Continue / Skip / Abort.`}
+              title={t('banner.stateTooltip').replace('{label}', label.toLowerCase())}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-status-warning inline-block animate-pulse" />
-              {label} in progress
+              {t('banner.stateInProgress').replace('{label}', label)}
             </a>
           );
         })()}

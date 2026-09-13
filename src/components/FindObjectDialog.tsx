@@ -3,6 +3,7 @@ import { Search, X, GitBranch, Tag, CornerDownRight } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
+import { useI18n } from '../lib/i18n';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
@@ -19,6 +20,7 @@ interface FindObjectDialogProps {
 }
 
 export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogProps) {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastActions();
   const [query, setQuery] = useState('');
@@ -38,11 +40,11 @@ export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogPr
       setResults(found);
       setSelectedIdx(0);
     } catch (e) {
-      toast.error('Search failed', String(e));
+      toast.error(t('search.findObject.searchFailed'), String(e));
     } finally {
       setLoading(false);
     }
-  }, [repo, toast]);
+  }, [repo, toast, t]);
 
   useEffect(() => {
     if (open) {
@@ -110,13 +112,13 @@ export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogPr
             ref={inputRef}
             type="text"
             className="flex-1 bg-transparent border-0 text-sm"
-            placeholder="Find branch, tag, or ref..."
+            placeholder={t('search.findObject.placeholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             style={{ background: 'transparent', border: 'none', padding: 0 }}
           />
-          {loading && <span className="text-2xs text-text-tertiary">searching...</span>}
+          {loading && <span className="text-2xs text-text-tertiary">{t('search.findObject.searching')}</span>}
           <button className="icon-btn" onClick={onClose}>
             <X size={14} />
           </button>
@@ -125,7 +127,7 @@ export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogPr
         <div className="flex-1 overflow-y-auto">
           {results.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-text-tertiary">
-              {query.trim() ? 'No refs found' : 'Start typing to search...'}
+              {query.trim() ? t('search.findObject.noRefs') : t('search.findObject.startTyping')}
             </div>
           ) : (
             results.map((ref, idx) => {
@@ -162,11 +164,11 @@ export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogPr
 
         <div className="px-4 py-2 border-t border-border-default text-2xs text-text-tertiary flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span>↑↓ navigate</span>
-            <span>↵ select</span>
-            <span>esc close</span>
+            <span>{t('search.findObject.navigate')}</span>
+            <span>{t('search.findObject.select')}</span>
+            <span>{t('search.findObject.close')}</span>
           </div>
-          <span>{results.length} results</span>
+          <span>{t('search.findObject.results').replace('{count}', String(results.length))}</span>
         </div>
       </div>
     </div>
