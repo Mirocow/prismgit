@@ -854,15 +854,23 @@ export const gitAbortOpTool: AITool = {
 
 /** List all repositories that the app has opened before.
  *
- *  Returns a compact list (name + path + last-opened timestamp). Used by the
- *  AI Assistant when the user asks "what repos do I have?" or wants to switch
- *  context without navigating the sidebar.
+ *  DEFAULT mode returns name + path + last-opened + pinned status.
+ *  Pass include_status=true to ALSO fetch git status (branch, ahead/behind,
+ *  file change counts) for every repo in parallel. This lets the user ask
+ *  "show me the status of all my repos" in a single tool call.
  */
 export const listReposTool: AITool = {
   name: 'list_repos',
-  description: 'List all repositories that the app has previously opened. Each entry has name, path, last-opened time, and pinned/favorite status. Use this when the user asks "what repos do I have" or wants to switch context — does NOT require a repo to be open.',
-  parameters: { type: 'object', properties: {}, additionalProperties: false },
-  async execute() {
+  description: 'List all repositories the app has opened. By default returns name+path+last-opened. Pass include_status=true to ALSO fetch git status (branch, ahead/behind, changed files) for every repo — useful for "show status of all my repos".',
+  parameters: {
+    type: 'object',
+    properties: {
+      include_status: { type: 'boolean', description: 'If true, fetch git status (branch, ahead/behind, file counts) for every repo in parallel. Slower but gives the full picture. Default: false.', default: false },
+    },
+    additionalProperties: false,
+  },
+  async execute(params) {
+    const includeStatus = (params as { include_status?: boolean })?.include_status ?? false;
     const repos = await api.settings.getRepos();
     if (repos.length === 0) {
       return 'No repositories in the app list yet. Use clone_repo or init_repo to add one, or open one via the sidebar "Open Repository" button.';
@@ -871,10 +879,46 @@ export const listReposTool: AITool = {
     const sorted = [...repos].sort((a, b) => b.lastOpened - a.lastOpened);
     const lines: string[] = [`Total: ${sorted.length} repositories`];
     lines.push('');
-    for (const r of sorted) {
-      const ago = formatAgo(Date.now() - r.lastOpened);
-      const pin = r.pinned ? ' [pinned]' : '';
-      lines.push(`• ${r.name}${pin} — ${r.path} (last opened ${ago})`);
+
+    if (!includeStatus) {
+      // Fast mode — just name + path + timestamp.
+      for (const r of sorted) {
+        const ago = formatAgo(Date.now() - r.lastOpened);
+        const pin = r.pinned ? ' [pinned]' : '';
+        lines.push(`• ${r.name}${pin} — ${r.path} (last opened ${ago})`);
+      }
+      lines.push('');
+      lines.push('Tip: call list_repos with include_status=true to see git status of all repos.');
+      return lines.join('\n');
+    }
+
+    // ── Multi-repo status mode ───────────────────────────────────────
+    // Fetch git status for every repo IN PARALLEL — don't wait for each
+    // one sequentially. If a repo is missing/unavailable, show an error
+    // for just that repo but keep going.
+    lines.push('Fetching status for all repos (parallel)...');
+    lines.push('');
+    const statusPromises = sorted.map(async (r) => {
+      try {
+        const status = await api.git.status(r.path);
+        const branch = status.current ?? 'detached HEAD';
+        const ahead = status.ahead > 0 ? `↑${status.ahead}` : '';
+        const behind = status.behind > 0 ? `↓${status.behind}` : '';
+        const changes = status.files.length > 0 ? `${status.files.length} changed` : 'clean';
+        const sync = ahead || behind ? ` ${ahead}${behind}` : '';
+        return { name: r.name, path: r.path, status: `${branch}${sync} — ${changes}`, error: null as string | null };
+      } catch (e) {
+        return { name: r.name, path: r.path, status: '', error: String(e).slice(0, 80) };
+      }
+    });
+    const statuses = await Promise.all(statusPromises);
+    for (const s of statuses) {
+      const pin = sorted.find(r => r.path === s.path)?.pinned ? ' [pinned]' : '';
+      if (s.error) {
+        lines.push(`• ${s.name}${pin} — ${s.path} — ERROR: ${s.error}`);
+      } else {
+        lines.push(`• ${s.name}${pin} — ${s.status} — ${s.path}`);
+      }
     }
     return lines.join('\n');
   },

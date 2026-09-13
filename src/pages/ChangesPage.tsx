@@ -247,6 +247,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const [diffLoading, setDiffLoading] = useState(false);
   const [commitMsg, setCommitMsg] = useState('');
   const [amend, setAmend] = useState(false);
+  // ── Auto-suggest commit message ───────────────────────────────────────
+  // When the user stages files and the commit message is empty, the AI
+  // suggests a commit message after a 2s debounce. Non-blocking — runs
+  // in the background, doesn't freeze the UI. The suggestion appears as
+  // a subtle hint above the textarea; clicking it fills the field.
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [aiSuggesting, setAiSuggesting] = useState(false);
+  const aiSuggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aiSuggestAbortRef = useRef<AbortController | null>(null);
   // When true, commit auto-stages all changes before committing (git add . && git commit)
   const [commitAll, setCommitAll] = useState(false);
   const [fileFilter, setFileFilter] = useState('');
@@ -1327,6 +1336,52 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const renamedOldPaths = useMemo(() => new Set(detectedRenames.map(r => r.oldPath)), [detectedRenames]);
   const renamedNewPaths = useMemo(() => new Set(detectedRenames.map(r => r.newPath)), [detectedRenames]);
 
+  // ── Auto-suggest commit message ───────────────────────────────────────
+  // Fires when: (1) there are staged files, (2) the commit message is
+  // empty, (3) AI is enabled in settings. Debounced 2s — doesn't fire on
+  // every stage/unstage, only when the user stops staging for 2s.
+  // Non-blocking: uses AbortController, textarea stays fully editable.
+  useEffect(() => {
+    if (aiSuggestTimerRef.current) clearTimeout(aiSuggestTimerRef.current);
+    aiSuggestAbortRef.current?.abort();
+    aiSuggestAbortRef.current = null;
+
+    if (!settings?.aiCommitMessagesEnabled) { setAiSuggestion(null); return; }
+    if (commitMsg.trim()) { setAiSuggestion(null); return; }
+    if (stagedFiles.length === 0) { setAiSuggestion(null); return; }
+
+    aiSuggestTimerRef.current = setTimeout(async () => {
+      const provider = buildAIProvider(settings);
+      if (!provider) return;
+      const controller = new AbortController();
+      aiSuggestAbortRef.current = controller;
+      setAiSuggesting(true);
+      try {
+        const diffArgs = ['diff', '--cached', '--stat'];
+        const diffText = await api.git.raw(repo.path, diffArgs);
+        if (controller.signal.aborted) return;
+        if (!diffText.trim()) { setAiSuggestion(null); return; }
+        const recentMsgs = journal.slice(0, 5).map(j => j.subject);
+        const result = await generateCommitMessage({
+          diff: diffText,
+          recentMessages: recentMsgs,
+          provider,
+        });
+        if (controller.signal.aborted) return;
+        const cleaned = result.trim();
+        if (cleaned) setAiSuggestion(cleaned);
+      } catch {
+        // Silently fail — user can click AI button for manual feedback.
+      } finally {
+        if (!controller.signal.aborted) setAiSuggesting(false);
+      }
+    }, 2000);
+
+    return () => {
+      if (aiSuggestTimerRef.current) clearTimeout(aiSuggestTimerRef.current);
+    };
+  }, [stagedFiles.length, commitMsg, settings?.aiCommitMessagesEnabled, settings, repo.path, journal]);
+
   // Unstaged (changed, non-staged) files — always visible (default).
   // Exclude files that are part of a detected rename (old path = delete,
   // new path = untracked) — they'll be shown as a single Renamed entry.
@@ -2397,8 +2452,31 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 Commit
               </button>
             </div>
-            <div className="flex-1 flex overflow-hidden">
-              <textarea
+            <div className="flex-1 flex overflow-hidden flex-col">
+              {/* AI auto-suggestion hint — appears above the textarea when
+                  the AI has generated a suggestion in the background.
+                  Click to fill the textarea. Non-intrusive: subtle styling,
+                  dismissable by just typing in the textarea (which sets
+                  commitMsg → the useEffect clears the suggestion). */}
+              {aiSuggestion && !commitMsg.trim() && (
+                <button
+                  className="flex items-center gap-1.5 px-2 py-1 bg-accent-muted/50 border-b border-accent/20 text-2xs text-accent hover:bg-accent-muted transition-colors text-left"
+                  onClick={() => { setCommitMsg(aiSuggestion); setAiSuggestion(null); }}
+                  title="Click to use this AI-generated commit message"
+                >
+                  <Sparkles size={9} className="flex-shrink-0" />
+                  <span className="truncate flex-1 font-mono">{aiSuggestion.split('\n')[0]}</span>
+                  <span className="text-3xs text-text-tertiary flex-shrink-0">click to use</span>
+                </button>
+              )}
+              {aiSuggesting && !aiSuggestion && !commitMsg.trim() && (
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs text-text-tertiary">
+                  <Loader size={9} className="animate-spin" />
+                  <span>Suggesting commit message…</span>
+                </div>
+              )}
+              <div className="flex-1 flex overflow-hidden">
+                <textarea
                 id="commit-message-input"
                 className="flex-1 text-sm font-mono resize-none p-2 bg-bg-primary border-r border-border-subtle"
                 placeholder={t('changes.commitMessage')}
@@ -2417,6 +2495,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                   <CommitMarkdownPreview content={commitMsg} />
                 </div>
               )}
+              </div>
             </div>
           </div>
         </div>

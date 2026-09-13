@@ -250,6 +250,9 @@ Rules:
 ── Error recovery ──
 20. If a tool returns an error (e.g. "Ollama chat error 0"), DON'T repeat the same request. Instead, tell the user what happened and suggest a fix (e.g. "the model may have timed out, try again" or "check if the git operation is valid").
 21. If the user repeats the same request 2+ times and you keep failing, STOP and explain what's going wrong — don't just retry the same tool call in a loop.
+
+── Language ──
+22. MATCH THE USER'S LANGUAGE. If the user writes in Russian, respond in Russian. If in English, respond in English. If in Chinese, respond in Chinese. If in German, respond in German. Detect the language from the user's message and use it for ALL your responses — tool descriptions, summaries, explanations. This is critical for a good user experience.
 `;
 }
 

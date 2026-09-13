@@ -3,7 +3,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { useI18n } from '../lib/i18n';
-import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download, ChevronRight, ChevronDown } from './icons';
+import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download, ChevronRight, ChevronDown, RefreshCw } from './icons';
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage } from '../lib/aiChat';
 import { type LLMProvider } from '../lib/aiCommitMessages';
@@ -569,7 +569,30 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         ) : (
-          messages.map((msg, idx) => <MessageBubble key={idx} msg={msg} />)
+          <>
+            {messages.map((msg, idx) => <MessageBubble key={idx} msg={msg} />)}
+            {/* Regenerate button — appears under the last assistant message
+                when NOT busy. Re-runs the last user prompt with the same
+                context but different temperature, giving a fresh response. */}
+            {!busy && messages.length >= 2 && (() => {
+              const lastMsg = messages[messages.length - 1];
+              const isLastAssistant = lastMsg?.role === 'assistant' && !lastMsg.toolCalls?.length;
+              if (!isLastAssistant) return null;
+              // Find the last user message for re-sending
+              const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+              if (!lastUserMsg) return null;
+              return (
+                <button
+                  className="flex items-center gap-1 text-2xs text-text-tertiary hover:text-accent transition-colors mt-1"
+                  onClick={() => void handleSend(lastUserMsg.content)}
+                  title="Regenerate the last response with a fresh attempt"
+                >
+                  <RefreshCw size={9} />
+                  Regenerate
+                </button>
+              );
+            })()}
+          </>
         )}
         {busy && (
           <div className="flex items-center gap-2 text-xs text-text-tertiary">
