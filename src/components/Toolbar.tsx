@@ -951,10 +951,10 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
         'Push', currentRepo.path, 'git push',
         () => push(currentRepo.path)
       );
-      toast.success('Pushed successfully');
+      toast.success(t('toast.git.pushSuccess'));
       // Notify History page to reload (one-shot event, no loop).
       window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
-    } catch (e) { toast.error('Push failed', String(e)); }
+    } catch (e) { toast.error(t('toast.git.pushFailed'), String(e)); }
   };
   const handlePull = async () => {
     if (!currentRepo) return;
@@ -975,10 +975,10 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
     } catch (e) {
       const msg = String(e);
       if (msg.includes('CONFLICT') || msg.includes('conflict')) {
-        toast.warning('Pull resulted in conflicts', 'Use "Resolve Conflicts" button');
+        toast.warning(t('toast.git.pullConflicts'), 'Use "Resolve Conflicts" button');
         refreshStatus(currentRepo.path);
       } else {
-        toast.error('Pull failed', msg);
+        toast.error(t('toast.git.pullFailed'), msg);
       }
     }
   };
@@ -1058,16 +1058,16 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           case 'stage':
             return (
               <div key={key} className="flex items-center">
-                <LabeledButton icon={Plus} label="Stage" iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
-                <LabeledButton icon={Minus} label="Unstage" iconColor={COLOR_ORANGE} onClick={() => {
+                <LabeledButton icon={Plus} label={t('action.button.stage')} iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
+                <LabeledButton icon={Minus} label={t('action.button.unstage')} iconColor={COLOR_ORANGE} onClick={() => {
                   if (!currentRepo) return;
                   useOperationLogStore.getState().logOperation(
                     'Unstage All', currentRepo.path, 'git reset HEAD -- .',
                     () => api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])
                   ).then(() => refreshStatus(currentRepo.path))
-                   .catch((e) => toast.error('Unstage failed', String(e)));
-                }} disabled={disabled} title="Unstage all changes" />
-                <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
+                   .catch((e) => toast.error(t('toast.git.unstageFailed'), String(e)));
+                }} disabled={disabled} title={t('action.title.unstageAll')} />
+                <LabeledButton icon={Trash} label={t('action.button.discard')} iconColor={COLOR_RED} onClick={() => {
                   if (!currentRepo) return;
                   void confirmDialog({
                     title: 'Discard ALL uncommitted changes?',
@@ -1083,8 +1083,8 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                         await api.git.raw(currentRepo.path, ['clean', '-fd']);
                         await refreshStatus(currentRepo.path);
                       }
-                    ).then(() => toast.success('Changes discarded'))
-                     .catch((e) => toast.error('Discard failed', String(e)));
+                    ).then(() => toast.success(t('toast.git.discardSuccess')))
+                     .catch((e) => toast.error(t('toast.git.discardFailed'), String(e)));
                   });
                 }} disabled={disabled || isInProgress} title={isInProgress ? 'Blocked — finish the in-progress operation first' : 'Discard all changes'} />
                 <Divider />
@@ -1093,25 +1093,25 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           case 'stash':
             return (
               <div key={key} className="flex items-center">
-                <LabeledButton icon={CloudDownload} label="Stash" iconColor={COLOR_PURPLE} onClick={() => {
+                <LabeledButton icon={CloudDownload} label={t('action.button.stash')} iconColor={COLOR_PURPLE} onClick={() => {
                   if (!currentRepo) return;
                   useOperationLogStore.getState().logOperation(
                     'Stash', currentRepo.path, 'git stash push -u',
                     () => api.git.stashPush(currentRepo.path, undefined, true)
                   ).then(() => {
-                    toast.success('Stash saved'); refreshStatus(currentRepo.path);
-                  }).catch((e) => toast.error('Stash failed', String(e)));
-                }} disabled={disabled} title="Save stash" />
-                <LabeledButton icon={GitPullRequest} label="Pop" iconColor={COLOR_PURPLE} onClick={() => {
+                    toast.success(t('toast.stash.saved')); refreshStatus(currentRepo.path);
+                  }).catch((e) => toast.error(t('toast.stash.failed'), String(e)));
+                }} disabled={disabled} title={t('action.title.saveStash')} />
+                <LabeledButton icon={GitPullRequest} label={t('action.button.pop')} iconColor={COLOR_PURPLE} onClick={() => {
                   if (!currentRepo) return;
                   api.git.stashList(currentRepo.path).then(stashes => {
-                    if (stashes.length === 0) { toast.info('No stashes'); return; }
+                    if (stashes.length === 0) { toast.info(t('toast.stash.none')); return; }
                     useOperationLogStore.getState().logOperation(
                       'Stash Pop', currentRepo.path, 'git stash pop stash@{0}',
                       () => api.git.stashPop(currentRepo.path, 0)
                     ).then(() => {
-                      toast.success('Stash popped'); refreshStatus(currentRepo.path);
-                    }).catch((e) => toast.error('Pop failed', String(e)));
+                      toast.success(t('toast.stash.popped')); refreshStatus(currentRepo.path);
+                    }).catch((e) => toast.error(t('toast.stash.popFailed'), String(e)));
                   });
                 }} disabled={disabled} title="Pop latest stash (apply + drop)" />
                 <Divider />
@@ -1120,9 +1120,9 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           case 'log':
             return (
               <div key={key} className="flex items-center">
-                <LabeledButton icon={GitBranch} label="History" iconColor={COLOR_BLUE} onClick={() => navigate('/history')} disabled={disabled} title="Commit history" active={currentPath === '/history'} />
-                <LabeledButton icon={FileText} label="Diff" iconColor={COLOR_BLUE} onClick={() => navigate('/diff')} disabled={disabled} title="Compare files between refs" active={currentPath === '/diff'} />
-                <LabeledButton icon={Search} label="Blame" iconColor={COLOR_BLUE} onClick={() => navigate('/blame')} disabled={disabled} title="Blame a file" active={currentPath === '/blame'} />
+                <LabeledButton icon={GitBranch} label={t('action.button.history')} iconColor={COLOR_BLUE} onClick={() => navigate('/history')} disabled={disabled} title="Commit history" active={currentPath === '/history'} />
+                <LabeledButton icon={FileText} label={t('action.button.diff')} iconColor={COLOR_BLUE} onClick={() => navigate('/diff')} disabled={disabled} title="Compare files between refs" active={currentPath === '/diff'} />
+                <LabeledButton icon={Search} label={t('action.button.blame')} iconColor={COLOR_BLUE} onClick={() => navigate('/blame')} disabled={disabled} title="Blame a file" active={currentPath === '/blame'} />
                 <Divider />
               </div>
             );
@@ -1130,7 +1130,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
             return (
               <div key={key} className="flex items-center">
                 <LabeledButton icon={GitMerge} label="Git-Flow" iconColor={COLOR_ORANGE} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow operations" />
-                <LabeledButton icon={RotateCcw} label="Rebase" iconColor={COLOR_ORANGE} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Interactive rebase" />
+                <LabeledButton icon={RotateCcw} label={t('action.button.rebase')} iconColor={COLOR_ORANGE} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Interactive rebase" />
               </div>
             );
           default:

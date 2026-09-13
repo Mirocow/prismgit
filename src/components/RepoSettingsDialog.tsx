@@ -4,6 +4,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 /**
  * SmartGit "Repository | Settings": per-repository configuration stored in
@@ -17,6 +18,7 @@ type Tab = (typeof TABS)[number];
 export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => void; remoteName?: string }) {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastActions();
+  const { t } = useI18n();
   const [tab, setTab] = useState<Tab>('User');
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -58,7 +60,7 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
       setEncoding(enc);
       setTagGroupPattern(tgp); setTagGroupOrder(tgo);
     } catch (e) {
-      toast.error('Failed to load repository settings', String(e));
+      toast.error(t('toast.repo.settingsLoadFailed'), String(e));
     } finally {
       setBusy(false);
     }
@@ -89,10 +91,10 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
         await api.git.configUnset(p, 'smartgit.tag-grouping.pattern').catch(() => {});
         await api.git.configUnset(p, 'smartgit.tag-grouping.order').catch(() => {});
       }
-      toast.success('Repository settings saved');
+      toast.success(t('toast.repo.settingsSaved'));
       onClose();
     } catch (e) {
-      toast.error('Failed to save settings', String(e));
+      toast.error(t('toast.repo.settingsSaveFailed'), String(e));
     } finally {
       setSaving(false);
     }
@@ -105,7 +107,7 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={onClose}>
       <div className="panel w-full max-w-xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center px-4 py-3 border-b border-border">
-          <span className="text-sm font-semibold">Repository Settings</span>
+          <span className="text-sm font-semibold">{t('action.label.repositorySettings')}</span>
           <span className="text-xs text-text-tertiary ml-2 truncate">{repo.name}</span>
           {remoteName && (
             <span className="badge badge-renamed ml-2 text-2xs">remote: {remoteName}</span>
@@ -127,16 +129,16 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
         </div>
 
         <div className="flex border-b border-border overflow-x-auto">
-          {TABS.map((t) => (
+          {TABS.map((tabName) => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={tabName}
+              onClick={() => setTab(tabName)}
               className={cn(
                 'px-3 py-2 text-xs whitespace-nowrap border-b-2 -mb-px',
-                tab === t ? 'border-accent text-accent font-medium' : 'border-transparent text-text-secondary hover:text-text-primary'
+                tab === tabName ? 'border-accent text-accent font-medium' : 'border-transparent text-text-secondary hover:text-text-primary'
               )}
             >
-              {t}
+              {tabName}
             </button>
           ))}
         </div>
@@ -148,7 +150,7 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
             <div className="grid grid-cols-1 gap-3">
               <p className="text-text-tertiary">Identifies the commit author for this repository (user.name / user.email in .git/config).</p>
               <label className="flex flex-col gap-1 text-text-secondary">User name
-                <input value={userName} onChange={(e) => setUserName(e.target.value)} className={inputCls} placeholder="Your Name" />
+                <input value={userName} onChange={(e) => setUserName(e.target.value)} className={inputCls} placeholder={t('action.label.yourName')} />
               </label>
               <label className="flex flex-col gap-1 text-text-secondary">E-mail
                 <input value={userEmail} onChange={(e) => setUserEmail(e.target.value)} className={inputCls} placeholder="you@example.com" />
@@ -160,8 +162,8 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
               <p className="text-text-tertiary">How the Pull command integrates new commits from the tracked remote branch.</p>
               <label className="flex flex-col gap-1 text-text-secondary">When pulling
                 <select value={pullRebase} onChange={(e) => setPullRebase(e.target.value)} className={selectCls}>
-                  <option value="false">Merge remote changes into local branch</option>
-                  <option value="true">Rebase local commits onto fetched changes</option>
+                  <option value="false">{t('action.label.mergeRemote')}</option>
+                  <option value="true">{t('action.label.rebaseLocal')}</option>
                   <option value="input">Ask every time (pull.rebase=input)</option>
                 </select>
               </label>
@@ -173,9 +175,9 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
               </label>
               <label className="flex flex-col gap-1 text-text-secondary">Submodules when fetching
                 <select value={fetchRecurseSubmodules} onChange={(e) => setFetchRecurseSubmodules(e.target.value)} className={selectCls}>
-                  <option value="false">Do not recurse</option>
+                  <option value="false">{t('action.label.doNotRecurse')}</option>
                   <option value="on-demand">Fetch new commits in registered submodules (on-demand)</option>
-                  <option value="true">Always recurse</option>
+                  <option value="true">{t('action.label.alwaysRecurse')}</option>
                 </select>
               </label>
             </div>
@@ -230,8 +232,8 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
               </label>
               <label className="flex flex-col gap-1 text-text-secondary">Sort order
                 <select value={tagGroupOrder} onChange={(e) => setTagGroupOrder(e.target.value)} className={selectCls}>
-                  <option value="ascending">Ascending</option>
-                  <option value="descending">Descending</option>
+                  <option value="ascending">{t('action.label.ascending')}</option>
+                  <option value="descending">{t('action.label.descending')}</option>
                 </select>
               </label>
             </div>
@@ -239,14 +241,14 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
         </div>
 
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
-          <button className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover" onClick={onClose}>Cancel</button>
+          <button className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover" onClick={onClose}>{t('action.button.cancel')}</button>
           <button
             className="px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded hover:opacity-90 disabled:opacity-40 flex items-center gap-1"
             onClick={save}
             disabled={saving || busy}
           >
             {saving && <Loader size={12} className="animate-spin" />}
-            Save
+            {t('action.button.save')}
           </button>
         </div>
       </div>

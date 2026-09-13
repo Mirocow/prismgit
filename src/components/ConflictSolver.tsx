@@ -271,13 +271,13 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
                     try {
                       await api.git.raw(repo.path, ['checkout', '--ours', '--', filePath]);
                       await api.git.add(repo.path, [filePath]);
-                      toast.success('Took ours');
+                      toast.success(t('toast.conflict.takeOurs'));
                       await refreshStatus(repo.path);
                       onClose();
-                    } catch (e) { toast.error('Failed', String(e)); }
+                    } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
                   }}
                 >
-                  Take ours
+                  {t('action.button.takeOurs')}
                 </button>
               )}
               {!theirsEmpty && (
@@ -288,13 +288,13 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
                     try {
                       await api.git.raw(repo.path, ['checkout', '--theirs', '--', filePath]);
                       await api.git.add(repo.path, [filePath]);
-                      toast.success('Took theirs');
+                      toast.success(t('toast.conflict.takeTheirs'));
                       await refreshStatus(repo.path);
                       onClose();
-                    } catch (e) { toast.error('Failed', String(e)); }
+                    } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
                   }}
                 >
-                  Take theirs
+                  {t('action.button.takeTheirs')}
                 </button>
               )}
               {/* Resolve as deleted — git rm the file */}
@@ -304,15 +304,15 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
                 onClick={async () => {
                   try {
                     await api.git.raw(repo.path, ['rm', '--', filePath]);
-                    toast.success('Resolved as deleted');
+                    toast.success(t('toast.conflict.deleted'));
                     await refreshStatus(repo.path);
                     onClose();
-                  } catch (e) { toast.error('Failed', String(e)); }
+                  } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
                 }}
               >
-                Resolve as deleted
+                {t('action.button.resolveAsDeleted')}
               </button>
-              <button className="btn btn-secondary text-xs" onClick={onClose}>Cancel</button>
+              <button className="btn btn-secondary text-xs" onClick={onClose}>{t('action.button.cancel')}</button>
             </div>
           </div>
         </div>
@@ -539,11 +539,11 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
             onClick={async () => {
               try {
                 await api.git.raw(repo.path, ['mergetool', '--', filePath]);
-                toast.success('Merge tool completed', 'Reloading file content…');
+                toast.success(t('toast.vscode.mergeToolCompleted'), 'Reloading file content…');
                 await loadFile();
                 await refreshStatus(repo.path);
               } catch (e) {
-                toast.error('Merge tool failed', String(e));
+                toast.error(t('toast.vscode.mergeToolFailed'), String(e));
               }
             }}
           >

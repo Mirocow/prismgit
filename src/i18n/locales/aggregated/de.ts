@@ -17,6 +17,8 @@ import { de as vscode } from '../domains/vscode';
 import { de as search } from '../domains/search';
 import { de as tour } from '../domains/tour';
 import { de as aiassistant } from '../domains/aiassistant';
+import { de as toasts } from '../domains/toasts';
+import { de as actions } from '../domains/actions';
 
 export const de: Record<string, string> = {
   ...core,
@@ -35,4 +37,6 @@ export const de: Record<string, string> = {
   ...search,
   ...tour,
   ...aiassistant,
+  ...toasts,
+  ...actions,
 };

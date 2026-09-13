@@ -1350,8 +1350,8 @@ export function BranchesPage() {
             }).then((ok) => {
               if (!ok) return;
               api.git.checkout(repo.path, b.name, { track: true })
-                .then(() => { toast.success(`Checked out '${localName}'`); load(); refreshStatus(repo.path); })
-                .catch((err) => toast.error('Checkout failed', String(err)));
+                .then(() => { toast.success(t('toast.git.checkoutSuccess', { ref: localName })); load(); refreshStatus(repo.path); })
+                .catch((err) => toast.error(t('toast.git.checkoutFailed'), String(err)));
             });
             return;
           }

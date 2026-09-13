@@ -388,7 +388,7 @@ export default function App() {
     const repo = useRepositoryStore.getState().currentRepo;
     const f = fileOverride ?? useSelectionStore.getState().selectedFilePath;
     if (!repo) return;
-    if (!f) { toast.warning('No file selected', 'Select a file in Changes first'); return; }
+    if (!f) { toast.warning(i18nT('toast.git.noFileSelected'), 'Select a file in Changes first'); return; }
     try {
       if (mode === 'both') {
         await api.git.raw(repo.path, ['checkout', '--ours', '--', f]);
@@ -406,14 +406,14 @@ export default function App() {
       await api.git.add(repo.path, [f]);
       toast.success(`${f}: ${mode === 'resolved' ? 'marked resolved' : mode === 'both' ? 'took both' : `took ${mode}`}`);
       useGitStore.getState().refreshStatus(repo.path);
-    } catch (e) { toast.error('Resolve failed', String(e)); }
+    } catch (e) { toast.error(i18nT('toast.git.resolveFailed'), String(e)); }
   }, [toast]);
 
   // Listen for menu events
   useEffect(() => {
     const handleOpenRepo = (path: string) => {
       useRepositoryStore.getState().openRepository(path).catch((e) => {
-        toast.error('Failed to open repository', String(e));
+        toast.error(i18nT('toast.git.openRepoFailed'), String(e));
       });
     };
     const handleClone = () => setShowClone(true);
@@ -424,14 +424,14 @@ export default function App() {
       if (!repo) return;
       useGitStore.getState().push(repo.path)
         .then(() => {
-          toast.success('Pushed successfully');
+          toast.success(i18nT('toast.git.pushSuccess'));
           // Notify History page to reload — emits a one-shot event that
           // History's useEffect listens to (replaces the old `lastRefresh`
           // subscription which caused an infinite refresh loop with the
           // file watcher).
           window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
         })
-        .catch((e) => toast.error('Push failed', String(e)));
+        .catch((e) => toast.error(i18nT('toast.git.pushFailed'), String(e)));
     };
     const handlePull = () => {
       const repo = useRepositoryStore.getState().currentRepo;
@@ -439,21 +439,21 @@ export default function App() {
       // SmartGit Manual: Smart Pull — prevents divergence after remote force-push
       api.git.smartPull(repo.path)
         .then((result) => {
-          toast.success(`Smart pull: ${result.strategy}`, result.message);
+          toast.success(i18nT('toast.smartPull.success', { strategy: result.strategy }), result.message);
           useGitStore.getState().refreshStatus(repo.path);
           window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
         })
-        .catch((e) => toast.error('Pull failed', String(e)));
+        .catch((e) => toast.error(i18nT('toast.git.pullFailed'), String(e)));
     };
     const handleFetch = () => {
       const repo = useRepositoryStore.getState().currentRepo;
       if (!repo) return;
       useGitStore.getState().fetch(repo.path)
         .then(() => {
-          toast.success('Fetched successfully');
+          toast.success(i18nT('toast.git.fetchSuccess'));
           window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
         })
-        .catch((e) => toast.error('Fetch failed', String(e)));
+        .catch((e) => toast.error(i18nT('toast.git.fetchFailed'), String(e)));
     };
     const handleToggleTheme = () => useSettingsStore.getState().toggleTheme();
     const handleGitFlow = () => setShowGitFlow(true);
@@ -469,7 +469,7 @@ export default function App() {
     // ===== SmartGit-style command helpers =====
     const requireRepo = () => useRepositoryStore.getState().currentRepo;
     const selectedFile = () => useSelectionStore.getState().selectedFilePath;
-    const warnNoFile = () => toast.warning('No file selected', 'Select a file in Changes first');
+    const warnNoFile = () => toast.warning(i18nT('toast.git.noFileSelected'), 'Select a file in Changes first');
     const infoBox = (title: string, message: string) =>
       confirmDialog({ title, message: message.slice(0, 3000), confirmLabel: 'Close', hideCancel: true });
 
@@ -491,16 +491,16 @@ export default function App() {
       const target = useSelectionStore.getState().selectedCommitHash;
       try {
         await api.git.createTag(repo.path, name, undefined, target || undefined);
-        toast.success(`Tag ${name} created${target ? ` at ${target.slice(0, 7)}` : ''}`);
+        toast.success(i18nT('toast.tag.created', { name, target: target ? ` at ${target.slice(0, 7)}` : '' }));
         useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Add tag failed', String(e)); }
+      } catch (e) { toast.error(i18nT('toast.tag.createFailed'), String(e)); }
     };
 
     const handleSetTracked = async () => {
       const repo = requireRepo();
       if (!repo) return;
       const branch = await api.git.currentBranch(repo.path).catch(() => null);
-      if (!branch) { toast.warning('No local branch checked out'); return; }
+      if (!branch) { toast.warning(i18nT('toast.git.noLocalBranch')); return; }
       const remoteBranch = await promptDialog({
         title: 'Set Tracked Branch',
         message: `Remote branch that "${branch}" should track`,
@@ -511,7 +511,7 @@ export default function App() {
         await api.git.raw(repo.path, ['branch', '--set-upstream-to', remoteBranch, branch]);
         toast.success(`${branch} now tracks ${remoteBranch}`);
         useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Set tracked branch failed', String(e)); }
+      } catch (e) { toast.error(i18nT('toast.git.setTrackedFailed'), String(e)); }
     };
 
     const handleStopTracking = async () => {
@@ -523,7 +523,7 @@ export default function App() {
         await api.git.raw(repo.path, ['branch', '--unset-upstream', branch]);
         toast.success(`${branch} no longer tracks a remote branch`);
         useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Stop tracking failed', String(e)); }
+      } catch (e) { toast.error(i18nT('toast.git.stopTrackingFailed'), String(e)); }
     };
 
     // ===== Bisect =====
@@ -537,12 +537,12 @@ export default function App() {
           case 'start':
             await api.git.bisectStart(repo.path);
             await api.git.bisectBad(repo.path, 'HEAD');
-            toast.info('Bisect started', 'HEAD marked as bad — now mark a good commit (Branch | Bisect)');
+            toast.info(i18nT('toast.bisect.started'), 'HEAD marked as bad — now mark a good commit (Branch | Bisect)');
             break;
-          case 'bad': await api.git.bisectBad(repo.path); toast.success('HEAD marked as bad'); break;
-          case 'good': await api.git.bisectGood(repo.path); toast.success('HEAD marked as good'); break;
-          case 'skip': await api.git.bisectSkip(repo.path); toast.success('Commit skipped'); break;
-          case 'reset': await api.git.bisectReset(repo.path); toast.success('Bisect finished'); break;
+          case 'bad': await api.git.bisectBad(repo.path); toast.success(i18nT('toast.bisect.headBad')); break;
+          case 'good': await api.git.bisectGood(repo.path); toast.success(i18nT('toast.bisect.headGood')); break;
+          case 'skip': await api.git.bisectSkip(repo.path); toast.success(i18nT('toast.bisect.skipped')); break;
+          case 'reset': await api.git.bisectReset(repo.path); toast.success(i18nT('toast.bisect.finished')); break;
           case 'log': {
             const logText = await api.git.bisectLog(repo.path);
             await infoBox('Bisect Log', logText);
@@ -550,7 +550,7 @@ export default function App() {
           }
         }
         refresh();
-      } catch (e) { toast.error('Bisect failed', String(e)); }
+      } catch (e) { toast.error(i18nT('toast.bisect.failed'), String(e)); }
     };
 
     // ===== Local operations =====
@@ -559,22 +559,22 @@ export default function App() {
       const f = selectedFile();
       if (!repo) return;
       if (!f) { warnNoFile(); return; }
-      try { await api.git.add(repo.path, [f]); toast.success(`Staged ${f}`); useGitStore.getState().refreshStatus(repo.path); }
-      catch (e) { toast.error('Stage failed', String(e)); }
+      try { await api.git.add(repo.path, [f]); toast.success(i18nT('toast.git.stageSuccess', { file: f })); useGitStore.getState().refreshStatus(repo.path); }
+      catch (e) { toast.error(i18nT('toast.git.stageFailed'), String(e)); }
     };
     const handleUnstage = async () => {
       const repo = requireRepo();
       const f = selectedFile();
       if (!repo) return;
       if (!f) { warnNoFile(); return; }
-      try { await api.git.resetFile(repo.path, f); toast.success(`Unstaged ${f}`); useGitStore.getState().refreshStatus(repo.path); }
-      catch (e) { toast.error('Unstage failed', String(e)); }
+      try { await api.git.resetFile(repo.path, f); toast.success(i18nT('toast.git.unstageSuccess', { file: f })); useGitStore.getState().refreshStatus(repo.path); }
+      catch (e) { toast.error(i18nT('toast.git.unstageFailed'), String(e)); }
     };
     const handleStageAll = async () => {
       const repo = requireRepo();
       if (!repo) return;
-      try { await useGitStore.getState().stageAll(repo.path); toast.success('All changes staged'); }
-      catch (e) { toast.error('Stage failed', String(e)); }
+      try { await useGitStore.getState().stageAll(repo.path); toast.success(i18nT('toast.git.stageAllSuccess')); }
+      catch (e) { toast.error(i18nT('toast.git.stageFailed'), String(e)); }
     };
     const handleDiscard = async () => {
       const repo = requireRepo();
@@ -590,9 +590,9 @@ export default function App() {
       if (!ok) return;
       try {
         await api.git.restore(repo.path, [f]);
-        toast.success(`Discarded changes in ${f}`);
+        toast.success(i18nT('toast.git.discardedIn', { file: f }));
         useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Discard failed', String(e)); }
+      } catch (e) { toast.error(i18nT('toast.git.discardFailed'), String(e)); }
     };
     const handleEditLastCommitMessage = async () => {
       const repo = requireRepo();
@@ -607,9 +607,9 @@ export default function App() {
         });
         if (!message || message === current) return;
         await api.git.editCommitMessage(repo.path, 'HEAD', message);
-        toast.success('Commit message updated');
+        toast.success(i18nT('toast.edit.messageUpdated'));
         useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Edit message failed', String(e)); }
+      } catch (e) { toast.error(i18nT('toast.edit.messageFailed'), String(e)); }
     };
     const handleEditCommitAuthor = async () => {
       const repo = requireRepo();
@@ -621,13 +621,13 @@ export default function App() {
       });
       if (!value) return;
       const m = value.match(/^([^<]+)<([^>]+)>\s*$/);
-      if (!m) { toast.error('Invalid format', 'Use: Name <email>'); return; }
+      if (!m) { toast.error(i18nT('toast.git.invalidFormat'), 'Use: Name <email>'); return; }
       const target = useSelectionStore.getState().selectedCommitHash || 'HEAD';
       try {
         await api.git.editCommitAuthor(repo.path, target, m[1].trim(), m[2].trim());
         toast.success(`Author of ${target === 'HEAD' ? 'HEAD' : target.slice(0, 7)} changed to ${m[1].trim()}`);
         useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Edit author failed', String(e)); }
+      } catch (e) { toast.error(i18nT('toast.edit.authorFailed'), String(e)); }
     };
     const handleUndoLastCommit = async () => {
       const repo = requireRepo();
@@ -825,10 +825,10 @@ export default function App() {
       if (!repo) return;
       try {
         const res = await api.vscode.open(repo.path);
-        if (res.ok) toast.success(i18nT('vscode.opened'));
-        else toast.error(i18nT('vscode.openFailed'));
+        if (res.ok) toast.success(i18nT('toast.vscode.opened'));
+        else toast.error(i18nT('toast.vscode.openFailed'));
       } catch (e) {
-        toast.error(i18nT('vscode.openFailed'), String(e));
+        toast.error(i18nT('toast.vscode.openFailed'), String(e));
       }
     };
     const handleFormatPatch = async () => {
@@ -1158,7 +1158,7 @@ export default function App() {
     const cleanupOpen = window.smartgit.events.on('cli:open', (data: unknown) => {
       const { path } = data as { path: string };
       useRepositoryStore.getState().openRepository(path).catch((e) => {
-        toast.error('Failed to open repository', String(e));
+        toast.error(i18nT('toast.git.openRepoFailed'), String(e));
       });
     });
     const cleanupLog = window.smartgit.events.on('cli:log', (data: unknown) => {

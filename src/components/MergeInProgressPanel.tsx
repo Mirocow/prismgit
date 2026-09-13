@@ -6,6 +6,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { confirmDialog } from './ConfirmDialog';
+import { useI18n } from '../lib/i18n';
 
 interface MergeInProgressPanelProps {
   repoPath: string;
@@ -25,6 +26,7 @@ interface MergeInProgressPanelProps {
 export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanelProps) {
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastActions();
+  const { t } = useI18n();
   const [conflicted, setConflicted] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -45,11 +47,11 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
     setBusy('continue');
     try {
       await api.git.continueMerge(repoPath);
-      toast.success('Merge committed');
+      toast.success(t('toast.merge.committed'));
       await refreshStatus(repoPath);
       onClose?.();
     } catch (e) {
-      toast.error('Continue failed', String(e));
+      toast.error(t('toast.merge.continueFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -65,11 +67,11 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
     setBusy('abort');
     try {
       await api.git.abortMerge(repoPath);
-      toast.info('Merge aborted');
+      toast.info(t('toast.merge.aborted'));
       await refreshStatus(repoPath);
       onClose?.();
     } catch (e) {
-      toast.error('Abort failed', String(e));
+      toast.error(t('toast.merge.abortFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -118,7 +120,7 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
                         toast.success(`${f}: took ours`);
                         await refreshStatus(repoPath);
                         loadState();
-                      } catch (err) { toast.error('Take ours failed', String(err)); }
+                      } catch (err) { toast.error(t('toast.merge.takeOursFailed'), String(err)); }
                     }}
                   >
                     O
@@ -134,7 +136,7 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
                         toast.success(`${f}: took theirs`);
                         await refreshStatus(repoPath);
                         loadState();
-                      } catch (err) { toast.error('Take theirs failed', String(err)); }
+                      } catch (err) { toast.error(t('toast.merge.takeTheirsFailed'), String(err)); }
                     }}
                   >
                     T

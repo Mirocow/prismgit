@@ -371,7 +371,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       if (!lsOutput.trim()) {
         // File is not in conflict state — show a friendly message instead
         // of trying to load non-existent stage versions.
-        toast.warning('File is not conflicted', 'This file may have been resolved already, or it is not in a conflict state.');
+        toast.warning(t('toast.conflict.notConflicted'), 'This file may have been resolved already, or it is not in a conflict state.');
         setLoading(false);
         return;
       }
@@ -504,7 +504,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
     setHighlightedHtml(rebuildHighlight(newText));
     setContent(newText);
     setDirty(true);
-    toast.success(`Hunk ${currentHunkIdx + 1}: ${resolution.replace(/-/g, ' ')}`);
+    toast.success(t('toast.conflict.hunkResolved', { idx: currentHunkIdx + 1, resolution: resolution.replace(/-/g, ' ') }));
     if (currentHunkIdx < hunks.length - 1) {
       setCurrentHunk(currentHunkIdx + 1);
     } else {
@@ -545,7 +545,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         ?? editorRef.current?.textContent
         ?? content;
       if (resolved.includes('<<<<<<<') || resolved.includes('>>>>>>>')) {
-        toast.warning('Conflict markers remain', 'Save anyway? File will be staged but not resolvable.');
+        toast.warning(t('toast.conflict.markersRemain'), 'Save anyway? File will be staged but not resolvable.');
       }
       const fullPath = `${repo.path}/${filePath}`.replace(/\/\+/g, '/');
       await api.fs.writeFile(fullPath, resolved);
@@ -626,12 +626,12 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
                     try {
                       await api.git.raw(repo.path, ['checkout', '--ours', '--', filePath]);
                       await api.git.add(repo.path, [filePath]);
-                      toast.success('Took ours');
+                      toast.success(t('toast.conflict.takeOurs'));
                       await refreshStatus(repo.path);
                       onResolved?.(filePath);
-                    } catch (e) { toast.error('Failed', String(e)); }
+                    } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
                   }}
-                >Take ours</button>
+                >{t('action.button.takeOurs')}</button>
               )}
               {!theirsEmpty && (
                 <button className="btn btn-secondary text-xs" title="Keep their version (git checkout --theirs)"
@@ -639,23 +639,23 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
                     try {
                       await api.git.raw(repo.path, ['checkout', '--theirs', '--', filePath]);
                       await api.git.add(repo.path, [filePath]);
-                      toast.success('Took theirs');
+                      toast.success(t('toast.conflict.takeTheirs'));
                       await refreshStatus(repo.path);
                       onResolved?.(filePath);
-                    } catch (e) { toast.error('Failed', String(e)); }
+                    } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
                   }}
-                >Take theirs</button>
+                >{t('action.button.takeTheirs')}</button>
               )}
               <button className="btn btn-danger text-xs" title="Resolve as deleted (git rm)"
                 onClick={async () => {
                   try {
                     await api.git.raw(repo.path, ['rm', '--', filePath]);
-                    toast.success('Resolved as deleted');
+                    toast.success(t('toast.conflict.deleted'));
                     await refreshStatus(repo.path);
                     onResolved?.(filePath);
-                  } catch (e) { toast.error('Failed', String(e)); }
+                  } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
                 }}
-              >Resolve as deleted</button>
+              >{t('action.button.resolveAsDeleted')}</button>
             </div>
           </div>
         </div>
@@ -755,13 +755,13 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
           onClick={resetHunk}
-          title="Reset this hunk to raw conflict markers"
+          title={t('action.title.resetHunk')}
         >
           <RotateCcw size={10} className="inline -mt-0.5" /> Reset
         </button>
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
-          title="Open external editor"
+          title={t('action.title.openExternalEditor')}
           onClick={() => {
             const fullPath = `${repo.path}/${filePath}`.replace(/\/+/g, '/');
             api.git.openFile(fullPath);
@@ -771,14 +771,14 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         </button>
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
-          title="Run git mergetool"
+          title={t('action.title.runGitMergetool')}
           onClick={async () => {
             try {
               await api.git.raw(repo.path, ['mergetool', '--', filePath]);
-              toast.success('Merge tool completed', 'Reloading file content…');
+              toast.success(t('toast.vscode.mergeToolCompleted'), 'Reloading file content…');
               await loadFile();
               await refreshStatus(repo.path);
-            } catch (e) { toast.error('Merge tool failed', String(e)); }
+            } catch (e) { toast.error(t('toast.vscode.mergeToolFailed'), String(e)); }
           }}
         >
           <GitMerge size={10} className="inline -mt-0.5" /> Merge Tool
@@ -791,9 +791,9 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           onClick={async () => {
             try {
               const res = await api.vscode.openMerge(repo.path, filePath);
-              if (res.ok) toast.success('Opened in VS Code merge editor');
-              else toast.error('VS Code not found', res.detail || 'Install VS Code or configure path');
-            } catch (e) { toast.error('VS Code merge failed', String(e)); }
+              if (res.ok) toast.success(t('toast.vscode.mergeEditorOpened'));
+              else toast.error(t('toast.vscode.notFound'), res.detail || 'Install VS Code or configure path');
+            } catch (e) { toast.error(t('toast.vscode.mergeFailed'), String(e)); }
           }}
         >
           <ExternalLink size={10} className="inline -mt-0.5" /> VS Code

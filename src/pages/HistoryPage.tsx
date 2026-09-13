@@ -329,7 +329,7 @@ export function HistoryPage() {
           selectCommit(result[0].hash);
         }
       }
-    } catch (e) { toast.error('Failed to load history', String(e)); }
+    } catch (e) { toast.error(t('toast.history.loadFailed'), String(e)); }
     finally { setLoading(false); }
     // NOTE: status?.current / status?.tracking are intentionally in the
     // deps — when the user switches branches (or pulls/fetches new
@@ -396,7 +396,7 @@ export function HistoryPage() {
     } catch (e) {
       // Surface as toast so the user knows the next page failed to load —
       // otherwise they'd think the list "ended" when it actually didn't.
-      toast.error('Failed to load more commits', String(e));
+      toast.error(t('toast.history.loadMoreFailed'), String(e));
       setHasMore(false);
     } finally {
       setLoadingMore(false);
@@ -823,7 +823,7 @@ export function HistoryPage() {
         toast.success(`${state[0].toUpperCase() + state.slice(1)} aborted`);
         await refreshStatus(repo.path);
         await loadHistory();
-      } catch (e) { toast.error(`Abort ${state} failed`, String(e)); }
+      } catch (e) { toast.error(t('toast.merge.abortStateFailed', { state }), String(e)); }
       return true;
     }
     // User clicked "Go to Changes" — navigate there so they can use the banner.
@@ -849,12 +849,12 @@ export function HistoryPage() {
           'Resolve it on the Changes page: Skip (drop) or Commit Empty'
         );
       } else if (result.error) {
-        toast.error('Cherry-pick failed', result.error);
+        toast.error(t('toast.cherryPick.failed'), result.error);
       } else {
-        toast.success('Cherry-picked');
+        toast.success(t('toast.cherryPick.cherryPicked'));
       }
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Cherry-pick failed', String(e)); }
+    } catch (e) { toast.error(t('toast.cherryPick.failed'), String(e)); }
     finally { setCpBusyHash(null); }
   };
 
@@ -872,9 +872,9 @@ export function HistoryPage() {
     try {
       const result = await api.git.revert(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) toast.warning(`${result.conflicts.length} conflicts`);
-      else toast.success('Reverted');
+      else toast.success(t('toast.revert.reverted'));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Revert failed', String(e)); }
+    } catch (e) { toast.error(t('toast.revert.failed'), String(e)); }
   };
 
   const handleReset = async (hash: string, mode: 'soft' | 'mixed' | 'hard' | 'keep') => {
@@ -889,9 +889,9 @@ export function HistoryPage() {
     }))) return;
     try {
       await api.git.reset(repo.path, mode, hash);
-      toast.success(`Reset ${mode} to ${shortHash(hash)}`);
+      toast.success(t('toast.reset.success', { mode, hash: shortHash(hash) }));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Reset failed', String(e)); }
+    } catch (e) { toast.error(t('toast.reset.failed'), String(e)); }
   };
 
   const handleRebase = async (hash: string) => {
@@ -903,9 +903,9 @@ export function HistoryPage() {
     }))) return;
     try {
       await api.git.rebase(repo.path, hash);
-      toast.success('Rebase started');
+      toast.success(t('toast.merge.rebaseStarted'));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Rebase failed', String(e)); }
+    } catch (e) { toast.error(t('toast.merge.rebaseFailed'), String(e)); }
   };
 
   // Full commit diff via git diff <hash>^..<hash> — rendered in the compare modal
@@ -913,16 +913,16 @@ export function HistoryPage() {
     try {
       const result = await api.git.diffCommit(repo.path, entry.hash);
       setCompareDiff({ result, title: `Commit ${shortHash(entry.hash)} vs parent` });
-    } catch (e) { toast.error('Failed to load commit diff', String(e)); }
+    } catch (e) { toast.error(t('toast.history.commitDiffFailed'), String(e)); }
   };
 
   // VS Code: open the full commit patch (git show) as a highlighted .patch file
   const handleOpenCommitPatch = async (entry: LogEntry) => {
     try {
       const res = await api.vscode.openCommitPatch(repo.path, entry.hash);
-      if (res.ok) toast.success('Opened in VS Code');
+      if (res.ok) toast.success(t('toast.vscode.opened'));
       else toast.error(res.detail || 'VS Code CLI not found — install VS Code or set its path in Settings → External Tools');
-    } catch (e) { toast.error('Failed to open VS Code', String(e)); }
+    } catch (e) { toast.error(t('toast.vscode.openFailed'), String(e)); }
   };
 
   // Start an interactive rebase stopped at this commit ('edit') — the user then
@@ -936,12 +936,12 @@ export function HistoryPage() {
     try {
       const res = await api.git.splitCommit(repo.path, entry.hash);
       if (res.started) {
-        toast.success('Interactive edit started — use the Rebase panel to continue');
+        toast.success(t('toast.merge.startEditStarted'));
         await refreshStatus(repo.path); await loadHistory();
       } else {
-        toast.error('Failed to start split', res.message);
+        toast.error(t('toast.merge.splitStartFailed'), res.message);
       }
-    } catch (e) { toast.error('Split failed', String(e)); }
+    } catch (e) { toast.error(t('toast.merge.splitFailed'), String(e)); }
   };
 
   // Split-off dialog: move the selected files from this commit into a NEW commit
@@ -966,15 +966,15 @@ export function HistoryPage() {
 
   const handleSplitOffExecute = async () => {
     if (!splitOffEntry) return;
-    if (splitOffSelected.size === 0) { toast.warning('Select at least one file'); return; }
-    if (!splitOffMessage.trim()) { toast.warning('New commit message is required'); return; }
+    if (splitOffSelected.size === 0) { toast.warning(t('toast.merge.selectFileRequired')); return; }
+    if (!splitOffMessage.trim()) { toast.warning(t('toast.merge.messageRequired')); return; }
     setSplitOffBusy(true);
     try {
       await api.git.splitOffFiles(repo.path, splitOffEntry.hash, Array.from(splitOffSelected), splitOffMessage.trim());
-      toast.success(`Moved ${splitOffSelected.size} file${splitOffSelected.size > 1 ? 's' : ''} into a new commit`);
+      toast.success(t('toast.merge.splitMoved', { count: splitOffSelected.size }));
       setShowSplitOff(false);
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Split off failed', String(e)); }
+    } catch (e) { toast.error(t('toast.merge.splitOffFailed'), String(e)); }
     finally { setSplitOffBusy(false); }
   };
 
@@ -987,9 +987,9 @@ export function HistoryPage() {
     }))) return;
     try {
       await api.git.checkout(repo.path, hash);
-      toast.success(`Checked out ${shortHash(hash)}`);
+      toast.success(t('toast.git.checkoutSuccess', { ref: shortHash(hash) }));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Checkout failed', String(e)); }
+    } catch (e) { toast.error(t('toast.git.checkoutFailed'), String(e)); }
   };
 
   const handleEditMessage = (entry: LogEntry) => {
@@ -1003,10 +1003,10 @@ export function HistoryPage() {
     if (!selected) return;
     try {
       await api.git.editCommitMessage(repo.path, selected.hash, editMsgValue);
-      toast.success('Commit message updated');
+      toast.success(t('toast.edit.messageUpdated'));
       setEditingMessage(false);
       await loadHistory();
-    } catch (e) { toast.error('Failed', String(e)); }
+    } catch (e) { toast.error(t('toast.generic.failed'), String(e)); }
   };
 
   const handleEditAuthor = async (entry: LogEntry) => {
@@ -1017,12 +1017,12 @@ export function HistoryPage() {
     });
     if (!value) return;
     const m = value.match(/^([^<]+)<([^>]+)>\s*$/);
-    if (!m) { toast.error('Invalid format', 'Use: Name <email>'); return; }
+    if (!m) { toast.error(t('toast.git.invalidFormat'), 'Use: Name <email>'); return; }
     try {
       await api.git.editCommitAuthor(repo.path, entry.hash, m[1].trim(), m[2].trim());
-      toast.success('Author updated');
+      toast.success(t('toast.edit.authorUpdated'));
       await loadHistory();
-    } catch (e) { toast.error('Edit author failed', String(e)); }
+    } catch (e) { toast.error(t('toast.edit.authorFailed'), String(e)); }
   };
 
   const handleAddNote = async (entry: LogEntry) => {
@@ -1035,8 +1035,8 @@ export function HistoryPage() {
     if (message === null) return;
     if (message.trim() === '') {
       if (existing) {
-        try { await api.git.notesRemove(repo.path, 'commits', entry.hash); toast.success('Note removed'); }
-        catch (e) { toast.error('Remove note failed', String(e)); }
+        try { await api.git.notesRemove(repo.path, 'commits', entry.hash); toast.success(t('toast.edit.noteRemoved')); }
+        catch (e) { toast.error(t('toast.edit.noteRemoveFailed'), String(e)); }
       }
       return;
     }
@@ -1068,7 +1068,7 @@ export function HistoryPage() {
       const info = await api.git.extractRepoInfo(repo.path);
       if (info.webUrl) api.app.openExternal(`${info.webUrl}/commit/${selected.hash}`);
       else toast.info('No remote URL');
-    } catch (e) { toast.error('Failed', String(e)); }
+    } catch (e) { toast.error(t('toast.generic.failed'), String(e)); }
   };
 
   const showCommitContextMenu = async (e: React.MouseEvent, entry: LogEntry, idx: number) => {
@@ -1219,7 +1219,7 @@ export function HistoryPage() {
     }))) return;
     try {
       await api.git.noteRemove(repo.path, entry.hash);
-      toast.success('Note removed');
+      toast.success(t('toast.edit.noteRemoved'));
     } catch (e) { toast.error('Failed to remove note', String(e)); }
   };
 
@@ -2072,8 +2072,8 @@ export function HistoryPage() {
                   <textarea className="w-full text-xs font-mono h-20 resize-none mb-1"
                     value={editMsgValue} onChange={(e) => setEditMsgValue(e.target.value)} />
                   <div className="flex gap-1">
-                    <button className="btn btn-primary text-2xs" onClick={handleSaveMessage}>Save</button>
-                    <button className="btn btn-secondary text-2xs" onClick={() => setEditingMessage(false)}>Cancel</button>
+                    <button className="btn btn-primary text-2xs" onClick={handleSaveMessage}>{t('action.button.save')}</button>
+                    <button className="btn btn-secondary text-2xs" onClick={() => setEditingMessage(false)}>{t('action.button.cancel')}</button>
                   </div>
                 </div>
               )}
@@ -2264,7 +2264,7 @@ export function HistoryPage() {
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button className="btn btn-secondary" onClick={() => setShowTagDialog(false)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => setShowTagDialog(false)}>{t('action.button.cancel')}</button>
               <button className="btn btn-primary" onClick={handleSaveTag} disabled={!tagName.trim()}>
                 <TagIcon size={13} /> Create Tag
               </button>
@@ -2296,7 +2296,7 @@ export function HistoryPage() {
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button className="btn btn-secondary" onClick={() => setShowBranchDialog(false)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => setShowBranchDialog(false)}>{t('action.button.cancel')}</button>
               <button className="btn btn-primary" onClick={handleSaveBranch} disabled={!branchName.trim()}>
                 <GitBranch size={13} /> Create Branch
               </button>
@@ -2364,7 +2364,7 @@ export function HistoryPage() {
                 onChange={(e) => setSplitOffMessage(e.target.value)}
               />
               <div className="flex justify-end gap-2">
-                <button className="btn btn-secondary text-xs" onClick={() => setShowSplitOff(false)}>Cancel</button>
+                <button className="btn btn-secondary text-xs" onClick={() => setShowSplitOff(false)}>{t('action.button.cancel')}</button>
                 <button
                   className="btn btn-primary text-xs"
                   onClick={handleSplitOffExecute}

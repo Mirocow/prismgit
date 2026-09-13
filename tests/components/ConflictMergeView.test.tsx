@@ -191,10 +191,13 @@ describe('ConflictMergeView', () => {
       await new Promise(r => setTimeout(r, 50));
     });
 
-    // Success toast should have fired with "Hunk 1: ours"
+    // Success toast should have fired with the hunk-resolution key.
+    // The i18n mock returns the key as-is (no English value lookup),
+    // so we just verify the correct i18n key was used — this keeps
+    // the test stable across locale changes.
     expect(successSpy).toHaveBeenCalled();
     const lastCall = successSpy.mock.calls[successSpy.mock.calls.length - 1];
-    expect(lastCall[0]).toMatch(/Hunk 1.*ours/i);
+    expect(lastCall[0]).toBe('toast.conflict.hunkResolved');
   }, 10000);
 
   it('Save & Stage button is clickable after content loads', async () => {
