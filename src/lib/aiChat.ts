@@ -488,16 +488,31 @@ export async function callLLMChatWithUsage(
   }
 }
 
-async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
-  const url = provider.url || 'https://api.openai.com/v1/chat/completions';
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
-  const body = JSON.stringify({
+/**
+ * Check if an error response indicates the model doesn't support tool calling.
+ * Ollama and some OpenAI-compatible APIs return 400 with messages like:
+ *   "model 'llama3-gradient:8b' does not support tools"
+ *   "This model does not support function calling"
+ */
+function isToolsUnsupported(status: number, body: string): boolean {
+  if (status !== 400) return false;
+  const lower = body.toLowerCase();
+  return lower.includes('does not support tools')
+      || lower.includes('does not support function calling')
+      || lower.includes('tool calls are not supported')
+      || lower.includes('tools are not supported');
+}
+
+/**
+ * Build the message body for an OpenAI-compatible chat request.
+ * If `includeTools` is false, the `tools` field is omitted — used as a
+ * fallback when the model doesn't support tool calling.
+ */
+function buildOpenAIBody(messages: ChatMessage[], provider: LLMProvider, includeTools: boolean): string {
+  const payload: Record<string, unknown> = {
     model: provider.model,
     messages: messages.map(m => {
-      // For role='tool', OpenAI expects {role: 'tool', content, tool_call_id}.
       if (m.role === 'tool') return { role: 'tool', content: m.content, tool_call_id: m.toolName };
-      // For role='assistant' with tool_calls, include them in the response.
       if (m.role === 'assistant' && m.toolCalls?.length) {
         return {
           role: 'assistant',
@@ -511,21 +526,50 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, si
       }
       return { role: m.role, content: m.content };
     }),
-    tools: AI_TOOLS.map(t => ({
-      type: 'function',
-      function: { name: t.name, description: t.description, parameters: t.parameters },
-    })),
     max_tokens: 1024,
     temperature: provider.temperature ?? 0.4,
-  });
-  const res = await proxyFetch(url, headers, body, signal);
+  };
+  if (includeTools) {
+    payload.tools = AI_TOOLS.map(t => ({
+      type: 'function',
+      function: { name: t.name, description: t.description, parameters: t.parameters },
+    }));
+  }
+  return JSON.stringify(payload);
+}
+
+async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
+  const url = provider.url || 'https://api.openai.com/v1/chat/completions';
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
+
+  // First attempt: WITH tools (full agent mode).
+  let body = buildOpenAIBody(messages, provider, true);
+  let res = await proxyFetch(url, headers, body, signal);
+
+  // ── Fallback: if the model doesn't support tools, retry WITHOUT tools ──
+  // Some models (e.g. llama3-gradient, older Ollama models) return 400
+  // when the `tools` field is present. We retry the same request without
+  // tools — the AI can still chat, just without git tool integration.
+  if (!res.ok && isToolsUnsupported(res.status, res.body)) {
+    body = buildOpenAIBody(messages, provider, false);
+    res = await proxyFetch(url, headers, body, signal);
+  }
+
   if (!res.ok) {
+    // Check if the error is about tools not being supported — give a
+    // friendly message instead of a raw 400 error.
+    if (isToolsUnsupported(res.status, res.body)) {
+      throw new Error(
+        `Model "${provider.model}" does not support tool calling. ` +
+        `You can still chat with this model, but git tools (get_status, commit, push, etc.) won't be available. ` +
+        `Switch to a model that supports tools (e.g. llama3.1, mistral, qwen2.5) for full AI Assistant functionality.`
+      );
+    }
     throw new Error(`OpenAI chat error ${res.status}: ${res.body}`);
   }
   const data = JSON.parse(res.body);
   const msg = data.choices?.[0]?.message ?? {};
-  // Parse token usage from the response — most OpenAI-compatible APIs
-  // (OpenAI, Groq, Cerebras, OpenRouter, Mistral, etc.) return this.
   const rawUsage = data.usage;
   const usage: TokenUsage | undefined = rawUsage ? {
     inputTokens: rawUsage.prompt_tokens ?? 0,
@@ -664,22 +708,42 @@ async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, si
   // Extract system prompt from the first message
   const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
 
-  const body = JSON.stringify({
-    model: provider.model,
-    messages: ollamaMessages,
-    system: systemPrompt,
-    stream: false,
-    tools: AI_TOOLS.map(t => ({
-      type: 'function',
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.parameters,
-      },
-    })),
-  });
-  const res = await proxyFetch(url, headers, body, signal);
+  const buildOllamaBody = (includeTools: boolean): string => {
+    const payload: Record<string, unknown> = {
+      model: provider.model,
+      messages: ollamaMessages,
+      system: systemPrompt,
+      stream: false,
+    };
+    if (includeTools) {
+      payload.tools = AI_TOOLS.map(t => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+        },
+      }));
+    }
+    return JSON.stringify(payload);
+  };
+
+  // First attempt: WITH tools.
+  let res = await proxyFetch(url, headers, buildOllamaBody(true), signal);
+
+  // ── Fallback: if the model doesn't support tools, retry WITHOUT tools ──
+  if (!res.ok && isToolsUnsupported(res.status, res.body)) {
+    res = await proxyFetch(url, headers, buildOllamaBody(false), signal);
+  }
+
   if (!res.ok) {
+    if (isToolsUnsupported(res.status, res.body)) {
+      throw new Error(
+        `Model "${provider.model}" does not support tool calling. ` +
+        `You can still chat with this model, but git tools (get_status, commit, push, etc.) won't be available. ` +
+        `Switch to a model that supports tools (e.g. llama3.1, mistral, qwen2.5) for full AI Assistant functionality.`
+      );
+    }
     throw new Error(`Ollama chat error ${res.status}: ${res.body}`);
   }
   const data = JSON.parse(res.body);
