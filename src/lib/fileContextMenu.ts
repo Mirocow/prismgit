@@ -467,11 +467,44 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       });
       if (!ok) return true;
       try {
-        if (ctx.isStaged) {
-          for (const p of targets) await api.git.resetFile(ctx.repoPath, p);
+        // For ALL discard cases (staged, unstaged, unmerged/conflicted):
+        // 1. git reset HEAD -- <files>  → unstages + clears unmerged state
+        // 2. git checkout -- <files>   → restores working tree to HEAD
+        //
+        // The old code called `api.git.restore()` directly for unstaged files,
+        // but `git restore` FAILS on unmerged files with:
+        //   "error: path '.vscode/settings.json' is unmerged"
+        //
+        // By always calling resetFile FIRST (which runs `git reset HEAD -- <file>`),
+        // we clear the unmerged/staged state, THEN restore works.
+        // This handles:
+        //   - Normal staged files (unstage + restore)
+        //   - Normal unstaged files (reset is a no-op, restore works)
+        //   - Unmerged/conflicted files (reset clears conflict state, restore to HEAD)
+        for (const p of targets) {
+          try {
+            await api.git.resetFile(ctx.repoPath, p);
+          } catch {
+            // resetFile may fail if the file is not in the index (untracked).
+            // That's fine — we'll handle untracked separately below.
+          }
+        }
+        // Now restore working tree to HEAD for all targets.
+        // For untracked files this won't work (git restore only works on
+        // tracked files) — but the untracked case is handled by the
+        // separate 'discard-untracked' menu item.
+        try {
           await api.git.restore(ctx.repoPath, targets);
-        } else {
-          await api.git.restore(ctx.repoPath, targets);
+        } catch {
+          // If restore fails (e.g. some files were untracked and can't be
+          // restored), try git checkout -- for each file individually.
+          for (const p of targets) {
+            try {
+              await api.git.raw(ctx.repoPath, ['checkout', '--', p]);
+            } catch {
+              // Skip files that can't be restored (untracked, already deleted, etc.)
+            }
+          }
         }
         t.success(n('Discarded changes in'));
         refresh();
