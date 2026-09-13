@@ -662,7 +662,26 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <>
-            {messages.map((msg, idx) => <MessageBubble key={idx} msg={msg} onRegenerate={!busy && msg.role === 'user' ? () => void handleSend(msg.content, true) : undefined} />)}
+            {messages.map((msg, idx) => {
+              // For user messages: retry re-sends that message.
+              // For assistant final answers: retry finds the last user
+              // message BEFORE this answer and re-sends it.
+              const canRetry = !busy && (msg.role === 'user' || (msg.role === 'assistant' && !msg.toolCalls?.length));
+              let retryHandler: (() => void) | undefined;
+              if (canRetry) {
+                if (msg.role === 'user') {
+                  retryHandler = () => void handleSend(msg.content, true);
+                } else {
+                  // Find the last user message before this assistant message
+                  let lastUserMsg: string | null = null;
+                  for (let i = idx - 1; i >= 0; i--) {
+                    if (messages[i].role === 'user') { lastUserMsg = messages[i].content; break; }
+                  }
+                  if (lastUserMsg) retryHandler = () => void handleSend(lastUserMsg!, true);
+                }
+              }
+              return <MessageBubble key={idx} msg={msg} onRegenerate={retryHandler} />;
+            })}
           </>
         )}
         {busy && (
@@ -759,15 +778,15 @@ function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?:
           <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap break-words">
             {msg.content}
           </div>
-          {/* Regenerate button — appears on hover for each user message.
-              Re-sends this specific message to get a fresh AI response. */}
+          {/* Retry button — ALWAYS visible (not hover-only). Re-sends
+              this message to get a fresh AI response. */}
           {onRegenerate && (
             <button
-              className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors opacity-0 group-hover:opacity-100"
+              className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
               onClick={onRegenerate}
               title="Resend this message"
             >
-              <RefreshCw size={8} />
+              <RefreshCw size={9} />
               Retry
             </button>
           )}
@@ -799,22 +818,31 @@ function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?:
       </div>
     );
   }
-  // assistant final answer — render with lightweight markdown + copy button.
+  // assistant final answer — render with lightweight markdown + copy + retry.
   return (
     <div className="flex items-start gap-2 group">
       <Bot size={14} className="flex-shrink-0 mt-0.5 text-accent" />
       <div className="bg-bg-secondary rounded px-3 py-1.5 text-xs max-w-[85%] whitespace-pre-wrap break-words">
         <MarkdownLite text={msg.content} />
-        {/* Copy button — appears on hover. Assistant answers often contain
-            commands or commit messages the user wants to copy. */}
-        <div className="mt-1 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Action buttons — Retry (regenerate) + Copy. Always visible. */}
+        <div className="mt-1 flex justify-end gap-2">
+          {onRegenerate && (
+            <button
+              onClick={onRegenerate}
+              className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
+              title="Regenerate this response"
+            >
+              <RefreshCw size={9} />
+              Retry
+            </button>
+          )}
           <button
             onClick={handleCopy}
-            className="icon-btn !w-4 !h-4 hover:text-accent"
+            className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
             title="Copy message"
-            aria-label="Copy message"
           >
-            {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
+            {copied ? <Check size={9} className="text-status-added" /> : <Copy size={9} />}
+            {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
       </div>
