@@ -262,8 +262,39 @@ export const ArrowDown = (p: IconProps) => (
   </Icon>
 );
 
-// Plug (розетка) — used in History/Changes sync indicator to mean "pull needed".
-// Standard Lucide "plug" path.
+// PlugConnected — plug inserted INTO socket (синхронизировано).
+// Shows a plug (two prongs) going INTO a socket on the right side.
+// Lucide-style 24x24 viewBox, stroke-based.
+export const PlugConnected = (p: IconProps) => (
+  <Icon {...p}>
+    {/* Left: plug with two prongs */}
+    <path d="M9 2v6" />
+    <path d="M13 2v6" />
+    <path d="M7 8h8v3a4 4 0 0 1-4 4H7a4 4 0 0 1-0-4z" />
+    {/* Right: socket receiving the prongs — connected */}
+    <path d="M15 11h4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-4" />
+    {/* Small connection line showing they're joined */}
+    <path d="M15 15h2" />
+  </Icon>
+);
+
+// PlugDisconnected — plug pulled AWAY from socket (рассинхронизировано).
+// Shows a plug on the left, socket on the right, with a gap between them.
+export const PlugDisconnected = (p: IconProps) => (
+  <Icon {...p}>
+    {/* Left: plug with two prongs */}
+    <path d="M7 2v6" />
+    <path d="M11 2v6" />
+    <path d="M5 8h8v3a4 4 0 0 1-4 4H5a4 4 0 0 1-0-4z" />
+    {/* Gap (disconnected) */}
+    {/* Right: socket — not connected to the plug */}
+    <path d="M17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2" />
+    {/* Small lightning/dash indicating disconnect */}
+    <path d="M14 12l2-2" />
+  </Icon>
+);
+
+// Plug — kept for backward compat (raw plug without socket).
 export const Plug = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 22v-5" />
@@ -273,8 +304,7 @@ export const Plug = (p: IconProps) => (
   </Icon>
 );
 
-// PlugZap (вилка в розетке) — used in History/Changes sync indicator to mean
-// "in sync with remote". Standard Lucide "plug-zap" path.
+// PlugZap — kept for backward compat.
 export const PlugZap = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 13v2" />
@@ -286,7 +316,7 @@ export const PlugZap = (p: IconProps) => (
   </Icon>
 );
 
-// Power — alternative "in sync" icon (power symbol). Kept as alternative.
+// Power — kept for backward compat.
 export const Power = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 2v10" />

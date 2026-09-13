@@ -17,7 +17,8 @@ import {
   GitPullRequest,
   Pencil,
   Plug,
-  PlugZap,
+  PlugConnected,
+  PlugDisconnected,
   RefreshCw,
   RotateCcw,
   StickyNote,
@@ -1491,14 +1492,11 @@ export function HistoryPage() {
               Tagged{allTags.length > 0 ? ` (${allTags.length})` : ''}
             </button>
           </div>
-          {/* Sync indicator — shows whether the local branch is in sync with
-              its remote-tracking branch. Uses plug/zap icons:
-                - both 0:                 🔌⚡  (PlugZap — вилка в розетке, синхронизировано)
-                - ahead > 0:              ↑N    (ArrowUp — push needed, local commits ahead)
-                - behind > 0:             ↓M    (ArrowDown — pull needed, remote has new commits)
-                - ahead > 0 && behind > 0: ↑N ↓M (both push & pull needed)
-              User explicitly asked for "вилка в розетке" (plug-in-socket) icon
-              when in sync, and separate вилка / розетка when not. */}
+          {/* Sync indicator — plug connected/disconnected icon:
+              - both 0 (in sync):     🔌✓ PlugConnected (вилка в розетке, green)
+              - ahead > 0 (push):     PlugDisconnected ↑N (вилка отдельно, orange)
+              - behind > 0 (pull):    PlugDisconnected ↓M (вилка отдельно, blue)
+              - both > 0 (push+pull): PlugDisconnected ↑N ↓M (вилка отдельно, red) */}
           {status?.current && status?.tracking && (
             <div
               className={cn('flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-2xs font-medium',
@@ -1516,22 +1514,28 @@ export function HistoryPage() {
                     `↑ ${status.ahead} commit(s) ahead · ↓ ${status.behind} commit(s) behind`
               }
             >
-              {status.ahead > 0 && (
+              {status.ahead === 0 && status.behind === 0 ? (
+                /* In sync — plug CONNECTED (вилка в розетке) */
                 <span className="flex items-center gap-0.5">
-                  <ArrowUp size={10} />
-                  {status.ahead}
+                  <PlugConnected size={14} />
                 </span>
-              )}
-              {status.behind > 0 && (
-                <span className="flex items-center gap-0.5">
-                  <ArrowDown size={10} />
-                  {status.behind}
-                </span>
-              )}
-              {status.ahead === 0 && status.behind === 0 && (
-                <span className="flex items-center gap-0.5">
-                  <PlugZap size={12} />
-                </span>
+              ) : (
+                /* Out of sync — plug DISCONNECTED (вилка отдельно) + counts */
+                <>
+                  <PlugDisconnected size={14} />
+                  {status.ahead > 0 && (
+                    <span className="flex items-center gap-0.5 ml-0.5">
+                      <ArrowUp size={9} />
+                      {status.ahead}
+                    </span>
+                  )}
+                  {status.behind > 0 && (
+                    <span className="flex items-center gap-0.5 ml-0.5">
+                      <ArrowDown size={9} />
+                      {status.behind}
+                    </span>
+                  )}
+                </>
               )}
             </div>
           )}

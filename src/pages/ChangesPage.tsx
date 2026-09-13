@@ -5,7 +5,7 @@ import { CommitTypeDropdown } from '../components/CommitTypeDropdown';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
 import { FilterInput } from '../components/FilterInput';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FilePlus, FileCheck, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Loader, Lock, Minus, Plus, PlugZap, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FilePlus, FileCheck, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Loader, Lock, Minus, Plus, PlugConnected, PlugDisconnected, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
 import { LazyFileList } from '../components/LazyFileList';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
@@ -2393,10 +2393,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 )}
               </div>
               <div className="flex-1" />
-              {/* Sync indicator — same as in History page. Uses plug/zap icons:
-                  PlugZap when in sync (вилка в розетке), ArrowUp/Down when
-                  push/pull needed. Only shown when there's an upstream tracking
-                  branch configured. */}
+              {/* Sync indicator — plug connected/disconnected (same as History):
+                  PlugConnected when in sync, PlugDisconnected + counts when not. */}
               {status?.current && status?.tracking && (
                 <div
                   className={cn('flex items-center gap-0.5 px-1.5 py-0.5 mr-1 rounded border text-2xs font-medium',
@@ -2414,22 +2412,26 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                         `↑ ${status.ahead} commit(s) ahead · ↓ ${status.behind} commit(s) behind`
                   }
                 >
-                  {status.ahead > 0 && (
+                  {status.ahead === 0 && status.behind === 0 ? (
                     <span className="flex items-center gap-0.5">
-                      <ArrowUp size={10} />
-                      {status.ahead}
+                      <PlugConnected size={14} />
                     </span>
-                  )}
-                  {status.behind > 0 && (
-                    <span className="flex items-center gap-0.5">
-                      <ArrowDown size={10} />
-                      {status.behind}
-                    </span>
-                  )}
-                  {status.ahead === 0 && status.behind === 0 && (
-                    <span className="flex items-center gap-0.5">
-                      <PlugZap size={12} />
-                    </span>
+                  ) : (
+                    <>
+                      <PlugDisconnected size={14} />
+                      {status.ahead > 0 && (
+                        <span className="flex items-center gap-0.5 ml-0.5">
+                          <ArrowUp size={9} />
+                          {status.ahead}
+                        </span>
+                      )}
+                      {status.behind > 0 && (
+                        <span className="flex items-center gap-0.5 ml-0.5">
+                          <ArrowDown size={9} />
+                          {status.behind}
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
               )}

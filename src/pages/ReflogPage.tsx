@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { History, RefreshCw, Trash, ChevronDown, ChevronRight, ArrowRight } from '../components/icons';
+import { History, RefreshCw, Trash, ChevronDown, ChevronRight, ArrowRight, ArrowUp, ArrowDown, PlugConnected, PlugDisconnected } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useGitStore } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type ReflogEntry, type CommitFile } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
@@ -34,6 +35,7 @@ const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
 export function ReflogPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
+  const status = useGitStore((s) => s.status);
   const toast = useToastActions();
   const showContextMenu = useContextMenu();
   const selectCommit = useSelectionStore((s) => s.selectCommit);
@@ -148,6 +150,34 @@ export function ReflogPage() {
           <span className="text-2xs text-text-tertiary">{t('pages.entriesCount', { count: entries.length })}</span>
         </div>
         <div className="flex items-center gap-2">
+          {/* Sync indicator — plug connected/disconnected (same as History) */}
+          {status?.current && status?.tracking && (
+            <div
+              className={cn('flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-2xs font-medium',
+                status.ahead > 0 && status.behind > 0
+                  ? 'border-status-modified/40 bg-status-modified/10 text-status-modified'
+                  : status.ahead > 0
+                    ? 'border-status-added/40 bg-status-added/10 text-status-added'
+                    : status.behind > 0
+                      ? 'border-status-info/40 bg-status-info/10 text-status-info'
+                      : 'border-status-added/30 bg-status-added/5 text-status-added')}
+              title={
+                status.ahead === 0 && status.behind === 0
+                  ? `In sync with ${status.tracking}`
+                  : `Local: ${status.current} · Upstream: ${status.tracking}\n↑ ${status.ahead} ahead · ↓ ${status.behind} behind`
+              }
+            >
+              {status.ahead === 0 && status.behind === 0 ? (
+                <PlugConnected size={14} />
+              ) : (
+                <>
+                  <PlugDisconnected size={14} />
+                  {status.ahead > 0 && (<><ArrowUp size={9} />{status.ahead}</>)}
+                  {status.behind > 0 && (<><ArrowDown size={9} />{status.behind}</>)}
+                </>
+              )}
+            </div>
+          )}
           <button className="icon-btn" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={13} />
           </button>
