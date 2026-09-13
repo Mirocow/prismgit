@@ -262,6 +262,67 @@ export const ArrowDown = (p: IconProps) => (
   </Icon>
 );
 
+// Plug (розетка) — used in History/Changes sync indicator to mean "pull needed".
+// Standard Lucide "plug" path.
+export const Plug = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 22v-5" />
+    <path d="M9 8V2" />
+    <path d="M15 8V2" />
+    <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
+  </Icon>
+);
+
+// PlugZap (вилка в розетке) — used in History/Changes sync indicator to mean
+// "in sync with remote". Standard Lucide "plug-zap" path.
+export const PlugZap = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 13v2" />
+    <path d="M9 8V2" />
+    <path d="M15 8V2" />
+    <path d="M18 8v3a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V8Z" />
+    <path d="M5 19l4-4" />
+    <path d="M9 19l-4-4" />
+  </Icon>
+);
+
+// Power — alternative "in sync" icon (power symbol). Kept as alternative.
+export const Power = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 2v10" />
+    <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
+  </Icon>
+);
+
+// Cpu — used in the Ollama model picker to show parameter count.
+export const Cpu = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+    <rect x="9" y="9" width="6" height="6" />
+    <path d="M15 2v2" /><path d="M15 20v2" /><path d="M2 15h2" /><path d="M2 9h2" />
+    <path d="M20 15h2" /><path d="M20 9h2" /><path d="M9 2v2" /><path d="M9 20v2" />
+  </Icon>
+);
+
+// HardDrive — used in the Ollama model picker to show file size on disk.
+export const HardDrive = (p: IconProps) => (
+  <Icon {...p}>
+    <line x1="22" y1="12" x2="2" y2="12" />
+    <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    <line x1="6" y1="16" x2="6.01" y2="16" />
+    <line x1="10" y1="16" x2="10.01" y2="16" />
+  </Icon>
+);
+
+// Zap — used in the Ollama model picker to show "loaded / warm" models.
+export const Zap = (p: IconProps) => (
+  <Icon {...p}>
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+  </Icon>
+);
+
+
+
 export const CloudDownload = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="8 17 12 21 16 17" />

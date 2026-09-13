@@ -10,6 +10,9 @@ export function registerAiIpc(): void {
   );
 
   // Ollama model list — fetch /api/tags via main process (no CORS).
+  // Returns the full model details (size, family, parameter_size,
+  // quantization_level, format) so the UI can show a rich model picker
+  // like LM Studio does (size, parameters, quantization column).
   ipcMain.handle(
     'ai:ollamaListModels',
     async (_e, url: string) => {
@@ -20,9 +23,22 @@ export function registerAiIpc(): void {
           return { ok: false, error: `HTTP ${response.status} ${response.statusText}`, models: [] };
         }
         const data = await response.json();
-        const models = (data.models || []).map((m: { name: string; size?: number }) => ({
+        const models = (data.models || []).map((m: {
+          name: string;
+          size?: number;
+          details?: {
+            family?: string;
+            parameter_size?: string;
+            quantization_level?: string;
+            format?: string;
+          };
+        }) => ({
           name: m.name,
           size: m.size,
+          family: m.details?.family,
+          parameterSize: m.details?.parameter_size,
+          quantization: m.details?.quantization_level,
+          format: m.details?.format,
         }));
         return { ok: true, error: null, models };
       } catch (e) {
@@ -31,6 +47,70 @@ export function registerAiIpc(): void {
           ? 'Cannot connect to Ollama. Make sure it\'s running (ollama serve) and the URL is correct.'
           : msg;
         return { ok: false, error: friendly, models: [] };
+      }
+    }
+  );
+
+  // Ollama /api/ps — list currently loaded models (in memory).
+  // Used to detect if a model is "warm" (already loaded) vs. cold (needs
+  // loading on next request, which takes 5-60s). The picker shows a badge
+  // for warm models so the user can pick one that'll respond instantly.
+  ipcMain.handle(
+    'ai:ollamaListLoadedModels',
+    async (_e, url: string) => {
+      try {
+        const base = (url || 'http://localhost:11434').trim().replace(/\/$/, '');
+        const response = await fetch(`${base}/api/ps`);
+        if (!response.ok) {
+          return { ok: false, error: `HTTP ${response.status}`, models: [] };
+        }
+        const data = await response.json();
+        const models = (data.models || []).map((m: { name: string; expires_at?: string; size_vram?: number }) => ({
+          name: m.name,
+          expiresAt: m.expires_at,
+          sizeVram: m.size_vram,
+        }));
+        return { ok: true, error: null, models };
+      } catch {
+        // /api/ps may not exist on older Ollama versions — fail silently
+        // with an empty list (the picker just won't show "loaded" badges).
+        return { ok: false, error: 'ps_unavailable', models: [] };
+      }
+    }
+  );
+
+  // Ollama /api/generate with keep_alive — keep a model loaded in memory
+  // for a long time (default Ollama unloads after 5 min of inactivity,
+  // which causes the "long wait" the user reported). The /api/ps call alone
+  // doesn't extend the keep-alive timer; we need to send a tiny generate
+  // request with keep_alive set to a large value (e.g. "30m" or -1 = forever).
+  //
+  // Called automatically when the user selects a model in the picker —
+  // "warms up" the model so the first chat message responds instantly.
+  ipcMain.handle(
+    'ai:ollamaKeepAlive',
+    async (_e, url: string, model: string, keepAlive?: string) => {
+      try {
+        const base = (url || 'http://localhost:11434').trim().replace(/\/$/, '');
+        // Send a no-op generate request with keep_alive to extend the
+        // model's in-memory lifetime. The prompt is intentionally empty
+        // — Ollama returns immediately, but the model stays loaded.
+        const response = await fetch(`${base}/api/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            prompt: '',
+            stream: false,
+            keep_alive: keepAlive || '30m', // 30 minutes — covers most chat sessions
+          }),
+        });
+        if (!response.ok) {
+          return { ok: false, error: `HTTP ${response.status}` };
+        }
+        return { ok: true, error: null };
+      } catch (e) {
+        return { ok: false, error: String(e) };
       }
     }
   );

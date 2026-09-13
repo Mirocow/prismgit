@@ -772,7 +772,7 @@ export const tauriApi = {
     generateCommitMessage: async (): Promise<string> => {
       throw new Error('ai.generateCommitMessage not yet wired in Tauri backend');
     },
-    ollamaListModels: async (url: string): Promise<{ ok: boolean; error: string | null; models: { name: string; size?: number }[] }> => {
+    ollamaListModels: async (url: string): Promise<{ ok: boolean; error: string | null; models: { name: string; size?: number; family?: string; parameterSize?: string; quantization?: string; format?: string }[] }> => {
       try {
         const base = (url || 'http://localhost:11434').trim().replace(/\/$/, '');
         const response = await fetch(`${base}/api/tags`);
@@ -780,10 +780,49 @@ export const tauriApi = {
           return { ok: false, error: `HTTP ${response.status}`, models: [] };
         }
         const data = await response.json();
-        const models = (data.models || []).map((m: { name: string; size?: number }) => ({ name: m.name, size: m.size }));
+        const models = (data.models || []).map((m: {
+          name: string; size?: number;
+          details?: { family?: string; parameter_size?: string; quantization_level?: string; format?: string };
+        }) => ({
+          name: m.name,
+          size: m.size,
+          family: m.details?.family,
+          parameterSize: m.details?.parameter_size,
+          quantization: m.details?.quantization_level,
+          format: m.details?.format,
+        }));
         return { ok: true, error: null, models };
       } catch (e) {
         return { ok: false, error: String(e), models: [] };
+      }
+    },
+    ollamaListLoadedModels: async (url: string): Promise<{ ok: boolean; error: string | null; models: { name: string; expiresAt?: string; sizeVram?: number }[] }> => {
+      // Tauri: direct fetch to /api/ps (no CORS restriction).
+      try {
+        const base = (url || 'http://localhost:11434').trim().replace(/\/$/, '');
+        const response = await fetch(`${base}/api/ps`);
+        if (!response.ok) return { ok: false, error: `HTTP ${response.status}`, models: [] };
+        const data = await response.json();
+        const models = (data.models || []).map((m: { name: string; expires_at?: string; size_vram?: number }) => ({
+          name: m.name, expiresAt: m.expires_at, sizeVram: m.size_vram,
+        }));
+        return { ok: true, error: null, models };
+      } catch {
+        return { ok: false, error: 'ps_unavailable', models: [] };
+      }
+    },
+    ollamaKeepAlive: async (url: string, model: string, keepAlive?: string): Promise<{ ok: boolean; error: string | null }> => {
+      try {
+        const base = (url || 'http://localhost:11434').trim().replace(/\/$/, '');
+        const response = await fetch(`${base}/api/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, prompt: '', stream: false, keep_alive: keepAlive || '30m' }),
+        });
+        if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
+        return { ok: true, error: null };
+      } catch (e) {
+        return { ok: false, error: String(e) };
       }
     },
     chat: async (config: { url: string; headers: Record<string, string>; body: string; method?: string }): Promise<{ ok: boolean; status: number; statusText: string; body: string }> => {

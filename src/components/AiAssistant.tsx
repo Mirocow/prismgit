@@ -243,7 +243,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 w-96 max-h-[600px] bg-bg-elevated border border-border-default rounded-lg shadow-2xl flex flex-col z-50">
+    <div className="fixed bottom-4 right-4 w-[28rem] max-h-[80vh] bg-bg-elevated border border-border-default rounded-lg shadow-2xl flex flex-col z-50">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-tertiary rounded-t-lg">
         <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -351,7 +351,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[200px] max-h-[400px]">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[300px] max-h-[60vh]">
         {messages.length === 0 ? (
           <div className="text-xs text-text-tertiary text-center py-4">
             {sessionRepoPath === null

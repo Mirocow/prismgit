@@ -16,6 +16,8 @@ import {
   GitMerge,
   GitPullRequest,
   Pencil,
+  Plug,
+  PlugZap,
   RefreshCw,
   RotateCcw,
   StickyNote,
@@ -1490,13 +1492,13 @@ export function HistoryPage() {
             </button>
           </div>
           {/* Sync indicator — shows whether the local branch is in sync with
-              its remote-tracking branch. Three states:
-                - ahead > 0 && behind > 0: ↑N ↓M  (both push & pull needed)
-                - ahead > 0:              ↑N      (push needed — local commits ahead)
-                - behind > 0:             ↓M      (pull needed — remote has new commits)
-                - both 0:                 ✓       (in sync — green check)
-              Clicking the indicator triggers a pull (when behind) or push
-              (when ahead) via the existing actions. */}
+              its remote-tracking branch. Uses plug/zap icons:
+                - both 0:                 🔌⚡  (PlugZap — вилка в розетке, синхронизировано)
+                - ahead > 0:              ↑N    (ArrowUp — push needed, local commits ahead)
+                - behind > 0:             ↓M    (ArrowDown — pull needed, remote has new commits)
+                - ahead > 0 && behind > 0: ↑N ↓M (both push & pull needed)
+              User explicitly asked for "вилка в розетке" (plug-in-socket) icon
+              when in sync, and separate вилка / розетка when not. */}
           {status?.current && status?.tracking && (
             <div
               className={cn('flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-2xs font-medium',
@@ -1528,8 +1530,7 @@ export function HistoryPage() {
               )}
               {status.ahead === 0 && status.behind === 0 && (
                 <span className="flex items-center gap-0.5">
-                  <Check size={10} />
-                  <Sync size={9} className="opacity-70" />
+                  <PlugZap size={12} />
                 </span>
               )}
             </div>

@@ -1094,13 +1094,30 @@ smartgit.refresh.inspectEol=true
                 </div>
                 <div>
                   <label className="text-xs text-text-tertiary block mb-1">{t('settings.model')}</label>
-                  <input
-                    type="text"
-                    className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
-                    placeholder="gpt-4o-mini"
-                    defaultValue={settings.aiModel || ''}
-                    onBlur={(e) => setSetting('aiModel', e.target.value)}
-                  />
+                  {/* For Ollama, hide the manual Model input — the model is
+                      chosen via the OllamaModelPicker below (which fetches
+                      the live model list from the server and shows metadata:
+                      parameter count, file size, quantization, family).
+                      For other providers (OpenAI/Anthropic/Mistral/custom),
+                      keep the free-text input — there's no server to query. */}
+                  {settings.aiProvider === 'ollama' ? (
+                    <input
+                      type="text"
+                      className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5 opacity-60"
+                      placeholder={settings.aiModel || 'Pick from list below ↓'}
+                      value={settings.aiModel || ''}
+                      readOnly
+                      title="Model is chosen via the picker below"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
+                      placeholder="gpt-4o-mini"
+                      defaultValue={settings.aiModel || ''}
+                      onBlur={(e) => setSetting('aiModel', e.target.value)}
+                    />
+                  )}
                 </div>
               </div>
             </div>

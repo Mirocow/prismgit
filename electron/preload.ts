@@ -479,6 +479,10 @@ const api = {
       ipcRenderer.invoke('ai:generateCommitMessage', cfg, diff, hint),
     ollamaListModels: (url: string) =>
       ipcRenderer.invoke('ai:ollamaListModels', url),
+    ollamaListLoadedModels: (url: string) =>
+      ipcRenderer.invoke('ai:ollamaListLoadedModels', url),
+    ollamaKeepAlive: (url: string, model: string, keepAlive?: string) =>
+      ipcRenderer.invoke('ai:ollamaKeepAlive', url, model, keepAlive),
     chat: (config: { url: string; headers: Record<string, string>; body: string; method?: string }) =>
       ipcRenderer.invoke('ai:chat', config),
   },

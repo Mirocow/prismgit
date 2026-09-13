@@ -78,13 +78,54 @@ const toast = () => useToastStore.getState();
  * Fetch live index flags for a file before opening the changes-mode menu
  * (so the checkbox items reflect the real `git ls-files -v` state).
  * Never throws — falls back to { tracked: true, …false } on IPC errors.
+ *
+ * ── Cache ─────────────────────────────────────────────────────────────
+ * The user reported that the right-click context menu in Changes was slow
+ * to open. Root cause: every right-click awaited this IPC + git subprocess
+ * call before showing the menu, adding 100-300ms latency. The flags rarely
+ * change between two right-clicks on the same file, so we cache them for
+ * 10 seconds. The first click still pays the IPC cost, but subsequent
+ * clicks on the same file (or within a rapid session) are instant.
+ *
+ * Cache key: `${repoPath}|${path}`. TTL: 10s — long enough to absorb
+ * repeated right-clicks on the same file, short enough that a real
+ * assume-unchanged / skip-worktree toggle (which sets the flag via git
+ * config) is reflected on the next menu open.
  */
+const indexFlagsCache = new Map<string, { ts: number; flags: IndexFlags }>();
+const INDEX_FLAGS_CACHE_TTL_MS = 10_000;
+
 export async function getIndexFlagsAsync(repoPath: string, path: string): Promise<IndexFlags> {
-  try {
-    return await api.git.getIndexFlags(repoPath, path);
-  } catch {
-    return { assumeUnchanged: false, skipWorktree: false, tracked: true };
+  const cacheKey = `${repoPath}|${path}`;
+  const cached = indexFlagsCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < INDEX_FLAGS_CACHE_TTL_MS) {
+    return cached.flags;
   }
+  let flags: IndexFlags;
+  try {
+    flags = await api.git.getIndexFlags(repoPath, path);
+  } catch {
+    flags = { assumeUnchanged: false, skipWorktree: false, tracked: true };
+  }
+  // Store in cache — cap at 256 entries so the cache can't grow unbounded.
+  if (indexFlagsCache.size >= 256) {
+    const firstKey = indexFlagsCache.keys().next().value;
+    if (firstKey) indexFlagsCache.delete(firstKey);
+  }
+  indexFlagsCache.set(cacheKey, { ts: Date.now(), flags });
+  return flags;
+}
+
+/** Invalidate the cache for a single file (call after toggling assume-
+ *  unchanged / skip-worktree so the next menu open reflects the new state). */
+export function invalidateIndexFlagsCache(repoPath: string, path: string): void {
+  indexFlagsCache.delete(`${repoPath}|${path}`);
+}
+
+/** Invalidate the entire cache (call after a commit / checkout / branch
+ *  switch — any operation that could change index flags for many files). */
+export function invalidateAllIndexFlagsCache(): void {
+  indexFlagsCache.clear();
 }
 
 export function fullPathOf(repoPath: string, path: string): string {
