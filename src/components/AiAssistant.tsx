@@ -3,7 +3,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { useI18n } from '../lib/i18n';
-import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download } from './icons';
+import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download, ChevronRight, ChevronDown } from './icons';
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage } from '../lib/aiChat';
 import { type LLMProvider } from '../lib/aiCommitMessages';
@@ -628,34 +628,16 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     );
   }
   if (msg.role === 'tool') {
-    return (
-      <div className="bg-bg-tertiary border border-border-subtle rounded px-3 py-1.5 text-xs font-mono whitespace-pre-wrap break-words">
-        <div className="text-2xs text-text-tertiary mb-1 flex items-center gap-1">
-          <Wrench size={9} /> {msg.toolName}
-          {/* Copy button — tool results are often long (git log, git status)
-              and the user may want to paste them elsewhere. */}
-          <button
-            onClick={handleCopy}
-            className="ml-auto icon-btn !w-4 !h-4 hover:text-accent"
-            title="Copy result"
-            aria-label="Copy result"
-          >
-            {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
-          </button>
-        </div>
-        <div className="text-text-secondary max-h-40 overflow-y-auto">{msg.content}</div>
-      </div>
-    );
+    return <ToolResultBubble msg={msg} />;
   }
   if (msg.role === 'assistant' && msg.toolCalls?.length) {
+    // "Calling tool: get_status" — kept VERY compact (single line, no bubble,
+    // muted text). The user asked for these to be minimal — the real content
+    // is in the tool result block below (which is collapsed by default).
     return (
-      <div className="flex items-start gap-2">
-        <Bot size={14} className="flex-shrink-0 mt-0.5 text-accent" />
-        <div className="bg-bg-secondary border border-border-subtle rounded px-3 py-1.5 text-xs text-text-secondary italic">
-          <div className="flex items-center gap-1">
-            <ArrowRight size={10} /> {msg.content}
-          </div>
-        </div>
+      <div className="flex items-center gap-1 pl-1 text-2xs text-text-tertiary italic opacity-70">
+        <ArrowRight size={9} />
+        <span>{msg.content}</span>
       </div>
     );
   }
@@ -678,6 +660,80 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Tool result bubble — ALWAYS COLLAPSED by default.
+ *
+ * The user explicitly asked for this: tool results like get_status / get_log
+ * can be very long (50+ lines of git output), and seeing them all expanded
+ * floods the chat transcript. By default the bubble shows only:
+ *   - the tool name (🔧 get_status)
+ *   - a one-line preview (first non-empty line, truncated to 80 chars)
+ *   - a chevron to expand/collapse
+ *   - a copy button (always visible — user may want to copy without expanding)
+ *
+ * Clicking the header toggles between collapsed (default) and expanded.
+ * When expanded, the full content is shown in a scrollable monospace block
+ * (max-h-60 so even 1000-line outputs don't take over the chat).
+ */
+function ToolResultBubble({ msg }: { msg: ChatMessage }) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation(); // don't toggle expand when clicking copy
+    navigator.clipboard.writeText(msg.content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => { /* ignore */ });
+  }, [msg.content]);
+
+  // One-line preview — first non-empty line, truncated.
+  const firstLine = useMemo(() => {
+    const line = msg.content.split('\n').find(l => l.trim());
+    if (!line) return '(empty result)';
+    return line.length > 80 ? line.slice(0, 80) + '…' : line;
+  }, [msg.content]);
+
+  // Total line count — shown as a badge so the user knows how much is hidden.
+  const lineCount = useMemo(() => msg.content.split('\n').length, [msg.content]);
+
+  return (
+    <div className="bg-bg-tertiary border border-border-subtle rounded text-xs font-mono">
+      {/* Header — clickable to toggle expand/collapse */}
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-2xs text-text-tertiary hover:bg-bg-hover transition-colors rounded-t"
+      >
+        {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+        <Wrench size={9} />
+        <span className="font-medium text-text-secondary">{msg.toolName}</span>
+        {/* Preview — shown only when collapsed. */}
+        {!expanded && (
+          <span className="text-text-tertiary truncate flex-1 ml-1 opacity-70">{firstLine}</span>
+        )}
+        {/* Line count badge — tells the user how much is hidden. */}
+        <span className="text-3xs text-text-tertiary flex-shrink-0 ml-auto px-1 rounded bg-bg-secondary">
+          {lineCount} {lineCount === 1 ? 'line' : 'lines'}
+        </span>
+        {/* Copy button — always visible, stops propagation so it doesn't toggle. */}
+        <span
+          onClick={handleCopy}
+          className="icon-btn !w-4 !h-4 hover:text-accent flex-shrink-0 cursor-pointer"
+          title="Copy result"
+        >
+          {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
+        </span>
+      </button>
+      {/* Content — only rendered when expanded. */}
+      {expanded && (
+        <div className="px-2.5 pb-2 text-text-secondary max-h-60 overflow-y-auto whitespace-pre-wrap break-words border-t border-border-subtle">
+          {msg.content}
+        </div>
+      )}
     </div>
   );
 }
