@@ -32,19 +32,100 @@ import { api } from './api';
  *
  * Returns { ok, status, statusText, body } where body is the raw response text.
  * The caller parses JSON from body as needed.
+ *
+ * ── Model-loading retry (Ollama) ───────────────────────────────────────
+ * When Ollama receives a request for a model that isn't currently loaded
+ * in memory, it returns HTTP 404 with a body like:
+ *   { "error": "model 'llama3.2' not found, try pulling it first" }
+ * OR (newer versions) HTTP 200 with a streaming "loading model..." preamble
+ * that takes 5-60 seconds before the first token. Older versions also emit
+ * HTTP 503 while the model is loading on another worker.
+ *
+ * The proxyFetch wrapper detects the "model not loaded" signature and
+ * retries up to `MAX_RETRIES` times with exponential backoff (2s, 4s, 8s).
+ * After each retry, the model is usually loaded and the next request
+ * succeeds immediately. This prevents the AI Assistant from erroring out
+ * on the first message of a session — the user just sees "Loading model…"
+ * for a few seconds, then the response streams in normally.
  */
-async function proxyFetch(url: string, headers: Record<string, string>, body: string): Promise<{ ok: boolean; status: number; statusText: string; body: string }> {
-  // Try IPC proxy first (Electron main process — no CORS restriction)
-  try {
-    const result = await api.ai?.chat?.({ url, headers, body, method: 'POST' });
-    if (result) return result;
-  } catch {
-    // IPC not available (test env, or api.ai.chat not wired) — fall through to direct fetch
+const MAX_RETRIES = 3;
+const INITIAL_BACKOFF_MS = 2000;
+
+/** Detect Ollama "model not loaded" / "model loading" responses. */
+function isModelLoading(status: number, body: string): boolean {
+  // HTTP 404 + "model not found" — older Ollama signature.
+  // HTTP 503 — newer Ollama when another worker is loading the model.
+  if (status === 503) return true;
+  if (status === 404) {
+    const lower = body.toLowerCase();
+    return (
+      lower.includes('not found') ||
+      lower.includes('try pulling') ||
+      lower.includes('model ') && lower.includes(' loading')
+    );
   }
-  // Fallback: direct fetch (works in Tauri and browser contexts without CORS)
-  const res = await fetch(url, { method: 'POST', headers, body });
-  const text = await res.text();
-  return { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
+  // Some Ollama versions return 200 but with an error body (rare).
+  if (status === 200) {
+    const lower = body.toLowerCase();
+    if (lower.includes('"error"') && lower.includes('loading')) return true;
+  }
+  return false;
+}
+
+async function proxyFetch(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
+): Promise<{ ok: boolean; status: number; statusText: string; body: string }> {
+  let lastError: { ok: boolean; status: number; statusText: string; body: string } | null = null;
+  let backoff = INITIAL_BACKOFF_MS;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    let result: { ok: boolean; status: number; statusText: string; body: string };
+    // Try IPC proxy first (Electron main process — no CORS restriction)
+    try {
+      const r = await api.ai?.chat?.({ url, headers, body, method: 'POST' });
+      if (!r) throw new Error('IPC returned empty');
+      result = r;
+    } catch {
+      // Fallback: direct fetch (works in Tauri and browser contexts without CORS)
+      try {
+        const res = await fetch(url, { method: 'POST', headers, body });
+        const text = await res.text();
+        result = { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
+      } catch (e) {
+        // Network-level failure (server killed connection mid-load, ECONNRESET,
+        // fetch abort on the long initial wait). If we haven't exhausted retries,
+        // treat as model-loading and retry.
+        if (attempt < MAX_RETRIES) {
+          await new Promise(resolve => setTimeout(resolve, backoff));
+          backoff *= 2;
+          continue;
+        }
+        throw e;
+      }
+    }
+
+    // Success — return immediately.
+    if (result.ok) return result;
+
+    lastError = result;
+
+    // Detect "model not loaded" — retry with backoff so Ollama can finish
+    // loading the model in the background. After 2-3 retries (4-12 seconds
+    // total), the model is typically warm and subsequent requests succeed.
+    if (attempt < MAX_RETRIES && isModelLoading(result.status, result.body)) {
+      await new Promise(resolve => setTimeout(resolve, backoff));
+      backoff *= 2;
+      continue;
+    }
+
+    // Non-retryable error — return to the caller for normal handling.
+    return result;
+  }
+
+  // Exhausted retries — return the last error response.
+  return lastError ?? { ok: false, status: 0, statusText: 'Exhausted retries', body: '' };
 }
 
 export interface ChatMessage {
@@ -70,12 +151,25 @@ export interface ToolCall {
 /**
  * Build the system prompt that describes available tools.
  * Sent to the LLM as the first system message.
+ *
+ * The prompt explicitly distinguishes between:
+ *   - Repository-scoped tools (require an open repo): get_status, get_log,
+ *     get_diff, get_branches, stage_files, commit, push, etc.
+ *   - App-scoped tools (work WITHOUT an open repo): list_repos,
+ *     search_repos, clone_repo, init_repo, open_repo.
+ * This lets the AI gracefully handle "no repo open" by suggesting the user
+ * clone/init/open one instead of failing on a git command.
  */
-export function buildToolSystemPrompt(tools: AITool[] = AI_TOOLS): string {
+export function buildToolSystemPrompt(tools: AITool[] = AI_TOOLS, repoPath?: string): string {
   const toolDocs = tools.map(t => `- ${t.name}: ${t.description}\n  Parameters: ${JSON.stringify(t.parameters)}`).join('\n');
-  return `You are PrismGit's AI assistant — you help the user manage their Git repository.
+  const repoContext = repoPath
+    ? `Current repository context: ${repoPath}\nYou can run git commands against this repo directly using the repository-scoped tools.`
+    : `No repository is currently open. For repository-scoped tools (get_status, get_log, commit, push, etc.) to work, the user must first open or clone a repo. Use the app-scoped tools (list_repos, search_repos, clone_repo, init_repo, open_repo) to help them set one up — they do NOT require an open repo.`;
+  return `You are PrismGit's AI assistant — you help the user manage their Git repositories.
 
-You have access to tools for reading repository data and performing git actions.
+${repoContext}
+
+You have access to tools for reading repository data, performing git actions, AND managing the app's repository list.
 
 Available tools:
 ${toolDocs}
@@ -88,7 +182,9 @@ Rules:
 5. If a tool fails, report the error and suggest what the user should do.
 6. For commit messages, use imperative mood: "Add feature X", "Fix bug Y".
 7. You can chain multiple tool calls: e.g. get_status → stage_files → commit → push.
-8. Be concise — users want quick answers, not essays.
+8. If the user asks to "open" / "switch to" / "find" a repository, use list_repos + search_repos + open_repo.
+9. If the user asks to "clone" or "create" a repo, use clone_repo or init_repo — these work even when no repo is currently open.
+10. Be concise — users want quick answers, not essays.
 `;
 }
 
@@ -104,11 +200,16 @@ Rules:
  * The `onAssistantMessage` callback is called for each assistant
  * intermediate message (with tool_calls) and for the final answer —
  * useful for the UI to render the agent's "thinking" trace.
+ *
+ * `repoPath` is now optional — when undefined, only the app-scoped tools
+ * (list_repos, search_repos, clone_repo, init_repo, open_repo) can run
+ * successfully. The system prompt tells the LLM which tools are available
+ * and what context (repo or no-repo) it's operating in.
  */
 export async function runWithTools(
   userMessage: string,
   provider: LLMProvider,
-  repoPath: string,
+  repoPath: string | undefined,
   options?: {
     onAssistantMessage?: (msg: ChatMessage) => void;
     onToolCall?: (name: string, args: Record<string, unknown>) => void;
@@ -117,7 +218,7 @@ export async function runWithTools(
   },
 ): Promise<{ finalMessage: string; history: ChatMessage[] }> {
   const history: ChatMessage[] = [
-    { role: 'system', content: buildToolSystemPrompt() },
+    { role: 'system', content: buildToolSystemPrompt(AI_TOOLS, repoPath) },
     { role: 'user', content: userMessage },
   ];
   const maxIterations = options?.maxIterations ?? 5;
@@ -141,7 +242,11 @@ export async function runWithTools(
         continue;
       }
       try {
-        const result = await tool.execute(call.arguments, repoPath);
+        // repoPath may be undefined for app-scoped tools — they ignore it.
+        // Repository-scoped tools will fail at api.git.* with a clear error
+        // (e.g. "no repo open"), which the LLM can recover from by suggesting
+        // the user open one.
+        const result = await tool.execute(call.arguments, repoPath ?? '');
         options?.onToolResult?.(call.name, result);
         history.push({ role: 'tool', content: result, toolName: call.name });
       } catch (e) {

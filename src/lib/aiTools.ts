@@ -45,22 +45,69 @@ export const gitStatusTool: AITool = {
   },
 };
 
-/** Get the recent commit log (last N commits). */
+/** Get the recent commit log (last N commits).
+ *
+ * DEFAULT mode is "collapsed" — returns only a summary line (total count,
+ * current branch, last commit hash+subject) plus up to 5 recent commit
+ * subjects. This keeps the tool output short and readable when the AI is
+ * exploring the repository state — the user's request "show me recent
+ * commits" doesn't need 50 lines of metadata.
+ *
+ * Pass `verbose: true` to get the full list up to `count` (max 50).
+ */
 export const gitLogTool: AITool = {
   name: 'get_log',
-  description: 'Get recent commits from the repository (default: last 10).',
+  description: 'Get recent commits from the repository. By default returns a COLLAPSED summary (total count + last 5 subjects) — pass verbose=true for the full list up to count (max 50).',
   parameters: {
     type: 'object',
     properties: {
-      count: { type: 'number', description: 'Number of commits to return (max 50)', default: 10 },
+      count: { type: 'number', description: 'Max number of commits to return when verbose=true (max 50)', default: 10 },
+      verbose: { type: 'boolean', description: 'If true, return the full list of `count` commits (one per line). If false (default), return a 1-line summary + last 5 subjects only.', default: false },
     },
     additionalProperties: false,
   },
   async execute(params, repoPath) {
-    const count = Math.min(50, Math.max(1, (params as { count?: number })?.count ?? 10));
-    const log = await api.git.log(repoPath, { maxCount: count });
+    const p = params as { count?: number; verbose?: boolean };
+    const verbose = p.verbose ?? false;
+    const requestedCount = Math.min(50, Math.max(1, p.count ?? 10));
+    // For collapsed mode, fetch up to 5 (the visible window) plus a count
+    // of the total. For verbose mode, fetch the full requestedCount.
+    const fetchCount = verbose ? requestedCount : Math.min(5, requestedCount);
+    const log = await api.git.log(repoPath, { maxCount: verbose ? fetchCount : 50 });
     if (log.length === 0) return 'No commits yet.';
-    return log.map(c => `${c.hashAbbrev} ${c.subject} (${c.author.name})`).join('\n');
+
+    const total = log.length;
+    const lastCommit = log[0];
+    const lastHash = lastCommit.hashAbbrev;
+    const lastSubject = lastCommit.subject;
+    const lastAuthor = lastCommit.author.name;
+    const lastDate = lastCommit.author.date;
+
+    if (!verbose) {
+      // ── Collapsed summary mode ──────────────────────────────────────────
+      // One-line summary + up to 5 most-recent commit subjects.
+      // This is what the AI sees by default — keeps the chat readable and
+      // avoids flooding the context with 50 lines when the user just
+      // asked "what's the state of the repo".
+      const lines: string[] = [];
+      lines.push(`Total commits: ${total}`);
+      lines.push(`Latest: ${lastHash} ${lastSubject} — ${lastAuthor}${lastDate ? ` (${lastDate})` : ''}`);
+      lines.push('');
+      lines.push(`Last ${Math.min(5, total)} commits:`);
+      for (const c of log.slice(0, 5)) {
+        lines.push(`  ${c.hashAbbrev} ${c.subject} — ${c.author.name}`);
+      }
+      if (total > 5) {
+        lines.push('');
+        lines.push(`… and ${total - 5} more. Call get_log with verbose=true to see up to ${Math.min(50, total)} commits.`);
+      }
+      return lines.join('\n');
+    }
+
+    // ── Verbose mode ─────────────────────────────────────────────────────
+    return log.slice(0, requestedCount).map(c =>
+      `${c.hashAbbrev} ${c.subject} (${c.author.name})`
+    ).join('\n');
   },
 };
 
@@ -353,6 +400,236 @@ export const gitMergeTool: AITool = {
   },
 };
 
+// ============================================================================
+// Repository-management tools — DO NOT require an open repository.
+// These let the AI Assistant work BEFORE the user has opened any repo: it can
+// list known repositories (those the app has opened before), search them by
+// name/path, clone a new one from a URL, initialize a fresh repo in a folder,
+// and OPEN any of them in the app UI (which makes them the current repo).
+//
+// `repoPath` is ignored by these tools — they operate on the app-level
+// repository list maintained by the settings store.
+// ============================================================================
+
+/** List all repositories that the app has opened before.
+ *
+ *  Returns a compact list (name + path + last-opened timestamp). Used by the
+ *  AI Assistant when the user asks "what repos do I have?" or wants to switch
+ *  context without navigating the sidebar.
+ */
+export const listReposTool: AITool = {
+  name: 'list_repos',
+  description: 'List all repositories that the app has previously opened. Each entry has name, path, last-opened time, and pinned/favorite status. Use this when the user asks "what repos do I have" or wants to switch context — does NOT require a repo to be open.',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  async execute() {
+    const repos = await api.settings.getRepos();
+    if (repos.length === 0) {
+      return 'No repositories in the app list yet. Use clone_repo or init_repo to add one, or open one via the sidebar "Open Repository" button.';
+    }
+    // Sort by lastOpened desc — most recent first.
+    const sorted = [...repos].sort((a, b) => b.lastOpened - a.lastOpened);
+    const lines: string[] = [`Total: ${sorted.length} repositories`];
+    lines.push('');
+    for (const r of sorted) {
+      const ago = formatAgo(Date.now() - r.lastOpened);
+      const pin = r.pinned ? ' [pinned]' : '';
+      lines.push(`• ${r.name}${pin} — ${r.path} (last opened ${ago})`);
+    }
+    return lines.join('\n');
+  },
+};
+
+/** Search repositories by name or path substring (case-insensitive). */
+export const searchReposTool: AITool = {
+  name: 'search_repos',
+  description: 'Search the app\'s known-repositories list by name or path substring (case-insensitive). Returns matching repos with their full paths so the AI can pass them to open_repo. Useful when the user says "open the prismgit repo" without typing the full path.',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Search query — matches repo name OR path (case-insensitive substring)' },
+    },
+    required: ['query'],
+    additionalProperties: false,
+  },
+  async execute(params) {
+    const q = (params as { query: string }).query.trim().toLowerCase();
+    if (!q) return 'Empty query — nothing to search.';
+    const repos = await api.settings.getRepos();
+    const matches = repos.filter(r =>
+      r.name.toLowerCase().includes(q) || r.path.toLowerCase().includes(q)
+    );
+    if (matches.length === 0) {
+      return `No repositories matching "${q}". Use list_repos to see all known repos.`;
+    }
+    const lines: string[] = [`Found ${matches.length} repositor${matches.length === 1 ? 'y' : 'ies'} matching "${q}":`];
+    for (const r of matches) {
+      lines.push(`• ${r.name} — ${r.path}`);
+    }
+    return lines.join('\n');
+  },
+};
+
+/** Clone a remote repository into a local folder and add it to the app list.
+ *
+ *  Uses the configured default clone directory (Settings → Default Clone Dir)
+ *  if `target_path` is not provided. If `open_after` is true (default), the
+ *  cloned repo is also opened as the current repository in the app UI.
+ */
+export const cloneRepoTool: AITool = {
+  name: 'clone_repo',
+  description: 'Clone a remote Git repository (git clone) into a local folder, add it to the app\'s known-repos list, and optionally open it as the current repository. Does NOT require a repo to be open — works from the Welcome screen too.',
+  parameters: {
+    type: 'object',
+    properties: {
+      url: { type: 'string', description: 'Remote URL to clone (HTTPS or SSH). Required.' },
+      target_path: { type: 'string', description: 'Local folder to clone into. If omitted, uses the app\'s default clone directory + the repo name extracted from the URL.' },
+      depth: { type: 'number', description: 'Shallow clone depth (e.g. 1 for --depth=1). 0 = full clone (default).', default: 0 },
+      branch: { type: 'string', description: 'Branch to clone (default: all branches). Use this to clone only a single branch for speed.' },
+      open_after: { type: 'boolean', description: 'If true (default), open the cloned repo as the current repository in the app UI.', default: true },
+    },
+    required: ['url'],
+    additionalProperties: false,
+  },
+  async execute(params) {
+    const p = params as { url: string; target_path?: string; depth?: number; branch?: string; open_after?: boolean };
+    if (!p.url?.trim()) return 'Error: url is required.';
+    const url = p.url.trim();
+
+    // Resolve target path — default clone dir + repo name from URL.
+    let targetPath = p.target_path?.trim();
+    if (!targetPath) {
+      const defaultCloneDir = await api.settings.get<string>('defaultCloneDir');
+      if (!defaultCloneDir) {
+        return 'Error: no target_path given and no default clone directory configured. Set one in Settings → Default Clone Directory, or pass target_path explicitly.';
+      }
+      const repoName = extractRepoNameFromUrl(url);
+      targetPath = `${defaultCloneDir.replace(/[/\\]+$/, '')}/${repoName}`;
+    }
+
+    try {
+      await api.git.clone(url, targetPath, {
+        depth: p.depth && p.depth > 0 ? p.depth : undefined,
+        branch: p.branch || undefined,
+      });
+    } catch (e) {
+      return `Clone failed: ${String(e)}`;
+    }
+
+    // Add to app's known-repos list.
+    const name = targetPath.split(/[/\\]/).pop() || targetPath;
+    try {
+      await api.settings.addRepo({ path: targetPath, name });
+    } catch { /* already exists — fine */ }
+
+    // Optionally open it.
+    if (p.open_after ?? true) {
+      try {
+        // Lazy import to avoid circular dependency at module load time
+        // (repositoryStore imports many things; aiTools is imported widely).
+        const { useRepositoryStore } = await import('../stores/repositoryStore');
+        await useRepositoryStore.getState().openRepository(targetPath);
+        return `Cloned '${url}' → ${targetPath} and opened as current repository.`;
+      } catch (e) {
+        return `Cloned '${url}' → ${targetPath}. Failed to auto-open: ${String(e)} (use open_repo to retry).`;
+      }
+    }
+    return `Cloned '${url}' → ${targetPath}. Added to the repo list.`;
+  },
+};
+
+/** Initialize a new Git repository in a local folder.
+ *
+ *  Creates `target_path` if it doesn't exist, runs `git init`, adds the
+ *  folder to the app's known-repos list, and optionally opens it.
+ */
+export const initRepoTool: AITool = {
+  name: 'init_repo',
+  description: 'Initialize a new Git repository in a local folder (git init). Creates the folder if it doesn\'t exist, registers it in the app\'s known-repos list, and optionally opens it as the current repository. Use this when the user says "create a new repo here" or "initialize a project".',
+  parameters: {
+    type: 'object',
+    properties: {
+      target_path: { type: 'string', description: 'Local folder path to initialize as a git repo. Will be created if it doesn\'t exist. Required.' },
+      open_after: { type: 'boolean', description: 'If true (default), open the new repo as the current repository in the app UI.', default: true },
+    },
+    required: ['target_path'],
+    additionalProperties: false,
+  },
+  async execute(params) {
+    const p = params as { target_path: string; open_after?: boolean };
+    const targetPath = p.target_path.trim();
+    if (!targetPath) return 'Error: target_path is required.';
+
+    try {
+      await api.git.init(targetPath, false);
+    } catch (e) {
+      return `Init failed: ${String(e)}`;
+    }
+
+    const name = targetPath.split(/[/\\]/).pop() || targetPath;
+    try {
+      await api.settings.addRepo({ path: targetPath, name });
+    } catch { /* already exists — fine */ }
+
+    if (p.open_after ?? true) {
+      try {
+        const { useRepositoryStore } = await import('../stores/repositoryStore');
+        await useRepositoryStore.getState().openRepository(targetPath);
+        return `Initialized new git repo at ${targetPath} and opened as current repository.`;
+      } catch (e) {
+        return `Initialized new git repo at ${targetPath}. Failed to auto-open: ${String(e)} (use open_repo to retry).`;
+      }
+    }
+    return `Initialized new git repo at ${targetPath}. Added to the repo list.`;
+  },
+};
+
+/** Open an existing repository in the app UI.
+ *
+ *  Takes an absolute path (or just a repo name — uses search_repos logic to
+ *  resolve it) and switches the app's current repository to it.
+ */
+export const openRepoTool: AITool = {
+  name: 'open_repo',
+  description: 'Open an existing repository in the app UI, making it the current repository. Accepts either an absolute path (use list_repos / search_repos to find one) or a repo name (will be resolved via the app\'s known-repos list). Use this when the user says "open the X repo" or wants to switch context.',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Absolute path to the repository, OR a repo name from the known-repos list (will be resolved case-insensitively).' },
+    },
+    required: ['path'],
+    additionalProperties: false,
+  },
+  async execute(params) {
+    const p = params as { path: string };
+    const query = p.path.trim();
+    if (!query) return 'Error: path is required.';
+
+    // First try as an absolute path. If it doesn't match any known repo,
+    // try resolving it as a name via the app's repo list.
+    let resolvedPath = query;
+    const isAbsolute = /^[\\/]/.test(query) || /^[a-zA-Z]:[\\/]/.test(query);
+    if (!isAbsolute) {
+      const repos = await api.settings.getRepos();
+      const match = repos.find(r =>
+        r.name.toLowerCase() === query.toLowerCase() ||
+        r.name.toLowerCase().includes(query.toLowerCase())
+      );
+      if (!match) {
+        return `No known repository matches "${query}". Use list_repos to see all known repos, or pass an absolute path.`;
+      }
+      resolvedPath = match.path;
+    }
+
+    try {
+      const { useRepositoryStore } = await import('../stores/repositoryStore');
+      await useRepositoryStore.getState().openRepository(resolvedPath);
+      return `Opened repository: ${resolvedPath}`;
+    } catch (e) {
+      return `Failed to open ${resolvedPath}: ${String(e)}`;
+    }
+  },
+};
+
 /** All registered AI tools. */
 export const AI_TOOLS: AITool[] = [
   // Read-only
@@ -374,9 +651,42 @@ export const AI_TOOLS: AITool[] = [
   gitStashPushTool,
   gitStashPopTool,
   gitMergeTool,
+  // Repository management (work WITHOUT an open repo)
+  listReposTool,
+  searchReposTool,
+  cloneRepoTool,
+  initRepoTool,
+  openRepoTool,
 ];
 
 /** Look up a tool by name. */
 export function getTool(name: string): AITool | undefined {
   return AI_TOOLS.find(t => t.name === name);
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+/** Format milliseconds as a human-readable "X minutes ago" string. */
+function formatAgo(ms: number): string {
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mon = Math.floor(day / 30);
+  if (mon < 12) return `${mon}mo ago`;
+  return `${Math.floor(mon / 12)}y ago`;
+}
+
+/** Extract a repo name from a Git URL (HTTPS or SSH). */
+function extractRepoNameFromUrl(url: string): string {
+  // Strip trailing .git and slashes
+  const cleaned = url.replace(/[\\/]+$/, '').replace(/\.git$/i, '');
+  // SSH: git@host:owner/repo  →  last segment after / or :
+  // HTTPS: https://host/owner/repo  →  last segment after /
+  const match = cleaned.match(/[/:]([^/:]+)$/);
+  return match?.[1] ?? 'cloned-repo';
 }
