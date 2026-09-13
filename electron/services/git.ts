@@ -1216,6 +1216,53 @@ function describeNetworkError(e: unknown, op: 'push' | 'pull' | 'fetch'): Error 
   return err;
 }
 
+/**
+ * Handle "untracked working tree files would be overwritten" errors.
+ * When git pull/checkout/merge fails because untracked files conflict
+ * with incoming files, auto-clean those specific files (git clean -f)
+ * and retry the operation.
+ *
+ * Returns true if the error was handled (caller should retry).
+ */
+function isUntrackedOverwriteError(e: unknown): boolean {
+  const msg = String(e);
+  return msg.includes('untracked working tree files would be overwritten');
+}
+
+/** Extract the file paths from "untracked working tree files would be
+ *  overwritten by merge: file1 file2" error messages. */
+function extractUntrackedFiles(e: unknown): string[] {
+  const msg = String(e);
+  const lines = msg.split('\n');
+  const files: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Lines with file paths are indented with a tab
+    if (line.startsWith('\t') && trimmed) {
+      files.push(trimmed);
+    }
+  }
+  return files;
+}
+
+/** Auto-clean conflicting untracked files, then the caller can retry. */
+async function cleanConflictingUntracked(repoPath: string, files: string[]): Promise<void> {
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  for (const f of files) {
+    try {
+      // Force-remove the untracked file that blocks the operation.
+      await git.raw(['clean', '-f', '--', f]);
+    } catch {
+      // If clean fails, try fs.unlink as a last resort.
+      try {
+        const fullPath = path.join(repoPath, f);
+        if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+      } catch { /* ignore — will surface as a clearer error on retry */ }
+    }
+  }
+}
+
 export async function pull(
   repoPath: string,
   remote = 'origin',
@@ -1232,6 +1279,24 @@ export async function pull(
   try {
     await git.raw(args);
   } catch (e) {
+    // ── Auto-recover from "untracked working tree files would be
+    //    overwritten" — the user has local untracked files that
+    //    conflict with incoming files from the remote. Auto-clean
+    //    those files and retry the pull. This is safe because
+    //    the files are UNTRACKED — they're not in git history.
+    if (isUntrackedOverwriteError(e)) {
+      const files = extractUntrackedFiles(e);
+      if (files.length > 0) {
+        await cleanConflictingUntracked(repoPath, files);
+        // Retry the pull after cleaning.
+        try {
+          await git.raw(args);
+          return;
+        } catch (e2) {
+          throw describeNetworkError(e2, 'pull');
+        }
+      }
+    }
     throw describeNetworkError(e, 'pull');
   }
 }
@@ -1571,6 +1636,24 @@ export async function checkout(
     try {
       await git.raw(args);
     } catch (e) {
+      // ── Auto-recover from "untracked working tree files would be
+      //    overwritten by checkout" — same as pull.
+      if (isUntrackedOverwriteError(e)) {
+        const files = extractUntrackedFiles(e);
+        if (files.length > 0) {
+          await cleanConflictingUntracked(repoPath, files);
+          // Retry checkout after cleaning.
+          try {
+            await git.raw(args);
+            return;
+          } catch (e2) {
+            const err2 = e2 as { stderr?: string; message?: string };
+            const msg2 = err2?.stderr || err2?.message || String(e2);
+            const lines2 = msg2.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
+            throw new Error(lines2.length > 0 ? lines2.join('\n') : msg2);
+          }
+        }
+      }
       const err = e as { stderr?: string; message?: string };
       const msg = err?.stderr || err?.message || String(e);
       const lines = msg.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
