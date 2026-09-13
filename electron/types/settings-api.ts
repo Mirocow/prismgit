@@ -152,6 +152,20 @@ export interface AppSettings {
   aiModel?: string;
   /** Provider URL (for Ollama: http://localhost:11434). */
   aiUrl?: string;
+  /**
+   * Per-provider configuration storage — saves URL + API key + model
+   * SEPARATELY for each provider. When the user switches from OpenAI
+   * to Groq and back, their OpenAI API key and model are preserved.
+   *
+   * Key = provider id (e.g., "openai", "groq", "zai").
+   * Value = { url?, apiKey?, model? } — only the fields the user set.
+   *
+   * The ACTIVE provider's config is ALSO mirrored in the flat
+   * aiUrl/aiApiKey/aiModel fields (for backward compat with code that
+   * reads those directly). When switching providers, the flat fields
+   * are updated from this store.
+   */
+  aiProviderConfigs?: Record<string, { url?: string; apiKey?: string; model?: string }>;
   /** Custom AI system prompt template with {{branch}}, {{author}}, etc. */
   aiCustomPrompt?: string;
   /** Max AI Assistant chat messages to persist per-project (default: 100). */

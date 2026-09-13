@@ -1083,19 +1083,31 @@ smartgit.refresh.inspectEol=true
                     className="w-full text-sm bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
                     value={settings.aiProvider || ''}
                     onChange={(e) => {
-                      const providerId = e.target.value;
-                      setSetting('aiProvider', providerId);
-                      // Auto-fill URL + model from the provider preset —
-                      // saves the user from looking up the correct endpoint
-                      // URL for each provider. They can still override after.
-                      if (providerId) {
-                        const preset = getProviderPreset(providerId);
-                        if (preset.defaultUrl && !settings.aiUrl) {
-                          setSetting('aiUrl', preset.defaultUrl);
-                        }
-                        if (preset.defaultModel && !settings.aiModel) {
-                          setSetting('aiModel', preset.defaultModel);
-                        }
+                      const newProviderId = e.target.value;
+                      const oldProviderId = settings.aiProvider || '';
+                      // ── Save the CURRENT provider's config before switching ──
+                      // This preserves URL + API key + model so the user can
+                      // switch back without re-entering them.
+                      if (oldProviderId) {
+                        const configs = { ...(settings.aiProviderConfigs || {}) };
+                        configs[oldProviderId] = {
+                          url: settings.aiUrl,
+                          apiKey: settings.aiApiKey,
+                          model: settings.aiModel,
+                        };
+                        setSetting('aiProviderConfigs', configs);
+                      }
+                      // ── Switch to the new provider ──
+                      setSetting('aiProvider', newProviderId);
+                      if (newProviderId) {
+                        const preset = getProviderPreset(newProviderId);
+                        // Check if we have a SAVED config for this provider
+                        // (from a previous session). If so, restore it.
+                        // Otherwise, use the preset defaults.
+                        const savedConfig = settings.aiProviderConfigs?.[newProviderId];
+                        setSetting('aiUrl', savedConfig?.url ?? preset.defaultUrl);
+                        setSetting('aiModel', savedConfig?.model ?? preset.defaultModel);
+                        setSetting('aiApiKey', savedConfig?.apiKey ?? '');
                       }
                     }}
                   >

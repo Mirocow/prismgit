@@ -5,8 +5,8 @@ import { useToastActions } from '../stores/toastStore';
 import { useI18n } from '../lib/i18n';
 import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download, ChevronRight, ChevronDown, RefreshCw } from './icons';
 import { cn } from '../lib/utils';
-import { runWithTools, type ChatMessage } from '../lib/aiChat';
-import { type LLMProvider } from '../lib/aiCommitMessages';
+import { runWithTools, type ChatMessage, type TokenUsage } from '../lib/aiChat';
+import { PROVIDER_PRESETS, getProviderPreset, type LLMProvider } from '../lib/aiCommitMessages';
 
 /**
  * LAR-3 — AI Assistant chat panel.
@@ -241,6 +241,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
   const currentRepo = useRepositoryStore(s => s.currentRepo);
   const settings = useSettingsStore(s => s.settings);
+  const setSetting = useSettingsStore(s => s.setSetting);
   const toast = useToastActions();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -421,6 +422,37 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     setShowSessionMenu(false);
   };
 
+  // ── Provider switcher ──────────────────────────────────────────────
+  // Switch LLM provider ON THE FLY — mid-conversation. The conversation
+  // history and context are preserved (they're passed as priorHistory to
+  // runWithTools, which doesn't depend on the provider). The new provider
+  // continues the conversation from where the old one left off.
+  //
+  // Per-provider configs (URL + API key + model) are saved/restored from
+  // aiProviderConfigs so the user doesn't re-enter credentials on each switch.
+  const [showProviderMenu, setShowProviderMenu] = useState(false);
+  const switchProvider = useCallback((newProviderId: string) => {
+    const oldProviderId = settings?.aiProvider || '';
+    // Save current provider's config.
+    if (oldProviderId && setSetting) {
+      const configs = { ...(settings.aiProviderConfigs || {}) };
+      configs[oldProviderId] = {
+        url: settings.aiUrl,
+        apiKey: settings.aiApiKey,
+        model: settings.aiModel,
+      };
+      setSetting('aiProviderConfigs', configs);
+    }
+    // Switch to new provider — restore saved config or use preset defaults.
+    setSetting('aiProvider', newProviderId);
+    const preset = getProviderPreset(newProviderId);
+    const savedConfig = settings?.aiProviderConfigs?.[newProviderId];
+    setSetting('aiUrl', savedConfig?.url ?? preset.defaultUrl);
+    setSetting('aiModel', savedConfig?.model ?? preset.defaultModel);
+    setSetting('aiApiKey', savedConfig?.apiKey ?? '');
+    setShowProviderMenu(false);
+  }, [settings, setSetting]);
+
   // Starter prompts — different sets for repo vs no-repo mode.
   const starterPrompts = sessionRepoPath === null
     ? STARTER_PROMPTS_NO_REPO
@@ -508,6 +540,55 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                       </button>
                     ))
                   )}
+                </div>
+              </>
+            )}
+          </div>
+          {/* Provider switcher — compact dropdown to switch LLM provider
+              ON THE FLY. Saves the current provider's config (URL+key+model)
+              and restores the new provider's saved config. Conversation
+              history is preserved — the new provider continues the chat. */}
+          <div className="relative ml-1">
+            <button
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs bg-bg-secondary border border-border-subtle hover:border-accent transition-colors"
+              onClick={() => setShowProviderMenu(v => !v)}
+              title={settings?.aiProvider ? `Provider: ${getProviderPreset(settings.aiProvider).label}` : 'No provider selected'}
+            >
+              <span className="truncate max-w-20">
+                {settings?.aiProvider
+                  ? getProviderPreset(settings.aiProvider).label.split(' ')[0]
+                  : 'no provider'}
+              </span>
+              <span className="text-text-tertiary text-3xs">▾</span>
+            </button>
+            {showProviderMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowProviderMenu(false)} />
+                <div className="absolute top-full right-0 mt-1 w-64 bg-bg-elevated border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
+                  <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
+                    Switch AI Provider
+                  </div>
+                  {PROVIDER_PRESETS.map(p => (
+                    <button
+                      key={p.id}
+                      className={cn(
+                        'w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors flex items-center gap-2',
+                        settings?.aiProvider === p.id && 'bg-accent-muted text-accent',
+                      )}
+                      onClick={() => switchProvider(p.id)}
+                    >
+                      <span className="flex-1 truncate">{p.label}</span>
+                      {p.freeTier && (
+                        <span className="text-3xs px-1 rounded bg-status-added/15 text-status-added">FREE</span>
+                      )}
+                      {settings?.aiProviderConfigs?.[p.id]?.apiKey && (
+                        <span className="text-3xs text-status-added" title="API key saved">✓</span>
+                      )}
+                    </button>
+                  ))}
+                  <div className="text-3xs text-text-tertiary px-3 py-1.5 border-t border-border-subtle">
+                    Switching preserves the conversation — the new provider continues the chat.
+                  </div>
                 </div>
               </>
             )}
