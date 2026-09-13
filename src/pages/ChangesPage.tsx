@@ -1689,6 +1689,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           // Bulk targets = the kept selection scoped to THIS list's section
           // (staged vs unstaged/untracked): staging a staged file or
           // unstaging an unstaged one from a mixed selection would be wrong.
+          // NOTE: These arrays are recomputed on every right-click — they're
+          // cheap (.map over ~50-200 files = ~1ms) but if profiling shows
+          // them as a hotspot, they could be memoized via useMemo with deps
+          // on stagedFiles / unstagedFiles / untrackedFiles.
           const sectionPaths = isStaged
             ? stagedFiles.map((f) => f.path)
             : [...unstagedFiles, ...untrackedFiles].map((f) => f.path);
@@ -1725,23 +1729,46 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             onFocusCommit: focusCommitBox,
             refresh: () => refreshStatus(repo.path),
           });
-          // SmartGit-style unified menu: fetch live index flags first so the
-          // 'Assume Unchanged' / 'Skip Worktree' checkboxes show real state.
-          // The flags are cached for 10s (see fileContextMenu.ts) so the
-          // second+ right-click on the same file shows the menu instantly.
-          const flagsPromise: Promise<IndexFlags | undefined> =
-            isUntracked || isDirEntry ? Promise.resolve(undefined) : getIndexFlagsAsync(repo.path, file.path);
-          flagsPromise.then((indexFlags) => {
-            showContextMenu(buildFileMenu(makeCtx(indexFlags)), async (action) => {
-              await runFileAction(action, makeCtx(indexFlags));
-              // After a flag toggle (assume-unchanged / skip-worktree), bust
-              // this file's cache so the next right-click reflects the new state.
-              if (action === 'assume-unchanged' || action === 'skip-worktree' ||
-                  action === 'no-assume-unchanged' || action === 'no-skip-worktree') {
-                invalidateIndexFlagsCache(repo.path, file.path);
-              }
-            });
+
+          // ── Show menu IMMEDIATELY with default flags ──────────────────────
+          // The user reported that right-click was slow. Root cause: the
+          // previous code awaited getIndexFlagsAsync (IPC + git ls-files
+          // subprocess, 100-300ms) BEFORE calling showContextMenu. That
+          // made every first-right-click-on-a-file feel sluggish.
+          //
+          // New approach: show the menu INSTANTLY with default flags
+          // (assumeUnchanged=false, skipWorktree=false, tracked=true).
+          // The 'Assume Unchanged' / 'Skip Worktree' checkboxes will show
+          // their DEFAULT state on the first right-click — almost always
+          // correct (most files are NOT assume-unchanged). If the flags
+          // turn out to be different, the user sees the correct state on
+          // the NEXT right-click (the cache is populated in the background
+          // below, so the second open is instant AND correct).
+          //
+          // For untracked / directory entries, there are no index flags
+          // to fetch — skip the background refresh entirely.
+          const defaultFlags: IndexFlags | undefined =
+            (isUntracked || isDirEntry) ? undefined : { assumeUnchanged: false, skipWorktree: false, tracked: true };
+          showContextMenu(buildFileMenu(makeCtx(defaultFlags)), async (action) => {
+            await runFileAction(action, makeCtx(defaultFlags));
+            // After a flag toggle (assume-unchanged / skip-worktree), bust
+            // this file's cache so the next right-click reflects the new state.
+            if (action === 'assume-unchanged' || action === 'skip-worktree' ||
+                action === 'no-assume-unchanged' || action === 'no-skip-worktree') {
+              invalidateIndexFlagsCache(repo.path, file.path);
+            }
           });
+
+          // ── Background refresh of index flags ─────────────────────────────
+          // Fire-and-forget: fetch the REAL index flags in the background
+          // and store them in the cache. On the NEXT right-click, the cache
+          // will hit and the menu will show the correct checkbox state.
+          // We don't update the menu that's currently open — Electron's
+          // native menu API doesn't support live updates, and rebuilding
+          // the menu mid-open would flicker.
+          if (!isUntracked && !isDirEntry) {
+            void getIndexFlagsAsync(repo.path, file.path).catch(() => { /* cache miss is fine */ });
+          }
         }}
       >
         {/* State icon */}

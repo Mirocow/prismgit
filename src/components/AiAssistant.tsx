@@ -3,7 +3,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { useI18n } from '../lib/i18n';
-import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check } from './icons';
+import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download } from './icons';
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage } from '../lib/aiChat';
 import { type LLMProvider } from '../lib/aiCommitMessages';
@@ -96,6 +96,100 @@ function clearChatHistory(sessionRepoPath: string | null | undefined): void {
   } catch {
     // ignore
   }
+}
+
+/**
+ * Export the full chat conversation as a Markdown file — used to share
+ * the conversation with the developer for debugging / improving the AI
+ * Assistant. The format is human-readable:
+ *
+ *   # PrismGit AI Assistant — Chat Log
+ *   Session: <repo path or 'No repository'>
+ *   Exported: 2026-09-13T15:42:00.000Z
+ *   Messages: 12
+ *
+ *   ## 👤 User
+ *   What changed since the last commit?
+ *
+ *   ## 🤖 Assistant
+ *   Calling tool: get_status
+ *
+ *   ### 🔧 get_status
+ *   Current branch: main
+ *   ...
+ *
+ *   ## 🤖 Assistant
+ *   You have 3 modified files...
+ *
+ * Each message is included — user prompts, assistant reasoning, tool
+ * calls, tool results, errors. Nothing is truncated, so the developer
+ * sees exactly what the AI saw and did.
+ */
+function exportChatLog(
+  messages: ChatMessage[],
+  sessionRepoPath: string | null | undefined,
+  sessionRepoName: string | undefined,
+): void {
+  const exportedAt = new Date().toISOString();
+  const sessionLabel = sessionRepoPath
+    ? `${sessionRepoName ?? sessionRepoPath} (\`${sessionRepoPath}\`)`
+    : 'No repository (app-level mode)';
+  const lines: string[] = [
+    '# PrismGit AI Assistant — Chat Log',
+    '',
+    `- **Session:** ${sessionLabel}`,
+    `- **Exported:** ${exportedAt}`,
+    `- **Messages:** ${messages.length}`,
+    '',
+    '---',
+    '',
+  ];
+
+  for (const msg of messages) {
+    if (msg.role === 'user') {
+      lines.push('## 👤 User', '');
+      lines.push(msg.content);
+      lines.push('');
+    } else if (msg.role === 'assistant' && msg.toolCalls?.length) {
+      lines.push('## 🤖 Assistant (tool call)', '');
+      lines.push(msg.content);
+      lines.push('');
+    } else if (msg.role === 'assistant') {
+      lines.push('## 🤖 Assistant', '');
+      lines.push(msg.content);
+      lines.push('');
+    } else if (msg.role === 'tool') {
+      lines.push(`### 🔧 ${msg.toolName ?? 'tool'}`, '');
+      // Wrap tool results in a code block so the markdown viewer doesn't
+      // misinterpret git output (which often contains #, *, etc.).
+      lines.push('```');
+      lines.push(msg.content);
+      lines.push('```');
+      lines.push('');
+    }
+    lines.push('---');
+    lines.push('');
+  }
+
+  const md = lines.join('\n');
+  // Build a filename that includes the repo name (sanitised) + timestamp.
+  const safeName = (sessionRepoName ?? 'no-repo').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const filename = `prismgit-chat-${safeName}-${ts}.md`;
+
+  // Trigger a browser download. In Electron/Tauri this lands in the
+  // user's Downloads directory — same as any other file save.
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Release the blob URL after the click — the browser keeps the download
+  // alive even after the URL is revoked, as long as the click happened.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** Format milliseconds as a human-readable "Xm ago" string for the header badge. */
@@ -402,13 +496,27 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           {messages.length > 0 && (
-            <button
-              className="icon-btn !w-5 !h-5 hover:!text-status-deleted"
-              onClick={handleClear}
-              title={t('aiAssistant.clearHistory')}
-            >
-              <Trash size={11} />
-            </button>
+            <>
+              {/* Export chat log as Markdown — used to share the
+                  conversation with the developer for debugging / improving
+                  the AI Assistant. The .md file lands in the user's
+                  Downloads directory. */}
+              <button
+                className="icon-btn !w-5 !h-5 hover:!text-accent"
+                onClick={() => exportChatLog(messages, sessionRepoPath, sessionRepo?.name)}
+                title="Export chat log as Markdown (for debugging / sharing)"
+                aria-label="Export chat log"
+              >
+                <Download size={11} />
+              </button>
+              <button
+                className="icon-btn !w-5 !h-5 hover:!text-status-deleted"
+                onClick={handleClear}
+                title={t('aiAssistant.clearHistory')}
+              >
+                <Trash size={11} />
+              </button>
+            </>
           )}
           <button className="icon-btn !w-5 !h-5" onClick={onClose} aria-label={t('common.close')}>
             <X size={12} />
