@@ -72,12 +72,14 @@ function isModelLoading(status: number, body: string): boolean {
   return false;
 }
 
-async function proxyFetch(
+export async function proxyFetch(
   url: string,
   headers: Record<string, string>,
   body: string,
   signal?: AbortSignal,
+  method?: string,
 ): Promise<{ ok: boolean; status: number; statusText: string; body: string }> {
+  const httpMethod = method || 'POST';
   let lastError: { ok: boolean; status: number; statusText: string; body: string } | null = null;
   let backoff = INITIAL_BACKOFF_MS;
 
@@ -96,7 +98,7 @@ async function proxyFetch(
       // signal fires and we reject early — the in-flight IPC result is
       // discarded. For Ollama (which can take 30-300s for a slow model),
       // this is the difference between "instant stop" and "wait 5 minutes".
-      const ipcPromise = api.ai?.chat?.({ url, headers, body, method: 'POST' });
+      const ipcPromise = api.ai?.chat?.({ url, headers, body, method: httpMethod });
       if (signal) {
         result = await Promise.race([
           ipcPromise as Promise<typeof result>,
@@ -117,7 +119,11 @@ async function proxyFetch(
       }
       // Fallback: direct fetch (works in Tauri and browser contexts without CORS)
       try {
-        const res = await fetch(url, { method: 'POST', headers, body, signal });
+        const fetchOpts: RequestInit = { method: httpMethod, headers, signal };
+        if (httpMethod !== 'GET' && httpMethod !== 'HEAD' && body) {
+          fetchOpts.body = body;
+        }
+        const res = await fetch(url, fetchOpts);
         const text = await res.text();
         result = { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
       } catch (e2) {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { confirmDialog } from '../components/ConfirmDialog';
 import { Folder, Github, Loader, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
 import { OllamaModelPicker } from '../components/OllamaModelPicker';
+import { CloudModelPicker } from '../components/CloudModelPicker';
 import { api, type GitConfigEntry } from '../lib/api';
 import { PROVIDER_PRESETS, getProviderPreset } from '../lib/aiCommitMessages';
 import { LOCALES, useI18n } from '../lib/i18n';
@@ -1217,12 +1218,32 @@ smartgit.refresh.inspectEol=true
             {/* Ollama model picker — fetches /api/tags from the Ollama server,
                 shows a dropdown of available models. User can select instead of
                 typing the model name manually. */}
+            {/* Model picker — different pickers for different providers:
+                - Ollama: rich picker with metadata (params, size, quantization, family)
+                - Anthropic: no /models endpoint — manual text input only
+                - All other cloud providers (OpenAI, Groq, Cerebras, OpenRouter,
+                  Z.ai, Mistral, GitHub Models, Hugging Face, Custom):
+                  CloudModelPicker — fetches /models from the provider's API */}
             {settings.aiProvider === 'ollama' && (
               <OllamaModelPicker
                 url={settings.aiUrl || 'http://localhost:11434'}
                 selectedModel={settings.aiModel || ''}
                 onSelect={(model) => setSetting('aiModel', model)}
               />
+            )}
+            {settings.aiProvider && settings.aiProvider !== 'ollama' && settings.aiProvider !== 'anthropic' && settings.aiProvider !== 'custom' && (
+              <CloudModelPicker
+                preset={getProviderPreset(settings.aiProvider)}
+                url={settings.aiUrl || ''}
+                apiKey={settings.aiApiKey}
+                selectedModel={settings.aiModel || ''}
+                onSelect={(model) => setSetting('aiModel', model)}
+              />
+            )}
+            {settings.aiProvider === 'custom' && (
+              <div className="pt-3 border-t border-border-subtle text-2xs text-text-tertiary italic">
+                Custom endpoint — enter the model name manually. If the endpoint has a /models endpoint, you can switch to a named provider above to use the model picker.
+              </div>
             )}
 
             {/* Enable toggle */}
