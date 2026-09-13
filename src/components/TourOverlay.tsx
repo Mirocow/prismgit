@@ -142,11 +142,14 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
   };
 
   // When the checkbox is toggled ON, immediately mark tour as completed
-  // so even if the user closes the window without clicking Done/Skip,
-  // the tour won't reappear.
+  // and CLOSE the overlay — the user explicitly said they don't want to
+  // see this anymore.
   const handleDontShowChange = (checked: boolean) => {
     setDontShowAgain(checked);
-    if (checked) markTourCompleted();
+    if (checked) {
+      markTourCompleted();
+      onClose();
+    }
   };
 
   return (
