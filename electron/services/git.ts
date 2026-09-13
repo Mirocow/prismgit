@@ -40,18 +40,36 @@ import { BrowserWindow } from 'electron';
  * NOTE: This env override has the HIGHEST priority in git's config hierarchy
  * (above --system, --global, --local, and --file). It cannot be overridden
  * by anything in the repo. Requires git 2.31+ (GIT_CONFIG_COUNT).
+ *
+ * NOTE: simple-git BLOCKS GIT_CONFIG_COUNT by default as an "unsafe" env var.
+ * Every simpleGit() call must include `unsafe: { allowUnsafeConfigEnvCount: true }`.
+ * The `getGit()` function adds this automatically; ad-hoc simpleGit() calls
+ * must also add it (see GIT_UNSAFE_OPTIONS below).
+ */
+
+/**
+ * The env vars to pass to every simple-git instance.
  */
 const GIT_ENV_LFS_SKIP: Record<string, string> = {
   GIT_LFS_SKIP_SMUDGE: '1',
-  // Override core.hooksPath="" to disable ALL git hooks (prevents
-  // post-checkout/post-merge hooks from calling git-lfs).
   GIT_CONFIG_COUNT: '2',
   GIT_CONFIG_KEY_0: 'core.hooksPath',
   GIT_CONFIG_VALUE_0: '',
-  // Override filter.lfs.process="" so git doesn't invoke git-lfs
-  // even if the config entry is set in .git/config.
   GIT_CONFIG_KEY_1: 'filter.lfs.process',
   GIT_CONFIG_VALUE_1: '',
+};
+
+/**
+ * The simple-git options to use with every simpleGit() call.
+ * Combines the env override with the unsafe flags that allow GIT_CONFIG_COUNT
+ * and core.hooksPath override (both blocked by simple-git's safety plugin).
+ */
+const GIT_UNSAFE_OPTIONS = {
+  env: GIT_ENV_LFS_SKIP,
+  unsafe: {
+    allowUnsafeConfigEnvCount: true as const,
+    allowUnsafeHooksPath: true as const,
+  },
 };
 import type {
   StatusResult,
@@ -177,7 +195,8 @@ function getGit(repoPath: string): SimpleGit {
       binary: 'git',
       maxConcurrentProcesses: 2,
       trimmed: false,
-    }).env(GIT_ENV_LFS_SKIP);
+      ...GIT_UNSAFE_OPTIONS,
+    });
     gitCache.set(repoPath, git);
   }
   return git;
@@ -264,7 +283,7 @@ async function detectRepoState(repoPath: string, git?: SimpleGit) {
 
 export async function isRepo(targetPath: string): Promise<boolean> {
   try {
-    const git = simpleGit({ baseDir: targetPath }).env(GIT_ENV_LFS_SKIP);
+    const git = simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS });
     return await git.checkIsRepo();
   } catch {
     return false;
@@ -1962,7 +1981,7 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
   if (summary.hasRemote) {
     const checked = getBackgroundFetchRemotes(repoPath).filter((n) => summary.remotes.includes(n));
     if (checked.length > 0) {
-      const fetchGit = simpleGit({ baseDir: repoPath, binary: 'git' }).env(GIT_ENV_LFS_SKIP)
+      const fetchGit = simpleGit({ baseDir: repoPath, binary: 'git', ...GIT_UNSAFE_OPTIONS })
         .env({ GIT_TERMINAL_PROMPT: '0' });
       const perRemote = async (name: string): Promise<void> => {
         const authArgs = await remoteNetworkArgs(repoPath, name);
@@ -3051,7 +3070,7 @@ export async function submodules(repoPath: string): Promise<SubmoduleInfo[]> {
     let currentCommit = '';
     let trackedCommit = '';
     try {
-      const subGit = simpleGit({ baseDir: absSubPath }).env(GIT_ENV_LFS_SKIP);
+      const subGit = simpleGit({ baseDir: absSubPath, ...GIT_UNSAFE_OPTIONS });
       const subStatus = await subGit.status();
       upToDate = subStatus.isClean();
       currentCommit = await subGit.revparse(['HEAD']);
@@ -3135,7 +3154,7 @@ export async function clone(
   targetPath: string,
   options: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean } = {}
 ): Promise<string> {
-  const git = simpleGit().env(GIT_ENV_LFS_SKIP);
+  const git = simpleGit(GIT_UNSAFE_OPTIONS);
   const args: string[] = ['clone'];
   if (options.depth) args.push('--depth', String(options.depth));
   if (options.branch) args.push('--branch', options.branch);
@@ -3148,7 +3167,7 @@ export async function clone(
 }
 
 export async function init(targetPath: string, bare = false): Promise<void> {
-  const git = simpleGit({ baseDir: targetPath }).env(GIT_ENV_LFS_SKIP);
+  const git = simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS });
   await git.init(bare);
   invalidateCache();
 }
@@ -3721,7 +3740,7 @@ export async function editCommitMessage(
       // simple-git blocks `-c core.editor` on the default instance — the
       // non-HEAD reword path silently always failed. An unsafe instance is
       // required for interactive-rebase automation.
-      const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
+      const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true, allowUnsafeConfigEnvCount: true, allowUnsafeHooksPath: true } }).env(GIT_ENV_LFS_SKIP);
       // Rewording the ROOT commit: rebase needs --root there (same parent-
       // counting probe as squashCommits — rev-parse --quiet never throws).
       let rootCase = false;
@@ -4248,7 +4267,7 @@ export async function splitCommit(repoPath: string, hash: string): Promise<{ sta
   // Dedicated instance with unsafe.allowUnsafeEditor: simple-git blocks
   // `-c sequence.editor=...` on the default instance, which made splitCommit
   // fail silently (always {started:false}) despite valid git commands.
-  const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
+  const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true, allowUnsafeConfigEnvCount: true, allowUnsafeHooksPath: true } }).env(GIT_ENV_LFS_SKIP);
   // Start an interactive rebase with "edit" for the target commit
   // This will stop at the commit, allowing the user to split it
   try {
@@ -4664,7 +4683,7 @@ export async function showBuffer(repoPath: string, args: string[]): Promise<Buff
  * Returns when the clone is complete.
  */
 export async function mirror(remoteUrl: string, targetPath: string): Promise<void> {
-  const git = simpleGit().env(GIT_ENV_LFS_SKIP);
+  const git = simpleGit(GIT_UNSAFE_OPTIONS);
   await git.mirror(remoteUrl, targetPath);
 }
 
@@ -5649,7 +5668,7 @@ export async function clonePartial(
   if (options?.depth) args.push('--depth=' + options.depth);
   if (options?.branch) args.push('--branch=' + options.branch, '--single-branch');
   if (options?.recursive) args.push('--recursive');
-  const git = simpleGit().env(GIT_ENV_LFS_SKIP);
+  const git = simpleGit(GIT_UNSAFE_OPTIONS);
   const result = await git.raw(args);
   invalidateCache();
   return result || targetPath;
@@ -5661,7 +5680,7 @@ export async function setupCredentialHelper(repoPath: string): Promise<void> {
   // ("Configuring credential.helper is not permitted without enabling
   // allowUnsafeCredentialHelper") — the old code swallowed that error, so this
   // function silently did nothing. Use an unsafe instance and actually set it.
-  const git = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeCredentialHelper: true } }).env(GIT_ENV_LFS_SKIP);
+  const git = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeCredentialHelper: true, allowUnsafeConfigEnvCount: true, allowUnsafeHooksPath: true } }).env(GIT_ENV_LFS_SKIP);
   try {
     await git.addConfig('credential.helper', 'store', false /* replace-all */, 'local');
   } catch {
@@ -5859,7 +5878,7 @@ export async function squashCommits(
     // pitfall splitCommit documents) — an unsafe instance is MANDATORY here,
     // otherwise the rebase always fails with "Configuring core.editor is not
     // permitted without enabling allowUnsafeEditor".
-    const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
+    const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true, allowUnsafeConfigEnvCount: true, allowUnsafeHooksPath: true } }).env(GIT_ENV_LFS_SKIP);
     // fromHash may be the ROOT commit — rebase needs --root there. NOTE: a
     // `rev-parse --verify --quiet <hash>^` probe does NOT work: it exits 1
     // with EMPTY output and simple-git resolves that (no stderr → no throw).
