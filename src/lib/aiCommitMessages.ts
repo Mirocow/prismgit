@@ -15,7 +15,30 @@
 export interface LLMProvider {
   id: string;
   name: string;
-  type: 'openai' | 'anthropic' | 'github' | 'ollama' | 'mistral' | 'custom';
+  /**
+   * Provider type — determines which API protocol to use:
+   *   - 'openai'      — OpenAI Chat Completions API (also used for any
+   *                     OpenAI-compatible endpoint)
+   *   - 'anthropic'   — Anthropic Messages API (Claude)
+   *   - 'ollama'      — Ollama /api/chat (local, no API key)
+   *   - 'openrouter'  — OpenRouter (OpenAI-compatible aggregator with
+   *                     dozens of free models: Llama 3, Gemma, Mistral)
+   *   - 'groq'        — Groq (OpenAI-compatible, record-low latency)
+   *   - 'cerebras'    — Cerebras Inference (OpenAI-compatible, 1M free tokens/day)
+   *   - 'gemini'      — Google Gemini API (OpenAI-compatible endpoint)
+   *   - 'huggingface' — Hugging Face Inference API (OpenAI-compatible)
+   *   - 'mistral'     — Mistral AI (OpenAI-compatible)
+   *   - 'github'      — GitHub Models (OpenAI-compatible)
+   *   - 'custom'      — any other OpenAI-compatible endpoint
+   *
+   * All the new providers (openrouter, groq, cerebras, gemini,
+   * huggingface) use the OpenAI Chat Completions protocol — they're
+   * routed through callOpenAIChat() in aiChat.ts. The only reason they
+   * have distinct type ids is so the Settings page can pre-fill the
+   * correct base URL and show provider-specific hints.
+   */
+  type: 'openai' | 'anthropic' | 'github' | 'ollama' | 'mistral' | 'custom'
+      | 'openrouter' | 'groq' | 'cerebras' | 'gemini' | 'huggingface';
   url: string;
   apiKey?: string;
   model: string;
@@ -23,6 +46,137 @@ export interface LLMProvider {
   maxTokens?: number;
   /** Temperature for generation (0-1). */
   temperature?: number;
+}
+
+/**
+ * Built-in provider presets — used by the Settings page to pre-fill the
+ * URL + model + hint fields when the user picks a provider from the
+ * dropdown. The user can still override any field.
+ *
+ * All URLs point to the OpenAI-compatible /v1/chat/completions endpoint.
+ * API keys are obtained from each provider's dashboard — see the hint
+ * field for where to get one.
+ */
+export interface ProviderPreset {
+  id: LLMProvider['type'];
+  label: string;
+  /** Default base URL (OpenAI-compatible /v1/chat/completions). */
+  defaultUrl: string;
+  /** Default model name (user can change). */
+  defaultModel: string;
+  /** Short description shown in the Settings UI. */
+  description: string;
+  /** Where to get an API key (URL or instructions). */
+  apiKeyHint: string;
+  /** Whether this provider offers a FREE tier (no credit card). */
+  freeTier: boolean;
+}
+
+export const PROVIDER_PRESETS: ProviderPreset[] = [
+  {
+    id: 'openai',
+    label: 'OpenAI (gpt-4o-mini)',
+    defaultUrl: 'https://api.openai.com/v1/chat/completions',
+    defaultModel: 'gpt-4o-mini',
+    description: 'Official OpenAI API. Paid only.',
+    apiKeyHint: 'https://platform.openai.com/api-keys',
+    freeTier: false,
+  },
+  {
+    id: 'anthropic',
+    label: 'Anthropic (Claude)',
+    defaultUrl: 'https://api.anthropic.com/v1/messages',
+    defaultModel: 'claude-3-5-sonnet-20241022',
+    description: 'Anthropic Claude — uses a different API protocol (not OpenAI-compatible).',
+    apiKeyHint: 'https://console.anthropic.com/settings/keys',
+    freeTier: false,
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter (free models aggregator)',
+    defaultUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    defaultModel: 'meta-llama/llama-3.1-8b-instruct:free',
+    description: 'Aggregator with dozens of FREE models (Llama 3, Gemma, Mistral). No credit card needed. Pick any model from openrouter.ai/models.',
+    apiKeyHint: 'https://openrouter.ai/keys',
+    freeTier: true,
+  },
+  {
+    id: 'groq',
+    label: 'Groq (ultra-fast inference)',
+    defaultUrl: 'https://api.groq.com/openai/v1/chat/completions',
+    defaultModel: 'llama-3.1-8b-instant',
+    description: 'Record-low latency (~500 tokens/sec). Free tier: 30 req/min, 14,400 req/day. Models: Llama 3.1 (8B/70B), Mixtral, Gemma 2.',
+    apiKeyHint: 'https://console.groq.com/keys',
+    freeTier: true,
+  },
+  {
+    id: 'cerebras',
+    label: 'Cerebras Inference (1M free tokens/day)',
+    defaultUrl: 'https://api.cerebras.ai/v1/chat/completions',
+    defaultModel: 'llama3.1-8b',
+    description: 'Most generous free tier: 1,000,000 tokens/day. Specialised Cerebras chips — thousands of tokens/sec. No credit card.',
+    apiKeyHint: 'https://cloud.cerebras.ai',
+    freeTier: true,
+  },
+  {
+    id: 'gemini',
+    label: 'Google Gemini API',
+    defaultUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    defaultModel: 'gemini-1.5-flash',
+    description: 'Google AI Studio — Gemini Flash. ~1,500 req/day free. OpenAI-compatible endpoint.',
+    apiKeyHint: 'https://aistudio.google.com/apikey',
+    freeTier: true,
+  },
+  {
+    id: 'huggingface',
+    label: 'Hugging Face Inference API',
+    defaultUrl: 'https://api-inference.huggingface.co/models',
+    defaultModel: 'meta-llama/Llama-3.2-3B-Instruct',
+    description: 'Thousands of open models. Free starter credits. Great for niche/specialised models.',
+    apiKeyHint: 'https://huggingface.co/settings/tokens',
+    freeTier: true,
+  },
+  {
+    id: 'mistral',
+    label: 'Mistral AI (Experiment plan)',
+    defaultUrl: 'https://api.mistral.ai/v1/chat/completions',
+    defaultModel: 'mistral-small-latest',
+    description: 'Free Experiment plan — up to 500K tokens/min. Models: Mistral Nemo, Pixtral, Small/Large.',
+    apiKeyHint: 'https://console.mistral.ai/api-keys',
+    freeTier: true,
+  },
+  {
+    id: 'github',
+    label: 'GitHub Models',
+    defaultUrl: 'https://models.inference.ai.azure.com/chat/completions',
+    defaultModel: 'gpt-4o-mini',
+    description: 'Free GitHub Models endpoint (uses your GitHub token).',
+    apiKeyHint: 'https://github.com/settings/tokens',
+    freeTier: true,
+  },
+  {
+    id: 'ollama',
+    label: 'Ollama (local, no API key)',
+    defaultUrl: 'http://localhost:11434',
+    defaultModel: 'llama3.2',
+    description: 'Run models locally — no API key, no internet. Use the model picker below to choose from installed models.',
+    apiKeyHint: 'Not needed — runs locally.',
+    freeTier: true,
+  },
+  {
+    id: 'custom',
+    label: 'Custom (OpenAI-compatible)',
+    defaultUrl: '',
+    defaultModel: '',
+    description: 'Any OpenAI-compatible endpoint (LM Studio, vLLM, text-generation-webui, etc.).',
+    apiKeyHint: 'Depends on the server.',
+    freeTier: false,
+  },
+];
+
+/** Look up a provider preset by id. Returns the 'custom' preset as fallback. */
+export function getProviderPreset(id: string): ProviderPreset {
+  return PROVIDER_PRESETS.find(p => p.id === id) ?? PROVIDER_PRESETS[PROVIDER_PRESETS.length - 1];
 }
 
 export interface AICommitMessageConfig {
@@ -85,13 +239,17 @@ export async function generateCommitMessage(params: GenerateMessageParams): Prom
     case 'openai':
     case 'custom':
     case 'github':
+    case 'mistral':
+    case 'openrouter':
+    case 'groq':
+    case 'cerebras':
+    case 'gemini':
+    case 'huggingface':
       return callOpenAICompatible(provider, systemPrompt, userPrompt, maxTokens);
     case 'anthropic':
       return callAnthropic(provider, systemPrompt, userPrompt, maxTokens);
     case 'ollama':
       return callOllama(provider, systemPrompt, userPrompt, maxTokens);
-    case 'mistral':
-      return callOpenAICompatible(provider, systemPrompt, userPrompt, maxTokens);
     default:
       throw new Error(`Unsupported provider type: ${provider.type}`);
   }
@@ -424,13 +582,17 @@ async function callProvider(
     case 'openai':
     case 'custom':
     case 'github':
+    case 'mistral':
+    case 'openrouter':
+    case 'groq':
+    case 'cerebras':
+    case 'gemini':
+    case 'huggingface':
       return callOpenAICompatible(provider, systemPrompt, userPrompt, maxTokens);
     case 'anthropic':
       return callAnthropic(provider, systemPrompt, userPrompt, maxTokens);
     case 'ollama':
       return callOllama(provider, systemPrompt, userPrompt, maxTokens);
-    case 'mistral':
-      return callOpenAICompatible(provider, systemPrompt, userPrompt, maxTokens);
     default:
       throw new Error(`Unsupported provider type: ${provider.type}`);
   }
@@ -622,6 +784,11 @@ export async function* callLLMStream(
     case 'custom':
     case 'github':
     case 'mistral':
+    case 'openrouter':
+    case 'groq':
+    case 'cerebras':
+    case 'gemini':
+    case 'huggingface':
       yield* streamOpenAICompatible();
       break;
     case 'anthropic':

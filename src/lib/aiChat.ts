@@ -355,6 +355,11 @@ export async function callLLMChat(
     case 'custom':
     case 'github':
     case 'mistral':
+    case 'openrouter':
+    case 'groq':
+    case 'cerebras':
+    case 'gemini':
+    case 'huggingface':
       return callOpenAIChat(messages, provider, signal);
     case 'anthropic':
       return callAnthropicChat(messages, provider, signal);

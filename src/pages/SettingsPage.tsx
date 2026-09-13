@@ -3,6 +3,7 @@ import { confirmDialog } from '../components/ConfirmDialog';
 import { Folder, Github, Loader, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
 import { OllamaModelPicker } from '../components/OllamaModelPicker';
 import { api, type GitConfigEntry } from '../lib/api';
+import { PROVIDER_PRESETS, getProviderPreset } from '../lib/aiCommitMessages';
 import { LOCALES, useI18n } from '../lib/i18n';
 import { getThemeMeta, THEMES } from '../lib/themes';
 import { cn } from '../lib/utils';
@@ -1081,15 +1082,29 @@ smartgit.refresh.inspectEol=true
                   <select
                     className="w-full text-sm bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
                     value={settings.aiProvider || ''}
-                    onChange={(e) => setSetting('aiProvider', e.target.value)}
+                    onChange={(e) => {
+                      const providerId = e.target.value;
+                      setSetting('aiProvider', providerId);
+                      // Auto-fill URL + model from the provider preset —
+                      // saves the user from looking up the correct endpoint
+                      // URL for each provider. They can still override after.
+                      if (providerId) {
+                        const preset = getProviderPreset(providerId);
+                        if (preset.defaultUrl && !settings.aiUrl) {
+                          setSetting('aiUrl', preset.defaultUrl);
+                        }
+                        if (preset.defaultModel && !settings.aiModel) {
+                          setSetting('aiModel', preset.defaultModel);
+                        }
+                      }
+                    }}
                   >
                     <option value="">{t('settings.disabledOption')}</option>
-                    <option value="openai">OpenAI (gpt-4o-mini)</option>
-                    <option value="anthropic">Anthropic (Claude)</option>
-                    <option value="github">GitHub Models</option>
-                    <option value="mistral">Mistral</option>
-                    <option value="ollama">{t('settings.aiProviderOllamaLocal')}</option>
-                    <option value="custom">{t('settings.aiProviderCustom')}</option>
+                    {PROVIDER_PRESETS.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}{p.freeTier ? ' — FREE' : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -1121,6 +1136,39 @@ smartgit.refresh.inspectEol=true
                 </div>
               </div>
             </div>
+
+            {/* Provider description + API key hint — shown when a provider
+                is selected. Helps the user understand what the provider
+                offers (free tier? latency?) and where to get an API key. */}
+            {settings.aiProvider && (() => {
+              const preset = getProviderPreset(settings.aiProvider);
+              return (
+                <div className="text-2xs text-text-tertiary mt-2 p-2 rounded bg-bg-tertiary border border-border-subtle">
+                  <div className="flex items-center gap-2 mb-1">
+                    {preset.freeTier && (
+                      <span className="px-1.5 py-0.5 rounded bg-status-added/15 text-status-added font-semibold text-3xs uppercase">
+                        FREE
+                      </span>
+                    )}
+                    <span>{preset.description}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="opacity-70">API key:</span>
+                    {preset.apiKeyHint.startsWith('http') ? (
+                      <a
+                        href={preset.apiKeyHint}
+                        onClick={(e) => { e.preventDefault(); api.app.openExternal(preset.apiKeyHint); }}
+                        className="text-accent hover:underline"
+                      >
+                        {preset.apiKeyHint}
+                      </a>
+                    ) : (
+                      <span>{preset.apiKeyHint}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Connection — URL + API key */}
             <div>
