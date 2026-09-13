@@ -2,6 +2,7 @@
 // Only icons we actually use, tree-shakeable, no runtime deps
 
 import type { SVGProps } from 'react';
+import React from 'react';
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -262,19 +263,37 @@ export const ArrowDown = (p: IconProps) => (
   </Icon>
 );
 
-// Plug (розетка) — used in History/Changes sync indicator to mean "pull needed".
-// Standard Lucide "plug" path.
-export const Plug = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M12 22v-5" />
-    <path d="M9 8V2" />
-    <path d="M15 8V2" />
-    <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
-  </Icon>
+const svgStyle = {
+  display: 'inline-block',
+  verticalAlign: 'middle',
+  height: '18px',
+  width: 'auto',
+  flexShrink: 0,
+};
+
+// PlugConnected — plug inserted INTO socket (синхронизировано).
+// Shows a plug (two prongs) going INTO a socket on the right side.
+// Lucide-style 24x24 viewBox, stroke-based.
+export const PlugConnected = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" style={svgStyle} {...p}>
+    <circle cx="4"  cy="12" r="3" fill="currentColor" />
+    <circle cx="20" cy="12" r="3" fill="currentColor" />
+    <rect x="7" y="10.5" width="10" height="3" rx="1.5" fill="currentColor" />
+  </svg>
 );
 
-// PlugZap (вилка в розетке) — used in History/Changes sync indicator to mean
-// "in sync with remote". Standard Lucide "plug-zap" path.
+// PlugDisconnected — plug pulled AWAY from socket (рассинхронизировано).
+// Shows a plug on the left, socket on the right, with a gap between them.
+export const PlugDisconnected = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" style={svgStyle} {...p}>
+    <circle cx="4"  cy="12" r="3" fill="currentColor" />
+    <circle cx="20" cy="12" r="3" fill="currentColor" />
+    <rect x="7"  y="10.5" width="5" height="3" rx="1.5" fill="currentColor" />
+    <rect x="24" y="10.5" width="5" height="3" rx="1.5" fill="currentColor" />
+  </svg>
+);
+
+// PlugZap — kept for backward compat.
 export const PlugZap = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 13v2" />
@@ -286,7 +305,7 @@ export const PlugZap = (p: IconProps) => (
   </Icon>
 );
 
-// Power — alternative "in sync" icon (power symbol). Kept as alternative.
+// Power — kept for backward compat.
 export const Power = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 2v10" />

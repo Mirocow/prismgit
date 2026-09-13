@@ -169,7 +169,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Z.ai (GLM models)',
     defaultUrl: 'https://api.z.ai/api/paas/v4/chat/completions',
     defaultModel: 'glm-4-flash',
-    description: 'Z.ai API — GLM-4-Flash (free), GLM-4-Plus, GLM-4V (vision). OpenAI-compatible endpoint. Free tier available.',
+    description: 'Z.ai API — GLM-4-Flash (free), GLM-4-Plus, GLM-4V (vision). OpenAI-compatible. If api.z.ai doesn\'t resolve from your location, try https://open.bigmodel.cn/api/paas/v4/chat/completions (China mirror).',
     apiKeyHint: 'https://z.ai/manage/apikey',
     freeTier: true,
   },

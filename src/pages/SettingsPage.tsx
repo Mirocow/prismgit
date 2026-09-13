@@ -1083,32 +1083,42 @@ smartgit.refresh.inspectEol=true
                   <select
                     className="w-full text-sm bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
                     value={settings.aiProvider || ''}
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const newProviderId = e.target.value;
                       const oldProviderId = settings.aiProvider || '';
-                      // ── Save the CURRENT provider's config before switching ──
-                      // This preserves URL + API key + model so the user can
-                      // switch back without re-entering them.
+                      // ── 1. Save current provider's config ──
+                      // Read current flat values and merge into configs.
+                      const currentUrl = settings.aiUrl || '';
+                      const currentApiKey = settings.aiApiKey || '';
+                      const currentModel = settings.aiModel || '';
+                      const existingConfigs = settings.aiProviderConfigs || {};
+                      const updatedConfigs = { ...existingConfigs };
                       if (oldProviderId) {
-                        const configs = { ...(settings.aiProviderConfigs || {}) };
-                        configs[oldProviderId] = {
-                          url: settings.aiUrl,
-                          apiKey: settings.aiApiKey,
-                          model: settings.aiModel,
+                        const existing = updatedConfigs[oldProviderId] || {};
+                        updatedConfigs[oldProviderId] = {
+                          url: currentUrl || existing.url,
+                          apiKey: currentApiKey || existing.apiKey,
+                          model: currentModel || existing.model,
                         };
-                        setSetting('aiProviderConfigs', configs);
                       }
-                      // ── Switch to the new provider ──
-                      setSetting('aiProvider', newProviderId);
+                      // ── 2. Get new provider's saved config or defaults ──
                       if (newProviderId) {
                         const preset = getProviderPreset(newProviderId);
-                        // Check if we have a SAVED config for this provider
-                        // (from a previous session). If so, restore it.
-                        // Otherwise, use the preset defaults.
-                        const savedConfig = settings.aiProviderConfigs?.[newProviderId];
-                        setSetting('aiUrl', savedConfig?.url ?? preset.defaultUrl);
-                        setSetting('aiModel', savedConfig?.model ?? preset.defaultModel);
-                        setSetting('aiApiKey', savedConfig?.apiKey ?? '');
+                        const savedConfig = updatedConfigs[newProviderId];
+                        const newUrl = savedConfig?.url || preset.defaultUrl;
+                        const newModel = savedConfig?.model || preset.defaultModel;
+                        const newApiKey = savedConfig?.apiKey || '';
+                        // ── 3. Apply ALL settings atomically ──
+                        await Promise.all([
+                          setSetting('aiProviderConfigs', updatedConfigs),
+                          setSetting('aiProvider', newProviderId),
+                          setSetting('aiUrl', newUrl),
+                          setSetting('aiModel', newModel),
+                          setSetting('aiApiKey', newApiKey),
+                        ]);
+                      } else {
+                        // Provider set to empty (disabled)
+                        await setSetting('aiProvider', '');
                       }
                     }}
                   >
@@ -1331,6 +1341,90 @@ smartgit.refresh.inspectEol=true
               </label>
               <div className="text-2xs text-text-tertiary mt-1">
                 When the conversation history exceeds this size (in characters, not messages), old messages are compressed into a short summary. Higher = AI remembers more, but costs more tokens. Lower = cheaper, but AI forgets older context faster. Default: 20,000 chars (~5,000 tokens).
+              </div>
+            </div>
+
+            {/* Tool Limits — control how much data AI tools return. */}
+            <div className="pt-3 border-t border-border-subtle">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                Tool Limits
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2 text-xs">
+                  <span className="text-text-tertiary">Max log commits</span>
+                  <input
+                    type="number" min={5} max={500} step={5}
+                    className="w-16 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                    value={settings.aiMaxLogCount ?? 50}
+                    onChange={(e) => setSetting('aiMaxLogCount', parseInt(e.target.value) || 50)}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs">
+                  <span className="text-text-tertiary">Log summary count</span>
+                  <input
+                    type="number" min={1} max={20} step={1}
+                    className="w-16 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                    value={settings.aiLogSummaryCount ?? 5}
+                    onChange={(e) => setSetting('aiLogSummaryCount', parseInt(e.target.value) || 5)}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs">
+                  <span className="text-text-tertiary">Status file preview</span>
+                  <input
+                    type="number" min={1} max={100} step={1}
+                    className="w-16 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                    value={settings.aiMaxStatusPreview ?? 10}
+                    onChange={(e) => setSetting('aiMaxStatusPreview', parseInt(e.target.value) || 10)}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs">
+                  <span className="text-text-tertiary">Max diff files</span>
+                  <input
+                    type="number" min={10} max={500} step={10}
+                    className="w-16 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                    value={settings.aiMaxDiffFiles ?? 50}
+                    onChange={(e) => setSetting('aiMaxDiffFiles', parseInt(e.target.value) || 50)}
+                  />
+                </label>
+              </div>
+              <div className="text-2xs text-text-tertiary mt-1">
+                Controls how much data the AI tools return. Higher = more detail but uses more context. Lower = faster and cheaper. Changes apply immediately.
+              </div>
+            </div>
+
+            {/* AI Guard — control which destructive actions the AI can perform. */}
+            <div className="pt-3 border-t border-border-subtle">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                AI Guard
+              </div>
+              <div className="text-2xs text-text-tertiary mb-2">
+                Control which destructive git actions the AI Assistant is allowed to perform. "Deny" blocks the action entirely — the AI will tell the user to do it manually.
+              </div>
+              <div className="space-y-1.5">
+                {([
+                  ['discard', 'Discard changes (reset --hard + clean)'],
+                  ['syncWithRemote', 'Sync with remote (reset --hard origin)'],
+                  ['forcePush', 'Force push (--force)'],
+                  ['amend', 'Commit --amend'],
+                  ['clean', 'Clean (delete untracked files)'],
+                  ['stashDrop', 'Stash drop'],
+                ] as const).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-xs">
+                    <span className="text-text-tertiary w-64 truncate">{label}</span>
+                    <select
+                      className="text-xs bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                      value={settings.aiGuard?.[key] ?? 'allow'}
+                      onChange={(e) => {
+                        const current = settings.aiGuard || {};
+                        setSetting('aiGuard', { ...current, [key]: e.target.value as 'allow' | 'confirm' | 'deny' });
+                      }}
+                    >
+                      <option value="allow">Allow</option>
+                      <option value="confirm">Confirm</option>
+                      <option value="deny">Deny</option>
+                    </select>
+                  </label>
+                ))}
               </div>
             </div>
 

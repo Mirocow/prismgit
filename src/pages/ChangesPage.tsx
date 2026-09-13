@@ -5,7 +5,7 @@ import { CommitTypeDropdown } from '../components/CommitTypeDropdown';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
 import { FilterInput } from '../components/FilterInput';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FilePlus, FileCheck, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Loader, Lock, Minus, Plus, PlugZap, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FileCheck, FilePlus, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Loader, Lock, Minus, Plus, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
 import { LazyFileList } from '../components/LazyFileList';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
@@ -26,7 +26,7 @@ import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore, type FileDisplayFlag } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
+import { useToastActions } from '../stores/toastStore';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -2393,46 +2393,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 )}
               </div>
               <div className="flex-1" />
-              {/* Sync indicator — same as in History page. Uses plug/zap icons:
-                  PlugZap when in sync (вилка в розетке), ArrowUp/Down when
-                  push/pull needed. Only shown when there's an upstream tracking
-                  branch configured. */}
-              {status?.current && status?.tracking && (
-                <div
-                  className={cn('flex items-center gap-0.5 px-1.5 py-0.5 mr-1 rounded border text-2xs font-medium',
-                    status.ahead > 0 && status.behind > 0
-                      ? 'border-status-modified/40 bg-status-modified/10 text-status-modified'
-                      : status.ahead > 0
-                        ? 'border-status-added/40 bg-status-added/10 text-status-added'
-                        : status.behind > 0
-                          ? 'border-status-info/40 bg-status-info/10 text-status-info'
-                          : 'border-status-added/30 bg-status-added/5 text-status-added')}
-                  title={
-                    status.ahead === 0 && status.behind === 0
-                      ? `In sync with ${status.tracking}`
-                      : `Local: ${status.current} · Upstream: ${status.tracking}\n` +
-                        `↑ ${status.ahead} commit(s) ahead · ↓ ${status.behind} commit(s) behind`
-                  }
-                >
-                  {status.ahead > 0 && (
-                    <span className="flex items-center gap-0.5">
-                      <ArrowUp size={10} />
-                      {status.ahead}
-                    </span>
-                  )}
-                  {status.behind > 0 && (
-                    <span className="flex items-center gap-0.5">
-                      <ArrowDown size={10} />
-                      {status.behind}
-                    </span>
-                  )}
-                  {status.ahead === 0 && status.behind === 0 && (
-                    <span className="flex items-center gap-0.5">
-                      <PlugZap size={12} />
-                    </span>
-                  )}
-                </div>
-              )}
               <button
                 className="btn btn-secondary text-xs"
                 onClick={handleCommitAndPush}

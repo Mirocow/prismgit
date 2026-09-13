@@ -6,7 +6,6 @@ import { FilterInput } from '../components/FilterInput';
 import {
   ArrowDown,
   ArrowUp,
-  Check,
   ChevronDown, ChevronRight,
   Copy,
   CornerDownRight,
@@ -16,12 +15,11 @@ import {
   GitMerge,
   GitPullRequest,
   Pencil,
-  Plug,
-  PlugZap,
+  PlugConnected,
+  PlugDisconnected,
   RefreshCw,
   RotateCcw,
   StickyNote,
-  Sync,
   Tag as TagIcon,
   Undo,
   X
@@ -36,6 +34,7 @@ import { linkifyCommitMessage } from '../lib/bugtraq';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
+import { useI18n } from '../lib/i18n';
 import { RefBadges } from '../lib/refBadge';
 import { buildRepoStateHandlers } from '../lib/repoState';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
@@ -47,7 +46,6 @@ import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastActions } from '../stores/toastStore';
-import { useI18n } from '../lib/i18n';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -1491,50 +1489,7 @@ export function HistoryPage() {
               Tagged{allTags.length > 0 ? ` (${allTags.length})` : ''}
             </button>
           </div>
-          {/* Sync indicator — shows whether the local branch is in sync with
-              its remote-tracking branch. Uses plug/zap icons:
-                - both 0:                 🔌⚡  (PlugZap — вилка в розетке, синхронизировано)
-                - ahead > 0:              ↑N    (ArrowUp — push needed, local commits ahead)
-                - behind > 0:             ↓M    (ArrowDown — pull needed, remote has new commits)
-                - ahead > 0 && behind > 0: ↑N ↓M (both push & pull needed)
-              User explicitly asked for "вилка в розетке" (plug-in-socket) icon
-              when in sync, and separate вилка / розетка when not. */}
-          {status?.current && status?.tracking && (
-            <div
-              className={cn('flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-2xs font-medium',
-                status.ahead > 0 && status.behind > 0
-                  ? 'border-status-modified/40 bg-status-modified/10 text-status-modified'
-                  : status.ahead > 0
-                    ? 'border-status-added/40 bg-status-added/10 text-status-added'
-                    : status.behind > 0
-                      ? 'border-status-info/40 bg-status-info/10 text-status-info'
-                      : 'border-status-added/30 bg-status-added/5 text-status-added')}
-              title={
-                status.ahead === 0 && status.behind === 0
-                  ? `In sync with ${status.tracking}`
-                  : `Local: ${status.current} · Upstream: ${status.tracking}\n` +
-                    `↑ ${status.ahead} commit(s) ahead · ↓ ${status.behind} commit(s) behind`
-              }
-            >
-              {status.ahead > 0 && (
-                <span className="flex items-center gap-0.5">
-                  <ArrowUp size={10} />
-                  {status.ahead}
-                </span>
-              )}
-              {status.behind > 0 && (
-                <span className="flex items-center gap-0.5">
-                  <ArrowDown size={10} />
-                  {status.behind}
-                </span>
-              )}
-              {status.ahead === 0 && status.behind === 0 && (
-                <span className="flex items-center gap-0.5">
-                  <PlugZap size={12} />
-                </span>
-              )}
-            </div>
-          )}
+
           <button className={cn('icon-btn !w-5 !h-5', showGraph && 'active')}
             title="Toggle graph" onClick={() => setShowGraph(!showGraph)}>
             <GitBranch size={11} />
@@ -1832,6 +1787,7 @@ export function HistoryPage() {
                 const color = getAuthorColor(entry.author.name);
                 const isSelected = selectedIdx === realIdx;
                 const isHEAD = entry.refs.some(r => r.includes('HEAD'));
+                const isFirstOverall = realIdx === 0;
                 return (
                   <div
                     key={entry.hash}
@@ -1844,6 +1800,51 @@ export function HistoryPage() {
                     onContextMenu={(e) => showCommitContextMenu(e, entry, realIdx)}
                   >
                     {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
+
+                    {/**  Sync indicator */}
+                    {isFirstOverall && status?.current && status?.tracking && (
+                      <div
+                        className={cn('flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-2xs font-medium',
+                          status.ahead > 0 && status.behind > 0
+                            ? 'border-status-modified/40 bg-status-modified/10 text-status-modified'
+                            : status.ahead > 0
+                              ? 'border-status-added/40 bg-status-added/10 text-status-added'
+                              : status.behind > 0
+                                ? 'border-status-info/40 bg-status-info/10 text-status-info'
+                                : 'border-status-added/30 bg-status-added/5 text-status-added')}
+                        title={
+                          status.ahead === 0 && status.behind === 0
+                            ? `In sync with ${status.tracking}`
+                            : `Local: ${status.current} · Upstream: ${status.tracking}\n` +
+                              `↑ ${status.ahead} commit(s) ahead · ↓ ${status.behind} commit(s) behind`
+                        }
+                      >
+                        {status.ahead === 0 && status.behind === 0 ? (
+                          /* In sync — plug CONNECTED (вилка в розетке) */
+                          <span className="flex items-center gap-0.5">
+                            <PlugConnected size={14} />
+                          </span>
+                        ) : (
+                          /* Out of sync — plug DISCONNECTED (вилка отдельно) + counts */
+                          <>
+                            <PlugDisconnected size={14} />
+                            {status.ahead > 0 && (
+                              <span className="flex items-center gap-0.5 ml-0.5">
+                                <ArrowUp size={9} />
+                                {status.ahead}
+                              </span>
+                            )}
+                            {status.behind > 0 && (
+                              <span className="flex items-center gap-0.5 ml-0.5">
+                                <ArrowDown size={9} />
+                                {status.behind}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+
                     {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
 
                     {/* Decorations: tags first, then HEAD/branches/remotes — parsed

@@ -1,22 +1,23 @@
-import { useState, useEffect, useCallback } from 'react';
-import { CloudDownload, RefreshCw, Plus, Trash, Pencil, ExternalLink, Loader, GitBranch, ChevronDown, ChevronRight, Check, Eye, EyeOff, Settings } from '../components/icons';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
-import { useSelectionStore } from '../stores/selectionStore';
+import { useCallback, useEffect, useState } from 'react';
+import { Check, ChevronDown, ChevronRight, CloudDownload, ExternalLink, Eye, EyeOff, GitBranch, Loader, Pencil, Plus, RefreshCw, Settings, Trash } from '../components/icons';
 import { api, type RemoteInfo } from '../lib/api';
-import { cn, copyToClipboard } from '../lib/utils';
-import { useContextMenu } from '../lib/useContextMenu';
 import { buildRemoteContextMenu } from '../lib/remoteContextMenu';
+import { useContextMenu } from '../lib/useContextMenu';
+import { cn, copyToClipboard } from '../lib/utils';
+import { useGitStore } from '../stores/gitStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { useToastActions } from '../stores/toastStore';
 
-import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog } from '../components/ConfirmDialog';
 import { RenameDialog } from '../components/RemoteDialogs';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
-import { getRemoteAuth, setRemoteAuth, hasRemoteAuth } from '../lib/remoteAuth';
-import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useI18n } from '../lib/i18n';
+import { getRemoteAuth, hasRemoteAuth, setRemoteAuth } from '../lib/remoteAuth';
 export function RemotesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
+  const status = useGitStore((s) => s.status);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastActions();
   const { t } = useI18n();
@@ -240,6 +241,7 @@ export function RemotesPage() {
           <span className="text-2xs text-text-tertiary">{t('remotes.count', { count: remotes.length })}</span>
         </div>
         <div className="flex items-center gap-2">
+
           <button
             className="icon-btn"
             title={t('remotes.repoSettingsTooltip')}

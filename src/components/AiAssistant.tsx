@@ -31,18 +31,12 @@ import { PROVIDER_PRESETS, getProviderPreset, type LLMProvider } from '../lib/ai
  *     based on the most common things users ask a git AI assistant to do
  *     (pull, push, status, recent commits, branch list, stash, etc.).
  *
- * ── Per-project "pinning" (parallel sessions) ───────────────────────────
- * The AI Assistant has its OWN notion of the "current session repo"
- * (`sessionRepoPath`), which is INDEPENDENT from the app's currently-open
- * repository (`useRepositoryStore.currentRepo`). When the user opens the
- * AI Assistant on repo A and then switches the app to repo B, the AI
- * Assistant keeps working on repo A — its chat history, context, and
- * tool calls all still target A. The user can manually switch the AI
- * session to B (or to "no repo") via the dropdown in the panel header.
- *
- * This mirrors how a developer might have two terminals open, one per
- * repo, and an AI helper pinned to each — switching the IDE's active
- * project doesn't kill either terminal.
+ * ── Project switching ──────────────────────────────────────────────────
+ * The AI Assistant FOLLOWS the app's currently-open repository. When
+ * the user switches projects in the sidebar, the AI Assistant switches
+ * too — loading the new project's chat history and scoping tool calls
+ * to the new repo. The user can also manually switch via the dropdown
+ * in the panel header (e.g. to "no repo" mode for clone/init tasks).
  *
  * ── No-repo mode ─────────────────────────────────────────────────────────
  * When `sessionRepoPath` is null, the AI Assistant operates in "no-repo"
@@ -246,16 +240,12 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // ── Session repo path ──────────────────────────────────────────────────
+  // FOLLOWS the app's currentRepo — when the user switches projects,
+  // the AI Assistant switches too (loads that project's chat history).
   const [sessionRepoPath, setSessionRepoPath] = useState<string | undefined | null>(undefined);
 
-  // On first mount, default the session to the app's current repo (or null
-  // if no repo is open). After this, sessionRepoPath only changes when the
-  // user explicitly switches via the dropdown.
   useEffect(() => {
-    if (sessionRepoPath === undefined) {
-      setSessionRepoPath(currentRepo?.path ?? null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setSessionRepoPath(currentRepo?.path ?? null);
   }, [currentRepo?.path]);
 
   const repos = useRepositoryStore(s => s.repos);
@@ -330,7 +320,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     return { id, name: id, type, url, apiKey: settings.aiApiKey, model };
   }, [settings]);
 
-  const handleSend = useCallback(async (overrideInput?: string) => {
+  const handleSend = useCallback(async (overrideInput?: string, isRegenerate = false) => {
     const userMsg = (overrideInput ?? input).trim();
     if (!userMsg) return;
     if (sessionRepoPath === undefined) return;
@@ -339,24 +329,24 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
       toast.info(t('changes.aiNoProvider'), t('changes.aiSetProviderHint'));
       return;
     }
-    setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    if (!isRegenerate) {
+      setInput('');
+      setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    }
     setBusy(true);
-    // Create a fresh AbortController for this request. Stored in a ref so
-    // handleStop() can call .abort() on it.
     const controller = new AbortController();
     abortRef.current = controller;
     try {
+      // For regenerate: pass messages WITHOUT the last assistant response
+      // so the AI generates a fresh answer. The user message is already
+      // in the history, so we DON'T add a duplicate.
+      const historyForContext = isRegenerate
+        ? messages.slice(0, messages.length - 1) // drop last assistant msg
+        : messages;
       await runWithTools(userMsg, provider, sessionRepoPath ?? undefined, {
         signal: controller.signal,
-        // ── Pass prior conversation history so the AI remembers context ──
-        priorHistory: messages,
-        // ── Context compression threshold (user-configurable via Settings).
-        //  When total character count of prior history exceeds this, old
-        //  messages are compressed into a text summary.
+        priorHistory: historyForContext,
         contextMaxChars: settings?.aiContextMaxChars ?? 20_000,
-        // ── Token usage callback — updates the UI with input/output token
-        // counts and context size after each LLM response.
         onTokenUsage: (usage) => {
           setTokenUsage({
             input: usage.inputTokens,
@@ -396,7 +386,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
       setBusy(false);
       abortRef.current = null;
     }
-  }, [input, sessionRepoPath, buildProvider, toast, t]);
+  }, [input, sessionRepoPath, buildProvider, toast, t, messages, settings]);
 
   /** Stop the in-flight LLM call. The user sees the "Stopped" message
    *  appear in the chat once the abort propagates through. */
@@ -431,25 +421,46 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   // Per-provider configs (URL + API key + model) are saved/restored from
   // aiProviderConfigs so the user doesn't re-enter credentials on each switch.
   const [showProviderMenu, setShowProviderMenu] = useState(false);
-  const switchProvider = useCallback((newProviderId: string) => {
+  const switchProvider = useCallback(async (newProviderId: string) => {
     const oldProviderId = settings?.aiProvider || '';
-    // Save current provider's config.
-    if (oldProviderId && setSetting) {
-      const configs = { ...(settings.aiProviderConfigs || {}) };
-      configs[oldProviderId] = {
-        url: settings.aiUrl,
-        apiKey: settings.aiApiKey,
-        model: settings.aiModel,
+    // ── 1. Save current provider's config to aiProviderConfigs ──
+    // Read the CURRENT flat values (aiUrl, aiApiKey, aiModel) and merge
+    // them into the configs store. We use functional updates to avoid
+    // stale-closure issues — settings in this closure may be outdated
+    // by the time the async setSetting calls complete.
+    const currentUrl = settings?.aiUrl || '';
+    const currentApiKey = settings?.aiApiKey || '';
+    const currentModel = settings?.aiModel || '';
+
+    // Build the updated configs map — merge old + new.
+    const existingConfigs = settings?.aiProviderConfigs || {};
+    const updatedConfigs = { ...existingConfigs };
+    if (oldProviderId) {
+      const existing = updatedConfigs[oldProviderId] || {};
+      updatedConfigs[oldProviderId] = {
+        url: currentUrl || existing.url,
+        apiKey: currentApiKey || existing.apiKey,
+        model: currentModel || existing.model,
       };
-      setSetting('aiProviderConfigs', configs);
     }
-    // Switch to new provider — restore saved config or use preset defaults.
-    setSetting('aiProvider', newProviderId);
+
+    // ── 2. Get the new provider's saved config or defaults ──
     const preset = getProviderPreset(newProviderId);
-    const savedConfig = settings?.aiProviderConfigs?.[newProviderId];
-    setSetting('aiUrl', savedConfig?.url ?? preset.defaultUrl);
-    setSetting('aiModel', savedConfig?.model ?? preset.defaultModel);
-    setSetting('aiApiKey', savedConfig?.apiKey ?? '');
+    const savedConfig = updatedConfigs[newProviderId];
+    const newUrl = savedConfig?.url || preset.defaultUrl;
+    const newModel = savedConfig?.model || preset.defaultModel;
+    const newApiKey = savedConfig?.apiKey || '';
+
+    // ── 3. Apply ALL settings in one batch ──
+    // We set them all together so the UI updates atomically — no flicker
+    // of half-switched state (old URL with new model, etc.).
+    await Promise.all([
+      setSetting('aiProviderConfigs', updatedConfigs),
+      setSetting('aiProvider', newProviderId),
+      setSetting('aiUrl', newUrl),
+      setSetting('aiModel', newModel),
+      setSetting('aiApiKey', newApiKey),
+    ]);
     setShowProviderMenu(false);
   }, [settings, setSetting]);
 
@@ -651,28 +662,26 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <>
-            {messages.map((msg, idx) => <MessageBubble key={idx} msg={msg} />)}
-            {/* Regenerate button — appears under the last assistant message
-                when NOT busy. Re-runs the last user prompt with the same
-                context but different temperature, giving a fresh response. */}
-            {!busy && messages.length >= 2 && (() => {
-              const lastMsg = messages[messages.length - 1];
-              const isLastAssistant = lastMsg?.role === 'assistant' && !lastMsg.toolCalls?.length;
-              if (!isLastAssistant) return null;
-              // Find the last user message for re-sending
-              const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-              if (!lastUserMsg) return null;
-              return (
-                <button
-                  className="flex items-center gap-1 text-2xs text-text-tertiary hover:text-accent transition-colors mt-1"
-                  onClick={() => void handleSend(lastUserMsg.content)}
-                  title="Regenerate the last response with a fresh attempt"
-                >
-                  <RefreshCw size={9} />
-                  Regenerate
-                </button>
-              );
-            })()}
+            {messages.map((msg, idx) => {
+              // For user messages: retry re-sends that message.
+              // For assistant final answers: retry finds the last user
+              // message BEFORE this answer and re-sends it.
+              const canRetry = !busy && (msg.role === 'user' || (msg.role === 'assistant' && !msg.toolCalls?.length));
+              let retryHandler: (() => void) | undefined;
+              if (canRetry) {
+                if (msg.role === 'user') {
+                  retryHandler = () => void handleSend(msg.content, true);
+                } else {
+                  // Find the last user message before this assistant message
+                  let lastUserMsg: string | null = null;
+                  for (let i = idx - 1; i >= 0; i--) {
+                    if (messages[i].role === 'user') { lastUserMsg = messages[i].content; break; }
+                  }
+                  if (lastUserMsg) retryHandler = () => void handleSend(lastUserMsg!, true);
+                }
+              }
+              return <MessageBubble key={idx} msg={msg} onRegenerate={retryHandler} />;
+            })}
           </>
         )}
         {busy && (
@@ -752,7 +761,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
  *   - assistant with tool_calls: italic "Calling tool..." bubble
  *   - assistant final: markdown-rendered with copy button
  */
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?: () => void }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -764,9 +773,23 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   if (msg.role === 'user') {
     return (
-      <div className="flex items-start gap-2 justify-end">
-        <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap break-words">
-          {msg.content}
+      <div className="flex items-start gap-2 justify-end group">
+        <div className="flex flex-col items-end gap-0.5">
+          <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap break-words">
+            {msg.content}
+          </div>
+          {/* Retry button — ALWAYS visible (not hover-only). Re-sends
+              this message to get a fresh AI response. */}
+          {onRegenerate && (
+            <button
+              className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
+              onClick={onRegenerate}
+              title="Resend this message"
+            >
+              <RefreshCw size={9} />
+              Retry
+            </button>
+          )}
         </div>
         <User size={14} className="flex-shrink-0 mt-0.5 text-text-tertiary" />
       </div>
@@ -795,22 +818,31 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       </div>
     );
   }
-  // assistant final answer — render with lightweight markdown + copy button.
+  // assistant final answer — render with lightweight markdown + copy + retry.
   return (
     <div className="flex items-start gap-2 group">
       <Bot size={14} className="flex-shrink-0 mt-0.5 text-accent" />
       <div className="bg-bg-secondary rounded px-3 py-1.5 text-xs max-w-[85%] whitespace-pre-wrap break-words">
         <MarkdownLite text={msg.content} />
-        {/* Copy button — appears on hover. Assistant answers often contain
-            commands or commit messages the user wants to copy. */}
-        <div className="mt-1 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Action buttons — Retry (regenerate) + Copy. Always visible. */}
+        <div className="mt-1 flex justify-end gap-2">
+          {onRegenerate && (
+            <button
+              onClick={onRegenerate}
+              className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
+              title="Regenerate this response"
+            >
+              <RefreshCw size={9} />
+              Retry
+            </button>
+          )}
           <button
             onClick={handleCopy}
-            className="icon-btn !w-4 !h-4 hover:text-accent"
+            className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
             title="Copy message"
-            aria-label="Copy message"
           >
-            {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
+            {copied ? <Check size={9} className="text-status-added" /> : <Copy size={9} />}
+            {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
       </div>

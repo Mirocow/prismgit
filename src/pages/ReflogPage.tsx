@@ -1,15 +1,16 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { History, RefreshCw, Trash, ChevronDown, ChevronRight, ArrowRight } from '../components/icons';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
-import { api, type ReflogEntry, type CommitFile } from '../lib/api';
-import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
-import { useSelectionStore } from '../stores/selectionStore';
-import { CommitHashLink } from '../components/StatusBar';
-import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
-import { useContextMenu } from '../lib/useContextMenu';
-import { useI18n } from '../lib/i18n';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { confirmDialog } from '../components/ConfirmDialog';
 import { EmptyState } from '../components/EmptyState';
+import { ArrowRight, ChevronDown, ChevronRight, History, RefreshCw } from '../components/icons';
+import { CommitHashLink } from '../components/StatusBar';
+import { api, type CommitFile, type ReflogEntry } from '../lib/api';
+import { useI18n } from '../lib/i18n';
+import { useContextMenu } from '../lib/useContextMenu';
+import { cn, copyToClipboard, formatDate, shortHash } from '../lib/utils';
+import { useGitStore } from '../stores/gitStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { useToastActions } from '../stores/toastStore';
 
 const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
 
@@ -34,6 +35,7 @@ const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
 export function ReflogPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
+  const status = useGitStore((s) => s.status);
   const toast = useToastActions();
   const showContextMenu = useContextMenu();
   const selectCommit = useSelectionStore((s) => s.selectCommit);

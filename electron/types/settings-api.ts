@@ -181,6 +181,50 @@ export interface AppSettings {
    */
   aiContextMaxChars?: number;
   /**
+   * AI tool limits — control how much data the AI tools return, keeping
+   * the conversation context manageable. All configurable via Settings → AI.
+   *
+   * Default values are tuned for a balance between usefulness and context
+   * size. Increase for deep analysis, decrease for speed.
+   */
+  /** Max commits returned by get_log verbose mode (default: 50). */
+  aiMaxLogCount?: number;
+  /** Max files shown in get_status summary preview (default: 10). */
+  aiMaxStatusPreview?: number;
+  /** Max files shown in get_diff --stat output (default: 50). */
+  aiMaxDiffFiles?: number;
+  /** Max commits shown in get_log collapsed mode summary (default: 5). */
+  aiLogSummaryCount?: number;
+  /** Max diff size in bytes for AI commit message generation (default: 131072 = 128KB). */
+  aiMaxDiffSizeBytes?: number;
+  /** Max tokens for AI commit message response (default: 256). */
+  aiMaxTokensCommit?: number;
+  /** Max tokens for AI Assistant chat response (default: 1024). */
+  aiMaxTokensChat?: number;
+  /** Max tool-use iterations in runWithTools (default: 5). */
+  aiMaxToolIterations?: number;
+  /** Diff truncation limit in characters (default: 48000). */
+  aiDiffTruncateChars?: number;
+  /**
+   * AI Guard — control which destructive actions the AI is allowed to perform.
+   * When a guard is 'deny', the tool refuses to execute and returns a message
+   * telling the AI to ask the user to do it manually.
+   */
+  aiGuard?: {
+    /** Allow discard_changes (git reset --hard + clean). Default: 'confirm'. */
+    discard?: 'allow' | 'confirm' | 'deny';
+    /** Allow sync_with_remote (reset --hard origin). Default: 'confirm'. */
+    syncWithRemote?: 'allow' | 'confirm' | 'deny';
+    /** Allow push with --force. Default: 'confirm'. */
+    forcePush?: 'allow' | 'confirm' | 'deny';
+    /** Allow commit --amend. Default: 'allow'. */
+    amend?: 'allow' | 'confirm' | 'deny';
+    /** Allow clean (delete untracked files). Default: 'confirm'. */
+    clean?: 'allow' | 'confirm' | 'deny';
+    /** Allow stash drop. Default: 'confirm'. */
+    stashDrop?: 'allow' | 'confirm' | 'deny';
+  };
+  /**
    * AI request timeout in seconds. Applied to:
    *   - commit-message generation (ai:generateCommitMessage IPC)
    *   - AI Assistant chat (ai:chat IPC proxy)

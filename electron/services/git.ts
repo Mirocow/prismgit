@@ -128,15 +128,42 @@ function getGit(repoPath: string): SimpleGit {
     git = simpleGit({
       baseDir: repoPath,
       binary: 'git',
-      // Limit concurrent git processes to reduce memory spikes.
-      // 2 is enough for most workflows (e.g. status + log in parallel).
-      // Higher values (4+) spawn more child processes = more RAM.
       maxConcurrentProcesses: 2,
       trimmed: false,
     });
     gitCache.set(repoPath, git);
   }
   return git;
+}
+
+/**
+ * Remove a stale .git/index.lock file if it exists. A previous git
+ * operation (crash, force-quit, killed process) may have left it behind,
+ * making ALL subsequent git commands fail with "Unable to create
+ * index.lock: File exists."
+ *
+ * This is called before write operations (add, restore, resetFile,
+ * commit, checkout, etc.) so the user doesn't have to manually delete
+ * the lock file.
+ *
+ * Safety: if another git process is ACTIVELY running (lock file is
+ * being held), the unlinkSync will fail with EPERM/EBUSY on Windows
+ * or succeed silently on Unix (where locks are advisory). On Unix,
+ * removing an active lock can cause the running git process to fail —
+ * but this is rare (maxConcurrentProcesses=2) and the alternative
+ * (leaving the lock) is worse (blocks ALL git operations).
+ */
+function removeStaleIndexLock(repoPath: string): void {
+  const lockPath = path.join(repoPath, '.git', 'index.lock');
+  try {
+    if (fs.existsSync(lockPath)) {
+      fs.unlinkSync(lockPath);
+    }
+  } catch {
+    // Can't remove — either permission issue or another process is
+    // actively holding it. The git command will fail with a clear
+    // "index.lock exists" error that the UI surfaces to the user.
+  }
 }
 
 function invalidateCache(repoPath?: string) {
@@ -325,20 +352,7 @@ export async function status(repoPath: string): Promise<StatusResult> {
 export async function add(repoPath: string, files: string[]): Promise<void> {
   const git = getGit(repoPath);
   if (files.length === 0) return;
-  // Remove stale .git/index.lock if it exists — a previous git operation
-  // (e.g. filter-branch crash) may have left it behind, making all
-  // subsequent git commands fail with "Unable to create index.lock".
-  const lockPath = path.join(repoPath, '.git', 'index.lock');
-  try {
-    if (fs.existsSync(lockPath)) {
-      // Check if the lock is stale (no running git process holding it).
-      // On most OSes, a stale lock from a crashed process can be safely removed.
-      fs.unlinkSync(lockPath);
-    }
-  } catch {
-    // If we can't remove it (permission, or another process is actively
-    // using it), the git command below will fail with a clear error.
-  }
+  removeStaleIndexLock(repoPath);
   try {
     await git.raw(['add', '--', ...files]);
   } catch (e) {
@@ -355,12 +369,14 @@ export async function add(repoPath: string, files: string[]): Promise<void> {
 
 export async function addAll(repoPath: string): Promise<void> {
   const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
   await git.add('-A');
   invalidateDiffCache(repoPath);
 }
 
 export async function restore(repoPath: string, files: string[], staged = false): Promise<void> {
   const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
   const args = ['restore'];
   if (staged) args.push('--staged');
   args.push('--', ...files);
@@ -385,6 +401,7 @@ export async function commit(
   if (amend) args.push('--amend', '--no-edit');
   if (signoff) args.push('--signoff');
   if (noVerify) args.push('--no-verify');
+  removeStaleIndexLock(repoPath);
   const output = await git.raw(args);
   // Bust the diff cache — HEAD has moved, every cached diff is now stale.
   invalidateDiffCache(repoPath);
@@ -3713,6 +3730,7 @@ export async function resetFile(
   ref?: string
 ): Promise<void> {
   const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
   await git.raw(['reset', ref || 'HEAD', '--', file]);
   invalidateDiffCache(repoPath);
 }
@@ -3841,6 +3859,15 @@ export async function lfsFetch(repoPath: string): Promise<void> {
 }
 
 export async function lfsInstall(repoPath: string): Promise<void> {
+  // Check if git-lfs is installed FIRST — if not, give a clear error
+  // message instead of letting simple-git throw a raw "git: 'lfs' is not
+  // a git command" error.
+  if (!await isLfsInstalled(repoPath)) {
+    throw new Error(
+      'Git LFS is not installed on this system. Install it from https://git-lfs.com ' +
+      'and run "git lfs install" from a terminal, then retry.'
+    );
+  }
   const git = getGit(repoPath);
   await git.raw(['lfs', 'install']);
 }

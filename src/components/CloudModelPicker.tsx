@@ -113,9 +113,11 @@ export function CloudModelPicker({
   }, [modelsUrl, apiKey]);
 
   // Auto-fetch when URL or API key changes (debounced 1s).
+  // All cloud providers require an API key (even free-tier ones like Groq,
+  // Cerebras, Z.ai). Only Ollama doesn't — but Ollama uses a different picker.
   useEffect(() => {
     if (!url && !preset.defaultUrl) return;
-    if (!apiKey && !preset.freeTier) return; // skip if API key needed but missing
+    if (!apiKey) return; // don't auto-fetch without an API key
     const timer = setTimeout(() => void fetchModels(), 1000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -196,8 +198,7 @@ export function CloudModelPicker({
         )
       ) : !loading && !error ? (
         <div className="text-2xs text-text-tertiary italic">
-          Click "Test & Fetch Models" to load the available models for this provider.
-          {!apiKey && !preset.freeTier && ' An API key is required.'}
+          Enter your API key above, then click "Test & Fetch Models" to load the available models.
         </div>
       ) : null}
 
