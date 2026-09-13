@@ -8,31 +8,51 @@ import type { PushRefStatus, PushResult, PushVerification } from '../types/git-a
 import { BrowserWindow } from 'electron';
 
 /**
- * Global LFS skip — prevents git from invoking the git-lfs filter-process
- * for ANY operation. This is set on EVERY simple-git instance via the
- * `env` option.
+ * Global environment overrides applied to EVERY simple-git instance.
  *
- * WHY: When a repo has `.gitattributes` with LFS filter rules but git-lfs
- * is NOT installed on the user's machine, every git command that touches
- * LFS-tracked files (status, restore, checkout, diff, add, commit) crashes
- * with:
- *   "git-lfs filter-process: git-lfs: command not found"
- *   "fatal: the remote end hung up unexpectedly"
+ * THREE problems this solves:
  *
- * Setting GIT_LFS_SKIP_SMUDGE=1 tells git to skip the LFS smudge/clean
- * filter entirely. LFS-tracked files show their POINTER content (not the
- * real binary), which is perfectly fine for:
- *   - status (shows M/A/D correctly)
- *   - diff (shows the pointer text diff)
- *   - restore/checkout (restores the pointer content, not the binary)
- *   - add/commit (stages the pointer, not the binary)
+ * 1. GIT_LFS_SKIP_SMUDGE=1 — tells git to skip the LFS smudge/clean
+ *    filter-process entirely. Without this, `git restore` / `git checkout`
+ *    crash with "git-lfs filter-process: git-lfs: command not found" when
+ *    the repo has .gitattributes with LFS rules but git-lfs is NOT installed.
  *
- * The user can install git-lfs separately if they need actual LFS file
- * operations (git lfs pull, git lfs push, etc.) — those go through the
- * lfsPull/lfsPush functions which DON'T use this env var (they explicitly
- * need git-lfs).
+ * 2. GIT_CONFIG_COUNT + GIT_CONFIG_KEY_0 + GIT_CONFIG_VALUE_0 — overrides
+ *    `core.hooksPath` to empty string, effectively DISABLING ALL GIT HOOKS
+ *    for operations run by PrismGit. This is the KEY fix for the LFS hook
+ *    problem: even with GIT_LFS_SKIP_SMUDGE=1, git still runs post-checkout
+ *    / post-merge hooks that call `git-lfs` directly. The hook fails with:
+ *      "This repository is configured for Git LFS but 'git-lfs' was not
+ *       found on your path. If you no longer wish to use Git LFS, remove
+ *       this hook by deleting the 'post-checkout' file in the hooks
+ *       directory (set by 'core.hookspath'; usually '.git/hooks')."
+ *    By setting core.hooksPath="" via env override (highest priority in git's
+ *    config hierarchy), hooks are NEVER invoked — no crash.
+ *
+ *    PrismGit is a GUI git client, not a terminal. Hooks (pre-commit linting,
+ *    post-checkout notifications, etc.) are CI/CLI concerns. The user can
+ *    still run hooks via the terminal if they want them.
+ *
+ * 3. GIT_CONFIG_KEY_1 + GIT_CONFIG_VALUE_1 — overrides `filter.lfs.process`
+ *    to empty, so git doesn't try to invoke `git-lfs filter-process` even
+ *    if the config entry exists.
+ *
+ * NOTE: This env override has the HIGHEST priority in git's config hierarchy
+ * (above --system, --global, --local, and --file). It cannot be overridden
+ * by anything in the repo. Requires git 2.31+ (GIT_CONFIG_COUNT).
  */
-const GIT_ENV_LFS_SKIP = { GIT_LFS_SKIP_SMUDGE: '1' };
+const GIT_ENV_LFS_SKIP: Record<string, string> = {
+  GIT_LFS_SKIP_SMUDGE: '1',
+  // Override core.hooksPath="" to disable ALL git hooks (prevents
+  // post-checkout/post-merge hooks from calling git-lfs).
+  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_KEY_0: 'core.hooksPath',
+  GIT_CONFIG_VALUE_0: '',
+  // Override filter.lfs.process="" so git doesn't invoke git-lfs
+  // even if the config entry is set in .git/config.
+  GIT_CONFIG_KEY_1: 'filter.lfs.process',
+  GIT_CONFIG_VALUE_1: '',
+};
 import type {
   StatusResult,
   LogEntry,
