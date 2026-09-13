@@ -642,9 +642,9 @@ export default function App() {
       if (!ok) return;
       try {
         await api.git.reset(repo.path, 'soft', 'HEAD~1');
-        toast.success('Last commit undone — changes are back in the Index');
+        toast.success(i18nT('toast.app.undoCommitSuccess'));
         useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Undo commit failed', String(e)); }
+      } catch (e) { toast.error(i18nT('toast.app.undoCommitFailed'), String(e)); }
     };
     const handleStashSelection = () => {
       window.location.hash = '#/changes';
@@ -655,7 +655,7 @@ export default function App() {
       const repo = requireRepo();
       if (!repo) return;
       window.location.hash = '#/stashes';
-      toast.info('Select a stash and click Apply');
+      toast.info(i18nT('toast.app.selectStashApply'));
     };
 
     const handleIgnore = async () => {
@@ -756,7 +756,7 @@ export default function App() {
     };
     const handleLfsTrack = () => {
       window.location.hash = '#/lfs';
-      toast.info('Use the Track button on the LFS page');
+      toast.info(i18nT('toast.app.useTrackButton'));
     };
 
     // ===== Remote =====
@@ -910,7 +910,7 @@ export default function App() {
       if (!repo) return;
       clearProjectPrefs(repo.path);
       useSelectionStore.getState().clearAll();
-      toast.success('Perspective reset — layout preferences cleared');
+      toast.success(i18nT('toast.app.perspectiveReset'));
     };
     const handleNavigate = (path: unknown) => {
       if (typeof path === 'string' && requireRepo()) navigate(path);

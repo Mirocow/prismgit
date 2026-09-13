@@ -216,6 +216,7 @@ const SidePane = memo(function SidePane({
     estimateRowHeight: ROW_HEIGHT,
     overscan: 6,
   });
+  const { t } = useI18n();
   const visibleLines = lines.slice(visibleRange.start, visibleRange.end);
   return (
     <div className="flex-1 flex flex-col border-r border-border-default last:border-r-0 min-w-0 overflow-hidden">
@@ -237,7 +238,7 @@ const SidePane = memo(function SidePane({
           onClick={onTake}
           title={takeLabel}
         >
-          <ArrowRight size={10} className="inline -mt-0.5" /> {side === 'ours' ? 'Take Left' : 'Take Right'}
+          <ArrowRight size={10} className="inline -mt-0.5" /> {side === 'ours' ? t('conflict.takeLeft') : t('conflict.takeRight')}
         </button>
       </div>
       {/* Pane content — windowed, with syntax highlighting */}
@@ -610,14 +611,14 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           <div className="panel p-6 max-w-md text-center">
             <AlertCircle size={28} className="mx-auto mb-3 text-status-modified" />
             <div className="text-sm font-medium mb-1">
-              {isBinary ? 'Binary file conflict' : 'Delete / Modify conflict'}
+              {isBinary ? t('conflict.binaryTitle') : t('conflict.deleteModifyTitle')}
             </div>
             <div className="text-xs text-text-tertiary mb-4">
               {isBinary
-                ? 'This file is binary and cannot be merged with a text-based solver. Choose which version to keep.'
+                ? t('conflict.binaryHint')
                 : oursEmpty
-                  ? 'The file was deleted on our side but modified on their side. Choose to keep theirs or delete.'
-                  : 'The file was deleted on their side but modified on our side. Choose to keep ours or delete.'}
+                  ? t('conflict.deleteOursHint')
+                  : t('conflict.deleteTheirsHint')}
             </div>
             <div className="flex items-center justify-center gap-2">
               {!oursEmpty && (
@@ -696,13 +697,13 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         </span>
         <code className="text-2xs font-mono text-text-tertiary truncate">{filePath}</code>
         <span className="text-2xs text-text-secondary tabular-nums ml-2">
-          <span className="text-status-conflict font-medium">{unresolvedCount}</span> conflicts
+          <span className="text-status-conflict font-medium">{unresolvedCount}</span> {t('conflict.conflictsLabel')}
         </span>
         <div className="w-px h-4 bg-border-default mx-1" />
         {/* Prev / Next conflict navigation */}
         <button
           className="icon-btn"
-          title="Previous conflict (Shift+F7)"
+          title={t('conflict.prevConflictTitle')}
           onClick={() => setCurrentHunk((h) => Math.max(0, h - 1))}
           disabled={currentHunkIdx === 0}
         >
@@ -713,7 +714,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         </span>
         <button
           className="icon-btn"
-          title="Next conflict (F7)"
+          title={t('conflict.nextConflictTitle')}
           onClick={() => setCurrentHunk((h) => Math.min(hunks.length - 1, h + 1))}
           disabled={hunks.length === 0 || currentHunkIdx === hunks.length - 1}
         >
@@ -725,30 +726,30 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
           onClick={() => applyResolution('both-ours-first')}
-          title="Take Left, Right — ours first then theirs (concatenate)"
+          title={t('conflict.takeLeftRightTitle')}
         >
-          <Plus size={10} className="inline -mt-0.5" /> Take L,R
+          <Plus size={10} className="inline -mt-0.5" /> {t('conflict.takeLR')}
         </button>
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
           onClick={() => applyResolution('ours')}
-          title="Take Left — use OURS for this hunk (Ctrl+1)"
+          title={t('conflict.takeLeftTitle')}
         >
-          <ArrowLeft size={10} className="inline -mt-0.5" /> Take Left
+          <ArrowLeft size={10} className="inline -mt-0.5" /> {t('conflict.takeLeft')}
         </button>
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
           onClick={() => applyResolution('theirs')}
-          title="Take Right — use THEIRS for this hunk (Ctrl+2)"
+          title={t('conflict.takeRightTitle')}
         >
-          Take Right <ArrowRight size={10} className="inline -mt-0.5" />
+          {t('conflict.takeRight')} <ArrowRight size={10} className="inline -mt-0.5" />
         </button>
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
           onClick={() => applyResolution('both-theirs-first')}
-          title="Take Right, Left — theirs first then ours"
+          title={t('conflict.takeRightLeftTitle')}
         >
-          Take R,L <Plus size={10} className="inline -mt-0.5" />
+          {t('conflict.takeRL')} <Plus size={10} className="inline -mt-0.5" />
         </button>
         <div className="w-px h-4 bg-border-default mx-1" />
         {/* Reset / External / Merge Tool */}
@@ -767,7 +768,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
             api.git.openFile(fullPath);
           }}
         >
-          <ExternalLink size={10} className="inline -mt-0.5" /> External
+          <ExternalLink size={10} className="inline -mt-0.5" /> {t('changes.external')}
         </button>
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
@@ -775,19 +776,19 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           onClick={async () => {
             try {
               await api.git.raw(repo.path, ['mergetool', '--', filePath]);
-              toast.success(t('toast.vscode.mergeToolCompleted'), 'Reloading file content…');
+              toast.success(t('toast.vscode.mergeToolCompleted'), t('conflict.reloadingFile'));
               await loadFile();
               await refreshStatus(repo.path);
             } catch (e) { toast.error(t('toast.vscode.mergeToolFailed'), String(e)); }
           }}
         >
-          <GitMerge size={10} className="inline -mt-0.5" /> Merge Tool
+          <GitMerge size={10} className="inline -mt-0.5" /> {t('conflict.mergeTool')}
         </button>
         <div className="w-px h-4 bg-border-default mx-1" />
         {/* VS Code integration */}
         <button
           className="btn btn-secondary text-2xs !py-0.5 !px-2"
-          title="Open in VS Code 3-way merge editor"
+          title={t('conflict.vsCodeTitle')}
           onClick={async () => {
             try {
               const res = await api.vscode.openMerge(repo.path, filePath);
@@ -796,7 +797,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
             } catch (e) { toast.error(t('toast.vscode.mergeFailed'), String(e)); }
           }}
         >
-          <ExternalLink size={10} className="inline -mt-0.5" /> VS Code
+          <ExternalLink size={10} className="inline -mt-0.5" /> {t('conflict.vsCode')}
         </button>
         {/* Save & Stage (right-aligned) */}
         <div className="flex-1" />
@@ -804,7 +805,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           className="btn btn-primary text-2xs !py-0.5 !px-2"
           onClick={handleSave}
           disabled={saving}
-          title="Save resolved content and stage the file (Ctrl+Enter)"
+          title={t('conflict.saveStageTitle')}
         >
           {saving ? <Loader size={11} className="spin" /> : <Check size={11} />}
           {t('changes.saveStage')}
@@ -816,14 +817,14 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       <div className="flex-1 overflow-hidden flex">
         {/* Left: Ours (HEAD) — windowed, syntax highlighted, green bg for conflicts */}
         <SidePane
-          title={`ours ("HEAD")`}
+          title={t('conflict.oursPaneTitle')}
           lines={oursLines}
           side="ours"
           conflictMask={conflictMask}
           sideBgClass="conflict-bg-ours"
           lang={langRef.current}
           onTake={() => applyResolution('ours')}
-          takeLabel="Take ours for this hunk"
+          takeLabel={t('conflict.takeOursForHunk')}
         />
 
         {/* Middle: Working Tree — EDITABLE (single contentEditable, no windowing) */}
@@ -832,12 +833,12 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
           <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between flex-shrink-0 h-8">
             <span className="text-text-primary truncate">
               {t('changes.workingTree')}
-              <span className="ml-2 text-2xs text-text-tertiary normal-case font-normal">(editable)</span>
+              <span className="ml-2 text-2xs text-text-tertiary normal-case font-normal">{t('conflict.editableHint')}</span>
             </span>
             {dirty && (
               <span className="text-2xs text-status-modified flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-status-modified" />
-                modified
+                {t('conflict.modified')}
               </span>
             )}
           </div>
@@ -859,14 +860,14 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
 
         {/* Right: Theirs — windowed, syntax highlighted, red bg for conflicts */}
         <SidePane
-          title="theirs"
+          title={t('conflict.theirsPaneTitle')}
           lines={theirsLines}
           side="theirs"
           conflictMask={conflictMask}
           sideBgClass="conflict-bg-theirs"
           lang={langRef.current}
           onTake={() => applyResolution('theirs')}
-          takeLabel="Take theirs for this hunk"
+          takeLabel={t('conflict.takeTheirsForHunk')}
         />
       </div>
 
@@ -874,10 +875,10 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       <div className="flex items-center justify-between px-3 py-1 bg-bg-secondary border-t border-border-default text-2xs text-text-tertiary flex-shrink-0">
         <span className="flex items-center gap-1">
           <Check size={9} className="text-status-added" />
-          Editable center — direct typing or use toolbar actions above.
+          {t('conflict.editableCenterHint')}
         </span>
         <span className="font-mono">
-          Shortcuts: F7 next · Shift+F7 prev · Ctrl+1 ours · Ctrl+2 theirs · Ctrl+3 both · Ctrl+Enter save
+          {t('conflict.shortcutsHint')}
         </span>
       </div>
     </div>

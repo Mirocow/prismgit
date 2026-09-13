@@ -253,14 +253,14 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
           <div className="panel p-6 max-w-md" onClick={(e) => e.stopPropagation()}>
             <AlertCircle size={28} className="mx-auto mb-3 text-status-modified" />
             <div className="text-sm font-medium mb-1 text-center">
-              {isBinary ? 'Binary file conflict' : 'Delete / Modify conflict'}
+              {isBinary ? t('conflict.binaryTitle') : t('conflict.deleteModifyTitle')}
             </div>
             <div className="text-xs text-text-tertiary mb-4 text-center">
               {isBinary
-                ? 'This file is binary and cannot be merged with a text-based solver. Choose which version to keep.'
+                ? t('conflict.binaryHint')
                 : oursEmpty
-                  ? 'The file was deleted on our side but modified on their side. Choose to keep theirs or delete.'
-                  : 'The file was deleted on their side but modified on our side. Choose to keep ours or delete.'}
+                  ? t('conflict.deleteOursHint')
+                  : t('conflict.deleteTheirsHint')}
             </div>
             <div className="flex items-center justify-center gap-2">
               {!oursEmpty && (
@@ -535,11 +535,11 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
               SmartGit/GitKraken both expose this as a one-click action. */}
           <button
             className="btn btn-secondary text-xs"
-            title="Run git mergetool (uses your configured merge.tool)"
+            title={t('conflict.runGitMergetool')}
             onClick={async () => {
               try {
                 await api.git.raw(repo.path, ['mergetool', '--', filePath]);
-                toast.success(t('toast.vscode.mergeToolCompleted'), 'Reloading file content…');
+                toast.success(t('toast.vscode.mergeToolCompleted'), t('conflict.reloadingFile'));
                 await loadFile();
                 await refreshStatus(repo.path);
               } catch (e) {
@@ -548,7 +548,7 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
             }}
           >
             <GitMerge size={11} />
-            Merge Tool
+            {t('conflict.mergeTool')}
           </button>
         </div>
         <div className="flex items-center gap-2">

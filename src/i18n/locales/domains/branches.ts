@@ -220,6 +220,12 @@ export const en: Record<string, string> = {
   'branches.findSelect': '↵ select',
   'branches.findClose': 'esc close',
   'branches.findResultsCount': '{count} results',
+
+  // ResetDialog mode labels (displayed alongside the git flag, e.g. --soft)
+  'branches.resetModeSoft': 'Soft',
+  'branches.resetModeMixed': 'Mixed',
+  'branches.resetModeHard': 'Hard',
+  'branches.resetModeKeep': 'Keep',
 };
 
 export const ru: Record<string, string> = {
@@ -437,6 +443,11 @@ export const ru: Record<string, string> = {
   'branches.findSelect': '↵ выбрать',
   'branches.findClose': 'esc закрыть',
   'branches.findResultsCount': '{count} результатов',
+
+  'branches.resetModeSoft': 'Мягкий',
+  'branches.resetModeMixed': 'Смешанный',
+  'branches.resetModeHard': 'Жёсткий',
+  'branches.resetModeKeep': 'Сохранить',
 };
 
 export const zh: Record<string, string> = {
@@ -654,6 +665,11 @@ export const zh: Record<string, string> = {
   'branches.findSelect': '↵ 选择',
   'branches.findClose': 'esc 关闭',
   'branches.findResultsCount': '{count} 个结果',
+
+  'branches.resetModeSoft': '软',
+  'branches.resetModeMixed': '混合',
+  'branches.resetModeHard': '硬',
+  'branches.resetModeKeep': '保留',
 };
 
 export const de: Record<string, string> = {
@@ -871,4 +887,9 @@ export const de: Record<string, string> = {
   'branches.findSelect': '↵ auswählen',
   'branches.findClose': 'esc schließen',
   'branches.findResultsCount': '{count} Ergebnisse',
+
+  'branches.resetModeSoft': 'Soft',
+  'branches.resetModeMixed': 'Mixed',
+  'branches.resetModeHard': 'Hard',
+  'branches.resetModeKeep': 'Keep',
 };

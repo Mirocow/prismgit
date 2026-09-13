@@ -1,6 +1,7 @@
 import type { StatusResult } from '../lib/api';
 import { getRepoInProgressState } from '../lib/repoState';
 import { shortHash } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 import { AlertTriangle, Check, X, Undo } from './icons';
 
 /**
@@ -46,16 +47,11 @@ export interface RepoStateBannerProps {
 }
 
 const FOOTERS: Record<string, string> = {
-  'cherry-picking':
-    'Only Continue / Abort are allowed — Pull, Checkout and Commit would lead to loss of the picked commit. Fetch is still available.',
-  'reverting':
-    'Only Continue / Abort are allowed — Pull, Checkout and Commit would lead to loss of the revert. Fetch is still available.',
-  'merging':
-    'Resolve conflicts and Commit to complete the merge, or Abort — Pull, Checkout and Reset would discard the merge. Fetch is still available.',
-  'rebasing':
-    'Only Continue / Abort are allowed — Pull, Checkout and Commit would discard the rebase. Fetch is still available.',
-  'bisecting':
-    'HEAD is detached at the bisect candidate — mark it Good / Bad or Abort the bisect. Pull, Checkout and Commit would interfere with the search. Fetch is still available.',
+  'cherry-picking': 'banner.cherryPickingFooter',
+  'reverting': 'banner.revertingFooter',
+  'merging': 'banner.mergingFooter',
+  'rebasing': 'banner.rebasingFooter',
+  'bisecting': 'banner.bisectingFooter',
 };
 
 /**
@@ -76,6 +72,7 @@ const FOOTERS: Record<string, string> = {
  * but are intentionally not surfaced in the banner.
  */
 export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps) {
+  const { t } = useI18n();
   const state = getRepoInProgressState(status);
   // If status is null or no in-progress state is active, render nothing.
   // After this guard, status is guaranteed non-null because getRepoInProgressState
@@ -87,14 +84,14 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
       case 'cherry-picking':
         return status.cherryPick ? (
           <span className="text-text-secondary truncate" data-testid="cherry-pick-commit">
-            Picking <code className="font-mono">{shortHash(status.cherryPick.commit)}</code>
+            {t('banner.picking')} <code className="font-mono">{shortHash(status.cherryPick.commit)}</code>
             {status.cherryPick.subject ? <> — “{status.cherryPick.subject}”</> : null}
           </span>
         ) : null;
       case 'reverting':
         return status.revert ? (
           <span className="text-text-secondary truncate" data-testid="revert-commit">
-            Reverting <code className="font-mono">{shortHash(status.revert.commit)}</code>
+            {t('banner.revertingLabel')} <code className="font-mono">{shortHash(status.revert.commit)}</code>
             {status.revert.subject ? <> — “{status.revert.subject}”</> : null}
           </span>
         ) : null;
@@ -108,14 +105,14 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
         return (
           <span className="text-text-secondary truncate" data-testid="rebase-progress">
             {status.rebase?.step != null && status.rebase?.total != null
-              ? `Step ${status.rebase.step} of ${status.rebase.total}`
-              : 'Rebase in progress'}
+              ? t('banner.stepXOfY', { step: status.rebase.step, total: status.rebase.total })
+              : t('banner.rebaseInProgress')}
           </span>
         );
       case 'bisecting':
         return status.bisect?.rev ? (
           <span className="text-text-secondary truncate" data-testid="bisect-rev">
-            Testing <code className="font-mono">{shortHash(status.bisect.rev)}</code>
+            {t('banner.testing')} <code className="font-mono">{shortHash(status.bisect.rev)}</code>
           </span>
         ) : null;
     }
@@ -140,7 +137,7 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
           </span>
           {detail}
         </div>
-        <div className="text-2xs text-text-tertiary mt-0.5">{FOOTERS[state.key]}</div>
+        <div className="text-2xs text-text-tertiary mt-0.5">{t(FOOTERS[state.key])}</div>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
         {/* cherry-picking (incl. empty & conflict): Continue, Abort */}
@@ -150,17 +147,17 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
               className="btn btn-primary text-2xs !py-0.5 !px-2"
               onClick={cp.onContinue}
               disabled={busy}
-              title="Finish the cherry-pick: commit the picked changes into the current branch"
+              title={t('banner.cherryPick.continueTitle')}
             >
-              <Check size={9} /> Continue
+              <Check size={9} /> {t('banner.continue')}
             </button>
             <button
               className="btn btn-danger text-2xs !py-0.5 !px-2"
               onClick={cp.onAbort}
               disabled={busy}
-              title="Cancel the cherry-pick and restore the previous state (git cherry-pick --abort)"
+              title={t('banner.cherryPick.abortTitle')}
             >
-              <X size={9} /> Abort
+              <X size={9} /> {t('banner.abort')}
             </button>
           </>
         )}
@@ -171,17 +168,17 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
               className="btn btn-primary text-2xs !py-0.5 !px-2"
               onClick={rv.onContinue}
               disabled={busy}
-              title="Finish the revert: commit the reverted changes into the current branch"
+              title={t('banner.revert.continueTitle')}
             >
-              <Check size={9} /> Continue
+              <Check size={9} /> {t('banner.continue')}
             </button>
             <button
               className="btn btn-danger text-2xs !py-0.5 !px-2"
               onClick={rv.onAbort}
               disabled={busy}
-              title="Cancel the revert and restore the previous state (git revert --abort)"
+              title={t('banner.revert.abortTitle')}
             >
-              <X size={9} /> Abort
+              <X size={9} /> {t('banner.abort')}
             </button>
           </>
         )}
@@ -191,9 +188,9 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
             className="btn btn-danger text-2xs !py-0.5 !px-2"
             onClick={mg.onAbort}
             disabled={busy}
-            title="Cancel the merge and restore the pre-merge state (git merge --abort)"
+            title={t('banner.merge.abortTitle')}
           >
-            <X size={9} /> Abort
+            <X size={9} /> {t('banner.abort')}
           </button>
         )}
         {/* rebasing (incl. multi-step): Continue, Abort */}
@@ -203,17 +200,17 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
               className="btn btn-primary text-2xs !py-0.5 !px-2"
               onClick={rb.onContinue}
               disabled={busy}
-              title="Continue the rebase with the resolved conflicts (git rebase --continue)"
+              title={t('banner.rebase.continueTitle')}
             >
-              <Check size={9} /> Continue
+              <Check size={9} /> {t('banner.continue')}
             </button>
             <button
               className="btn btn-danger text-2xs !py-0.5 !px-2"
               onClick={rb.onAbort}
               disabled={busy}
-              title="Cancel the rebase and restore the original branch (git rebase --abort)"
+              title={t('banner.rebase.abortTitle')}
             >
-              <X size={9} /> Abort
+              <X size={9} /> {t('banner.abort')}
             </button>
           </>
         )}
@@ -224,25 +221,25 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
               className="btn btn-secondary text-2xs !py-0.5 !px-2"
               onClick={bs.onBad}
               disabled={busy}
-              title="Mark HEAD as bad — the current revision is broken (git bisect bad)"
+              title={t('banner.bisect.badTitle')}
             >
-              <X size={9} /> Mark HEAD as Bad
+              <X size={9} /> {t('banner.markHeadBad')}
             </button>
             <button
               className="btn btn-primary text-2xs !py-0.5 !px-2"
               onClick={bs.onGood}
               disabled={busy}
-              title="Mark HEAD as good — the current revision works correctly (git bisect good)"
+              title={t('banner.bisect.goodTitle')}
             >
-              <Check size={9} /> Mark HEAD as Good
+              <Check size={9} /> {t('banner.markHeadGood')}
             </button>
             <button
               className="btn btn-danger text-2xs !py-0.5 !px-2"
               onClick={bs.onReset}
               disabled={busy}
-              title="End the bisect session and return to the original branch (git bisect reset)"
+              title={t('banner.bisect.abortTitle')}
             >
-              <Undo size={9} /> Abort
+              <Undo size={9} /> {t('banner.abort')}
             </button>
           </>
         )}

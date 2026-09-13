@@ -162,6 +162,19 @@ export const en: Record<string, string> = {
 
   // ── Generic fallback ────────────────────────────────────────────────────
   'toast.generic.failed': 'Failed',
+
+  // ── Stash continuation (HistoryPage) ─────────────────────────────────────
+  'toast.stash.applied': 'Stash applied',
+  'toast.stash.applyFailed': 'Apply stash failed',
+  'toast.stash.dropped': 'Stash dropped',
+  'toast.stash.dropFailed': 'Drop stash failed',
+
+  // ── App-level toast messages ────────────────────────────────────────────
+  'toast.app.undoCommitSuccess': 'Last commit undone — changes are back in the Index',
+  'toast.app.undoCommitFailed': 'Undo commit failed',
+  'toast.app.selectStashApply': 'Select a stash and click Apply',
+  'toast.app.useTrackButton': 'Use the Track button on the LFS page',
+  'toast.app.perspectiveReset': 'Perspective reset — layout preferences cleared',
 };
 
 export const ru: Record<string, string> = {
@@ -284,6 +297,17 @@ export const ru: Record<string, string> = {
   'toast.iRebase.targetRequired': 'Требуется целевая ветка',
 
   'toast.generic.failed': 'Не удалось',
+
+  'toast.stash.applied': 'Stash применён',
+  'toast.stash.applyFailed': 'Не удалось применить stash',
+  'toast.stash.dropped': 'Stash удалён',
+  'toast.stash.dropFailed': 'Не удалось удалить stash',
+
+  'toast.app.undoCommitSuccess': 'Последний коммит отменён — изменения возвращены в индекс',
+  'toast.app.undoCommitFailed': 'Не удалось отменить коммит',
+  'toast.app.selectStashApply': 'Выберите stash и нажмите Apply',
+  'toast.app.useTrackButton': 'Используйте кнопку Track на странице LFS',
+  'toast.app.perspectiveReset': 'Перспектива сброшена — настройки раскладки очищены',
 };
 
 export const zh: Record<string, string> = {
@@ -406,6 +430,17 @@ export const zh: Record<string, string> = {
   'toast.iRebase.targetRequired': '需要目标分支',
 
   'toast.generic.failed': '失败',
+
+  'toast.stash.applied': '贮藏已应用',
+  'toast.stash.applyFailed': '应用贮藏失败',
+  'toast.stash.dropped': '贮藏已丢弃',
+  'toast.stash.dropFailed': '丢弃贮藏失败',
+
+  'toast.app.undoCommitSuccess': '已撤销最后提交 — 更改已返回到索引',
+  'toast.app.undoCommitFailed': '撤销提交失败',
+  'toast.app.selectStashApply': '选择一个贮藏并点击应用',
+  'toast.app.useTrackButton': '使用 LFS 页面上的 Track 按钮',
+  'toast.app.perspectiveReset': '布局已重置 — 布局偏好已清除',
 };
 
 export const de: Record<string, string> = {
@@ -528,4 +563,46 @@ export const de: Record<string, string> = {
   'toast.iRebase.targetRequired': 'Ziel-Branch erforderlich',
 
   'toast.generic.failed': 'Fehlgeschlagen',
+
+  'toast.stash.applied': 'Stash angewendet',
+  'toast.stash.applyFailed': 'Stash anwenden fehlgeschlagen',
+  'toast.stash.dropped': 'Stash verworfen',
+  'toast.stash.dropFailed': 'Stash verwerfen fehlgeschlagen',
+
+  'toast.app.undoCommitSuccess': 'Letzter Commit rückgängig — Änderungen zurück im Index',
+  'toast.app.undoCommitFailed': 'Commit rückgängig fehlgeschlagen',
+  'toast.app.selectStashApply': 'Wählen Sie einen Stash und klicken Sie auf Apply',
+  'toast.app.useTrackButton': 'Verwenden Sie die Track-Schaltfläche auf der LFS-Seite',
+  'toast.app.perspectiveReset': 'Perspektive zurückgesetzt — Layout-Einstellungen gelöscht',
+};
+
+// ── App.tsx remaining toasts ──
+export const en_app = {
+  'toast.git.ignoreFailed': 'Ignore failed',
+  'toast.git.openIgnoreFailed': 'Failed to open .gitignore',
+  'toast.git.toggleFailed': 'Toggle failed',
+  'toast.git.moveRenameFailed': 'Move/rename failed',
+  'toast.git.deleteFailed2': 'Delete failed',
+  'toast.git.removeFailed': 'Remove failed',
+  'toast.git.lfsInstalled': 'Git LFS installed for this repository',
+  'toast.git.lfsOperationFailed': 'LFS operation failed',
+  'toast.git.fetchAllSuccess': 'Fetched all remotes',
+  'toast.git.fetchAllFailed': 'Fetch all failed',
+  'toast.git.pullHint': 'Right-click the branch → Pull... for options (merge/rebase/ff-only)',
+  'toast.git.fetchMoreHint': 'Right-click a remote → Fetch More... (or Set Depth... for shallow clones)',
+  'toast.git.verifyFailed': 'Verify failed',
+  'toast.git.gcFailed': 'GC failed',
+  'toast.git.openTerminalFailed': 'Could not open a terminal',
+  'toast.git.formatPatchFailed': 'Format patch failed',
+  'toast.git.deepLinkCopied': 'Deep link copied to clipboard',
+  'toast.git.deepLinkInvalid': 'Invalid deep link',
+  'toast.git.windowStyle': 'Window style: {style}',
+  'toast.git.toggleFailed2': 'Toggle failed',
+  'toast.git.undoLastCommit': 'Last commit undone — changes restored to working tree',
+  'toast.git.undoFailed': 'Undo failed',
+  'toast.git.operationAborted2': 'Operation aborted',
+  'toast.git.stashAbortFailed2': 'Stash & abort failed',
+  'toast.git.lastCommitUndo': 'Undone: {hash}',
+  'toast.git.nothingToAbort': 'Nothing to abort — no sequencer in progress',
+  'toast.git.abortFailed2': 'Abort failed',
 };

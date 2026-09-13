@@ -59,9 +59,9 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
 
   const handleAbort = async () => {
     if (!(await confirmDialog({
-      title: 'Abort merge?',
-      message: 'The repository returns to its state before the merge started. All staged merge changes are discarded.',
-      confirmLabel: 'Abort',
+      title: t('changes.abortMergeDialogTitle'),
+      message: t('changes.abortMergeDialogMessage'),
+      confirmLabel: t('changes.abortButtonLabel'),
       danger: true,
     }))) return;
     setBusy('abort');
@@ -83,13 +83,13 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
         <GitMerge size={16} className="text-status-modified flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium">
-            Merge in progress —{' '}
+            {t('changes.mergeInProgressTitle')} —{' '}
             {conflicted.length > 0
-              ? `${conflicted.length} conflicted file${conflicted.length > 1 ? 's' : ''}`
-              : 'ready to commit'}
+              ? t('changes.nConflictedFilesInline', { count: conflicted.length })
+              : t('changes.mergeInProgressReady')}
           </div>
           <div className="text-2xs text-text-tertiary mt-0.5">
-            Working tree is in merging state — other branch operations are blocked until you Continue or Abort.
+            {t('changes.mergeInProgressHint')}
           </div>
           {conflicted.length > 0 && (
             <div className="text-2xs text-text-tertiary mt-0.5 flex flex-wrap gap-1">
@@ -98,7 +98,7 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
                   <span
                     className="mono cursor-pointer hover:text-accent truncate"
                     style={{ maxWidth: 200 }}
-                    title="Select this file — opens it in Changes / Conflict Solver"
+                    title={t('changes.selectFileHint')}
                     onClick={() => {
                       useSelectionStore.getState().selectFile(f);
                       window.location.hash = '#/changes';
@@ -117,7 +117,7 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
                       try {
                         await api.git.raw(repoPath, ['checkout', '--ours', '--', f]);
                         await api.git.add(repoPath, [f]);
-                        toast.success(`${f}: took ours`);
+                        toast.success(t('changes.takeOursToast', { file: f }));
                         await refreshStatus(repoPath);
                         loadState();
                       } catch (err) { toast.error(t('toast.merge.takeOursFailed'), String(err)); }
@@ -133,7 +133,7 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
                       try {
                         await api.git.raw(repoPath, ['checkout', '--theirs', '--', f]);
                         await api.git.add(repoPath, [f]);
-                        toast.success(`${f}: took theirs`);
+                        toast.success(t('changes.takeTheirsToast', { file: f }));
                         await refreshStatus(repoPath);
                         loadState();
                       } catch (err) { toast.error(t('toast.merge.takeTheirsFailed'), String(err)); }
@@ -151,19 +151,19 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
             className="btn btn-primary text-xs"
             onClick={handleContinue}
             disabled={busy !== null || conflicted.length > 0}
-            title={conflicted.length > 0 ? 'Stage resolved files first' : 'git commit --no-edit'}
+            title={conflicted.length > 0 ? t('changes.stageResolvedFirst') : t('changes.gitCommitNoEditHint')}
           >
             {busy === 'continue' ? <Loader size={12} className="animate-spin" /> : <Check size={12} />}
-            Continue
+            {t('changes.continueButtonLabel')}
           </button>
           <button
             className="btn btn-secondary text-xs hover:!text-status-deleted"
             onClick={handleAbort}
             disabled={busy !== null}
-            title="git merge --abort"
+            title={t('changes.gitMergeAbortHint')}
           >
             {busy === 'abort' ? <Loader size={12} className="animate-spin" /> : <RotateCcw size={12} />}
-            Abort
+            {t('changes.abortButtonLabel')}
           </button>
         </div>
       </div>

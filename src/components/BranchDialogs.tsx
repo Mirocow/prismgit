@@ -49,11 +49,11 @@ function DialogShell({ title, subtitle, children, buttons, onClose, width = 440 
   );
 }
 
-const RESET_MODES: { mode: ResetMode; label: string; descKey: string }[] = [
-  { mode: 'soft', label: 'Soft', descKey: 'branches.resetSoftDesc' },
-  { mode: 'mixed', label: 'Mixed', descKey: 'branches.resetMixedDesc' },
-  { mode: 'hard', label: 'Hard', descKey: 'branches.resetHardDesc' },
-  { mode: 'keep', label: 'Keep', descKey: 'branches.resetKeepDesc' },
+const RESET_MODES: { mode: ResetMode; labelKey: string; descKey: string }[] = [
+  { mode: 'soft', labelKey: 'branches.resetModeSoft', descKey: 'branches.resetSoftDesc' },
+  { mode: 'mixed', labelKey: 'branches.resetModeMixed', descKey: 'branches.resetMixedDesc' },
+  { mode: 'hard', labelKey: 'branches.resetModeHard', descKey: 'branches.resetHardDesc' },
+  { mode: 'keep', labelKey: 'branches.resetModeKeep', descKey: 'branches.resetKeepDesc' },
 ];
 
 export function ResetDialog({

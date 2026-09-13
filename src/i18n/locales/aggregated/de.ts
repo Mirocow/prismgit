@@ -19,6 +19,10 @@ import { de as tour } from '../domains/tour';
 import { de as aiassistant } from '../domains/aiassistant';
 import { de as toasts } from '../domains/toasts';
 import { de as actions } from '../domains/actions';
+import { de as banner } from '../domains/banner';
+import { de as conflict } from '../domains/conflict';
+import { de as iRebase } from '../domains/iRebase';
+import { de as nav } from '../domains/nav';
 
 export const de: Record<string, string> = {
   ...core,
@@ -39,4 +43,8 @@ export const de: Record<string, string> = {
   ...aiassistant,
   ...toasts,
   ...actions,
+  ...banner,
+  ...conflict,
+  ...iRebase,
+  ...nav,
 };

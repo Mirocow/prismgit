@@ -1,4 +1,5 @@
 import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, RotateCcw, FileText, Search, CloudDownload, Filter, Recycle, Sparkles } from './icons';
+import { t } from '../lib/i18n';
 
 /**
  * Single source of truth for the app navigation.
@@ -21,6 +22,12 @@ import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, RotateCcw,
  *   - Notes → removed entirely (git notes are obscure; distributed
  *     reviews in /reviews already cover the 'metadata on a commit'
  *     use case with a richer UI).
+ *
+ * NOTE: labels and descriptions are translated via the standalone `t()`
+ * function from `../lib/i18n`. They are evaluated at module-load time
+ * using the locale selected on app startup (saved in localStorage or
+ * detected from navigator.language). If the user switches locale at
+ * runtime via Settings, a refresh is required to update the nav labels.
  */
 export interface NavItem {
   path: string;
@@ -31,50 +38,55 @@ export interface NavItem {
   description?: string;
 }
 
+const GROUP_WORKING_TREE = () => t('nav.group.workingTree');
+const GROUP_WORKFLOWS = () => t('nav.group.workflows');
+const GROUP_AI = () => t('nav.group.ai');
+const GROUP_REFS = () => t('nav.group.refs');
+
 export const NAV_ITEMS: NavItem[] = [
   // === Working Tree ===
-  { path: '/changes', label: 'Changes', icon: GitCommit, group: 'Working Tree',
-    description: 'Staged and unstaged changes. Stage files, write a commit message, and commit. Right-click a file for more actions.' },
-  { path: '/history', label: 'History', icon: History, group: 'Working Tree',
-    description: 'Commit graph across all branches. Filter by author, date, path, or message. Select a commit to see its files and diff. Right-click for tag/branch/cherry-pick.' },
-  { path: '/diff', label: 'Diff', icon: FileText, group: 'Working Tree',
-    description: 'Compare any two refs (commits, branches, tags) or the working tree. Drag the splitter to resize the file list.' },
-  { path: '/search', label: 'Search', icon: Search, group: 'Working Tree',
-    description: 'Search file contents with git grep. Find TODOs, function definitions, or any text across tracked files.' },
-  { path: '/blame', icon: FileText, label: 'Blame', group: 'Working Tree',
-    description: 'Line-by-line attribution: who wrote each line of a file, and in which commit. Click a commit hash to jump to it in History.' },
+  { path: '/changes', label: t('nav.label.changes'), icon: GitCommit, group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.changes') },
+  { path: '/history', label: t('nav.label.history'), icon: History, group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.history') },
+  { path: '/diff', label: t('nav.label.diff'), icon: FileText, group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.diff') },
+  { path: '/search', label: t('nav.label.search'), icon: Search, group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.search') },
+  { path: '/blame', icon: FileText, label: t('nav.label.blame'), group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.blame') },
 
   // === Workflows ===
-  { path: '/gitflow', label: 'Git-Flow', icon: GitBranch, group: 'Workflows',
-    description: 'Manage the Git-Flow branching model: feature, release, and hotfix branches. Start and finish each flow type.' },
-  { path: '/bisect', label: 'Bisect', icon: Filter, group: 'Workflows',
-    description: 'Binary search to find the commit that introduced a bug. Mark a commit as good or bad, and Git narrows the range.' },
-  { path: '/pulls', label: 'Pull Requests', icon: GitPullRequest, group: 'Workflows',
-    description: 'GitHub pull request integration. Requires a GitHub PAT (Settings → GitHub Integration). View, create, and open PRs.' },
-  { path: '/reviews', label: 'Reviews', icon: GitPullRequest, group: 'Workflows',
-    description: 'Distributed code reviews stored in git notes. Add comments to commits, files, and lines. Push/fetch to sync with teammates.' },
+  { path: '/gitflow', label: t('nav.label.gitflow'), icon: GitBranch, group: GROUP_WORKFLOWS(),
+    description: t('nav.desc.gitflow') },
+  { path: '/bisect', label: t('nav.label.bisect'), icon: Filter, group: GROUP_WORKFLOWS(),
+    description: t('nav.desc.bisect') },
+  { path: '/pulls', label: t('nav.label.pulls'), icon: GitPullRequest, group: GROUP_WORKFLOWS(),
+    description: t('nav.desc.pulls') },
+  { path: '/reviews', label: t('nav.label.reviews'), icon: GitPullRequest, group: GROUP_WORKFLOWS(),
+    description: t('nav.desc.reviews') },
 
   // === AI ===
-  { path: '/ai-chat', label: 'AI Chat', icon: Sparkles, group: 'AI',
-    description: 'AI Assistant chat — ask about your repository, stage files, generate commit messages, and more. Conversation history is saved per-project.' },
+  { path: '/ai-chat', label: t('nav.label.aiChat'), icon: Sparkles, group: GROUP_AI(),
+    description: t('nav.desc.aiChat') },
 
   // === Refs ===
-  { path: '/branches', label: 'Branches', icon: GitBranch, group: 'Refs',
-    description: 'Create, checkout, merge, rename, and delete branches. Drag a branch onto another to merge. Ctrl+click to filter History. Right-click for worktree actions.' },
-  { path: '/tags', label: 'Tags', icon: Tag, group: 'Refs',
-    description: 'Create lightweight or annotated tags. Click a tag to jump to its commit in History.' },
-  { path: '/remotes', label: 'Remotes', icon: CloudDownload, group: 'Refs',
-    description: 'Add, remove, and rename remotes. Edit fetch/push URLs. Fetch from all remotes or preview remote refs.' },
-  { path: '/reflog', label: 'Reflog', icon: RotateCcw, group: 'Refs',
-    description: 'Reference log for HEAD and other refs. Shows every checkout, commit, merge, reset. Cherry-pick or reset to any entry.' },
-  { path: '/recyclable', label: 'Recyclable', icon: Recycle, group: 'Refs',
-    description: 'Unreachable reflog commits eligible for GC (default retention: 90 days). Recover by cherry-pick or branch creation, or expire them.' },
-  { path: '/stashes', label: 'Stashes', icon: GitPullRequest, group: 'Refs',
-    description: 'Saved stashes. Click a stash to view its diff (compared to its parent, not HEAD). Apply, pop, or drop.' },
-  { path: '/submodules', label: 'Submodules', icon: Package, group: 'Refs',
-    description: 'Manage git submodules: init, update, sync. View submodule status and commit hashes.' },
-  { path: '/lfs', label: 'Git LFS', icon: Package, group: 'Refs',
-    description: 'Large File Storage management. Track patterns, pull/push LFS objects, manage file locks, view tracked files with sizes.' },
+  { path: '/branches', label: t('nav.label.branches'), icon: GitBranch, group: GROUP_REFS(),
+    description: t('nav.desc.branches') },
+  { path: '/tags', label: t('nav.label.tags'), icon: Tag, group: GROUP_REFS(),
+    description: t('nav.desc.tags') },
+  { path: '/remotes', label: t('nav.label.remotes'), icon: CloudDownload, group: GROUP_REFS(),
+    description: t('nav.desc.remotes') },
+  { path: '/reflog', label: t('nav.label.reflog'), icon: RotateCcw, group: GROUP_REFS(),
+    description: t('nav.desc.reflog') },
+  { path: '/recyclable', label: t('nav.label.recyclable'), icon: Recycle, group: GROUP_REFS(),
+    description: t('nav.desc.recyclable') },
+  { path: '/stashes', label: t('nav.label.stashes'), icon: GitPullRequest, group: GROUP_REFS(),
+    description: t('nav.desc.stashes') },
+  { path: '/submodules', label: t('nav.label.submodules'), icon: Package, group: GROUP_REFS(),
+    description: t('nav.desc.submodules') },
+  { path: '/lfs', label: t('nav.label.lfs'), icon: Package, group: GROUP_REFS(),
+    description: t('nav.desc.lfs') },
 ];
 
 /**

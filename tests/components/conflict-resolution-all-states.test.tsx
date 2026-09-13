@@ -43,7 +43,27 @@ vi.mock('../../src/stores/toastStore', () => ({ useToastActions: () => ({
   }),
   useToastStore: () => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn(), info: vi.fn() }) }));
 vi.mock('../../src/stores/selectionStore', () => ({ useSelectionStore: (s?: any) => s ? s({ selectedFilePath: null, selectFile: vi.fn() }) : { selectedFilePath: null, selectFile: vi.fn() } }));
-vi.mock('../../src/lib/i18n', () => ({ useI18n: () => ({ t: (k: string, p?: any) => p ? Object.entries(p).reduce((s, [k2, v]) => s.replace(`{${k2}}`, String(v)), k) : k }) }));
+vi.mock('../../src/lib/i18n', async () => {
+  // Use the real English dictionary so button labels (e.g. 'Continue', 'Abort',
+  // 'Mark HEAD as Bad') resolve to their user-facing English text — this keeps
+  // the test assertions stable while exercising the real translation chain.
+  const locales = await import('../../src/i18n/locales');
+  return {
+    useI18n: () => ({
+      t: (k: string, p?: any) => {
+        let s = locales.en[k] ?? k;
+        if (p) {
+          for (const [k2, v] of Object.entries(p)) {
+            s = s.replace(new RegExp(`\\{${k2}\\}`, 'g'), String(v));
+          }
+        }
+        return s;
+      },
+      locale: 'en',
+      setLocale: () => {},
+    }),
+  };
+});
 vi.mock('../../src/components/ConfirmDialog', () => ({ confirmDialog: vi.fn(() => Promise.resolve(true)), promptDialog: vi.fn(() => Promise.resolve(null)) }));
 
 import { RepoStateBanner } from '../../src/components/RepoStateBanner';

@@ -292,7 +292,7 @@ export function InteractiveRebaseDialog({
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
           <h3 className="text-base font-medium flex items-center gap-2">
             <RefreshCw size={16} />
-            Interactive Rebase
+            {t('iRebase.title')}
           </h3>
           <button className="icon-btn" onClick={onClose}>
             <X size={14} />
@@ -300,10 +300,10 @@ export function InteractiveRebaseDialog({
         </div>
 
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border-default bg-bg-tertiary text-xs">
-          <span className="text-text-tertiary">Rebasing onto:</span>
+          <span className="text-text-tertiary">{t('iRebase.rebasingOnto')}</span>
           <code
             className="mono text-accent cursor-pointer hover:underline"
-            title="Select this branch (visible in all tools) — click to view in History"
+            title={t('iRebase.selectBranchHint')}
             onClick={effectiveOntoBranch ? () => {
               useSelectionStore.getState().selectBranch(effectiveOntoBranch);
               window.location.hash = '#/history';
@@ -311,7 +311,7 @@ export function InteractiveRebaseDialog({
           >
             {effectiveOntoBranch || 'HEAD~' + numCommits}
           </code>
-          <span className="text-text-tertiary ml-auto">{todos.length} commits</span>
+          <span className="text-text-tertiary ml-auto">{t('iRebase.commitsCount', { count: todos.length })}</span>
         </div>
 
         {/* SmartGit Manual: Toolbar — Auto-Squash, Coalesce mode, drag hint */}
@@ -320,23 +320,23 @@ export function InteractiveRebaseDialog({
             className={cn('px-1.5 py-0.5 rounded flex items-center gap-1',
               autoSquashMode ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
             onClick={() => { handleAutoSquash(); setAutoSquashMode(!autoSquashMode); }}
-            title="Squash adjacent commits with same subject (mimics git rebase --autosquash)"
+            title={t('iRebase.autoSquashTitle')}
           >
-            <Layers size={10} /> Auto-Squash
+            <Layers size={10} /> {t('iRebase.autoSquash')}
           </button>
           <button
             className={cn('px-1.5 py-0.5 rounded flex items-center gap-1',
               coalesceMode ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
             onClick={() => {
               setCoalesceMode(!coalesceMode);
-              toast.info(coalesceMode ? 'Coalesce mode OFF' : 'Coalesce mode ON — drag one commit onto another to merge them');
+              toast.info(coalesceMode ? t('iRebase.coalesceOffHint') : t('iRebase.coalesceOnHint'));
             }}
-            title="Toggle Coalesce mode: drag one commit onto another to merge them"
+            title={t('iRebase.coalesceTitle')}
           >
-            <GitMerge size={10} /> Coalesce
+            <GitMerge size={10} /> {t('iRebase.coalesce')}
           </button>
           <span className="text-text-tertiary ml-auto">
-            {coalesceMode ? 'Drop one commit onto another to combine' : 'Drag rows to reorder'}
+            {coalesceMode ? t('iRebase.coalesceDropHint') : t('iRebase.dragReorderHint')}
           </span>
         </div>
 
@@ -344,7 +344,7 @@ export function InteractiveRebaseDialog({
           {loading ? (
             <div className="p-8 text-center text-text-tertiary text-sm flex items-center justify-center gap-2">
               <Loader size={14} className="spin" />
-              Loading commits...
+              {t('iRebase.loadingCommits')}
             </div>
           ) : (
             todos.map((item, idx) => (
@@ -366,7 +366,7 @@ export function InteractiveRebaseDialog({
                 )}
               >
                 {/* Drag handle — visual cue that rows are draggable */}
-                <div className="text-text-tertiary text-xs flex-shrink-0 mt-1 select-none" title="Drag to reorder">
+                <div className="text-text-tertiary text-xs flex-shrink-0 mt-1 select-none" title={t('iRebase.dragHandleTitle')}>
                   ⋮⋮
                 </div>
 
@@ -388,7 +388,7 @@ export function InteractiveRebaseDialog({
                     History, Diff, Notes all follow) */}
                 <code
                   className="text-xs mono text-text-tertiary hover:text-accent cursor-pointer flex-shrink-0 mt-0.5 w-16"
-                  title="Select this commit — click to view in History"
+                  title={t('iRebase.selectCommitHint')}
                   onClick={(e) => {
                     e.stopPropagation();
                     useSelectionStore.getState().selectCommit(item.hash);
@@ -450,7 +450,7 @@ export function InteractiveRebaseDialog({
                       {/* SmartGit Manual: Split commit — marks as 'edit' for pause */}
                       <button
                         className="icon-btn !w-6 !h-6 opacity-0 group-hover:opacity-100"
-                        title="Split commit (marks as 'edit' — rebase pauses here)"
+                        title={t('iRebase.splitCommitTitle')}
                         onClick={() => handleSplitCommit(idx)}
                       >
                         <Scissors size={11} />
@@ -495,10 +495,10 @@ export function InteractiveRebaseDialog({
           <div className="text-2xs text-text-tertiary">
             {hasChanges ? (
               <span className="flex items-center gap-1 text-status-modified">
-                <AlertCircle size={10} /> History will be rewritten
+                <AlertCircle size={10} /> {t('iRebase.historyWillBeRewritten')}
               </span>
             ) : (
-              <span>No changes — same as original history</span>
+              <span>{t('iRebase.noChanges')}</span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -509,7 +509,7 @@ export function InteractiveRebaseDialog({
               disabled={executing || loading}
             >
               {executing ? <Loader size={13} className="spin" /> : <RefreshCw size={13} />}
-              Start Rebase
+              {t('iRebase.startRebase')}
             </button>
           </div>
         </div>

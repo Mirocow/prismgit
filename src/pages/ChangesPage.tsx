@@ -946,7 +946,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       toast.success(okMsg);
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error(`${title} failed`, String(e));
+      toast.error(`${title} ${t('toast.generic.failed')}`.toLowerCase(), String(e));
     } finally {
       setCpBusy(false);
     }
@@ -957,17 +957,17 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       setCpBusy(true);
       try {
         const res = await useOperationLogStore.getState().logOperation(
-          'Cherry-pick Continue', repo.path, 'git cherry-pick --continue',
+          t('changes.cp.continueTitle'), repo.path, 'git cherry-pick --continue',
           () => api.git.cherryPickContinue(repo.path)
         );
         if (res?.empty) {
-          toast.warning('The previous cherry-pick is now empty', 'Use Skip (drop it) or Commit Empty (commit it anyway)');
+          toast.warning(t('changes.cp.emptyAfter'), t('changes.cp.emptyDetail'));
         } else {
-          toast.success('Cherry-pick finished — commit created');
+          toast.success(t('changes.cp.finished'));
         }
         await refreshStatus(repo.path);
       } catch (e) {
-        toast.error('Cherry-pick Continue failed', String(e));
+        toast.error(t('changes.cp.continueFailed'), String(e));
       } finally {
         setCpBusy(false);
       }
@@ -976,31 +976,31 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const handleCpCommitEmpty = () => {
     if (!status?.isCherryPicking) return;
     void runCherryPickOp(
-      'Cherry-pick Commit Empty', 'git commit --allow-empty',
+      t('changes.cp.commitEmptyTitle'), 'git commit --allow-empty',
       () => api.git.cherryPickContinue(repo.path, true).then(() => undefined),
-      'Empty commit created — cherry-pick finished'
+      t('changes.cp.emptyCommitCreated')
     );
   };
   const handleCpSkip = () => {
     if (!status?.isCherryPicking) return;
     void runCherryPickOp(
-      'Cherry-pick Skip', 'git cherry-pick --skip',
+      t('changes.cp.skipTitle'), 'git cherry-pick --skip',
       () => api.git.cherryPickSkip(repo.path),
-      'Cherry-pick skipped'
+      t('changes.cp.skipped')
     );
   };
   const handleCpAbort = async () => {
     if (!status?.isCherryPicking) return;
     if (!(await confirmDialog({
-      title: 'Abort cherry-pick',
-      message: 'Cancel the cherry-pick and restore the branch to its previous state?\n\nPicked changes will be discarded.',
-      confirmLabel: 'Abort',
+      title: t('changes.cp.abortDialogTitle'),
+      message: t('changes.cp.abortDialogMessage'),
+      confirmLabel: t('changes.abortButtonLabel'),
       danger: true,
     }))) return;
     void runCherryPickOp(
       'Cherry-pick Abort', 'git cherry-pick --abort',
       () => api.git.cherryPickAbort(repo.path),
-      'Cherry-pick aborted'
+      t('changes.cp.aborted')
     );
   };
 
@@ -1008,31 +1008,31 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const handleRvContinue = () => {
     if (!status?.isReverting) return;
     void runCherryPickOp(
-      'Revert Continue', 'git revert --continue',
+      t('changes.rv.continueTitle'), 'git revert --continue',
       () => api.git.revertContinue(repo.path),
-      'Revert finished — commit created'
+      t('changes.rv.finished')
     );
   };
   const handleRvSkip = () => {
     if (!status?.isReverting) return;
     void runCherryPickOp(
-      'Revert Skip', 'git revert --skip',
+      t('changes.rv.skipTitle'), 'git revert --skip',
       () => api.git.revertSkip(repo.path),
-      'Revert step skipped'
+      t('changes.rv.skipped')
     );
   };
   const handleRvAbort = async () => {
     if (!status?.isReverting) return;
     if (!(await confirmDialog({
-      title: 'Abort revert',
-      message: 'Cancel the revert and restore the branch to its previous state?\n\nRevert changes will be discarded.',
-      confirmLabel: 'Abort',
+      title: t('changes.rv.abortDialogTitle'),
+      message: t('changes.rv.abortDialogMessage'),
+      confirmLabel: t('changes.abortButtonLabel'),
       danger: true,
     }))) return;
     void runCherryPickOp(
       'Revert Abort', 'git revert --abort',
       () => api.git.revertAbort(repo.path),
-      'Revert aborted'
+      t('changes.rv.aborted')
     );
   };
 
@@ -1041,15 +1041,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const handleMergeAbort = async () => {
     if (!status?.isMerging) return;
     if (!(await confirmDialog({
-      title: 'Abort merge',
-      message: 'Cancel the merge and restore the branch to its pre-merge state?\n\nMerged changes will be discarded.',
-      confirmLabel: 'Abort Merge',
+      title: t('changes.merge.abortDialogTitle'),
+      message: t('changes.merge.abortDialogMessage'),
+      confirmLabel: t('changes.merge.abortDialogButton'),
       danger: true,
     }))) return;
     void runCherryPickOp(
       'Merge Abort', 'git merge --abort',
       () => api.git.abortMerge(repo.path),
-      'Merge aborted'
+      t('changes.merge.aborted')
     );
   };
 
@@ -1057,31 +1057,31 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const handleRbContinue = () => {
     if (!status?.isRebasing) return;
     void runCherryPickOp(
-      'Rebase Continue', 'git rebase --continue',
+      t('changes.rb.continueTitle'), 'git rebase --continue',
       () => api.git.rebase(repo.path, '', { continue: true }),
-      'Rebase continued'
+      t('changes.rb.continued')
     );
   };
   const handleRbSkip = () => {
     if (!status?.isRebasing) return;
     void runCherryPickOp(
-      'Rebase Skip', 'git rebase --skip',
+      t('changes.rb.skipTitle'), 'git rebase --skip',
       () => api.git.rebase(repo.path, '', { skip: true }),
-      'Rebase step skipped'
+      t('changes.rb.stepSkipped')
     );
   };
   const handleRbAbort = async () => {
     if (!status?.isRebasing) return;
     if (!(await confirmDialog({
-      title: 'Abort rebase',
-      message: 'Cancel the rebase and restore the branch to its original state?\n\nRebased commits will be discarded.',
-      confirmLabel: 'Abort',
+      title: t('changes.rb.abortDialogTitle'),
+      message: t('changes.rb.abortDialogMessage'),
+      confirmLabel: t('changes.abortButtonLabel'),
       danger: true,
     }))) return;
     void runCherryPickOp(
       'Rebase Abort', 'git rebase --abort',
       () => api.git.rebase(repo.path, '', { abort: true }),
-      'Rebase aborted'
+      t('changes.rb.aborted')
     );
   };
 
@@ -1089,38 +1089,38 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const handleBsGood = () => {
     if (!status?.isBisecting) return;
     void runCherryPickOp(
-      'Bisect Good', 'git bisect good',
+      t('changes.bs.goodTitle'), 'git bisect good',
       () => api.git.bisectGood(repo.path),
-      'Marked good — bisect continues'
+      t('changes.bs.markedGood')
     );
   };
   const handleBsBad = () => {
     if (!status?.isBisecting) return;
     void runCherryPickOp(
-      'Bisect Bad', 'git bisect bad',
+      t('changes.bs.badTitle'), 'git bisect bad',
       () => api.git.bisectBad(repo.path),
-      'Marked bad — bisect continues'
+      t('changes.bs.markedBad')
     );
   };
   const handleBsSkip = () => {
     if (!status?.isBisecting) return;
     void runCherryPickOp(
-      'Bisect Skip', 'git bisect skip',
+      t('changes.bs.skipTitle'), 'git bisect skip',
       () => api.git.bisectSkip(repo.path),
-      'Revision skipped — bisect continues'
+      t('changes.bs.skipped')
     );
   };
   const handleBsReset = async () => {
     if (!status?.isBisecting) return;
     if (!(await confirmDialog({
-      title: 'Reset bisect',
-      message: 'End the bisect session and return to the original branch?',
-      confirmLabel: 'Reset',
+      title: t('changes.bs.resetDialogTitle'),
+      message: t('changes.bs.resetDialogMessage'),
+      confirmLabel: t('changes.resetButton'),
     }))) return;
     void runCherryPickOp(
       'Bisect Reset', 'git bisect reset',
       () => api.git.bisectReset(repo.path),
-      'Bisect finished — back on the original branch'
+      t('changes.bs.finished')
     );
   };
 
@@ -1130,25 +1130,25 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // the Stashes page. This is the "start fresh" option SmartGit offers.
   const handleStashAll = async () => {
     if (!(await confirmDialog({
-      title: 'Stash all and abort?',
-      message: 'This will stash ALL local changes (including untracked files) and abort the current operation.\n\nThe stash is saved with a descriptive message and is recoverable via the Stashes page.',
-      confirmLabel: 'Stash All & Abort',
+      title: t('changes.stashAllTitle'),
+      message: t('changes.stashAllMessage'),
+      confirmLabel: t('changes.stashAllButton'),
       danger: true,
     }))) return;
     try {
       const stateLabel = status?.isMerging ? 'merge' : status?.isRebasing ? 'rebase' : status?.isCherryPicking ? 'cherry-pick' : status?.isReverting ? 'revert' : 'operation';
       await api.git.stashPush(repo.path, `auto-stash before abort (${stateLabel})`, true, false);
-      toast.success('All changes stashed', 'Now aborting the operation…');
+      toast.success(t('changes.stashAllStashed'), t('changes.stashAllStashedDetail'));
       // Abort the in-progress operation based on the active state
       if (status?.isMerging) await api.git.abortMerge(repo.path);
       else if (status?.isRebasing) await api.git.rebase(repo.path, '', { abort: true });
       else if (status?.isCherryPicking) await api.git.cherryPickAbort(repo.path);
       else if (status?.isReverting) await api.git.revertAbort(repo.path);
       else if (status?.isBisecting) await api.git.bisectReset(repo.path);
-      toast.success('Operation aborted', 'Stash is available on the Stashes page.');
+      toast.success(t('changes.stashAllAborted'), t('changes.stashAllAbortedDetail'));
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Stash & abort failed', String(e));
+      toast.error(t('changes.stashAllFailed'), String(e));
     }
   };
 
@@ -1906,7 +1906,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           {hiddenCount > 0 && !hasFlag('unchanged') && (
             <button
               className="clickable-text text-2xs"
-              title="Show unchanged files"
+              title={t('changes.showUnchangedFiles')}
               onClick={() => toggleFileDisplayFlag('unchanged')}
             >
               {t('changes.filesHidden', { count: hiddenCount.toLocaleString() })}
@@ -2406,10 +2406,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 className="btn btn-primary text-xs"
                 onClick={handleCommit}
                 disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || isCommitBlocked(status)}
-                title={isCommitBlocked(status) ? 'A git operation is in progress — finish it first (use the banner above)' : 'Ctrl+Enter'}
+                title={isCommitBlocked(status) ? t('changes.operationBlockedTitle') : t('changes.ctrlEnterHint')}
               >
                 <GitCommit size={11} />
-                Commit
+                {t('changes.commitButton')}
               </button>
             </div>
             <div className="flex-1 flex overflow-hidden flex-col">
@@ -2422,17 +2422,17 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 <button
                   className="flex items-center gap-1.5 px-2 py-1 bg-accent-muted/50 border-b border-accent/20 text-2xs text-accent hover:bg-accent-muted transition-colors text-left"
                   onClick={() => { setCommitMsg(aiSuggestion); setAiSuggestion(null); }}
-                  title="Click to use this AI-generated commit message"
+                  title={t('changes.aiSuggestionTitle')}
                 >
                   <Sparkles size={9} className="flex-shrink-0" />
                   <span className="truncate flex-1 font-mono">{aiSuggestion.split('\n')[0]}</span>
-                  <span className="text-3xs text-text-tertiary flex-shrink-0">click to use</span>
+                  <span className="text-3xs text-text-tertiary flex-shrink-0">{t('changes.aiSuggestionClickToUse')}</span>
                 </button>
               )}
               {aiSuggesting && !aiSuggestion && !commitMsg.trim() && (
                 <div className="flex items-center gap-1.5 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs text-text-tertiary">
                   <Loader size={9} className="animate-spin" />
-                  <span>Suggesting commit message…</span>
+                  <span>{t('changes.aiSuggesting')}</span>
                 </div>
               )}
               <div className="flex-1 flex overflow-hidden">

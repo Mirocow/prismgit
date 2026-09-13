@@ -178,8 +178,10 @@ describe('ConflictMergeView', () => {
       expect(screen.queryByTestId('conflict-editor')).toBeTruthy();
     }, { timeout: 5000 });
 
-    // Find any "Take Left" button
-    const takeLeftButtons = screen.getAllByRole('button', { name: /Take Left/i });
+    // Find any "Take Left" button (i18n mock returns the key as-is when no
+    // translation lookup is wired in the test environment — search by the
+    // i18n key fragment so the test stays stable across locale changes).
+    const takeLeftButtons = screen.getAllByRole('button', { name: /takeLeft|Take Left/i });
     expect(takeLeftButtons.length).toBeGreaterThan(0);
 
     // Click the first one — should fire the applyResolution callback which

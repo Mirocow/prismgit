@@ -797,18 +797,18 @@ export function HistoryPage() {
                 : null;
     if (!state) return false;
     const title =
-      state === 'merge' ? 'Merge in progress'
-        : state === 'rebase' ? 'Rebase in progress'
-          : state === 'cherry-pick' ? 'Cherry-pick in progress'
-            : state === 'revert' ? 'Revert in progress'
-              : 'Bisect in progress';
+      state === 'merge' ? t('history.blockedBy.mergeInProgress')
+        : state === 'rebase' ? t('history.blockedBy.rebaseInProgress')
+          : state === 'cherry-pick' ? t('history.blockedBy.cherryPickInProgress')
+            : state === 'revert' ? t('history.blockedBy.revertInProgress')
+              : t('history.blockedBy.bisectInProgress');
     // Offer an in-place Abort button — the user shouldn't have to leave
     // History just to discard a stale merge.
     const abortNow = await confirmDialog({
       title,
-      message: `Another HEAD-moving operation would discard the in-progress ${state}.\n\nFinish it first on the Changes page, or Abort it now.`,
-      confirmLabel: `Abort ${state} now`,
-      cancelLabel: 'Go to Changes',
+      message: t('history.blockedBy.message', { state }),
+      confirmLabel: t('history.blockedBy.abortNow', { state }),
+      cancelLabel: t('history.blockedBy.goToChanges'),
       danger: true,
     });
     if (abortNow) {
@@ -820,7 +820,7 @@ export function HistoryPage() {
           case 'revert': await api.git.revertAbort(repo.path); break;
           case 'bisect': await api.git.bisectReset(repo.path); break;
         }
-        toast.success(`${state[0].toUpperCase() + state.slice(1)} aborted`);
+        toast.success(t('history.blockedBy.aborted', { state }));
         await refreshStatus(repo.path);
         await loadHistory();
       } catch (e) { toast.error(t('toast.merge.abortStateFailed', { state }), String(e)); }
@@ -834,19 +834,19 @@ export function HistoryPage() {
   const handleCherryPick = async (entry: { hash: string; subject: string }) => {
     if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
-      title: `Cherry-pick ${shortHash(entry.hash)}`,
-      message: `Apply the changes from this commit onto your current branch?\n\nCommit: "${entry.subject}"`,
-      confirmLabel: 'Cherry-pick',
+      title: t('history.cherryPickTitle', { hash: shortHash(entry.hash) }),
+      message: t('history.cherryPickMessage', { subject: entry.subject }),
+      confirmLabel: t('history.cherryPickAction'),
     }))) return;
     setCpBusyHash(entry.hash);
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) {
-        toast.warning(`${result.conflicts.length} conflicts`, 'Resolve them on the Changes page, then press Continue');
+        toast.warning(t('history.nConflicts', { count: result.conflicts.length }), t('history.cherryPickConflictsDetail'));
       } else if (result.empty) {
         toast.warning(
-          'The cherry-pick is empty — changes are already applied',
-          'Resolve it on the Changes page: Skip (drop) or Commit Empty'
+          t('history.cherryPickEmpty'),
+          t('history.cherryPickEmptyDetail')
         );
       } else if (result.error) {
         toast.error(t('toast.cherryPick.failed'), result.error);
@@ -865,13 +865,13 @@ export function HistoryPage() {
   const handleRevert = async (entry: LogEntry) => {
     if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
-      title: `Revert ${shortHash(entry.hash)}`,
-      message: `Create a NEW commit that undoes the changes from this commit?\n\nOriginal commit: "${entry.subject}"`,
-      confirmLabel: 'Revert',
+      title: t('history.revertTitle', { hash: shortHash(entry.hash) }),
+      message: t('history.revertMessage', { subject: entry.subject }),
+      confirmLabel: t('history.revertAction'),
     }))) return;
     try {
       const result = await api.git.revert(repo.path, [entry.hash]);
-      if (result.conflicts.length > 0) toast.warning(`${result.conflicts.length} conflicts`);
+      if (result.conflicts.length > 0) toast.warning(t('history.nConflicts', { count: result.conflicts.length }));
       else toast.success(t('toast.revert.reverted'));
       await refreshStatus(repo.path); await loadHistory();
     } catch (e) { toast.error(t('toast.revert.failed'), String(e)); }
@@ -880,11 +880,11 @@ export function HistoryPage() {
   const handleReset = async (hash: string, mode: 'soft' | 'mixed' | 'hard' | 'keep') => {
     if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
-      title: `Reset to ${shortHash(hash)} (${mode})`,
+      title: t('history.resetTitle', { hash: shortHash(hash), mode }),
       message: mode === 'hard'
-        ? 'WARNING: all uncommitted changes will be lost!'
-        : `Move the current branch to ${shortHash(hash)} using a ${mode} reset.`,
-      confirmLabel: 'Reset',
+        ? t('history.resetHardWarning')
+        : t('history.resetMessage', { hash: shortHash(hash), mode }),
+      confirmLabel: t('history.resetAction'),
       danger: mode === 'hard',
     }))) return;
     try {
@@ -897,9 +897,9 @@ export function HistoryPage() {
   const handleRebase = async (hash: string) => {
     if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
-      title: 'Rebase current branch',
-      message: `Replay your current branch's commits on top of ${shortHash(hash)}?\nMay cause conflicts.`,
-      confirmLabel: 'Rebase',
+      title: t('history.rebaseTitle'),
+      message: t('history.rebaseMessage', { hash: shortHash(hash) }),
+      confirmLabel: t('history.rebaseAction'),
     }))) return;
     try {
       await api.git.rebase(repo.path, hash);
@@ -912,7 +912,7 @@ export function HistoryPage() {
   const handleShowCommitDiff = async (entry: LogEntry) => {
     try {
       const result = await api.git.diffCommit(repo.path, entry.hash);
-      setCompareDiff({ result, title: `Commit ${shortHash(entry.hash)} vs parent` });
+      setCompareDiff({ result, title: t('history.commitVsParent', { hash: shortHash(entry.hash) }) });
     } catch (e) { toast.error(t('toast.history.commitDiffFailed'), String(e)); }
   };
 
@@ -921,7 +921,7 @@ export function HistoryPage() {
     try {
       const res = await api.vscode.openCommitPatch(repo.path, entry.hash);
       if (res.ok) toast.success(t('toast.vscode.opened'));
-      else toast.error(res.detail || 'VS Code CLI not found — install VS Code or set its path in Settings → External Tools');
+      else toast.error(res.detail || t('history.vscodeCliNotFound'));
     } catch (e) { toast.error(t('toast.vscode.openFailed'), String(e)); }
   };
 
@@ -929,9 +929,9 @@ export function HistoryPage() {
   // splits the commit by staging parts and continuing via the Rebase panel.
   const handleStartSplitCommit = async (entry: LogEntry) => {
     if (!(await confirmDialog({
-      title: `Split ${shortHash(entry.hash)}`,
-      message: "This starts an interactive rebase stopped at this commit ('edit').\nThen: reset parts of the commit, stage pieces, commit repeatedly, and press Continue in the Rebase panel.",
-      confirmLabel: 'Split',
+      title: t('history.splitTitle', { hash: shortHash(entry.hash) }),
+      message: t('history.splitMessage'),
+      confirmLabel: t('history.splitAction'),
     }))) return;
     try {
       const res = await api.git.splitCommit(repo.path, entry.hash);
@@ -957,7 +957,7 @@ export function HistoryPage() {
   const handleOpenSplitOff = (entry: LogEntry) => {
     setSplitOffEntry(entry);
     setSplitOffSelected(new Set());
-    setSplitOffMessage(`Split from "${entry.subject}"`);
+    setSplitOffMessage(t('history.splitOffInitialMsg', { subject: entry.subject }));
     setShowSplitOff(true);
     api.git.commitFiles(repo.path, entry.hash)
       .then(setSplitOffFileList)
@@ -981,9 +981,9 @@ export function HistoryPage() {
   const handleCheckout = async (hash: string) => {
     if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
-      title: `Checkout ${shortHash(hash)}`,
-      message: "This puts you in detached HEAD state — you won't be on any branch.",
-      confirmLabel: 'Checkout',
+      title: t('history.checkoutTitle', { hash: shortHash(hash) }),
+      message: t('history.checkoutMessage'),
+      confirmLabel: t('history.checkoutAction'),
     }))) return;
     try {
       await api.git.checkout(repo.path, hash);
@@ -1011,13 +1011,13 @@ export function HistoryPage() {
 
   const handleEditAuthor = async (entry: LogEntry) => {
     const value = await promptDialog({
-      title: 'Edit Commit Author',
-      message: `Author of ${shortHash(entry.hash)} — current: ${entry.author.name} <${entry.author.email}>`,
+      title: t('history.editAuthorTitle'),
+      message: t('history.editAuthorMessage', { hash: shortHash(entry.hash), author: entry.author.name, email: entry.author.email }),
       input: { initialValue: `${entry.author.name} <${entry.author.email}>` },
     });
     if (!value) return;
     const m = value.match(/^([^<]+)<([^>]+)>\s*$/);
-    if (!m) { toast.error(t('toast.git.invalidFormat'), 'Use: Name <email>'); return; }
+    if (!m) { toast.error(t('toast.git.invalidFormat'), t('history.authorFormatHint')); return; }
     try {
       await api.git.editCommitAuthor(repo.path, entry.hash, m[1].trim(), m[2].trim());
       toast.success(t('toast.edit.authorUpdated'));
@@ -1028,8 +1028,8 @@ export function HistoryPage() {
   const handleAddNote = async (entry: LogEntry) => {
     const existing = await api.git.notesShow(repo.path, 'commits', entry.hash).catch(() => null);
     const message = await promptDialog({
-      title: existing ? 'Edit Note' : 'Add Note',
-      message: `Git note on ${shortHash(entry.hash)} (category commits)`,
+      title: existing ? t('history.editNoteTitle') : t('history.addNoteTitle'),
+      message: t('history.noteMessage', { hash: shortHash(entry.hash) }),
       input: { initialValue: existing ?? '' },
     });
     if (message === null) return;
@@ -1042,22 +1042,22 @@ export function HistoryPage() {
     }
     try {
       await api.git.notesAdd(repo.path, 'commits', entry.hash, message.trim(), true);
-      toast.success('Note saved');
+      toast.success(t('history.noteSaved'));
       await loadHistory();
-    } catch (e) { toast.error('Save note failed', String(e)); }
+    } catch (e) { toast.error(t('history.saveNoteFailed'), String(e)); }
   };
 
   const handleFormatPatch = async (entry: LogEntry) => {
     const outDir = await promptDialog({
-      title: 'Format Patch',
-      message: `Write a .patch file for ${shortHash(entry.hash)} to`,
+      title: t('history.formatPatchTitle'),
+      message: t('history.formatPatchMessage', { hash: shortHash(entry.hash) }),
       input: { initialValue: `${repo.path}/patches` },
     });
     if (!outDir) return;
     try {
       const files = await api.git.formatPatch(repo.path, { outputDir: outDir, commit: entry.hash });
-      await confirmDialog({ title: 'Format Patch', message: `Written:\n${files.join('\n')}`, confirmLabel: 'Close', hideCancel: true });
-    } catch (e) { toast.error('Format patch failed', String(e)); }
+      await confirmDialog({ title: t('history.formatPatchTitle'), message: t('history.formatPatchWritten', { files: files.join('\n') }), confirmLabel: t('history.closeAction'), hideCancel: true });
+    } catch (e) { toast.error(t('history.formatPatchFailed'), String(e)); }
   };
 
   const handleOpenInBrowser = async () => {
@@ -1067,7 +1067,7 @@ export function HistoryPage() {
     try {
       const info = await api.git.extractRepoInfo(repo.path);
       if (info.webUrl) api.app.openExternal(`${info.webUrl}/commit/${selected.hash}`);
-      else toast.info('No remote URL');
+      else toast.info(t('history.noRemoteUrl'));
     } catch (e) { toast.error(t('toast.generic.failed'), String(e)); }
   };
 
@@ -1179,9 +1179,9 @@ export function HistoryPage() {
           window.location.hash = '#/diff';
           break;
         }
-        case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success('Copied'); break;
-        case 'copy-full': copyToClipboard(entry.hash); toast.success('Copied'); break;
-        case 'copy-msg': copyToClipboard(entry.subject); toast.success('Copied'); break;
+        case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success(t('history.copied')); break;
+        case 'copy-full': copyToClipboard(entry.hash); toast.success(t('history.copied')); break;
+        case 'copy-msg': copyToClipboard(entry.subject); toast.success(t('history.copied')); break;
         case 'edit-msg': handleEditMessage(entry); break;
         case 'edit-author': handleEditAuthor(entry); break;
         case 'add-note': handleAddNote(entry); break;
@@ -1203,24 +1203,24 @@ export function HistoryPage() {
     try {
       const note = await api.git.noteShow(repo.path, entry.hash);
       if (note.trim()) {
-        toast.info(`Note for ${shortHash(entry.hash)}`, note);
+        toast.info(t('history.noteFor', { hash: shortHash(entry.hash) }), note);
       } else {
-        toast.info('No note for this commit');
+        toast.info(t('history.noNote'));
       }
-    } catch (e) { toast.error('Failed to load note', String(e)); }
+    } catch (e) { toast.error(t('history.noteLoadFailed'), String(e)); }
   };
 
   const handleRemoveNote = async (entry: LogEntry) => {
     if (!(await confirmDialog({
-      title: 'Remove Git Note',
-      message: `Remove the Git Note from ${shortHash(entry.hash)}?`,
-      confirmLabel: 'Remove',
+      title: t('history.removeNoteTitle'),
+      message: t('history.removeNoteMessage', { hash: shortHash(entry.hash) }),
+      confirmLabel: t('history.removeAction'),
       danger: true,
     }))) return;
     try {
       await api.git.noteRemove(repo.path, entry.hash);
       toast.success(t('toast.edit.noteRemoved'));
-    } catch (e) { toast.error('Failed to remove note', String(e)); }
+    } catch (e) { toast.error(t('history.noteRemoveFailed'), String(e)); }
   };
 
   // Tag-from-commit dialog state
@@ -1248,13 +1248,13 @@ export function HistoryPage() {
       const force = !!editingTagName;
       await api.git.createTag(repo.path, tagName.trim(), tagMessage || undefined, tagTarget, force, tagAnnotated);
       toast.success(
-        force ? `Tag '${tagName}' updated` : `Tag '${tagName}' created`,
-        `Points to ${shortHash(tagTarget)}`
+        force ? t('history.tagUpdatedToast', { name: tagName }) : t('history.tagCreatedToast', { name: tagName }),
+        t('history.tagPointsTo', { hash: shortHash(tagTarget) })
       );
       setShowTagDialog(false);
       setEditingTagName(null);
       await loadHistory();
-    } catch (e) { toast.error('Failed to save tag', String(e)); }
+    } catch (e) { toast.error(t('history.tagCreateFailed'), String(e)); }
   };
 
   // Edit an existing tag's message (annotated tags only). Re-creates the tag
@@ -1267,7 +1267,7 @@ export function HistoryPage() {
       const existing = tags.find(t => t.name === tagName);
       const isAnnotated = existing?.annotated ?? false;
       if (!isAnnotated) {
-        toast.info('Lightweight tag', `"${tagName}" has no message to edit. Use Delete + Create to convert.`);
+        toast.info(t('history.lightweightTagTitle'), t('history.lightweightTagMessage', { name: tagName }));
         return;
       }
       // Open the tag dialog in "edit" mode — pre-fill name + message,
@@ -1278,7 +1278,7 @@ export function HistoryPage() {
       setTagAnnotated(true);
       setEditingTagName(tagName);
       setShowTagDialog(true);
-    } catch (e) { toast.error('Failed to load tag', String(e)); }
+    } catch (e) { toast.error(t('history.tagLoadFailed'), String(e)); }
   };
 
   // Track whether the dialog is in edit mode (vs create). When set, handleSaveTag
@@ -1294,9 +1294,9 @@ export function HistoryPage() {
     }))) return;
     try {
       await api.git.deleteTag(repo.path, tagName);
-      toast.success(`Tag "${tagName}" deleted`);
+      toast.success(t('history.tagDeletedToast', { name: tagName }));
       await loadHistory();
-    } catch (e) { toast.error('Failed to delete tag', String(e)); }
+    } catch (e) { toast.error(t('history.tagDeleteFailed'), String(e)); }
   };
 
   // Branch-from-commit dialog state
@@ -1318,10 +1318,10 @@ export function HistoryPage() {
     try {
       await api.git.createBranch(repo.path, branchName.trim(), branchTarget);
       if (branchCheckout) await api.git.checkout(repo.path, branchName.trim());
-      toast.success(`Branch '${branchName}' created`, `From ${shortHash(branchTarget)}`);
+      toast.success(t('history.branchCreatedToast', { name: branchName }), t('history.branchFrom', { hash: shortHash(branchTarget) }));
       setShowBranchDialog(false);
       await loadHistory();
-    } catch (e) { toast.error('Failed to create branch', String(e)); }
+    } catch (e) { toast.error(t('history.branchCreateFailed'), String(e)); }
   };
 
   // ===== SmartGit Log groups: Stashes + Recyclable Commits — row actions =====
@@ -1331,9 +1331,9 @@ export function HistoryPage() {
         `Apply Stash {${s.index}}`, repo.path, `git stash apply stash@{${s.index}}`,
         () => api.git.stashApply(repo.path, s.index)
       );
-      toast.success('Stash applied');
+      toast.success(t('toast.stash.applied'));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Apply stash failed', String(e)); }
+    } catch (e) { toast.error(t('toast.stash.applyFailed'), String(e)); }
   };
   const handleStashPop = async (s: StashEntry) => {
     try {
@@ -1341,15 +1341,15 @@ export function HistoryPage() {
         `Pop Stash {${s.index}}`, repo.path, `git stash pop stash@{${s.index}}`,
         () => api.git.stashPop(repo.path, s.index)
       );
-      toast.success('Stash popped');
+      toast.success(t('toast.stash.popped'));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Pop stash failed', String(e)); }
+    } catch (e) { toast.error(t('toast.stash.popFailed'), String(e)); }
   };
   const handleStashDrop = async (s: StashEntry) => {
     if (!(await confirmDialog({
-      title: `Drop Stash {${s.index}}`,
-      message: `Permanently remove this stash?\n\n${s.message}`,
-      confirmLabel: 'Drop',
+      title: t('history.dropStashTitle', { index: s.index }),
+      message: t('history.dropStashMessage', { message: s.message }),
+      confirmLabel: t('history.dropAction'),
       danger: true,
     }))) return;
     try {
@@ -1357,22 +1357,22 @@ export function HistoryPage() {
         `Drop Stash {${s.index}}`, repo.path, `git stash drop stash@{${s.index}}`,
         () => api.git.stashDrop(repo.path, s.index)
       );
-      toast.success('Stash dropped');
+      toast.success(t('toast.stash.dropped'));
       await loadHistory();
-    } catch (e) { toast.error('Drop stash failed', String(e)); }
+    } catch (e) { toast.error(t('toast.stash.dropFailed'), String(e)); }
   };
   const handleRecyclableBranch = async (c: RecyclableCommit) => {
     const name = await promptDialog({
-      title: 'Create branch at recyclable commit',
-      message: `Recover ${shortHash(c.hash)} as a new branch — the commit becomes reachable again.`,
+      title: t('history.recyclableBranchTitle'),
+      message: t('history.recyclableBranchMessage', { hash: shortHash(c.hash) }),
       input: { initialValue: `recover/${c.hash.substring(0, 8)}` },
     });
     if (!name) return;
     try {
       await api.git.createBranch(repo.path, name, c.hash);
-      toast.success(`Branch '${name}' created`, `From ${shortHash(c.hash)}`);
+      toast.success(t('history.branchCreatedToast', { name }), t('history.branchFrom', { hash: shortHash(c.hash) }));
       await loadHistory();
-    } catch (e) { toast.error('Create branch failed', String(e)); }
+    } catch (e) { toast.error(t('history.branchCreateFailed'), String(e)); }
   };
   const handleShowCommit = (hash: string) => {
     // Highlight the commit in the graph (when reachable from a loaded ref)
@@ -1989,10 +1989,10 @@ export function HistoryPage() {
               )}
               <div className="flex items-center gap-2 mb-3">
                 <CommitHashLink hash={selected.hash} />
-                <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>
+                <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success(t('history.copied')); }}>
                   <Copy size={10} />
                 </button>
-                <button className="icon-btn !w-5 !h-5" title="Browser" onClick={handleOpenInBrowser}>
+                <button className="icon-btn !w-5 !h-5" title={t('history.browserTitle')} onClick={handleOpenInBrowser}>
                   <ExternalLink size={11} />
                 </button>
               </div>

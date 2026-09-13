@@ -30,6 +30,10 @@ import * as tour from './domains/tour';
 import * as aiassistant from './domains/aiassistant';
 import * as toasts from './domains/toasts';
 import * as actions from './domains/actions';
+import * as banner from './domains/banner';
+import * as conflict from './domains/conflict';
+import * as iRebase from './domains/iRebase';
+import * as nav from './domains/nav';
 
 /** All domain modules — used by the parity tests to walk every dictionary. */
 export const DOMAINS: Record<string, { en: Record<string, string>; ru: Record<string, string>; zh: Record<string, string>; de: Record<string, string> }> = {
@@ -51,6 +55,10 @@ export const DOMAINS: Record<string, { en: Record<string, string>; ru: Record<st
   aiassistant,
   toasts,
   actions,
+  banner,
+  conflict,
+  iRebase,
+  nav,
 };
 
 /** Static English merge — synchronous fallback for the whole app. */
