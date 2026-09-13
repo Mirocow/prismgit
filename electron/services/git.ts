@@ -4056,65 +4056,156 @@ export async function lfsInstall(repoPath: string): Promise<void> {
 }
 
 /**
- * Detect whether the repo has LFS filter rules configured in .gitattributes.
+ * Detect whether the repo has LFS configured — in .gitattributes OR git
+ * hooks OR git config filter.lfs.*.
  *
- * Returns true if `.gitattributes` contains lines like:
- *   *.mp4 filter=lfs diff=lfs merge=lfs -text
- *   *.zip filter=lfs diff=lfs merge=lfs -text
+ * Returns true if ANY of:
+ *   - .gitattributes contains filter=lfs / diff=lfs / merge=lfs
+ *   - .git/hooks/ has LFS hooks (post-checkout, post-merge, post-commit, pre-push)
+ *     that call git-lfs
+ *   - git config has filter.lfs.clean / filter.lfs.smudge / filter.lfs.process set
  *
  * This is used by the LFS health check on repo open — if LFS is configured
  * but git-lfs is NOT installed, the user is prompted to either:
  *   1. Install git-lfs (open https://git-lfs.com in browser)
- *   2. Remove the LFS filter rules from .gitattributes (clean up)
+ *   2. Remove the LFS configuration (clean up .gitattributes + hooks + config)
  *   3. Skip (continue with GIT_LFS_SKIP_SMUDGE=1 — current default)
  */
 export async function detectLfsConfigured(repoPath: string): Promise<boolean> {
-  const attrsPath = path.join(repoPath, '.gitattributes');
+  // 1. Check .gitattributes for LFS filter rules
   try {
-    if (!fs.existsSync(attrsPath)) return false;
-    const content = fs.readFileSync(attrsPath, 'utf8');
-    // Match LFS filter lines: "filter=lfs" or "diff=lfs" or "merge=lfs"
-    return /filter\s*=\s*lfs|diff\s*=\s*lfs|merge\s*=\s*lfs/i.test(content);
-  } catch {
-    return false;
-  }
+    const attrsPath = path.join(repoPath, '.gitattributes');
+    if (fs.existsSync(attrsPath)) {
+      const content = fs.readFileSync(attrsPath, 'utf8');
+      if (/filter\s*=\s*lfs|diff\s*=\s*lfs|merge\s*=\s*lfs/i.test(content)) {
+        return true;
+      }
+    }
+  } catch { /* ignore */ }
+
+  // 2. Check git config for filter.lfs.* entries
+  try {
+    const git = getGit(repoPath);
+    const config = await git.raw(['config', '--get-regexp', '^filter\\.lfs\\.']).catch(() => '');
+    if (config.trim()) return true;
+  } catch { /* ignore */ }
+
+  // 3. Check for LFS hooks in .git/hooks/
+  try {
+    // Resolve hooks dir — may be overridden by core.hookspath
+    const git = getGit(repoPath);
+    let hooksDir = path.join(repoPath, '.git', 'hooks');
+    const hooksPathConfig = await git.raw(['config', '--get', 'core.hookspath']).catch(() => '');
+    if (hooksPathConfig.trim()) {
+      // core.hookspath is relative to the repo root
+      hooksDir = path.isAbsolute(hooksPathConfig.trim())
+        ? hooksPathConfig.trim()
+        : path.join(repoPath, hooksPathConfig.trim());
+    }
+    const lfsHooks = ['post-checkout', 'post-merge', 'post-commit', 'pre-push', 'post-fetch'];
+    for (const hook of lfsHooks) {
+      const hookPath = path.join(hooksDir, hook);
+      if (fs.existsSync(hookPath)) {
+        const content = fs.readFileSync(hookPath, 'utf8');
+        if (/git-lfs|git lfs/i.test(content)) return true;
+      }
+    }
+  } catch { /* ignore */ }
+
+  return false;
 }
 
 /**
- * Remove LFS filter rules from .gitattributes.
+ * Comprehensively remove ALL LFS configuration from a repository:
  *
- * Removes ALL lines containing "filter=lfs", "diff=lfs", or "merge=lfs"
- * from the repo's .gitattributes file. Non-LFS rules (e.g. "text=auto",
- * "eol=lf") are preserved.
+ *   1. Remove filter=lfs / diff=lfs / merge=lfs lines from .gitattributes
+ *   2. Remove LFS git hooks (post-checkout, post-merge, post-commit, pre-push)
+ *   3. Unset git config filter.lfs.* entries (clean, smudge, process, required)
  *
- * After removal, the LFS-tracked files will be treated as regular files
- * — no filter applied. The user can commit the .gitattributes change to
- * permanently disable LFS for this repo.
+ * After removal, the repo no longer triggers git-lfs for ANY operation.
+ * The user should commit the .gitattributes change to make it permanent.
  *
- * Returns the number of lines removed.
+ * Returns the total number of items removed (lines + hooks + config entries).
  */
 export async function removeLfsFilter(repoPath: string): Promise<number> {
-  const attrsPath = path.join(repoPath, '.gitattributes');
+  let removed = 0;
+
+  // 1. Remove LFS filter lines from .gitattributes
   try {
-    if (!fs.existsSync(attrsPath)) return 0;
-    const content = fs.readFileSync(attrsPath, 'utf8');
-    const lines = content.split('\n');
-    const kept: string[] = [];
-    let removed = 0;
-    for (const line of lines) {
-      if (/filter\s*=\s*lfs|diff\s*=\s*lfs|merge\s*=\s*lfs/i.test(line)) {
-        removed++;
-      } else {
-        kept.push(line);
+    const attrsPath = path.join(repoPath, '.gitattributes');
+    if (fs.existsSync(attrsPath)) {
+      const content = fs.readFileSync(attrsPath, 'utf8');
+      const lines = content.split('\n');
+      const kept: string[] = [];
+      for (const line of lines) {
+        if (/filter\s*=\s*lfs|diff\s*=\s*lfs|merge\s*=\s*lfs/i.test(line)) {
+          removed++;
+        } else {
+          kept.push(line);
+        }
+      }
+      if (removed > 0) {
+        fs.writeFileSync(attrsPath, kept.join('\n'), 'utf8');
       }
     }
-    if (removed > 0) {
-      fs.writeFileSync(attrsPath, kept.join('\n'), 'utf8');
+  } catch { /* ignore */ }
+
+  // 2. Remove LFS git hooks
+  try {
+    const git = getGit(repoPath);
+    let hooksDir = path.join(repoPath, '.git', 'hooks');
+    const hooksPathConfig = await git.raw(['config', '--get', 'core.hookspath']).catch(() => '');
+    if (hooksPathConfig.trim()) {
+      hooksDir = path.isAbsolute(hooksPathConfig.trim())
+        ? hooksPathConfig.trim()
+        : path.join(repoPath, hooksPathConfig.trim());
     }
-    return removed;
-  } catch {
-    return 0;
-  }
+    const lfsHooks = ['post-checkout', 'post-merge', 'post-commit', 'pre-push', 'post-fetch'];
+    for (const hook of lfsHooks) {
+      const hookPath = path.join(hooksDir, hook);
+      if (fs.existsSync(hookPath)) {
+        const content = fs.readFileSync(hookPath, 'utf8');
+        if (/git-lfs|git lfs/i.test(content)) {
+          // Rename to .bak instead of deleting — user might want to restore
+          const bakPath = hookPath + '.bak';
+          try {
+            if (fs.existsSync(bakPath)) fs.unlinkSync(bakPath);
+            fs.renameSync(hookPath, bakPath);
+            removed++;
+          } catch { /* ignore — can't rename */ }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  // 3. Unset git config filter.lfs.* entries
+  try {
+    const git = getGit(repoPath);
+    const configEntries = [
+      'filter.lfs.clean',
+      'filter.lfs.smudge',
+      'filter.lfs.process',
+      'filter.lfs.required',
+    ];
+    for (const key of configEntries) {
+      try {
+        await git.raw(['config', '--unset', key]);
+        removed++;
+      } catch {
+        // Key doesn't exist — that's fine.
+      }
+    }
+    // Also unset in global config if present
+    for (const key of configEntries) {
+      try {
+        await git.raw(['config', '--global', '--unset', key]);
+      } catch {
+        // Key doesn't exist globally — fine.
+      }
+    }
+  } catch { /* ignore */ }
+
+  return removed;
 }
 
 export async function lfsTrack(repoPath: string, patterns: string[]): Promise<void> {
