@@ -154,9 +154,11 @@ export default function App() {
   const [showTour, setShowTour] = useState(false);
   useEffect(() => {
     // Auto-start tour on first launch.
+    // Check localStorage directly — the key 'prismgit-tour-completed' must
+    // be exactly '1' for the tour to be skipped.
     try {
-      const done = localStorage.getItem('prismgit-tour-completed') === '1';
-      if (!done) {
+      const done = localStorage.getItem('prismgit-tour-completed');
+      if (done !== '1') {
         // Defer until the rest of the UI has mounted so the spotlight
         // targets exist in the DOM.
         const t = setTimeout(() => setShowTour(true), 800);

@@ -141,13 +141,22 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
-  // When the checkbox is toggled ON, immediately mark tour as completed
-  // and CLOSE the overlay — the user explicitly said they don't want to
-  // see this anymore.
+  // When the checkbox is toggled ON, immediately:
+  // 1. Write 'prismgit-tour-completed' = '1' to localStorage
+  // 2. Close the overlay
+  // 3. Log for debugging
   const handleDontShowChange = (checked: boolean) => {
     setDontShowAgain(checked);
     if (checked) {
-      markTourCompleted();
+      try {
+        localStorage.setItem('prismgit-tour-completed', '1');
+        console.log('[Tour] markTourCompleted — localStorage set to "1"');
+        // Verify it was written
+        const verify = localStorage.getItem('prismgit-tour-completed');
+        console.log('[Tour] verify localStorage:', verify);
+      } catch (e) {
+        console.error('[Tour] Failed to set localStorage:', e);
+      }
       onClose();
     }
   };
