@@ -1181,6 +1181,28 @@ smartgit.refresh.inspectEol=true
                 onBlur={(e) => setSetting('aiCustomPrompt', e.target.value)}
               />
             </div>
+
+            {/* Chat History Limit — how many messages to persist per-project */}
+            <div className="pt-3 border-t border-border-subtle">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                {t('settings.aiChatHistorySection') || 'Chat History'}
+              </div>
+              <label className="flex items-center gap-2 text-xs">
+                <span className="text-text-tertiary">{t('settings.aiChatHistoryLimitLabel') || 'Max messages to save per project'}</span>
+                <input
+                  type="number"
+                  min={10}
+                  max={1000}
+                  step={10}
+                  className="w-20 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                  value={settings.aiChatHistoryLimit ?? 100}
+                  onChange={(e) => setSetting('aiChatHistoryLimit', parseInt(e.target.value) || 100)}
+                />
+              </label>
+              <div className="text-2xs text-text-tertiary mt-1">
+                {t('settings.aiChatHistoryHint') || 'Conversation history is saved per-project in localStorage. Older messages beyond this limit are automatically dropped.'}
+              </div>
+            </div>
           </div>
         </section>
         )}

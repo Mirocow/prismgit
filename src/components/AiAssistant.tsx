@@ -3,7 +3,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { useI18n } from '../lib/i18n';
-import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot } from './icons';
+import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash } from './icons';
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage } from '../lib/aiChat';
 import { type LLMProvider } from '../lib/aiCommitMessages';
@@ -13,20 +13,55 @@ import { type LLMProvider } from '../lib/aiCommitMessages';
  *
  * Floating dockable panel (bottom-right). Toggle via the AI toolbar
  * button (Sparkles icon). The chat:
- *   - Maintains conversation history in local state.
+ *   - Maintains conversation history persisted to localStorage per-repo.
  *   - Calls runWithTools() which loops: LLM → tool calls → tool
  *     results → LLM → final answer.
  *   - Renders intermediate 'assistant with tool_calls' messages as
  *     "Calling get_status..." transcript entries.
  *   - Renders tool results as monospace blocks.
  *
- * The AI provider comes from settingsStore (same as the commit-message
- * AI). If no provider is configured, shows an empty state pointing the
- * user to Settings → AI Commit Messages.
- *
- * Conversation history is NOT persisted — cleared on unmount. A
- * follow-up could persist to localStorage per-repo.
+ * Conversation history IS persisted — saved to localStorage under
+ * 'prismgit-ai-chat-<repoPath>' with a configurable limit (default 100
+ * messages, set via Settings → AI → Chat History Limit).
  */
+const STORAGE_KEY_PREFIX = 'prismgit-ai-chat-';
+const DEFAULT_HISTORY_LIMIT = 100;
+
+/** Load persisted chat messages for a given repo path. */
+function loadChatHistory(repoPath: string): ChatMessage[] {
+  try {
+    const key = STORAGE_KEY_PREFIX + repoPath;
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/** Save chat messages for a given repo path, capped to the limit. */
+function saveChatHistory(repoPath: string, messages: ChatMessage[], limit: number): void {
+  try {
+    const key = STORAGE_KEY_PREFIX + repoPath;
+    // Keep only the last `limit` messages — oldest are dropped.
+    const trimmed = messages.length > limit ? messages.slice(-limit) : messages;
+    localStorage.setItem(key, JSON.stringify(trimmed));
+  } catch {
+    // localStorage might be full — silently ignore
+  }
+}
+
+/** Clear chat history for a given repo path. */
+function clearChatHistory(repoPath: string): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY_PREFIX + repoPath);
+  } catch {
+    // ignore
+  }
+}
+
 export function AiAssistant({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
   const repo = useRepositoryStore(s => s.currentRepo);
@@ -37,10 +72,30 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Load persisted chat history when the repo changes.
+  useEffect(() => {
+    if (!repo) {
+      setMessages([]);
+      return;
+    }
+    const saved = loadChatHistory(repo.path);
+    setMessages(saved);
+  }, [repo?.path]);
+
   // Auto-scroll to bottom when messages change.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
+
+  // Persist messages to localStorage whenever they change (debounced).
+  const historyLimit = settings?.aiChatHistoryLimit ?? DEFAULT_HISTORY_LIMIT;
+  useEffect(() => {
+    if (!repo || messages.length === 0) return;
+    const timer = setTimeout(() => {
+      saveChatHistory(repo.path, messages, historyLimit);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [messages, repo?.path, historyLimit]);
 
   const buildProvider = useCallback((): LLMProvider | null => {
     if (!settings?.aiProvider) return null;
@@ -94,6 +149,11 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const handleClear = () => {
+    setMessages([]);
+    if (repo) clearChatHistory(repo.path);
+  };
+
   return (
     <div className="fixed bottom-4 right-4 w-96 max-h-[600px] bg-bg-elevated border border-border-default rounded-lg shadow-2xl flex flex-col z-50">
       {/* Header */}
@@ -103,9 +163,20 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           <span className="text-sm font-medium">{t('aiAssistant.title')}</span>
           {repo && <span className="text-2xs text-text-tertiary truncate max-w-32" title={repo.path}>{repo.name}</span>}
         </div>
-        <button className="icon-btn !w-5 !h-5" onClick={onClose} aria-label={t('common.close')}>
-          <X size={12} />
-        </button>
+        <div className="flex items-center gap-1">
+          {messages.length > 0 && (
+            <button
+              className="icon-btn !w-5 !h-5 hover:!text-status-deleted"
+              onClick={handleClear}
+              title={t('aiAssistant.clearHistory')}
+            >
+              <Trash size={11} />
+            </button>
+          )}
+          <button className="icon-btn !w-5 !h-5" onClick={onClose} aria-label={t('common.close')}>
+            <X size={12} />
+          </button>
+        </div>
       </div>
 
       {/* Messages */}

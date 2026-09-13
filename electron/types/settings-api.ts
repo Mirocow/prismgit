@@ -154,6 +154,8 @@ export interface AppSettings {
   aiUrl?: string;
   /** Custom AI system prompt template with {{branch}}, {{author}}, etc. */
   aiCustomPrompt?: string;
+  /** Max AI Assistant chat messages to persist per-project (default: 100). */
+  aiChatHistoryLimit?: number;
   // === SmartGit Manual v25/26: Force Push policies ===
   /** Force-push policy: 'deny' | 'feature-only' | 'allow'. */
   forcePushPolicy?: 'deny' | 'feature-only' | 'allow';
