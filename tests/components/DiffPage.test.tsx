@@ -32,6 +32,14 @@ vi.mock('../../src/lib/api', () => ({
 
 // Mock the toast store so it doesn't crash (no toast container needed for tests)
 vi.mock('../../src/stores/toastStore', () => ({
+  useToastActions: () => ({
+    error: vi.fn(),
+    warning: vi.fn(),
+    success: vi.fn(),
+    info: vi.fn(),
+    show: vi.fn(),
+    dismiss: vi.fn(),
+  }),
   useToastStore: () => ({
     error: vi.fn(),
     warning: vi.fn(),

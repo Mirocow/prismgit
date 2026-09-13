@@ -3,9 +3,10 @@ import { Folder, X, Github, Loader, Download } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useAuthStore } from '../stores/authStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type GithubRepository } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 interface CloneModalProps {
@@ -15,10 +16,11 @@ interface CloneModalProps {
 
 export function CloneModal({ open, onClose }: CloneModalProps) {
   useEscapeKey(open, onClose);
+  const { t } = useI18n();
   const cloneRepository = useRepositoryStore((s) => s.cloneRepository);
   const { authenticated, user } = useAuthStore();
   const settings = useSettingsStore((s) => s.settings);
-  const toast = useToastStore();
+  const toast = useToastActions();
 
   const [url, setUrl] = useState('');
   const [targetPath, setTargetPath] = useState('');
@@ -100,7 +102,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
       const r = await api.github.getRepositories(1);
       setRepos(r);
     } catch (e) {
-      toast.error('Failed to load repositories', String(e));
+      toast.error(t('dialogs.loadReposFailed'), String(e));
     } finally {
       setLoadingRepos(false);
     }
@@ -148,11 +150,11 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
   const handleClone = async () => {
     const normalizedUrl = normalizeUrl(url);
     if (!normalizedUrl) {
-      toast.warning('Repository URL is required');
+      toast.warning(t('dialogs.urlRequired'));
       return;
     }
     if (!targetPath.trim()) {
-      toast.warning('Target directory is required');
+      toast.warning(t('dialogs.targetRequired'));
       return;
     }
     setLoading(true);
@@ -180,13 +182,13 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
         await api.git.setupCredentialHelper(finalPath).catch(() => {});
       }
       toast.success(
-        mirror ? 'Mirror clone created successfully'
-        : partialClone ? 'Partial clone created (large files fetched on demand)'
-        : 'Repository cloned successfully'
+        mirror ? t('dialogs.mirrorCloneCreated')
+        : partialClone ? t('dialogs.partialCloneCreated')
+        : t('dialogs.cloneCreated')
       );
       onClose();
     } catch (e) {
-      toast.error('Clone failed', String(e));
+      toast.error(t('dialogs.cloneFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -222,7 +224,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
           <h3 className="text-base font-medium flex items-center gap-2">
             <Download size={16} />
-            Clone Repository
+            {t('clone.title')}
           </h3>
           <button className="icon-btn" onClick={onClose}>
             <X size={14} />
@@ -239,7 +241,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
             )}
             onClick={() => setTab('url')}
           >
-            URL
+            {t('dialogs.urlTab')}
           </button>
           <button
             className={cn(
@@ -252,7 +254,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
             disabled={!authenticated}
           >
             <Github size={12} />
-            GitHub {authenticated && `(${user?.login})`}
+            {t('dialogs.githubTab')} {authenticated && `(${user?.login})`}
           </button>
         </div>
 
@@ -261,7 +263,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-text-tertiary block mb-1">
-                  Repository URL
+                  {t('clone.url')}
                 </label>
                 <input
                   type="text"
@@ -274,7 +276,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
               </div>
               <div>
                 <label className="text-xs text-text-tertiary block mb-1">
-                  Target directory
+                  {t('clone.target')}
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -286,15 +288,15 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                   />
                   <button className="btn btn-secondary" onClick={handleBrowse}>
                     <Folder size={12} />
-                    Browse
+                    {t('dialogs.browse')}
                   </button>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-text-tertiary block mb-1 flex items-center gap-2">
-                    Branch (optional)
-                    {detectingBranch && <span className="text-2xs text-accent">detecting...</span>}
+                    {t('clone.branch')}
+                    {detectingBranch && <span className="text-2xs text-accent">{t('dialogs.detecting')}</span>}
                     {detectedBranch && !detectingBranch && (
                       <span className="text-2xs text-status-added">✓ {detectedBranch}</span>
                     )}
@@ -309,13 +311,13 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                 </div>
                 <div>
                   <label className="text-xs text-text-tertiary block mb-1">
-                    Depth (optional)
+                    {t('clone.depth')}
                   </label>
                   <input
                     type="number"
                     min={1}
                     className="w-full text-sm"
-                    placeholder="full clone"
+                    placeholder={t('dialogs.fullClonePlaceholder')}
                     value={depth}
                     onChange={(e) => setDepth(e.target.value ? Number(e.target.value) : '')}
                   />
@@ -323,54 +325,54 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
               </div>
               <label
                 className="flex items-center gap-2 text-sm cursor-pointer"
-                title="git clone --mirror: copies ALL refs (heads, tags, notes) as a bare repository — useful for backups"
+                title={t('dialogs.mirrorTooltip')}
               >
                 <input
                   type="checkbox"
                   checked={mirror}
                   onChange={(e) => setMirror(e.target.checked)}
                 />
-                Mirror clone (--mirror, all refs, bare)
+                {t('clone.mirror')}
               </label>
               <label
                 className="flex items-center gap-2 text-sm cursor-pointer"
-                title="git clone --filter=blob:none: skips file contents — fetched on demand when you click a file. Saves bandwidth & disk space on huge repos."
+                title={t('dialogs.partialTooltip')}
               >
                 <input
                   type="checkbox"
                   checked={partialClone}
                   onChange={(e) => setPartialClone(e.target.checked)}
                 />
-                Partial clone (skip large files, fetch on demand)
+                {t('clone.partial')}
               </label>
               <label
                 className="flex items-center gap-2 text-sm cursor-pointer"
-                title="Configure PrismGit as the credential helper for this repo — your GitHub PAT is reused by the git CLI."
+                title={t('dialogs.credHelperTooltip')}
               >
                 <input
                   type="checkbox"
                   checked={setupCredentialHelper}
                   onChange={(e) => setSetupCredentialHelper(e.target.checked)}
                 />
-                Use PrismGit as credential helper
+                {t('clone.credentialHelper')}
               </label>
               <label
                 className="flex items-center gap-2 text-sm cursor-pointer"
-                title="Skip --recursive submodule initialization."
+                title={t('dialogs.skipSubmodulesTooltip')}
               >
                 <input
                   type="checkbox"
                   checked={noRecursive}
                   onChange={(e) => setNoRecursive(e.target.checked)}
                 />
-                Skip submodule initialization
+                {t('clone.skipSubmodules')}
               </label>
             </div>
           ) : (
             <div className="space-y-3">
               <input
                 type="text"
-                placeholder="Search repositories..."
+                placeholder={t('dialogs.searchRepos')}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full text-sm"
@@ -379,11 +381,11 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                 {loadingRepos ? (
                   <div className="p-4 text-center text-sm text-text-tertiary flex items-center justify-center gap-2">
                     <Loader size={14} className="animate-spin" />
-                    Loading...
+                    {t('common.loading')}
                   </div>
                 ) : filteredRepos.length === 0 ? (
                   <div className="p-4 text-center text-sm text-text-tertiary">
-                    No repositories found
+                    {t('dialogs.noReposFound')}
                   </div>
                 ) : (
                   filteredRepos.map((r) => (
@@ -415,7 +417,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
 
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
           <button className="btn btn-secondary" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             className="btn btn-primary"
@@ -423,7 +425,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
             disabled={loading || !url.trim() || !targetPath.trim()}
           >
             {loading ? <Loader size={13} className="animate-spin" /> : <Download size={13} />}
-            Clone
+            {t('clone.clone')}
           </button>
         </div>
       </div>

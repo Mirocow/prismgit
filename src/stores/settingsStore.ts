@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { api, type AppSettings } from '../lib/api';
+import { type ThemeId, THEMES, getThemeMeta, DEFAULT_THEME, isThemeDark } from '../lib/themes';
 
-type Theme = 'dark' | 'light';
+export type Theme = ThemeId;
 
 interface SettingsState {
   settings: Partial<AppSettings>;
@@ -17,14 +18,19 @@ interface SettingsState {
 
 function applyThemeToDOM(theme: Theme) {
   const html = document.documentElement;
-  if (theme === 'dark') {
-    html.classList.add('dark');
-  } else {
-    html.classList.remove('dark');
-  }
+  const meta = getThemeMeta(theme);
+  const dark = meta?.isDark ?? false;
+  // Legacy .dark class — preserved for backward compat with components that
+  // check `classList.contains('dark')` (e.g. contrast blending in this file).
+  if (dark) html.classList.add('dark');
+  else html.classList.remove('dark');
+  // data-theme attribute — the actual theme selector used in globals.css.
+  // Each [data-theme="..."] block overrides the default :root / .dark
+  // variables with theme-specific colors.
+  html.setAttribute('data-theme', theme);
   // Persist for next load
   try {
-    localStorage.setItem('smartgit-theme', theme);
+    localStorage.setItem('prismgit-theme', theme);
   } catch {
     /* ignore */
   }
@@ -49,6 +55,35 @@ function applyThemeToDOM(theme: Theme) {
  *   - High contrast target: black (light theme) / white (dark theme)
  *   - Low contrast target: the background color (fades text into bg)
  */
+function applySidebarModeToDOM(mode: 'default' | 'dim' | 'light') {
+  const html = document.documentElement;
+  html.classList.remove('sidebar-dim', 'sidebar-light');
+  if (mode === 'dim') html.classList.add('sidebar-dim');
+  else if (mode === 'light') html.classList.add('sidebar-light');
+}
+
+/**
+ * Settings redesign — UI density (Compact / Comfortable).
+ * Affects row padding: Compact → py-1, Comfortable → py-1.5.
+ * Applied via CSS class on <html> so globals.css can target it.
+ */
+function applyUiDensityToDOM(density: 'compact' | 'comfortable') {
+  const html = document.documentElement;
+  html.classList.remove('density-compact', 'density-comfortable');
+  html.classList.add(density === 'compact' ? 'density-compact' : 'density-comfortable');
+}
+
+/**
+ * Settings redesign — zoom level (60-240%). Maps directly to
+ * document.documentElement.style.zoom (Chromium-only; Electron/Tauri
+ * both run on Chromium). Keyboard shortcuts Ctrl+= / Ctrl+- / Ctrl+0
+ * call setSetting('zoomLevel', ...) in App.tsx.
+ */
+function applyZoomToDOM(zoomPct: number) {
+  const clamped = Math.max(60, Math.min(240, zoomPct));
+  document.documentElement.style.zoom = `${clamped / 100}`;
+}
+
 function applyContrastToDOM(contrast: number) {
   const clamped = Math.max(50, Math.min(150, contrast));
   const root = document.documentElement;
@@ -110,7 +145,7 @@ function applyContrastToDOM(contrast: number) {
 
   // Persist for next load
   try {
-    localStorage.setItem('smartgit-contrast', String(clamped));
+    localStorage.setItem('prismgit-contrast', String(clamped));
   } catch {
     /* ignore */
   }
@@ -118,14 +153,14 @@ function applyContrastToDOM(contrast: number) {
 
 // Apply theme immediately on module load (prevents FOUC)
 try {
-  const saved = localStorage.getItem('smartgit-theme') as Theme | null;
-  if (saved === 'dark' || saved === 'light') {
-    applyThemeToDOM(saved);
-  } else {
-    applyThemeToDOM('light'); // default to light
-  }
+  const saved = localStorage.getItem('prismgit-theme') as Theme | null;
+  // Accept any registered theme; fall back to default for unknown values
+  // (handles old installs that had only 'light' / 'dark').
+  const validIds = THEMES.map((t) => t.id);
+  const theme = saved && validIds.includes(saved) ? saved : DEFAULT_THEME;
+  applyThemeToDOM(theme);
 } catch {
-  applyThemeToDOM('light');
+  applyThemeToDOM(DEFAULT_THEME);
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -137,7 +172,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ loading: true });
     try {
       const settings = await api.settings.getAll();
-      const theme = settings.theme === 'light' ? 'light' : 'dark';
+      // Validate stored theme — old installs may have 'light'/'dark' only,
+      // newer may have any of the registered themes.
+      const stored = settings.theme as string | undefined;
+      const validIds = THEMES.map((t) => t.id);
+      const theme: Theme = stored && validIds.includes(stored as Theme) ? (stored as Theme) : DEFAULT_THEME;
       set({ settings, theme, loading: false });
       get().applyTheme();
       // Apply all font sizes on load
@@ -151,6 +190,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (settings.fontSizeMonospace) document.documentElement.style.setProperty('--font-size-mono', `${settings.fontSizeMonospace}px`);
       // Apply UI contrast on load (default to 100 = no filter)
       applyContrastToDOM(settings.contrast ?? 100);
+      // Apply sidebar dim mode (Discord/Slack-style channel sidebar)
+      applySidebarModeToDOM(settings.sidebarMode ?? 'default');
+      // Settings redesign — apply UI density + zoom on load
+      applyUiDensityToDOM(settings.uiDensity ?? 'comfortable');
+      applyZoomToDOM(settings.zoomLevel ?? 100);
     } catch {
       set({ loading: false });
     }
@@ -161,7 +205,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const settings = { ...get().settings, [key]: value };
     set({ settings });
     if (key === 'theme') {
-      const t = value === 'light' ? 'light' : 'dark';
+      const t = value as Theme;
       set({ theme: t });
       get().applyTheme();
     }
@@ -189,6 +233,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (key === 'contrast') {
       applyContrastToDOM(value as number);
     }
+    // Apply sidebar visual mode live (Discord/Slack-style dim)
+    if (key === 'sidebarMode') {
+      applySidebarModeToDOM(value as 'default' | 'dim' | 'light');
+    }
+    // Settings redesign — apply UI density live
+    if (key === 'uiDensity') {
+      applyUiDensityToDOM(value as 'compact' | 'comfortable');
+    }
+    // Settings redesign — apply zoom level live
+    if (key === 'zoomLevel') {
+      applyZoomToDOM(value as number);
+    }
   },
 
   setTheme: async (theme) => {
@@ -196,7 +252,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   toggleTheme: async () => {
-    const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
+    // Toggle between light and dark variants — flips isDark but keeps the
+    // palette family when possible (e.g. github-light ↔ github-dark).
+    // For themes without a paired opposite, falls back to DEFAULT_THEME.
+    const current = get().theme;
+    const currentMeta = getThemeMeta(current);
+    if (!currentMeta) {
+      await get().setTheme(DEFAULT_THEME);
+      return;
+    }
+    // Try to find a paired opposite (same family, opposite darkness)
+    const opposite = THEMES.find((t) => t.isDark !== currentMeta.isDark && t.id.startsWith(current.split('-')[0]));
+    const next: Theme = opposite
+      ? opposite.id
+      : (currentMeta.isDark ? DEFAULT_THEME : 'dark');
     await get().setTheme(next);
   },
 

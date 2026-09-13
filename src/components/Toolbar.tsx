@@ -1,16 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { api, type BranchInfo } from '../lib/api';
+import { api, type BranchInfo, type RemoteInfo } from '../lib/api';
+import { useI18n } from '../lib/i18n';
+import { describePushResult } from '../lib/pushResult';
+import { getRepoInProgressState, isRepoBusy } from '../lib/repoState';
+import { getThemeMeta } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToolbarStore, DEFAULT_TOOLBAR_GROUPS, type ToolbarGroups, type ToolbarGroupKey } from '../stores/toolbarStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastActions } from '../stores/toastStore';
+import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Minus, Moon, Package, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Star, Sun, Tag as TagIcon, Trash, X } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -18,6 +22,7 @@ import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, 
 
 // Window control buttons — frameless window
 function WindowControls() {
+  const { t } = useI18n();
   const handleMinimize = () => api.window.minimize();
   const handleMaximize = async () => {
     const isMax = await api.window.isMaximized();
@@ -35,21 +40,21 @@ function WindowControls() {
       <button
         className="flex items-center justify-center w-11 h-9 hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-text-secondary"
         onClick={handleMinimize}
-        title="Minimize"
+        title={t('shell.minimize')}
       >
         <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor" /></svg>
       </button>
       <button
         className="flex items-center justify-center w-11 h-9 hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-text-secondary"
         onClick={handleMaximize}
-        title="Maximize"
+        title={t('shell.maximize')}
       >
         <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" /></svg>
       </button>
       <button
         className="flex items-center justify-center w-11 h-9 hover:bg-red-500 hover:text-white transition-colors text-text-secondary rounded-bl-md"
         onClick={handleClose}
-        title="Close"
+        title={t('common.close')}
       >
         <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" strokeWidth="1.4" /></svg>
       </button>
@@ -59,15 +64,20 @@ function WindowControls() {
 
 interface ToolbarProps {
   onFind?: () => void;
+  /** Global cross-entity search (commits/branches/tags/files/stashes). */
+  onGlobalSearch?: () => void;
   onGitFlow?: () => void;
   onInteractiveRebase?: () => void;
   onRepoInfo?: () => void;
   onShowShortcuts?: () => void;
   onShowClone?: () => void;
+  onToggleCommandLog?: () => void;
   onShowInit?: () => void;
+  /** LAR-3 — toggle the AI Assistant chat panel. */
+  onToggleAiAssistant?: () => void;
 }
 
-export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts, onShowClone, onShowInit }: ToolbarProps = {}) {
+export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts, onShowClone, onShowInit, onToggleCommandLog, onToggleAiAssistant }: ToolbarProps = {}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const currentMetadata = useRepositoryStore((s) => s.currentMetadata);
   const status = useGitStore((s) => s.status);
@@ -75,9 +85,10 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
   const push = useGitStore((s) => s.push);
   const pull = useGitStore((s) => s.pull);
   const fetch = useGitStore((s) => s.fetch);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const theme = useSettingsStore((s) => s.theme);
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
+  const settings = useSettingsStore((s) => s.settings);
   // Read global selection — show file-history chip in header if set
   const globalPathFilter = useSelectionStore((s) => s.pathFilter);
   const setGlobalPathFilter = useSelectionStore((s) => s.setPathFilter);
@@ -93,6 +104,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
   const setGroup = useToolbarStore((s) => s.setGroup);
   const setGroups = useToolbarStore((s) => s.setGroups);
   const [showCustomize, setShowCustomize] = useState(false);
+  const { t } = useI18n();
 
   const disabled = !currentRepo;
   const location = useLocation();
@@ -108,13 +120,19 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
 
   const handlePush = async () => {
     if (!currentRepo) return;
-    try { await push(currentRepo.path); toast.success('Pushed successfully'); }
-    catch (e) { toast.error('Push failed', String(e)); }
+    try {
+      const res = await push(currentRepo.path);
+      const pr = describePushResult(res);
+      if (pr.kind === 'error') toast.error(pr.title, pr.detail);
+      else if (pr.kind === 'info') toast.info(pr.title, pr.detail);
+      else toast.success(pr.title, pr.detail);
+    }
+    catch (e) { toast.error(t('shell.pushFailed'), String(e)); }
   };
   const handlePull = async () => {
     if (!currentRepo) return;
-    try { await pull(currentRepo.path); toast.success('Pulled successfully'); }
-    catch (e) { toast.error('Pull failed', String(e)); }
+    try { await pull(currentRepo.path); toast.success(t('status.pulledSuccessfully')); }
+    catch (e) { toast.error(t('shell.pullFailed'), String(e)); }
   };
   const handleSynchronize = async () => {
     if (!currentRepo) return;
@@ -122,25 +140,26 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
       await fetch(currentRepo.path, undefined, true);
       await pull(currentRepo.path);
       await push(currentRepo.path);
-      toast.success('Synchronized successfully');
-    } catch (e) { toast.error('Synchronize failed', String(e)); }
+      toast.success(t('shell.synchronized'));
+    } catch (e) { toast.error(t('shell.synchronizeFailed'), String(e)); }
   };
   const handleOpenInBrowser = async () => {
     if (!currentRepo) return;
     try {
       const info = await api.git.extractRepoInfo(currentRepo.path);
       if (info.webUrl && info.provider !== 'unknown') { api.app.openExternal(info.webUrl); }
-      else { toast.info('Repository has no remote URL'); }
-    } catch (e) { toast.error('Failed to open in browser', String(e)); }
+      else { toast.info(t('shell.noRemoteUrl')); }
+    } catch (e) { toast.error(t('shell.openInBrowserFailed'), String(e)); }
   };
   const handleRevealInFileManager = async () => {
     if (!currentRepo) return;
     try { await api.git.revealInFileManager(currentRepo.path); }
-    catch (e) { toast.error('Failed to reveal in file manager', String(e)); }
+    catch (e) { toast.error(t('shell.revealFailed'), String(e)); }
   };
 
-  const isInProgress = status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting;
-  const isBisecting = status?.isBisecting;
+  // SmartGit: while a sequencer state (merge/rebase/cherry-pick/revert/bisect)
+  // is active, Pull is NOT allowed — only Fetch / Fetch All stay available.
+  // The reaction lives in PullDropdown/GitToolbar below via lib/repoState.
 
   // Compact icon-only button
   const IconButton = ({ icon: Icon, onClick, disabled, title }: {
@@ -204,17 +223,17 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
           <IconButton
             icon={Folder}
             onClick={() => useRepositoryStore.getState().openRepositoryPicker()}
-            title="Open Repository (Ctrl+O)"
+            title={t('shell.openRepoShortcut')}
           />
           <IconButton
             icon={Download}
             onClick={() => onShowClone && onShowClone()}
-            title="Clone Repository"
+            title={t('welcome.cloneRepo')}
           />
           <IconButton
             icon={Plus}
             onClick={() => onShowInit && onShowInit()}
-            title="New Repository"
+            title={t('welcome.newRepo')}
           />
         </div>
       </div>
@@ -223,163 +242,70 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
 
       {/* Center: status badges + global selections (draggable area) */}
       <div className="flex-1 flex items-center justify-center titlebar-drag gap-2">
-        {currentRepo && status ? (
-          <div className="flex items-center gap-2 text-xs">
-            {isInProgress && (
-              <div className="flex items-center gap-1">
-                <span className="badge badge-modified flex items-center gap-1 animate-pulse">
-                  <AlertCircle size={9} />
-                  {status.isMerging ? 'MERGING' : status.isRebasing ? 'REBASING' : status.isCherryPicking ? 'CHERRY-PICK' : 'REVERT'}
-                </span>
-                {/* Continue / Abort buttons for cherry-pick and revert (SmartGit 22.1) */}
-                {(status.isCherryPicking || status.isReverting) && currentRepo && (
-                  <>
-                    <button
-                      className="text-2xs px-1.5 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 transition-colors"
-                      title={status.isCherryPicking ? 'Continue cherry-pick (after resolving conflicts)' : 'Continue revert (after resolving conflicts)'}
-                      onClick={() => {
-                        const op = status.isCherryPicking ? 'Cherry-Pick Continue' : 'Revert Continue';
-                        const cmd = status.isCherryPicking ? 'git cherry-pick --continue' : 'git revert --continue';
-                        useOperationLogStore.getState().logOperation(op, currentRepo.path, cmd,
-                          () => status.isCherryPicking
-                            ? api.git.cherryPickContinue(currentRepo.path)
-                            : api.git.revertContinue(currentRepo.path)
-                        ).then(() => { toast.success(`${op} successful`); refreshStatus(currentRepo.path); })
-                         .catch((e: unknown) => toast.error(`${op} failed`, String(e)));
-                      }}
-                    >
-                      Continue
-                    </button>
-                    <button
-                      className="text-2xs px-1.5 py-0.5 rounded bg-status-deleted/15 text-status-deleted hover:bg-status-deleted/25 transition-colors"
-                      title={status.isCherryPicking ? 'Abort cherry-pick' : 'Abort revert'}
-                      onClick={() => {
-                        const op = status.isCherryPicking ? 'Cherry-Pick Abort' : 'Revert Abort';
-                        const cmd = status.isCherryPicking ? 'git cherry-pick --abort' : 'git revert --abort';
-                        useOperationLogStore.getState().logOperation(op, currentRepo.path, cmd,
-                          () => status.isCherryPicking
-                            ? api.git.cherryPickAbort(currentRepo.path)
-                            : api.git.revertAbort(currentRepo.path)
-                        ).then(() => { toast.success(`${op} successful`); refreshStatus(currentRepo.path); })
-                         .catch((e: unknown) => toast.error(`${op} failed`, String(e)));
-                      }}
-                    >
-                      Abort
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-            {isBisecting && (
-              <span className="badge badge-modified flex items-center gap-1">
-                <AlertCircle size={9} /> BISECTING
-              </span>
-            )}
-            {(status.ahead > 0 || status.behind > 0) && (
-              <div className="flex items-center gap-1.5">
-                {status.ahead > 0 && (
-                  <span className="flex items-center gap-0.5 text-status-added">
-                    <ArrowUp size={10} />{status.ahead}
-                  </span>
-                )}
-                {status.behind > 0 && (
-                  <span className="flex items-center gap-0.5 text-status-modified">
-                    <ArrowDown size={10} />{status.behind}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        ) : null}
-        {selectedBranch && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-added/40 bg-status-added/10 text-status-added flex items-center gap-1" title={`Selected branch: ${selectedBranch}`}>
-            <GitBranch size={9} />{selectedBranch}
-            <button onClick={() => useSelectionStore.getState().selectBranch(null)} title="Clear branch selection">
-              <X size={8} />
-            </button>
-          </span>
-        )}
-        {selectedBranches.size > 0 && (
-          <span
-            className="text-2xs px-1.5 py-0.5 rounded border border-status-added/40 bg-status-added/10 text-status-added flex items-center gap-1"
-            title={`Selected branches: ${Array.from(selectedBranches).join(', ')}`}
-          >
-            <GitBranch size={9} />{selectedBranches.size} branches
-            <button onClick={() => useSelectionStore.getState().clearBranches()} title="Clear multi-branch selection">
-              <X size={8} />
-            </button>
-          </span>
-        )}
-        {selectedTag && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1" title={`Selected tag: ${selectedTag}`}>
-            <TagIcon size={9} />{selectedTag}
-            <button onClick={() => useSelectionStore.getState().selectTag(null)} title="Clear tag selection">
-              <X size={8} />
-            </button>
-          </span>
-        )}
-        {selectedStashIndex != null && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-warning/40 bg-status-warning/10 text-status-warning flex items-center gap-1" title={`Selected stash: stash@{${selectedStashIndex}}} — used by Stashes, Branches and Diff`}>
-            <Package size={9} />stash@{'{'}{selectedStashIndex}{'}'}
-            <button onClick={() => useSelectionStore.getState().selectStash(null)} title="Clear stash selection">
-              <X size={8} />
-            </button>
-          </span>
-        )}
-        {authorFilter && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-info/40 bg-status-info/10 text-status-info flex items-center gap-1" title={`Author filter — applied in History`}>
-            Author: {authorFilter}
-            <button onClick={() => useSelectionStore.getState().setAuthorFilter(null)} title="Clear author filter">
-              <X size={8} />
-            </button>
-          </span>
-        )}
-        {globalPathFilter && (
-          <span className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/40 bg-status-modified/10 text-status-modified flex items-center gap-1" title={`File history filter: ${globalPathFilter}`}>
-            File: {globalPathFilter}
-            <button onClick={() => setGlobalPathFilter(null)} title="Clear file filter">
-              <X size={8} />
-            </button>
-          </span>
-        )}
+
       </div>
 
       {/* Right: utility buttons + customize */}
       <div className="flex items-center gap-0.5 no-drag pr-2 relative">
         {groups.utils && (
           <>
-            <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title="Repository Info" />
-            <IconButton icon={Search} onClick={() => onFind && onFind()} disabled={disabled} title="Find Object (Ctrl+F)" />
-            <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title="Open in Browser" />
-            <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title="Reveal in File Manager" />
+            <IconButton icon={Star} onClick={() => onRepoInfo && onRepoInfo()} disabled={disabled} title={t('shell.repoInfo')} />
+            {/* Task 1 — search is enabled even when no repo is open.
+                GlobalSearch falls back to repository-list search when
+                currentRepo is null (see GlobalSearch's empty-state
+                handling). */}
+            <span data-tour="toolbar-global-search" style={{ display: 'inline-flex' }}>
+              <IconButton icon={Search} onClick={() => onGlobalSearch && onGlobalSearch()} title={t('search.toolbarButtonTitle')} />
+            </span>
+            <IconButton icon={FileText} onClick={() => onFind && onFind()} disabled={disabled} title={t('shell.findObject')} />
+            <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title={t('shell.openInBrowser')} />
+            <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title={t('shell.revealInFileManager')} />
             <Divider />
           </>
         )}
         <IconButton
-          icon={Keyboard}
-          onClick={() => onShowShortcuts && onShowShortcuts()}
-          title="Keyboard Shortcuts (Ctrl+?)"
+          icon={Terminal}
+          onClick={() => onToggleCommandLog && onToggleCommandLog()}
+          title={t('shell.commandLogTooltip')}
+        />
+        {/* ONB-1 — spotlight this button as the entry-point for
+            "press Ctrl+K anytime for command palette" tour step
+            (the shortcuts dialog lists Ctrl+K as the first shortcut). */}
+        <span data-tour="toolbar-command-palette" style={{ display: 'inline-flex' }}>
+          <IconButton
+            icon={Keyboard}
+            onClick={() => onShowShortcuts && onShowShortcuts()}
+            title={t('shell.keyboardShortcutsTooltip')}
+          />
+        </span>
+        {/* LAR-3 — AI Assistant toggle button. Disabled when AI is not
+            enabled in Settings (aiCommitMessagesEnabled). */}
+        <IconButton
+          icon={Sparkles}
+          onClick={() => onToggleAiAssistant && onToggleAiAssistant()}
+          disabled={!settings?.aiCommitMessagesEnabled}
+          title={settings?.aiCommitMessagesEnabled ? t('aiAssistant.toggleTitle') : t('aiAssistant.disabledHint')}
         />
         <IconButton
-          icon={theme === 'dark' ? Sun : Moon}
+          icon={(getThemeMeta(theme)?.isDark ?? false) ? Sun : Moon}
           onClick={() => toggleTheme()}
-          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+          title={(getThemeMeta(theme)?.isDark ?? false) ? t('shell.switchToLightTheme') : t('shell.switchToDarkTheme')}
         />
         {/* Customize toolbar button */}
         <button
           className="flex items-center justify-center w-7 h-7 rounded hover:bg-bg-hover transition-colors no-drag text-text-secondary hover:text-text-primary"
           onClick={() => setShowCustomize(!showCustomize)}
-          title="Customize toolbar"
+          title={t('shell.customizeToolbar')}
         >
           <SettingsIcon size={15} />
         </button>
         {showCustomize && (
           <div className="absolute top-full right-2 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-72">
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
-              Toolbar editor — applies to both toolbars · drag to reorder, click eye to hide
+              {t('shell.toolbarEditorHint')}
             </div>
             <div className="py-1 max-h-72 overflow-y-auto">
-              <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Visible</div>
+              <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">{t('shell.visible')}</div>
               {(Object.keys(groups) as Array<ToolbarGroupKey>)
                 .filter(key => groups[key])
                 .map((key, idx) => (
@@ -410,14 +336,14 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
                       setGroups(newOrdered as ToolbarGroups);
                     }}
                     className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-move text-xs"
-                    title="Drag to reorder"
+                    title={t('shell.dragToReorder')}
                   >
                     <span className="text-text-tertiary">⋮⋮</span>
                     <span className="capitalize flex-1">{key}</span>
                     <button
                       className="text-text-tertiary hover:text-status-deleted"
                       onClick={(e) => { e.stopPropagation(); setGroup(key, false); }}
-                      title="Hide this group"
+                      title={t('shell.hideGroup')}
                     >
                       <EyeOff size={11} />
                     </button>
@@ -426,7 +352,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
               {(Object.keys(groups) as Array<ToolbarGroupKey>)
                 .filter(key => !groups[key]).length > 0 && (
                 <>
-                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary border-t border-border-subtle">Hidden</div>
+                  <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary border-t border-border-subtle">{t('shell.hidden')}</div>
                   {(Object.keys(groups) as Array<ToolbarGroupKey>)
                     .filter(key => !groups[key])
                     .map(key => (
@@ -436,7 +362,7 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
                         <button
                           className="text-text-tertiary hover:text-status-added"
                           onClick={() => setGroup(key, true)}
-                          title="Show this group"
+                          title={t('shell.showGroup')}
                         >
                           <Plus size={11} />
                         </button>
@@ -448,11 +374,11 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
             <div className="px-3 py-1 border-t border-border-subtle flex justify-between">
               <button className="text-2xs text-accent"
                 onClick={() => setGroups(DEFAULT_TOOLBAR_GROUPS)}>
-                Reset to default
+                {t('shell.resetToDefault')}
               </button>
               <button className="text-2xs btn btn-primary !py-0.5 !px-2"
                 onClick={() => setShowCustomize(false)}>
-                Done
+                {t('shell.done')}
               </button>
             </div>
           </div>
@@ -467,54 +393,100 @@ export function Toolbar({ onFind, onGitFlow, onInteractiveRebase, onRepoInfo, on
 
 /**
  * Push dropdown — button + small chevron that opens a menu with:
- *   - Push to: <branch> (dropdown of local branches)
+ *   - Push to: <remote> (dropdown of ALL configured remotes, not just origin)
+ *   - Push branch: <branch> (dropdown of local branches)
+ *   - [✓] Set upstream (-u) — auto-enabled for fresh local branches
  *   - [✓] Force push (--force-with-lease)
  *   - Push tags
  */
 function PushDropdown({ disabled }: { disabled: boolean }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
+  const [defaultRemote, setDefaultRemote] = useState('origin');
+  const [selectedRemote, setSelectedRemote] = useState('origin');
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [selectedBranch, setSelectedBranch] = useState('');
+  const [remoteBranch, setRemoteBranch] = useState('');
+  const [setUpstream, setSetUpstream] = useState(false);
   const [force, setForce] = useState(false);
   const [pushTags, setPushTags] = useState(false);
 
+  // Load on mount too — the one-click Push button needs a valid default remote.
   useEffect(() => {
-    if (!open || !currentRepo) return;
+    if (!currentRepo) return;
+    api.git.remotes(currentRepo.path).then(rs => {
+      setRemotes(rs);
+      const def = rs.find(r => r.name === 'origin')?.name || rs[0]?.name || '';
+      setDefaultRemote(def);
+      setSelectedRemote(def);
+    }).catch(() => {});
+  }, [currentRepo]);
+
+  useEffect(() => {
+    if (!currentRepo) return;
     api.git.branches(currentRepo.path).then(brs => {
       setBranches(brs.filter(b => !b.remote));
       // Default to the globally selected branch (from Branches page) when it
-      // exists locally, otherwise the current branch
+      // exists locally, otherwise the current branch. Auto -u when the chosen
+      // branch has no upstream yet.
       const globallySelected = useSelectionStore.getState().selectedBranch;
-      const sel = globallySelected && brs.some(b => b.name === globallySelected && !b.remote)
-        ? globallySelected
-        : brs.find(b => b.current)?.name || '';
-      setSelectedBranch(sel);
+      const chosen = globallySelected && brs.some(b => b.name === globallySelected && !b.remote)
+        ? brs.find(b => b.name === globallySelected)
+        : brs.find(b => b.current);
+      setSelectedBranch(chosen?.name || '');
+      setSetUpstream(!!chosen && !chosen.tracking);
     }).catch(() => {});
-  }, [open, currentRepo]);
+  }, [currentRepo, open]);
 
   const doPush = async (branch?: string) => {
     if (!currentRepo) return;
     const b = branch || selectedBranch;
-    const cmd = `git push origin ${b || ''} ${force ? '--force' : ''} ${pushTags ? '--tags' : ''}`.trim();
+    if (!selectedRemote) {
+      toast.warning(t('shell.noRemotesConfigured'), t('shell.addRemoteFirst'));
+      setOpen(false);
+      return;
+    }
+    // Build the refspec. If the user specified a different remote branch
+    // (remoteBranch), use HEAD:remoteBranch so we push the current HEAD's
+    // commits to the named remote branch — e.g. push feature-branch commits
+    // to origin/main via `git push origin HEAD:main`.
+    // Without remoteBranch, use `branch` which pushes local→same-name remote.
+    const refspec = remoteBranch.trim()
+      ? `HEAD:${remoteBranch.trim()}`
+      : b;
+    const cmd = `git push ${selectedRemote} ${refspec} ${setUpstream ? '-u' : ''} ${force ? '--force-with-lease' : ''} ${pushTags ? '--tags' : ''}`.trim();
     try {
-      await useOperationLogStore.getState().logOperation(
-        `Push ${b || 'current'}${force ? ' (force)' : ''}${pushTags ? ' +tags' : ''}`,
+      const res = await useOperationLogStore.getState().logOperation(
+        `Push ${b || 'current'} → ${selectedRemote}${remoteBranch.trim() ? '/' + remoteBranch.trim() : ''}${force ? ' (force)' : ''}${pushTags ? ' +tags' : ''}`,
         currentRepo.path, cmd,
         async () => {
-          await api.git.push(currentRepo.path, 'origin', b || undefined, false, force, pushTags);
+          // When using HEAD:remoteBranch, we need to pass the refspec directly.
+          // api.git.push takes `branch` as a simple name — but HEAD:main is a refspec.
+          // So we pass refspec as the branch parameter; git push handles it correctly.
+          const r = await api.git.push(currentRepo.path, selectedRemote, refspec, setUpstream && !remoteBranch.trim(), force, pushTags);
           await refreshStatus(currentRepo.path);
+          // Also refresh repo stats in sidebar
+          api.settings.refreshRepoStats(currentRepo.path).then(() => {
+            useRepositoryStore.getState().loadMetadata();
+          }).catch(() => {});
+          return r;
         }
       );
-      toast.success(`Pushed ${b || 'current'}${force ? ' (force)' : ''}${pushTags ? ' + tags' : ''}`);
+      const t2 = describePushResult(res, selectedRemote, remoteBranch.trim() || b || undefined);
+      if (t2.kind === 'error') toast.error(t2.title, t2.detail);
+      else if (t2.kind === 'info') toast.info(t2.title, t2.detail);
+      else toast.success(t2.title, t2.detail);
     } catch (e) {
-      toast.error('Push failed', String(e));
+      toast.error(t('shell.pushFailed'), String(e));
     }
     setOpen(false);
     setForce(false);
     setPushTags(false);
+    setRemoteBranch('');
   };
 
   return (
@@ -524,17 +496,17 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
           className="flex items-center gap-1.5 px-3 h-8 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
           style={{ color: '#86b300' }}
           onClick={() => doPush()}
-          disabled={disabled}
-          title="Push current branch to origin"
+          disabled={disabled || remotes.length === 0}
+          title={remotes.length === 0 ? t('shell.noRemotesHint') : t('shell.pushCurrentBranchTo', { remote: defaultRemote })}
         >
           <ArrowUp size={14} />
-          <span className="hidden md:inline">Push</span>
+          <span className="hidden md:inline">{t('toolbar.push')}</span>
         </button>
         <button
           className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
           onClick={() => setOpen(!open)}
           disabled={disabled}
-          title="Push options — select branch, force push, tags"
+          title={t('shell.pushOptions')}
         >
           <ChevronDown size={12} />
         </button>
@@ -544,44 +516,91 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded-md shadow-lg z-50 min-w-64">
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
-              Push to origin
+              {t('toolbar.push')}
             </div>
-            <div className="p-2">
-              <label className="text-2xs text-text-tertiary block mb-1">Branch</label>
-              <select
-                className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
-                value={selectedBranch}
-                onChange={(e) => setSelectedBranch(e.target.value)}
-              >
-                {branches.map(b => (
-                  <option key={b.name} value={b.name}>
-                    {b.name}{b.current ? ' (current)' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="px-3 py-1">
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-                <span className="text-status-deleted">Force push (--force-with-lease)</span>
-              </label>
-            </div>
-            <div className="px-3 py-1">
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input type="checkbox" checked={pushTags} onChange={(e) => setPushTags(e.target.checked)} />
-                <span>Push tags</span>
-              </label>
-            </div>
-            <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
-              <button
-                className="btn btn-primary text-xs flex-1"
-                onClick={() => doPush()}
-                disabled={!selectedBranch}
-              >
-                <ArrowUp size={12} /> Push{force ? ' (force)' : ''}
-              </button>
-              <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>Cancel</button>
-            </div>
+            {remotes.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-text-tertiary">
+                {t('shell.noRemotesText')}
+                <div className="mt-1">{t('shell.pushNoRemotesHint')}</div>
+              </div>
+            ) : (
+              <>
+                <div className="p-2 space-y-2">
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('shell.remoteLabel')}</label>
+                    <select
+                      className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                      value={selectedRemote}
+                      onChange={(e) => setSelectedRemote(e.target.value)}
+                    >
+                      {remotes.map(r => (
+                        <option key={r.name} value={r.name}>
+                          {r.name}{r.name === defaultRemote && remotes.length > 1 ? ` ${t('shell.defaultSuffix')}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('shell.branchLabel')}</label>
+                    <select
+                      className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                      value={selectedBranch}
+                      onChange={(e) => {
+                        setSelectedBranch(e.target.value);
+                        const b = branches.find(x => x.name === e.target.value);
+                        setSetUpstream(!!b && !b.tracking);
+                      }}
+                    >
+                      {branches.map(b => (
+                        <option key={b.name} value={b.name}>
+                          {b.name}{b.current ? ` ${t('shell.currentSuffix')}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">
+                      {t('shell.remoteBranchOptional')}
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                      placeholder={t('shell.remoteBranchPlaceholder')}
+                      value={remoteBranch}
+                      onChange={(e) => setRemoteBranch(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="px-3 py-1">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer" title={t('shell.setUpstreamTooltip')}>
+                    <input type="checkbox" checked={setUpstream} onChange={(e) => setSetUpstream(e.target.checked)} />
+                    <span>{t('shell.setUpstream')}</span>
+                  </label>
+                </div>
+                <div className="px-3 py-1">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+                    <span className="text-status-deleted">{t('shell.forcePush')}</span>
+                  </label>
+                </div>
+                <div className="px-3 py-1">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={pushTags} onChange={(e) => setPushTags(e.target.checked)} />
+                    <span>{t('shell.pushTags')}</span>
+                  </label>
+                </div>
+                <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
+                  <button
+                    className="btn btn-primary text-xs flex-1"
+                    onClick={() => doPush()}
+                    disabled={!selectedBranch}
+                  >
+                    <ArrowUp size={12} /> {t('shell.pushToRemote', { remote: selectedRemote })}
+                  </button>
+                  <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>{t('common.cancel')}</button>
+                </div>
+              </>
+            )}
           </div>
         </>
       )}
@@ -591,49 +610,107 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
 
 /**
  * Pull dropdown — button + small chevron that opens a menu with:
- *   - Pull from: <branch> (dropdown of remote branches)
+ *   - Remote selector (ALL configured remotes — mirrors the Push dropdown)
+ *   - Remote branch selector scoped to the chosen remote
  *   - [✓] Rebase instead of merge
  *   - [✓] No fast-forward
+ *   - "Fetch <remote> now" when the remote has no fetched branches yet
+ *
+ * Fixes the old behavior where the one-click Pull silently did NOTHING until
+ * the user first opened the options menu (selectedBranch was only loaded on
+ * open), and where a freshly added remote (nothing fetched) left an EMPTY
+ * branch dropdown with no way to pull from it at all.
  */
-function PullDropdown({ disabled }: { disabled: boolean }) {
+function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason Pull is blocked (in-progress repo state) — undefined when allowed */ pullBlocked?: string }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const settings = useSettingsStore((s) => s.settings);
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
+  const [selectedRemote, setSelectedRemote] = useState('');
+  const [remoteBranches, setRemoteBranches] = useState<BranchInfo[]>([]);
+  // Stored as "origin/main" — remote + branch in one ref name
   const [selectedBranch, setSelectedBranch] = useState('');
   const [useRebase, setUseRebase] = useState(false);
   const [noFF, setNoFF] = useState(false);
+  const [fetching, setFetching] = useState(false);
 
+  // Remotes load on MOUNT (repo change too) — the one-click Pull button needs
+  // a valid remote without opening the options menu first.
   useEffect(() => {
-    if (!open || !currentRepo) return;
-    api.git.branches(currentRepo.path).then(brs => {
-      const remotes = brs.filter(b => b.remote);
-      setBranches(remotes);
-      // If a branch is globally selected (Branches page) and has a remote
-      // counterpart like "origin/<name>", preselect it — otherwise origin/<current>
-      const globallySelected = useSelectionStore.getState().selectedBranch;
-      const selectedRemote = globallySelected
-        ? remotes.find(r => r.name === globallySelected || r.name === `origin/${globallySelected}`)
-        : undefined;
-      if (selectedRemote) {
-        setSelectedBranch(selectedRemote.name);
-        return;
-      }
-      // Default to origin/<current>
-      const cur = brs.find(b => b.current);
-      if (cur) {
-        const match = remotes.find(r => r.name === `origin/${cur.name}`);
-        setSelectedBranch(match?.name || remotes[0]?.name || '');
-      } else {
-        setSelectedBranch(remotes[0]?.name || '');
-      }
+    if (!currentRepo) return;
+    api.git.remotes(currentRepo.path).then(rs => {
+      setRemotes(rs);
+      setSelectedRemote(prev =>
+        prev && rs.some(r => r.name === prev)
+          ? prev
+          : (rs.find(r => r.name === 'origin')?.name || rs[0]?.name || '')
+      );
     }).catch(() => {});
-  }, [open, currentRepo]);
+  }, [currentRepo]);
+
+  // Remote branches load on mount + when the menu opens or the remote changes.
+  const loadRemoteBranches = useCallback(async () => {
+    if (!currentRepo || !selectedRemote) { setRemoteBranches([]); return; }
+    try {
+      const brs = await api.git.branches(currentRepo.path);
+      const prefix = `${selectedRemote}/`;
+      const rem = brs.filter(b => b.remote && b.name.startsWith(prefix));
+      setRemoteBranches(rem);
+      // Default: remote branch matching the GLOBALLY selected branch (from
+      // Branches/History — the pull target follows the app-wide selection),
+      // then upstream-tracking of the CURRENT branch, then the first branch.
+      setSelectedBranch(prev => {
+        if (prev && rem.some(b => b.name === prev)) return prev;
+        const globallySelected = useSelectionStore.getState().selectedBranch;
+        const gMatch = globallySelected
+          ? rem.find(r => r.name === `${prefix}${globallySelected}`)
+          : undefined;
+        if (gMatch) return gMatch.name;
+        const cur = brs.find(b => b.current);
+        const match = cur ? rem.find(r => r.name === `${prefix}${cur.name}`) : undefined;
+        return match?.name || rem[0]?.name || '';
+      });
+    } catch { setRemoteBranches([]); }
+  }, [currentRepo, selectedRemote]);
+  useEffect(() => { loadRemoteBranches(); }, [loadRemoteBranches, open]);
+
+  const fetchRemoteNow = async () => {
+    if (!currentRepo || !selectedRemote) return;
+    setFetching(true);
+    try {
+      await api.git.fetch(currentRepo.path, selectedRemote, false, true);
+      toast.success(t('shell.fetchedRemote', { remote: selectedRemote }), t('shell.remoteBranchesUpdated'));
+    } catch (e) {
+      toast.error(t('shell.fetchRemoteFailed', { remote: selectedRemote }), String(e));
+    } finally {
+      setFetching(false);
+      loadRemoteBranches();
+    }
+  };
 
   const doPull = async () => {
-    if (!currentRepo || !selectedBranch) return;
+    if (!currentRepo) return;
+    // SmartGit: Pull would merge/rebase over an in-progress state (merge,
+    // rebase, cherry-pick, revert, bisect) and discard it — blocked. Fetch /
+    // Fetch All remain available (they never touch the working tree).
+    if (pullBlocked) {
+      toast.error(t('shell.pullNotAvailable'), pullBlocked);
+      setOpen(false);
+      return;
+    }
+    if (!selectedBranch) {
+      toast.warning(
+        t('shell.nothingToPull'),
+        remotes.length === 0
+          ? t('shell.noRemotesHint')
+          : t('shell.noFetchedBranchesOn', { remote: selectedRemote || t('shell.anyRemote') })
+      );
+      setOpen(false);
+      return;
+    }
     try {
       // Extract remote + branch from "origin/branch-name"
       const parts = selectedBranch.split('/');
@@ -651,15 +728,17 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
           await refreshStatus(currentRepo.path);
         }
       );
-      toast.success(`Pulled from ${selectedBranch}${shouldRebase ? ' (rebase)' : ' (merge)'}`);
+      toast.success(shouldRebase
+        ? t('shell.pulledFromRebase', { branch: selectedBranch })
+        : t('shell.pulledFromMerge', { branch: selectedBranch }));
     } catch (e) {
       // Don't crash — show error, let user resolve conflicts via ConflictSolver
       const msg = String(e);
       if (msg.includes('CONFLICT') || msg.includes('conflict')) {
-        toast.warning('Pull resulted in conflicts', 'Use "Resolve Conflicts" button in toolbar');
+        toast.warning(t('shell.pullConflicts'), t('shell.useResolveConflicts'));
         refreshStatus(currentRepo.path);
       } else {
-        toast.error('Pull failed', msg);
+        toast.error(t('shell.pullFailed'), msg);
       }
     }
     setOpen(false);
@@ -667,6 +746,7 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
     setNoFF(false);
   };
 
+  const pullTarget = selectedBranch || selectedRemote;
   return (
     <div className="relative">
       <div className="flex items-center">
@@ -674,17 +754,21 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
           className="flex items-center gap-1.5 px-3 h-8 rounded-l-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover"
           style={{ color: '#399ee6' }}
           onClick={() => doPull()}
-          disabled={disabled}
-          title="Pull from origin (current branch)"
+          disabled={disabled || !!pullBlocked}
+          title={pullBlocked
+            ? t('shell.pullBlocked', { reason: pullBlocked })
+            : pullTarget
+              ? t('shell.pullTargetTooltip', { ref: pullTarget })
+              : t('shell.pullNoBranches')}
         >
           <ArrowDown size={14} />
-          <span className="hidden md:inline">Pull</span>
+          <span className="hidden md:inline">{t('toolbar.pull')}</span>
         </button>
         <button
           className="flex items-center px-1.5 h-8 rounded-r-md transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover border-l border-border-subtle"
           onClick={() => setOpen(!open)}
           disabled={disabled}
-          title="Pull options — select branch, rebase, no-ff"
+          title={t('shell.pullOptions')}
         >
           <ChevronDown size={12} />
         </button>
@@ -693,43 +777,129 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded-md shadow-lg z-50 min-w-64">
-            <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
-              Pull from remote
-            </div>
-            <div className="p-2">
-              <label className="text-2xs text-text-tertiary block mb-1">Remote branch</label>
-              <select
-                className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
-                value={selectedBranch}
-                onChange={(e) => setSelectedBranch(e.target.value)}
-              >
-                {branches.map(b => (
-                  <option key={b.name} value={b.name}>{b.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="px-3 py-1">
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input type="checkbox" checked={useRebase} onChange={(e) => setUseRebase(e.target.checked)} />
-                <span>Rebase instead of merge</span>
-              </label>
-            </div>
-            <div className="px-3 py-1">
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input type="checkbox" checked={noFF} onChange={(e) => setNoFF(e.target.checked)} />
-                <span>No fast-forward (always create merge commit)</span>
-              </label>
-            </div>
-            <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
+            {/* SmartGit: during an in-progress state Pull is blocked, but the
+                menu stays reachable — Fetch / Fetch All remain available. */}
+            {pullBlocked && (
+              <div className="px-3 py-2 text-2xs bg-status-conflict/10 text-status-conflict border-b border-status-conflict/30">
+                Pull is blocked while {pullBlocked}
+                <div className="text-text-tertiary mt-0.5">Use Fetch / Fetch All — they never touch the working tree.</div>
+              </div>
+            )}
+            {/* Quick actions: Fetch from / Fetch All */}
+            <div className="px-3 py-2 border-b border-border-subtle flex gap-2">
               <button
-                className="btn btn-primary text-xs flex-1"
-                onClick={() => doPull()}
-                disabled={!selectedBranch}
+                className="btn btn-secondary text-2xs flex-1"
+                onClick={async () => {
+                  if (!currentRepo || !selectedRemote) return;
+                  try {
+                    await api.git.fetch(currentRepo.path, selectedRemote, true, true);
+                    toast.success(t('shell.fetchedFromRemote', { remote: selectedRemote }), t('shell.remoteBranchesUpdated'));
+                    await refreshStatus(currentRepo.path);
+                    loadRemoteBranches();
+                  } catch (e) { toast.error(t('shell.fetchRemoteFailed', { remote: selectedRemote }), String(e)); }
+                }}
+                disabled={!selectedRemote || remotes.length === 0}
+                title={`git fetch ${selectedRemote || '<remote>'} --prune --tags`}
               >
-                <ArrowDown size={12} /> Pull{useRebase ? ' (rebase)' : ''}
+                <CloudDownload size={11} /> {t('toolbar.fetchFrom')}
               </button>
-              <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>Cancel</button>
+              <button
+                className="btn btn-secondary text-2xs flex-1"
+                onClick={async () => {
+                  if (!currentRepo) return;
+                  try {
+                    await api.git.fetchAll(currentRepo.path, true);
+                    toast.success(t('shell.fetchedAllRemotes'), t('shell.remoteBranchesUpdated'));
+                    await refreshStatus(currentRepo.path);
+                    loadRemoteBranches();
+                  } catch (e) { toast.error(t('shell.fetchAllFailed'), String(e)); }
+                }}
+                disabled={remotes.length === 0}
+                title="git fetch --all --prune --tags"
+              >
+                <CloudDownload size={11} /> {t('toolbar.fetchAll')}
+              </button>
             </div>
+            <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
+              {t('toolbar.pullFromRemote')}
+            </div>
+            {remotes.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-text-tertiary">
+                {t('shell.noRemotesText')}
+                <div className="mt-1">{t('shell.pullNoRemotesHint')}</div>
+              </div>
+            ) : (
+              <>
+                <div className="p-2 space-y-2">
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('shell.remoteLabel')}</label>
+                    <select
+                      className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                      value={selectedRemote}
+                      onChange={(e) => { setSelectedRemote(e.target.value); setSelectedBranch(''); }}
+                    >
+                      {remotes.map(r => (
+                        <option key={r.name} value={r.name} title={r.refs?.fetch}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('shell.remoteBranchLabel')}</label>
+                    {remoteBranches.length > 0 ? (
+                      <select
+                        className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                        value={selectedBranch}
+                        onChange={(e) => setSelectedBranch(e.target.value)}
+                      >
+                        {remoteBranches.map(b => (
+                          <option key={b.name} value={b.name}>{b.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-xs text-text-tertiary px-1 py-1">
+                        {t('shell.noFetchedBranches', { remote: selectedRemote })}
+                      </div>
+                    )}
+                  </div>
+                  {remoteBranches.length === 0 && (
+                    <button
+                      className="btn btn-secondary text-xs w-full"
+                      onClick={fetchRemoteNow}
+                      disabled={fetching || !selectedRemote}
+                      title={`git fetch ${selectedRemote} --tags`}
+                    >
+                      {fetching ? <Loader size={12} className="spin" /> : <CloudDownload size={12} />}
+                      {t('shell.fetchRemoteNow', { remote: selectedRemote })}
+                    </button>
+                  )}
+                </div>
+                <div className="px-3 py-1">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={useRebase} onChange={(e) => setUseRebase(e.target.checked)} />
+                    <span>{t('shell.rebaseInsteadOfMerge')}</span>
+                  </label>
+                </div>
+                <div className="px-3 py-1">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={noFF} onChange={(e) => setNoFF(e.target.checked)} />
+                    <span>{t('shell.noFastForward')}</span>
+                  </label>
+                </div>
+                <div className="px-3 py-2 border-t border-border-subtle flex gap-2">
+                  <button
+                    className="btn btn-primary text-xs flex-1"
+                    onClick={() => doPull()}
+                    disabled={!selectedBranch || !!pullBlocked}
+                    title={pullBlocked ? `Pull is blocked — ${pullBlocked}` : undefined}
+                  >
+                    <ArrowDown size={12} /> {useRebase ? t('shell.pullRebase') : t('toolbar.pull')}
+                  </button>
+                  <button className="btn btn-secondary text-xs" onClick={() => setOpen(false)}>{t('common.cancel')}</button>
+                </div>
+              </>
+            )}
           </div>
         </>
       )}
@@ -743,13 +913,14 @@ function PullDropdown({ disabled }: { disabled: boolean }) {
  * This is the toolbar the user wants to be separate from the app-level header.
  */
 export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () => void; onInteractiveRebase?: () => void } = {}) {
+  const { t } = useI18n();
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const status = useGitStore((s) => s.status);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const push = useGitStore((s) => s.push);
   const pull = useGitStore((s) => s.pull);
   const fetch = useGitStore((s) => s.fetch);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const settings = useSettingsStore((s) => s.settings);
   const navigate = useNavigate();
   const location = useLocation();
@@ -759,6 +930,19 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   const groups = useToolbarStore((s) => s.groups);
 
   const disabled = !currentRepo;
+  // In-progress sequencer states block Push/Discard — they would conflict
+  // with the in-progress merge/rebase/cherry-pick/revert. Fetch/Fetch All are
+  // still allowed (read-only on the working tree). Bisect does NOT block.
+  const isInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
+
+  // SmartGit: while a sequencer state (merge / rebase / cherry-pick / revert /
+  // bisect) is active, Pull is NOT allowed — only Fetch / Fetch All remain
+  // available (they never touch the working tree or HEAD).
+  const repoState = getRepoInProgressState(status);
+  const pullBlocked = repoState
+    ? `${repoState.pullReason} — ${repoState.blockedHint}`
+    : undefined;
+  const isBusy = isRepoBusy(status);
 
   const handlePush = async () => {
     if (!currentRepo) return;
@@ -767,8 +951,10 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
         'Push', currentRepo.path, 'git push',
         () => push(currentRepo.path)
       );
-      toast.success('Pushed successfully');
-    } catch (e) { toast.error('Push failed', String(e)); }
+      toast.success(t('toast.git.pushSuccess'));
+      // Notify History page to reload (one-shot event, no loop).
+      window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
+    } catch (e) { toast.error(t('toast.git.pushFailed'), String(e)); }
   };
   const handlePull = async () => {
     if (!currentRepo) return;
@@ -785,13 +971,14 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
         }
       );
       toast.success(`Pulled ${shouldRebase ? '(rebase)' : '(merge)'}`);
+      window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
     } catch (e) {
       const msg = String(e);
       if (msg.includes('CONFLICT') || msg.includes('conflict')) {
-        toast.warning('Pull resulted in conflicts', 'Use "Resolve Conflicts" button');
+        toast.warning(t('toast.git.pullConflicts'), 'Use "Resolve Conflicts" button');
         refreshStatus(currentRepo.path);
       } else {
-        toast.error('Pull failed', msg);
+        toast.error(t('toast.git.pullFailed'), msg);
       }
     }
   };
@@ -848,10 +1035,10 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           <button
             className="flex items-center gap-1.5 px-3 h-8 rounded-md transition-colors no-drag text-xs bg-status-conflict/15 text-status-conflict border border-status-conflict/40 hover:bg-status-conflict/25 font-medium animate-pulse"
             onClick={handleResolveConflicts}
-            title={`${status?.conflicted?.length || 0} conflicted file(s) — click to resolve`}
+            title={t('shell.conflictsTooltip', { count: status?.conflicted?.length || 0 })}
           >
             <AlertCircle size={14} />
-            <span>Resolve {status?.conflicted?.length || 0} Conflicts</span>
+            <span>{t('shell.resolveConflicts', { count: status?.conflicted?.length || 0 })}</span>
           </button>
           <Divider />
         </>
@@ -862,24 +1049,25 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           case 'sync':
             return (
               <div key={key} className="flex items-center">
-                <PullDropdown disabled={disabled} />
-                <PushDropdown disabled={disabled} />
+                <PullDropdown disabled={disabled} pullBlocked={pullBlocked} />
+                <PushDropdown disabled={disabled || isInProgress} />
+                {isBusy && <span data-testid="toolbar-state-badge" className="text-2xs text-status-conflict ml-1 flex items-center gap-1" title={repoState?.blockedHint}><AlertCircle size={11} />{repoState?.badge}</span>}
                 <Divider />
               </div>
             );
           case 'stage':
             return (
               <div key={key} className="flex items-center">
-                <LabeledButton icon={Plus} label="Stage" iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
-                <LabeledButton icon={Minus} label="Unstage" iconColor={COLOR_ORANGE} onClick={() => {
+                <LabeledButton icon={Plus} label={t('action.button.stage')} iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
+                <LabeledButton icon={Minus} label={t('action.button.unstage')} iconColor={COLOR_ORANGE} onClick={() => {
                   if (!currentRepo) return;
                   useOperationLogStore.getState().logOperation(
                     'Unstage All', currentRepo.path, 'git reset HEAD -- .',
                     () => api.git.raw(currentRepo.path, ['reset', 'HEAD', '--', '.'])
                   ).then(() => refreshStatus(currentRepo.path))
-                   .catch((e) => toast.error('Unstage failed', String(e)));
-                }} disabled={disabled} title="Unstage all changes" />
-                <LabeledButton icon={Trash} label="Discard" iconColor={COLOR_RED} onClick={() => {
+                   .catch((e) => toast.error(t('toast.git.unstageFailed'), String(e)));
+                }} disabled={disabled} title={t('action.title.unstageAll')} />
+                <LabeledButton icon={Trash} label={t('action.button.discard')} iconColor={COLOR_RED} onClick={() => {
                   if (!currentRepo) return;
                   void confirmDialog({
                     title: 'Discard ALL uncommitted changes?',
@@ -895,35 +1083,35 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                         await api.git.raw(currentRepo.path, ['clean', '-fd']);
                         await refreshStatus(currentRepo.path);
                       }
-                    ).then(() => toast.success('Changes discarded'))
-                     .catch((e) => toast.error('Discard failed', String(e)));
+                    ).then(() => toast.success(t('toast.git.discardSuccess')))
+                     .catch((e) => toast.error(t('toast.git.discardFailed'), String(e)));
                   });
-                }} disabled={disabled} title="Discard all changes" />
+                }} disabled={disabled || isInProgress} title={isInProgress ? 'Blocked — finish the in-progress operation first' : 'Discard all changes'} />
                 <Divider />
               </div>
             );
           case 'stash':
             return (
               <div key={key} className="flex items-center">
-                <LabeledButton icon={CloudDownload} label="Stash" iconColor={COLOR_PURPLE} onClick={() => {
+                <LabeledButton icon={CloudDownload} label={t('action.button.stash')} iconColor={COLOR_PURPLE} onClick={() => {
                   if (!currentRepo) return;
                   useOperationLogStore.getState().logOperation(
                     'Stash', currentRepo.path, 'git stash push -u',
                     () => api.git.stashPush(currentRepo.path, undefined, true)
                   ).then(() => {
-                    toast.success('Stash saved'); refreshStatus(currentRepo.path);
-                  }).catch((e) => toast.error('Stash failed', String(e)));
-                }} disabled={disabled} title="Save stash" />
-                <LabeledButton icon={GitPullRequest} label="Pop" iconColor={COLOR_PURPLE} onClick={() => {
+                    toast.success(t('toast.stash.saved')); refreshStatus(currentRepo.path);
+                  }).catch((e) => toast.error(t('toast.stash.failed'), String(e)));
+                }} disabled={disabled} title={t('action.title.saveStash')} />
+                <LabeledButton icon={GitPullRequest} label={t('action.button.pop')} iconColor={COLOR_PURPLE} onClick={() => {
                   if (!currentRepo) return;
                   api.git.stashList(currentRepo.path).then(stashes => {
-                    if (stashes.length === 0) { toast.info('No stashes'); return; }
+                    if (stashes.length === 0) { toast.info(t('toast.stash.none')); return; }
                     useOperationLogStore.getState().logOperation(
                       'Stash Pop', currentRepo.path, 'git stash pop stash@{0}',
                       () => api.git.stashPop(currentRepo.path, 0)
                     ).then(() => {
-                      toast.success('Stash popped'); refreshStatus(currentRepo.path);
-                    }).catch((e) => toast.error('Pop failed', String(e)));
+                      toast.success(t('toast.stash.popped')); refreshStatus(currentRepo.path);
+                    }).catch((e) => toast.error(t('toast.stash.popFailed'), String(e)));
                   });
                 }} disabled={disabled} title="Pop latest stash (apply + drop)" />
                 <Divider />
@@ -932,9 +1120,9 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           case 'log':
             return (
               <div key={key} className="flex items-center">
-                <LabeledButton icon={GitBranch} label="History" iconColor={COLOR_BLUE} onClick={() => navigate('/history')} disabled={disabled} title="Commit history" active={currentPath === '/history'} />
-                <LabeledButton icon={FileText} label="Diff" iconColor={COLOR_BLUE} onClick={() => navigate('/diff')} disabled={disabled} title="Compare files between refs" active={currentPath === '/diff'} />
-                <LabeledButton icon={Search} label="Blame" iconColor={COLOR_BLUE} onClick={() => navigate('/blame')} disabled={disabled} title="Blame a file" active={currentPath === '/blame'} />
+                <LabeledButton icon={GitBranch} label={t('action.button.history')} iconColor={COLOR_BLUE} onClick={() => navigate('/history')} disabled={disabled} title="Commit history" active={currentPath === '/history'} />
+                <LabeledButton icon={FileText} label={t('action.button.diff')} iconColor={COLOR_BLUE} onClick={() => navigate('/diff')} disabled={disabled} title="Compare files between refs" active={currentPath === '/diff'} />
+                <LabeledButton icon={Search} label={t('action.button.blame')} iconColor={COLOR_BLUE} onClick={() => navigate('/blame')} disabled={disabled} title="Blame a file" active={currentPath === '/blame'} />
                 <Divider />
               </div>
             );
@@ -942,7 +1130,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
             return (
               <div key={key} className="flex items-center">
                 <LabeledButton icon={GitMerge} label="Git-Flow" iconColor={COLOR_ORANGE} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title="Git-Flow operations" />
-                <LabeledButton icon={RotateCcw} label="Rebase" iconColor={COLOR_ORANGE} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Interactive rebase" />
+                <LabeledButton icon={RotateCcw} label={t('action.button.rebase')} iconColor={COLOR_ORANGE} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title="Interactive rebase" />
               </div>
             );
           default:

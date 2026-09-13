@@ -23,6 +23,7 @@ import { cn } from './utils';
 import { useContextMenu } from './useContextMenu';
 import { buildRefMenu, runRefMenuAction } from './commitMenu';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSelectionStore } from '../stores/selectionStore';
 
 export type RefKind = 'tag' | 'head' | 'branch' | 'remote' | 'stash' | 'other';
 
@@ -107,14 +108,31 @@ export function RefBadge({ parsed, size = 8, hash, onChanged }: RefBadgeProps) {
     const ctx = { parsed, hash, repoPath: repoPath ?? undefined, onChanged };
     showContextMenu(buildRefMenu(ctx), (id) => runRefMenuAction(id, ctx));
   };
+  // Left click: the badge feeds the GLOBAL selection so the branch/tag shows
+  // up in the Toolbar chip, Branches/Tags pages and the History filter —
+  // same linkage as selecting it in its own tool.
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!parsed) return;
+    const selection = useSelectionStore.getState();
+    if (parsed.kind === 'tag') selection.selectTag(parsed.label);
+    else if (parsed.kind === 'branch' || parsed.kind === 'head') {
+      selection.selectBranch(parsed.label);
+      if (hash) selection.selectCommit(hash);
+    } else if (parsed.kind === 'remote') {
+      if (hash) selection.selectCommit(hash);
+    }
+  };
+  const selectable = parsed?.kind === 'tag' || parsed?.kind === 'branch' || parsed?.kind === 'head' || parsed?.kind === 'remote';
   return (
     <span
-      className={cn('text-2xs px-1.5 py-0.5 rounded border whitespace-nowrap cursor-default', badgeClass[parsed?.kind ?? 'other'])}
-      title={parsed?.raw}
+      className={cn('text-2xs px-1.5 py-0.5 rounded border whitespace-nowrap', selectable ? 'cursor-pointer hover:brightness-125' : 'cursor-default', badgeClass[parsed?.kind ?? 'other'])}
+      title={selectable ? `${parsed?.raw} — click: select in all tools · right-click: actions` : parsed?.raw}
       onContextMenu={handleContextMenu}
+      onClick={handleClick}
     >
       {parsed.kind === 'tag' && <TagIcon size={size} className="inline mr-0.5" />}
-      {parsed.kind === 'head' && '▸ '}
+      {parsed.kind === 'head' && '> '}
       {parsed.label}
     </span>
   );

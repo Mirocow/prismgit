@@ -1,0 +1,88 @@
+{
+  "version": "3.1.1",
+  "lastModified": "2026-09-11T21:40:58.011Z",
+  "folders": [],
+  "bookmarks": [
+    {
+      "id": "mtwcdk2bur23j46yt7",
+      "name": "const renderFileRow = (file: FileStatus, isStaged: boolean) => {",
+      "file": "src/pages/ChangesPage.tsx",
+      "line": 1143,
+      "character": 20,
+      "lineContent": "const renderFileRow = (file: FileStatus, isStaged: boolean) => {",
+      "sortOrder": 0
+    },
+    {
+      "id": "mtwceu8ovtd0ayzxbgl",
+      "name": "onContextMenu={(e) => {",
+      "file": "src/pages/ChangesPage.tsx",
+      "line": 1207,
+      "character": 24,
+      "lineContent": "onContextMenu={(e) => {",
+      "sortOrder": 1
+    },
+    {
+      "id": "mtx10wama8zrlve915t",
+      "name": "return wd !== ' ' && wd !== '!';",
+      "file": "src/pages/ChangesPage.tsx",
+      "line": 1055,
+      "character": 36,
+      "lineContent": "return wd !== ' ' && wd !== '!';",
+      "sortOrder": 2
+    },
+    {
+      "id": "mtx10zjhizwbxjc8a1h",
+      "name": "return idx !== ' ' && idx !== '?' && idx !== '!';",
+      "file": "src/pages/ChangesPage.tsx",
+      "line": 1030,
+      "character": 50,
+      "lineContent": "return idx !== ' ' && idx !== '?' && idx !== '!';",
+      "sortOrder": 3
+    },
+    {
+      "id": "mtx11ackx7ac6guslf",
+      "name": "return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');",
+      "file": "src/pages/ChangesPage.tsx",
+      "line": 1052,
+      "character": 50,
+      "lineContent": "return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');",
+      "sortOrder": 4
+    },
+    {
+      "id": "mtx29b83kjl831df5c",
+      "name": "{showBisectBadge && !showInProgressBadge && (",
+      "file": "src/components/Sidebar.tsx",
+      "line": 454,
+      "character": 26,
+      "lineContent": "{showBisectBadge && !showInProgressBadge && (",
+      "sortOrder": 5
+    },
+    {
+      "id": "mtx29prs1ea67zwvmh5",
+      "name": "const currentBisecting = !!status?.isBisecting;",
+      "file": "src/components/Sidebar.tsx",
+      "line": 406,
+      "character": 7,
+      "lineContent": "const currentBisecting = !!status?.isBisecting;",
+      "sortOrder": 6
+    },
+    {
+      "id": "mtxh959se3qqi45cfke",
+      "name": "const repo = node.repo;",
+      "file": "src/components/Sidebar.tsx",
+      "line": 429,
+      "character": 5,
+      "lineContent": "const repo = node.repo;",
+      "sortOrder": 7
+    },
+    {
+      "id": "mtxhdcm3xam8pdv2vmi",
+      "name": "<span className='text-accent font-medium'>{meta?.name}</span>",
+      "file": "src/components/Sidebar.tsx",
+      "line": 461,
+      "character": 13,
+      "lineContent": "<span className='text-accent font-medium'>{meta?.name}</span>",
+      "sortOrder": 8
+    }
+  ]
+}

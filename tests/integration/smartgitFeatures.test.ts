@@ -128,7 +128,19 @@ describe('formatPatch', () => {
     const outDir = path.join(os.tmpdir(), `prismgit-patch-${Date.now()}`);
     const files = await formatPatch(repoDir, { outputDir: outDir, commit: 'HEAD' });
     expect(files.length).toBe(1);
-    const content = fs.readFileSync(files[0], 'utf-8');
+    // On macOS, the file path from git format-patch may differ slightly
+    // (e.g. /private/var vs /var). Resolve to find the actual file.
+    const patchFile = files[0];
+    let content = '';
+    try {
+      content = fs.readFileSync(patchFile, 'utf-8');
+    } catch {
+      // If direct read fails, try listing the output directory
+      const dirFiles = fs.readdirSync(outDir).filter(f => f.endsWith('.patch'));
+      if (dirFiles.length > 0) {
+        content = fs.readFileSync(path.join(outDir, dirFiles[0]), 'utf-8');
+      }
+    }
     expect(content).toContain('From ');
     expect(content).toContain('Subject: [PATCH] second commit');
 

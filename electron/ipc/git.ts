@@ -6,6 +6,7 @@ export function registerGitIpc(): void {
   // Status & working tree
   ipcMain.handle('git:status', (_e, p: string) => gitService.status(p));
   ipcMain.handle('git:listDirectories', (_e, p: string, d?: number) => gitService.listDirectories(p, d));
+  ipcMain.handle('git:listAllDirectories', (_e, p: string, d?: number) => gitService.listAllDirectories(p, d));
   ipcMain.handle('git:add', (_e, p: string, f: string[]) => gitService.add(p, f));
   ipcMain.handle('git:addAll', (_e, p: string) => gitService.addAll(p));
   ipcMain.handle('git:restore', (_e, p: string, f: string[], staged?: boolean) => gitService.restore(p, f, staged));
@@ -17,8 +18,8 @@ export function registerGitIpc(): void {
   );
 
   // Network
-  ipcMain.handle('git:push', (_e, p: string, r?: string, b?: string, u?: boolean, f?: boolean, t?: boolean) =>
-    gitService.push(p, r, b, u, f, t)
+  ipcMain.handle('git:push', (_e, p: string, r?: string, b?: string, u?: boolean, f?: boolean, t?: boolean, tb?: string) =>
+    gitService.push(p, r, b, u, f, t, tb)
   );
   ipcMain.handle('git:pull', (_e, p: string, r?: string, b?: string, rb?: boolean, nff?: boolean) =>
     gitService.pull(p, r, b, rb, nff)
@@ -37,6 +38,9 @@ export function registerGitIpc(): void {
   );
   ipcMain.handle('git:findCommit', (_e, p: string, q: string) => gitService.findCommit(p, q));
   ipcMain.handle('git:commitFiles', (_e, p: string, h: string) => gitService.commitFiles(p, h));
+  ipcMain.handle('git:mergeNestedCommits', (_e, p: string, h: string) => gitService.mergeNestedCommits(p, h));
+  ipcMain.handle('git:tagsAt', (_e, p: string, h: string) => gitService.tagsAt(p, h));
+  ipcMain.handle('git:trackedFiles', (_e, p: string) => gitService.trackedFiles(p));
   ipcMain.handle('git:diffCommit', (_e, p: string, h: string, ph?: string) => gitService.diffCommit(p, h, ph));
   ipcMain.handle('git:commitExists', (_e, p: string, h: string) => gitService.commitExists(p, h));
 
@@ -76,6 +80,9 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:continueMerge', (_e, p: string) => gitService.continueMerge(p));
   ipcMain.handle('git:mergeTree', (_e, p: string, o: string, t: string) => gitService.mergeTree(p, o, t));
   ipcMain.handle('git:aheadBehind', (_e, p: string, b: string, c: string) => gitService.aheadBehind(p, b, c));
+  // Periodic remote check for the repository list (fetch + incoming/outgoing)
+  ipcMain.handle('git:pollRemoteSummary', (_e, p: string) => gitService.pollRemoteSummary(p));
+  ipcMain.handle('git:pollRemoteSummaries', (_e, paths: string[]) => gitService.pollRemoteSummaries(paths));
 
   // Diff
   ipcMain.handle('git:diff', (_e, p: string, f: string, o?: { staged?: boolean; ref?: string }) =>
@@ -123,9 +130,42 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:currentBranch', (_e, p: string) => gitService.currentBranch(p));
   ipcMain.handle('git:revParse', (_e, p: string, r: string) => gitService.revParse(p, r));
   ipcMain.handle('git:revParseArgs', (_e, p: string, a: string[]) => gitService.revParseArgs(p, a));
-  ipcMain.handle('git:raw', (_e, p: string, a: string[]) => gitService.raw(p, a));
+  // Rename detection — single IPC call replaces N+M per-file spawns in the
+  // renderer. See services/git.ts detectWorkingTreeRenames() for the strategy.
+  ipcMain.handle('git:detectWorkingTreeRenames', (_e, p: string, deleted: string[], untracked: string[]) =>
+    gitService.detectWorkingTreeRenames(p, deleted, untracked)
+  );
+  // git:raw — suppress noisy "path does not exist" errors that flood the
+  // main-process console. ConflictMergeView intentionally probes stages
+  // :1/:2/:3 that may not exist (e.g. when a file is no longer conflicted).
+  // The renderer already handles rejections via .catch(() => '') — but
+  // Electron's ipcMain.handle logs every thrown error to stderr.
+  // Returning '' for known-benign errors avoids the console spam while
+  // still propagating real errors (network failures, bad git invocations).
+  ipcMain.handle('git:raw', async (_e, p: string, a: string[]) => {
+    try {
+      return await gitService.raw(p, a);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Benign errors that shouldn't flood the console:
+      //   - "path '...' does not exist (neither on disk nor in the index)"
+      //   - "pathspec '...' did not match any file(s) known to git"
+      //   - "no submodule mapping found in .gitmodules for path '...'"
+      // These happen when probing for stage versions (:1/:2/:3) that may
+      // not exist, or when `git submodule status` is run on a repo whose
+      // index has a directory recorded as a submodule (mode 160000) but
+      // `.gitmodules` no longer references it. Returning an empty string
+      // matches what the renderer's .catch(() => '') would have produced
+      // and keeps the dev console quiet.
+      if (/does not exist|did not match any file|not in the index|no submodule mapping found/i.test(msg)) {
+        return '';
+      }
+      // Real error — re-throw so the renderer can handle it.
+      throw err;
+    }
+  });
   // New: full git CLI surface coverage (added per simple-git comprehensive test spec)
-  ipcMain.handle('git:grep', (_e, p: string, pat: string, opts?: string[]) => gitService.grep(p, pat, opts));
+  ipcMain.handle('git:grep', (_e, p: string, pat: string, opts?: string[], pathspec?: string) => gitService.grep(p, pat, opts, pathspec));
   ipcMain.handle('git:applyPatch', (_e, p: string, patch: string | string[], opts?: Record<string, null> | string[]) => gitService.applyPatch(p, patch, opts));
   ipcMain.handle('git:show', (_e, p: string, a: string[]) => gitService.show(p, a));
   ipcMain.handle('git:showBuffer', (_e, p: string, a: string[]) => gitService.showBuffer(p, a));
@@ -151,12 +191,14 @@ export function registerGitIpc(): void {
   // Cherry Pick (SmartGit 20+)
   ipcMain.handle('git:cherryPick', (_e, p: string, h: string[], nc?: boolean) => gitService.cherryPick(p, h, nc));
   ipcMain.handle('git:cherryPickAbort', (_e, p: string) => gitService.cherryPickAbort(p));
-  ipcMain.handle('git:cherryPickContinue', (_e, p: string) => gitService.cherryPickContinue(p));
+  ipcMain.handle('git:cherryPickContinue', (_e, p: string, allowEmpty?: boolean) => gitService.cherryPickContinue(p, allowEmpty));
+  ipcMain.handle('git:cherryPickSkip', (_e, p: string) => gitService.cherryPickSkip(p));
 
   // Revert (SmartGit 20+)
   ipcMain.handle('git:revert', (_e, p: string, h: string[], nc?: boolean) => gitService.revert(p, h, nc));
   ipcMain.handle('git:revertAbort', (_e, p: string) => gitService.revertAbort(p));
   ipcMain.handle('git:revertContinue', (_e, p: string) => gitService.revertContinue(p));
+  ipcMain.handle('git:revertSkip', (_e, p: string) => gitService.revertSkip(p));
 
   // Rebase (SmartGit 20+)
   ipcMain.handle('git:rebase', (_e, p: string, o: string, opts?: { interactive?: boolean; autosquash?: boolean; abort?: boolean; continue?: boolean; skip?: boolean }) =>
@@ -243,6 +285,7 @@ export function registerGitIpc(): void {
 
   // LFS support
   ipcMain.handle('git:lfsStatus', (_e, p: string) => gitService.lfsStatus(p));
+  ipcMain.handle('git:isLfsInstalled', (_e, p: string) => gitService.isLfsInstalled(p));
   ipcMain.handle('git:lfsPull', (_e, p: string, f?: string[]) => gitService.lfsPull(p, f));
   ipcMain.handle('git:lfsPush', (_e, p: string) => gitService.lfsPush(p));
   ipcMain.handle('git:lfsFetch', (_e, p: string) => gitService.lfsFetch(p));
@@ -366,4 +409,37 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:coalesceCommits', (_e, p: string, firstHash: string, secondHash: string) =>
     gitService.coalesceCommits(p, firstHash, secondHash)
   );
+
+  // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
+  ipcMain.handle('git:smartPull', (_e, p: string, r?: string, b?: string) => gitService.smartPull(p, r, b));
+  ipcMain.handle('git:octopusMerge', (_e, p: string, branches: string[]) => gitService.octopusMerge(p, branches));
+  // isForcePushAllowed is synchronous — wrap in Promise
+  ipcMain.handle('git:isForcePushAllowed', (_e, branch: string | undefined, policy: 'deny' | 'feature-only' | 'allow', protectedBranches?: string[]) =>
+    Promise.resolve(gitService.isForcePushAllowed(branch, policy, protectedBranches))
+  );
+  ipcMain.handle('git:applyLineEdit', (_e, p: string, f: string, ln: number, content: string, staged?: boolean) =>
+    gitService.applyLineEdit(p, f, ln, content, staged)
+  );
+  ipcMain.handle('git:editInfoExclude', (_e, p: string) => gitService.editInfoExclude(p));
+  ipcMain.handle('git:traceIgnoreRule', (_e, p: string, f: string) => gitService.traceIgnoreRule(p, f));
+  ipcMain.handle('git:detectRepoFormat', (_e, p: string) => gitService.detectRepoFormat(p));
+  ipcMain.handle('git:commitSigned', (_e, p: string, m: string, o?: { gpgSign?: boolean; sshSign?: boolean; signingKey?: string; noVerify?: boolean }) =>
+    gitService.commitSigned(p, m, o)
+  );
+  ipcMain.handle('git:createSignedTag', (_e, p: string, name: string, msg: string, ref?: string, sshSign?: boolean) =>
+    gitService.createSignedTag(p, name, msg, ref, sshSign)
+  );
+  ipcMain.handle('git:lfsFsck', (_e, p: string) => gitService.lfsFsck(p));
+  ipcMain.handle('git:batchOperation', (_e, repos: string[], op: 'fetch' | 'pull' | 'push' | 'status', o?: { remote?: string; branch?: string; force?: boolean }) =>
+    gitService.batchOperation(repos, op, o)
+  );
+  ipcMain.handle('git:exportConfig', (_e, p: string | null) => gitService.exportConfig(p));
+  ipcMain.handle('git:importConfig', (_e, p: string, config: any) => gitService.importConfig(p, config));
+
+  // Memory: invalidate the cached SimpleGit instance for a repo. Called by
+  // the renderer when a repo is closed (repositoryStore.closeRepository) —
+  // previously the cache retained a SimpleGit instance (with its child
+  // process pool) per repo ever opened for the entire session, leaking
+  // memory on every repo switch.
+  ipcMain.handle('git:invalidateCache', (_e, p?: string) => gitService.invalidateCache(p));
 }

@@ -1,10 +1,32 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, AlertCircle, Check, RotateCcw, Loader, GitMerge, GitPullRequest, ArrowDown, ArrowUp } from '../components/icons';
+import { X, AlertCircle, Check, RotateCcw, Loader, GitMerge, GitPullRequest, ArrowDown, ArrowUp, Sparkles } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { api } from '../lib/api';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
+import type { LLMProvider } from '../lib/aiCommitMessages';
+import type { AppSettings } from '../../electron/types/settings-api';
+import { useI18n } from '../lib/i18n';
+
+/** Build an LLMProvider from settings, or null if not configured. */
+function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvider | null {
+  if (!settings?.aiProvider) return null;
+  const type = settings.aiProvider as LLMProvider['type'];
+  const id = settings.aiProvider;
+  const url = settings.aiUrl || '';
+  const model = settings.aiModel || '';
+  if (!model) return null;
+  return {
+    id,
+    name: id,
+    type,
+    url,
+    apiKey: settings.aiApiKey,
+    model,
+  };
+}
 
 interface MergeState {
   inProgress: boolean;
@@ -28,9 +50,10 @@ export function MergePanel({
   targetBranch: string;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [state, setState] = useState<MergeState>({ inProgress: false, conflictedFiles: [] });
   const [loading, setLoading] = useState(false);
   const [strategy, setStrategy] = useState<MergeStrategy>('merge');
@@ -49,7 +72,7 @@ export function MergePanel({
         conflictedFiles: s.conflicted,
       });
     } catch (e) {
-      toast.error('Failed to load merge state', String(e));
+      toast.error(t('changes.mergeStateLoadFailed'), String(e));
     }
   }, [repo.path, toast]);
 
@@ -65,7 +88,7 @@ export function MergePanel({
       const oursSha = await api.git.revParse(repo.path, 'HEAD');
       const theirsSha = await api.git.revParse(repo.path, targetBranch);
       if (!oursSha || !theirsSha) {
-        setPreview({ kind: 'error', message: 'Cannot resolve refs' });
+        setPreview({ kind: 'error', message: t('changes.cannotResolveRefs') });
         return;
       }
       // If same SHA — already up to date
@@ -83,7 +106,7 @@ export function MergePanel({
         setPreview({ kind: 'conflicts', files: result.conflicts, ahead, behind });
       } else {
         // clean=false but no conflicts listed — probably unrelated histories or unsupported git
-        setPreview({ kind: 'error', message: 'Cannot compute merge preview (need Git 2.38+)' });
+        setPreview({ kind: 'error', message: t('changes.mergePreviewUnsupported') });
       }
     } catch (e) {
       setPreview({ kind: 'error', message: String(e) });
@@ -111,7 +134,7 @@ export function MergePanel({
         if (strategy === 'rebase') {
           // Rebase current branch onto target
           await api.git.rebase(repo.path, targetBranch);
-          toast.success(`Rebased onto ${targetBranch}`);
+          toast.success(t('changes.rebasedOnto', { branch: targetBranch }));
           onClose();
           await refreshStatus(repo.path);
           return;
@@ -120,20 +143,20 @@ export function MergePanel({
         const result = await api.git.merge(repo.path, targetBranch, opts);
         if (result.conflicts.length > 0) {
           toast.warning(
-            `Merge conflicts in ${result.conflicts.length} files`,
+            t('changes.mergeConflictsNFiles', { count: result.conflicts.length }),
             result.conflicts.join('\n')
           );
           await loadState();
           await refreshStatus(repo.path);
         } else if (result.fastForward) {
-          toast.success('Fast-forward merge complete');
+          toast.success(t('changes.fastForwardDone'));
           onClose();
           await refreshStatus(repo.path);
         } else if (result.alreadyUpToDate) {
-          toast.info('Already up to date');
+          toast.info(t('changes.alreadyUpToDate'));
           onClose();
         } else {
-          toast.success('Merge complete');
+          toast.success(t('status.mergeComplete'));
           onClose();
           await refreshStatus(repo.path);
         }
@@ -143,16 +166,16 @@ export function MergePanel({
         // Stash local changes, run merge, then pop stash
         const status = await api.git.status(repo.path);
         if (!status.isClean) {
-          toast.info('Auto-stashing local changes...');
+          toast.info(t('changes.autoStashing'));
           await api.git.stashPush(repo.path, 'prismgit-autostash', true);
           try {
             await runMerge();
           } finally {
             try {
               await api.git.stashPop(repo.path);
-              toast.success('Auto-stash restored');
+              toast.success(t('changes.autoStashRestored'));
             } catch (popErr) {
-              toast.warning('Auto-stash pop failed — see Stashes view', String(popErr));
+              toast.warning(t('changes.autoStashPopFailed'), String(popErr));
             }
           }
         } else {
@@ -162,7 +185,7 @@ export function MergePanel({
         await runMerge();
       }
     } catch (e) {
-      toast.error('Merge failed', String(e));
+      toast.error(t('changes.mergeFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -170,20 +193,20 @@ export function MergePanel({
 
   const handleAbort = async () => {
     if (!(await confirmDialog({
-      title: 'Abort merge',
-      message: 'Abort the current merge? All merge changes will be lost.',
-      confirmLabel: 'Abort merge',
+      title: t('changes.abortMerge'),
+      message: t('changes.abortMergeMessage'),
+      confirmLabel: t('changes.abortMerge'),
       danger: true,
     }))) return;
     setLoading(true);
     try {
       await api.git.abortMerge(repo.path);
-      toast.success('Merge aborted');
+      toast.success(t('changes.mergeAborted'));
       await loadState();
       await refreshStatus(repo.path);
       onClose();
     } catch (e) {
-      toast.error('Abort failed', String(e));
+      toast.error(t('changes.abortFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -193,12 +216,12 @@ export function MergePanel({
     setLoading(true);
     try {
       await api.git.continueMerge(repo.path);
-      toast.success('Merge completed');
+      toast.success(t('changes.mergeCompleted'));
       await loadState();
       await refreshStatus(repo.path);
       onClose();
     } catch (e) {
-      toast.error('Continue failed', String(e));
+      toast.error(t('changes.continueFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -210,11 +233,11 @@ export function MergePanel({
         <div className="flex items-center gap-2">
           <GitMerge size={14} className="text-accent" />
           <span className="text-sm font-medium">
-            {state.inProgress ? 'Merge in progress' : `Merge '${targetBranch}' → current branch`}
+            {state.inProgress ? t('changes.mergeInProgress') : t('changes.mergeTitle', { branch: targetBranch })}
           </span>
           {state.inProgress && state.conflictedFiles.length > 0 && (
             <span className="badge badge-conflict">
-              {state.conflictedFiles.length} CONFLICTS
+              {t('changes.nConflictsBadge', { count: state.conflictedFiles.length })}
             </span>
           )}
         </div>
@@ -230,14 +253,14 @@ export function MergePanel({
               <div className="mb-3">
                 <div className="text-xs text-text-secondary mb-2 flex items-center gap-2">
                   <AlertCircle size={12} className="text-status-conflict" />
-                  Resolve conflicts in the following files, then continue:
+                  {t('changes.resolveConflictsHint')}
                 </div>
                 <div className="space-y-1 max-h-32 overflow-y-auto">
                   {state.conflictedFiles.map((f) => (
                     <div key={f} className="flex items-center gap-2 text-xs px-2 py-1 bg-bg-tertiary rounded">
                       <span className="text-status-conflict">●</span>
                       <code className="mono flex-1 truncate">{f}</code>
-                      <button className="icon-btn !w-5 !h-5" title="Open file"
+                      <button className="icon-btn !w-5 !h-5" title={t('changes.openFile')}
                         onClick={() => api.git.openFile(`${repo.path}/${f}`.replace(/\/+/g, '/'))}>
                         <Check size={11} />
                       </button>
@@ -246,16 +269,16 @@ export function MergePanel({
                 </div>
               </div>
             ) : (
-              <div className="text-xs text-text-secondary mb-3">No conflicts. You can complete the merge.</div>
+              <div className="text-xs text-text-secondary mb-3">{t('changes.noConflictsHint')}</div>
             )}
             <div className="flex items-center gap-2">
               <button className="btn btn-primary" onClick={handleContinue}
                 disabled={loading || state.conflictedFiles.length > 0}>
                 {loading ? <Loader size={13} className="spin" /> : <Check size={13} />}
-                Continue
+                {t('changes.continueButton')}
               </button>
               <button className="btn btn-danger" onClick={handleAbort} disabled={loading}>
-                <RotateCcw size={13} /> Abort
+                <RotateCcw size={13} /> {t('changes.abort')}
               </button>
             </div>
           </>
@@ -265,13 +288,13 @@ export function MergePanel({
             <div className="mb-3">
               {preview.kind === 'loading' && (
                 <div className="text-xs text-text-tertiary flex items-center gap-2">
-                  <Loader size={12} className="spin" /> Computing merge preview...
+                  <Loader size={12} className="spin" /> {t('changes.computingPreview')}
                 </div>
               )}
               {preview.kind === 'clean' && (
                 <div className="text-xs flex items-center gap-3 text-status-added">
                   <Check size={12} />
-                  <span>Clean merge — no conflicts expected</span>
+                  <span>{t('changes.cleanMerge')}</span>
                   <span className="text-text-tertiary flex items-center gap-1">
                     <ArrowUp size={9} />{preview.ahead}
                     <ArrowDown size={9} />{preview.behind}
@@ -282,13 +305,13 @@ export function MergePanel({
                 <div>
                   <div className="text-xs flex items-center gap-3 text-status-conflict mb-2">
                     <AlertCircle size={12} />
-                    <span>{preview.files.length} file(s) will conflict</span>
+                    <span>{t('changes.filesWillConflict', { count: preview.files.length })}</span>
                     <span className="text-text-tertiary flex items-center gap-1">
                       <ArrowUp size={9} />{preview.ahead}
                       <ArrowDown size={9} />{preview.behind}
                     </span>
                     <button className="text-2xs text-accent ml-auto" onClick={() => setShowConflicts(!showConflicts)}>
-                      {showConflicts ? 'Hide' : 'Show'}
+                      {showConflicts ? t('changes.hide') : t('changes.show')}
                     </button>
                   </div>
                   {showConflicts && (
@@ -306,7 +329,7 @@ export function MergePanel({
               {preview.kind === 'uptodate' && (
                 <div className="text-xs flex items-center gap-2 text-status-info">
                   <Check size={12} />
-                  <span>Already up to date — target branch is fully merged.</span>
+                  <span>{t('changes.upToDateDetail')}</span>
                 </div>
               )}
               {preview.kind === 'error' && (
@@ -319,12 +342,12 @@ export function MergePanel({
 
             {/* Strategy selector */}
             <div className="flex items-center gap-4 mb-3">
-              <span className="text-xs text-text-tertiary">Strategy:</span>
+              <span className="text-xs text-text-tertiary">{t('changes.strategyLabel')}</span>
               {([
-                { id: 'merge', label: 'Merge commit' },
-                { id: 'squash', label: 'Squash' },
-                { id: 'rebase', label: 'Rebase' },
-                { id: 'ff-only', label: 'Fast-forward only' },
+                { id: 'merge', label: t('changes.strategyMergeCommit') },
+                { id: 'squash', label: t('changes.strategySquash') },
+                { id: 'rebase', label: t('changes.strategyRebase') },
+                { id: 'ff-only', label: t('changes.strategyFfOnly') },
               ] as const).map(opt => (
                 <label key={opt.id} className="flex items-center gap-1 text-xs cursor-pointer">
                   <input type="radio" name="strategy" value={opt.id} checked={strategy === opt.id}
@@ -340,31 +363,72 @@ export function MergePanel({
                 <label className="flex items-center gap-2 text-xs cursor-pointer">
                   <input type="checkbox" checked={noFf}
                     onChange={(e) => setNoFf(e.target.checked)} />
-                  <span>No fast-forward (always create merge commit)</span>
+                  <span>{t('changes.noFfOption')}</span>
                 </label>
               </div>
             )}
             {(strategy === 'merge' || strategy === 'rebase') && (
               <div className="flex items-center gap-4 mb-3">
-                <label className="flex items-center gap-2 text-xs cursor-pointer" title="Stash local changes before merge/rebase, then pop after — useful when working tree is dirty">
+                <label className="flex items-center gap-2 text-xs cursor-pointer" title={t('changes.autoStashTitle')}>
                   <input type="checkbox" checked={autoStash}
                     onChange={(e) => setAutoStash(e.target.checked)} />
-                  <span>Auto-stash local changes</span>
+                  <span>{t('changes.autoStashOption')}</span>
                 </label>
               </div>
             )}
             {strategy === 'squash' && (
               <div className="text-xs text-text-tertiary mb-3">
-                All commits from <code className="mono">{targetBranch}</code> will be combined into a single new commit.
+                {t('changes.squashHint', { branch: targetBranch })}
+              </div>
+            )}
+
+            {/* SmartGit Manual: AI for Merge descriptions — generate merge message */}
+            {strategy === 'merge' && (
+              <div className="mb-3">
+                <button
+                  className="btn btn-secondary text-xs"
+                  onClick={async () => {
+                    const settings = useSettingsStore.getState().settings;
+                    if (!settings?.aiCommitMessagesEnabled) {
+                      toast.warning(t('changes.aiDisabled'), t('changes.aiEnableHint'));
+                      return;
+                    }
+                    const provider = buildAIProvider(settings);
+                    if (!provider) {
+                      toast.warning(t('changes.aiNoProvider'));
+                      return;
+                    }
+                    try {
+                      const { generateMergeMessage } = await import('../lib/aiCommitMessages');
+                      // Get diff between current and target branch
+                      const diffResult = await api.git.diffBranches(repo.path, 'HEAD', targetBranch);
+                      const diffText = diffResult.hunks.map(h => h.header + '\n' + h.lines.map(l => l.content).join('\n')).join('\n').slice(0, 48000);
+                      const message = await generateMergeMessage({
+                        sourceBranch: targetBranch,
+                        targetBranch: 'current',
+                        diff: diffText,
+                        commitCount: preview.kind === 'clean' ? preview.ahead : 0,
+                        provider,
+                      });
+                      toast.success(t('changes.aiMergeMsgGenerated'), message.split('\n')[0]);
+                      // Copy to clipboard for user to paste
+                      navigator.clipboard.writeText(message);
+                    } catch (e) {
+                      toast.error(t('changes.aiGenerationFailed'), String(e));
+                    }
+                  }}
+                >
+                  <Sparkles size={11} /> {t('changes.aiMergeGenerate')}
+                </button>
               </div>
             )}
 
             <div className="flex items-center gap-2">
               <button className="btn btn-primary" onClick={handleMerge} disabled={loading}>
                 {loading ? <Loader size={13} className="spin" /> : strategy === 'rebase' ? <GitPullRequest size={13} /> : <GitMerge size={13} />}
-                {strategy === 'rebase' ? 'Rebase' : strategy === 'squash' ? 'Squash & Merge' : 'Merge'}
+                {strategy === 'rebase' ? t('changes.strategyRebase') : strategy === 'squash' ? t('changes.squashMergeButton') : t('changes.mergeButton')}
               </button>
-              <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+              <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
             </div>
           </>
         )}

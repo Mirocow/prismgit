@@ -2,12 +2,243 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.github.com https://github.com;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-rHZYBR2S6xa/ZHKGCt/R7oDAJkfqVPAfkAmmhDBMPKw='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.github.com https://github.com https://www.gravatar.com ws: wss:;" />
+    <meta name="csp-nonce" content="boot-screen-inline" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PrismGit</title>
+    <style>
+      /* Loading screen — shown immediately on first paint, before React mounts.
+         The renderer script takes ~200-500ms to load + parse + execute; during
+         that gap, the user used to see a blank white screen. Now we show the
+         PrismGit logo + a random feature tip that rotates every 4 seconds.
+
+         Removed automatically when React renders the real App (App.tsx
+         replaces #root's children).
+
+         Theme matching: JavaScript below reads the saved theme from
+         localStorage and sets --boot-bg / --boot-text / --boot-accent
+         CSS variables to the active theme's colors. This way the boot
+         screen matches whatever theme the user has chosen — no jarring
+         "white screen → dark theme" or vice versa. If the saved theme
+         isn't found, falls back to Ayu Dark (the app's default). */
+      :root {
+        --boot-bg: #0b0e14;
+        --boot-text: #bfbdb6;
+        --boot-text-dim: #8a8f98;
+        --boot-accent: #39bae6;
+        --boot-border: rgba(255, 255, 255, 0.08);
+        --boot-tip-bg: rgba(255, 255, 255, 0.05);
+      }
+      #boot-screen {
+        position: fixed;
+        inset: 0;
+        background: var(--boot-bg);
+        color: var(--boot-text);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        z-index: 9999;
+        transition: opacity 200ms ease-out;
+      }
+      #boot-screen.fade-out {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .boot-logo {
+        width: 64px;
+        height: 64px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--boot-accent) 0%, color-mix(in srgb, var(--boot-accent) 50%, #d2a6ff) 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--boot-bg);
+        letter-spacing: -2px;
+        box-shadow: 0 8px 24px color-mix(in srgb, var(--boot-accent) 25%, transparent);
+      }
+      .boot-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--boot-text);
+        margin: 0;
+      }
+      .boot-subtitle {
+        font-size: 11px;
+        color: var(--boot-text-dim);
+        margin: 0;
+      }
+      .boot-tip {
+        max-width: 380px;
+        min-height: 32px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        background: var(--boot-tip-bg);
+        border: 1px solid var(--boot-border);
+        font-size: 12px;
+        line-height: 1.5;
+        text-align: center;
+        color: var(--boot-text);
+        opacity: 0;
+        transition: opacity 250ms ease-in-out;
+      }
+      .boot-tip.visible { opacity: 1; }
+      .boot-tip-label {
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--boot-accent);
+        margin-bottom: 4px;
+        font-weight: 600;
+      }
+      .boot-spinner {
+        width: 24px;
+        height: 24px;
+        border: 2px solid color-mix(in srgb, var(--boot-text) 15%, transparent);
+        border-top-color: var(--boot-accent);
+        border-radius: 50%;
+        animation: boot-spin 0.8s linear infinite;
+      }
+      @keyframes boot-spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot-screen">
+        <div class="boot-logo">P</div>
+        <div>
+          <p class="boot-title">PrismGit</p>
+          <p class="boot-subtitle">Modern Git client</p>
+        </div>
+        <div class="boot-spinner"></div>
+        <div class="boot-tip" id="boot-tip">
+          <div class="boot-tip-label">Did you know?</div>
+          <div id="boot-tip-text">Loading…</div>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        // ── Theme color table (mirrors src/lib/themes.ts preview colors) ──────
+        // Used to match the boot screen to the user's saved theme before
+        // React mounts and globals.css applies the full theme.
+        var THEMES = {
+          'light':            { bg: '#f7f8fa', text: '#2c3138', dim: '#5c6166', accent: '#399ee6' },
+          'dark':             { bg: '#0b0e14', text: '#bfbdb6', dim: '#8a8f98', accent: '#39bae6' },
+          'github-light':    { bg: '#ffffff', text: '#1f2328', dim: '#59636e', accent: '#0969da' },
+          'github-dark':     { bg: '#0d1117', text: '#e6edf3', dim: '#8b949e', accent: '#2f81f7' },
+          'dracula':         { bg: '#282a36', text: '#f8f8f2', dim: '#bcbcbc', accent: '#bd93f9' },
+          'monokai':         { bg: '#272822', text: '#f8f8f2', dim: '#a8a8a0', accent: '#a6e22e' },
+          'solarized-light': { bg: '#fdf6e3', text: '#586e75', dim: '#93a1a1', accent: '#268bd2' },
+          'solarized-dark':  { bg: '#002b36', text: '#93a1a1', dim: '#657b83', accent: '#268bd2' },
+          'nord':            { bg: '#2e3440', text: '#d8dee9', dim: '#81a1c1', accent: '#88c0d0' },
+          'tokyo-night':     { bg: '#1a1b26', text: '#c0caf5', dim: '#a9b1d6', accent: '#7aa2f7' },
+          'catppuccin-mocha':{ bg: '#1e1e2e', text: '#cdd6f4', dim: '#a6adc8', accent: '#89b4fa' },
+          'one-dark':        { bg: '#282c34', text: '#abb2bf', dim: '#7f8c98', accent: '#61afef' },
+          'gruvbox-dark':    { bg: '#282828', text: '#ebdbb2', dim: '#a89984', accent: '#fabd2f' },
+          'slack-dark':      { bg: '#1a1d21', text: '#f0f0f0', dim: '#c8c8c8', accent: '#611f69' },
+          'discord':         { bg: '#36393f', text: '#dcddde', dim: '#b9bbbe', accent: '#5865f2' },
+          'light-dim-sidebar': { bg: '#f7f8fa', text: '#2c3138', dim: '#5c6166', accent: '#399ee6' },
+          'github-light-dim': { bg: '#ffffff', text: '#1f2328', dim: '#57606a', accent: '#0969da' },
+          'designer-light': { bg: '#ffffff', text: '#1e1e1e', dim: '#5e5e5e', accent: '#F24E1E' },
+          'purple': { bg: '#1a1b2e', text: '#c8c9e8', dim: '#9c9dc8', accent: '#9b6dff' },
+          'simple-light': { bg: '#ffffff', text: '#000000', dim: '#666666', accent: '#0066ff' },
+          'material': { bg: '#FAFAFA', text: '#212121', dim: '#616161', accent: '#3F51B5' },
+        };
+        // Read saved theme from localStorage and apply matching boot colors.
+        try {
+          var saved = localStorage.getItem('prismgit-theme') || 'light';
+          var t = THEMES[saved] || THEMES['dark'];
+          var root = document.documentElement;
+          root.style.setProperty('--boot-bg', t.bg);
+          root.style.setProperty('--boot-text', t.text);
+          root.style.setProperty('--boot-text-dim', t.dim);
+          root.style.setProperty('--boot-accent', t.accent);
+          // Light themes get stronger borders + opaque tip background.
+          var isLight = ['light', 'github-light', 'solarized-light'].indexOf(saved) >= 0;
+          if (isLight) {
+            root.style.setProperty('--boot-border', 'rgba(0, 0, 0, 0.08)');
+            root.style.setProperty('--boot-tip-bg', 'rgba(0, 0, 0, 0.04)');
+          }
+        } catch (e) { /* localStorage blocked */ }
+
+        // ── Random rotating tips ─────────────────────────────────────────────
+        var tips = [
+          'Press Ctrl+K anytime to open the Command Palette — fuzzy-search every action.',
+          'Ctrl+Shift+F opens Global Search across commits, branches, tags, files, and stashes.',
+          'Right-click a commit row to cherry-pick, revert, or tag it.',
+          'Ctrl+click multiple branches to multi-select; Shift+click selects a range.',
+          'Drag a file between Staged and Unstaged sections in Changes — or press Space to toggle.',
+          'In History, click any commit hash (anywhere) to jump to it in the graph.',
+          'The Conventional Commits dropdown in Changes lets you insert feat:/fix:/docs:/… with one click.',
+          'The new AI Suggest button in Branches generates 5 candidate branch names from your staged files.',
+          'Right-click a diff line in Diff viewer to open it in VS Code at that exact line.',
+          'In Settings → Appearance, dim the sidebar like Discord / Slack with one click.',
+          'Settings → Footer lets you toggle every status-bar section (VS Code-style).',
+          'Pull Requests page supports GitHub PR list/create/merge — configure a PAT in Settings → GitHub.',
+          'Git-Flow page handles feature/release/hotfix branch lifecycles automatically.',
+          'Recyclable page shows commits unreachable from any ref — recover before they expire (90 days).',
+          'Right-click a repository group in the sidebar to Add or Clone a project into it.',
+          'Themes: 15 built-in palettes including Slack, Discord, Dracula, Tokyo Night, and Gruvbox.',
+        ];
+        var tipEl = document.getElementById('boot-tip-text');
+        var wrapEl = document.getElementById('boot-tip');
+        var last = -1;
+        function showRandom() {
+          var i;
+          do { i = Math.floor(Math.random() * tips.length); } while (i === last);
+          last = i;
+          if (wrapEl) wrapEl.classList.remove('visible');
+          setTimeout(function () {
+            if (tipEl) tipEl.textContent = tips[i];
+            if (wrapEl) wrapEl.classList.add('visible');
+          }, 250);
+        }
+        // First tip after 600ms (after spinner appears), then every 4s.
+        setTimeout(showRandom, 600);
+        setInterval(showRandom, 4000);
+
+        // ── Auto-hide when React mounts ───────────────────────────────────────
+        // App.tsx replaces #root's children, which triggers a MutationObserver.
+        var observer = new MutationObserver(function (mutations) {
+          for (var i = 0; i < mutations.length; i++) {
+            var added = mutations[i].addedNodes;
+            for (var j = 0; j < added.length; j++) {
+              var node = added[j];
+              if (node.nodeType === 1 && node.id !== 'boot-screen') {
+                var bs = document.getElementById('boot-screen');
+                if (bs) {
+                  bs.classList.add('fade-out');
+                  setTimeout(function () { if (bs.parentNode) bs.parentNode.removeChild(bs); }, 250);
+                }
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.getElementById('root'), { childList: true, subtree: false });
+        // Safety net — if React fails to mount (runtime error in App.tsx),
+        // the MutationObserver never fires and the user is stuck on the
+        // boot screen. After 15 seconds, assume the boot failed and hide
+        // the boot screen anyway so the user can at least see the error
+        // in dev tools / reload.
+        setTimeout(function () {
+          var bs = document.getElementById('boot-screen');
+          if (bs && bs.parentNode) {
+            console.warn('PrismGit: boot screen safety timeout fired — React mount took >15s, hiding boot screen.');
+            bs.classList.add('fade-out');
+            setTimeout(function () { if (bs.parentNode) bs.parentNode.removeChild(bs); }, 250);
+          }
+        }, 15000);
+      })();
+    </script>
     <script type="module" src="/src/theme-init.ts"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

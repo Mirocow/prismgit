@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 type WindowStyle = 'standard' | 'log' | 'working-tree';
 
-const STORAGE_KEY = 'smartgit-window-style';
+const STORAGE_KEY = 'prismgit-window-style';
 
 interface WindowStyleState {
   style: WindowStyle;
@@ -12,7 +12,7 @@ interface WindowStyleState {
 // Initialize from localStorage
 function getInitialStyle(): WindowStyle {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY) as WindowStyle;
+    const saved = localStorage.getItem(STORAGE_KEY) as WindowStyle | null;
     return saved || 'standard';
   } catch {
     return 'standard';
@@ -44,10 +44,11 @@ interface WindowStyleSwitcherProps {
 }
 
 export function WindowStyleSwitcher({ value, onChange }: WindowStyleSwitcherProps) {
+  const { t } = useI18n();
   const styles: { key: WindowStyle; label: string; title: string }[] = [
-    { key: 'standard', label: 'Standard', title: 'Standard window: Changes + History combined' },
-    { key: 'log', label: 'Log', title: 'Log window: History-focused view' },
-    { key: 'working-tree', label: 'Working Tree', title: 'Working Tree window: Changes-focused view' },
+    { key: 'standard', label: t('shell.windowStyleStandard'), title: t('shell.windowStyleStandardTitle') },
+    { key: 'log', label: t('shell.windowStyleLog'), title: t('shell.windowStyleLogTitle') },
+    { key: 'working-tree', label: t('shell.windowStyleWorktree'), title: t('shell.windowStyleWorktreeTitle') },
   ];
 
   return (
@@ -76,3 +77,4 @@ export function WindowStyleSwitcher({ value, onChange }: WindowStyleSwitcherProp
 
 // Re-export cn to avoid circular imports
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';

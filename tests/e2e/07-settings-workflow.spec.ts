@@ -22,14 +22,30 @@ test.describe('Settings workflow', () => {
       await screenshot(ctx.page, 'settings-default');
 
       // Use page.evaluate for text checks (more reliable than waitForSelector).
-      // All panels should be visible: Appearance, Git, GitHub Integration,
-      // Pull Strategy, About.
-      const sections = ['APPEARANCE', 'GIT', 'GITHUB INTEGRATION', 'PULL STRATEGY', 'ABOUT'];
-      for (const section of sections) {
+      // Since the Settings page was split into two tabs (5a73533):
+      //   Application Settings → Appearance, GitHub Integration, About
+      //   Project Settings (needs an open repo; the fixture repo is
+      //   pre-loaded) → Pull Strategy, Git Config
+      const appSections = ['APPEARANCE', 'GITHUB INTEGRATION', 'ABOUT'];
+      for (const section of appSections) {
         const has = await ctx.page.evaluate((s) =>
           document.body.innerText.includes(s), section
         );
-        expect(has, `Settings page should contain "${section}" section`).toBe(true);
+        expect(has, `Application Settings should contain "${section}" section`).toBe(true);
+      }
+
+      // Switch to the Project Settings tab
+      const projectTab = ctx.page.locator('button:has-text("Project Settings")').first();
+      await projectTab.waitFor({ state: 'visible', timeout: 5000 });
+      await projectTab.click();
+      await ctx.page.waitForTimeout(1500);
+
+      const projectSections = ['PULL STRATEGY', 'GIT CONFIG'];
+      for (const section of projectSections) {
+        const has = await ctx.page.evaluate((s) =>
+          document.body.innerText.includes(s), section
+        );
+        expect(has, `Project Settings should contain "${section}" section`).toBe(true);
       }
     } finally {
       await ctx.close();

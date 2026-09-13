@@ -27,6 +27,8 @@ import type {
   SubtreeInfo,
   UnreachableCommit,
   BugtraqConfig,
+  RemoteCheckSummary,
+  PushResult,
 } from '../../electron/types/git-api';
 import type {
   GithubUser,
@@ -34,7 +36,8 @@ import type {
   GithubPullRequest,
   CommitCheckStatus,
 } from '../../electron/types/github-api';
-import type { AppSettings, RepositoryEntry, RepositoryMetadata } from '../../electron/types/settings-api';
+import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../../electron/types/settings-api';
+import type { CommandLogEntry } from '../../electron/types/command-log-api';
 
 export type {
   StatusResult,
@@ -65,6 +68,9 @@ export type {
   SubtreeInfo,
   UnreachableCommit,
   BugtraqConfig,
+  RemoteCheckSummary,
+  PushResult,
+  CommandLogEntry,
   GithubUser,
   GithubRepository,
   GithubPullRequest,
@@ -72,6 +78,34 @@ export type {
   AppSettings,
   RepositoryEntry,
   RepositoryMetadata,
+  RepoGroup,
 };
 
-export const api = window.smartgit;
+// Runtime-agnostic api: delegate to Tauri adapter when running under
+// Tauri (window.__TAURI_INTERNALS__ is set by Tauri 2.x), otherwise
+// use the Electron preload binding (window.smartgit).
+//
+// The Tauri adapter (src/lib/api-tauri.ts) implements the most critical
+// methods (git.raw/status/branches/tags/stashList/log/reflog, fs picker,
+// watcher, app.openExternal). Methods not yet wired in Tauri throw —
+// the frontend should gracefully disable those features when running
+// under Tauri (see isTauri() helper).
+import { tauriApi, isTauri } from './api-tauri';
+
+// Use 'unknown as' cast so TypeScript doesn't complain about the partial
+// Tauri adapter — methods that aren't implemented on the Tauri side
+// will throw at runtime, which the UI can catch and degrade gracefully.
+type AnyApi = typeof window.smartgit;
+export const api: AnyApi = isTauri()
+  ? (tauriApi as unknown as AnyApi)
+  : window.smartgit;
+
+// Under Tauri, window.smartgit doesn't exist (Tauri exposes window.__TAURI__
+// instead). But many components call window.smartgit.events.on(...) directly
+// rather than through the `api` import. Mirror the tauriApi onto
+// window.smartgit so those calls don't crash — they'll hit the no-op stubs.
+if (isTauri() && typeof window !== 'undefined' && !(window as { smartgit?: unknown }).smartgit) {
+  (window as { smartgit: unknown }).smartgit = tauriApi;
+}
+
+export { isTauri };

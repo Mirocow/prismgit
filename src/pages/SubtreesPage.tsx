@@ -1,19 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import { GitMerge, RefreshCw, Plus, Trash, CloudDownload, CloudUpload, SplitSquareHorizontal, Folder, History } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type SubtreeInfo, type RemoteInfo } from '../lib/api';
 import { cn } from '../lib/utils';
 import { confirmDialog } from '../components/ConfirmDialog';
+import { useI18n } from '../lib/i18n';
 
 /**
  * SmartGit "Remote | Subtree" feature: integrate other repositories into
  * sub-folders of the main repo (git subtree add/pull/push/split).
  */
 export function SubtreesPage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
 
   const [subtrees, setSubtrees] = useState<SubtreeInfo[]>([]);
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
@@ -40,7 +42,7 @@ export function SubtreesPage() {
       setSubtrees(subs);
       setRemotes(rems);
     } catch (e) {
-      toast.error('Failed to load subtrees', String(e));
+      toast.error(t('pages.subtreeLoadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -52,7 +54,7 @@ export function SubtreesPage() {
   const handleAdd = async () => {
     const n = name.trim() || path.trim().split('/').pop() || '';
     if (!path.trim() || !remoteName.trim() || !branch.trim()) {
-      toast.error('Path, remote and branch are required');
+      toast.error(t('pages.subtreeFieldsRequired'));
       return;
     }
     setBusy('add');
@@ -65,12 +67,12 @@ export function SubtreesPage() {
         squash,
         remoteUrl: remoteUrl.trim() || undefined,
       });
-      toast.success(`Subtree added at ${path.trim()}`);
+      toast.success(t('pages.subtreeAdded', { path: path.trim() }));
       setShowAdd(false);
       resetForm();
       await load();
     } catch (e) {
-      toast.error('Failed to add subtree', String(e));
+      toast.error(t('pages.subtreeAddFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -87,30 +89,30 @@ export function SubtreesPage() {
       toast.success(okMsg);
       await load();
     } catch (e) {
-      toast.error('Operation failed', String(e));
+      toast.error(t('pages.operationFailed'), String(e));
     } finally {
       setBusy(null);
     }
   };
 
-  const handleRemove = async (t: SubtreeInfo) => {
+  const handleRemove = async (sub: SubtreeInfo) => {
     const ok = await confirmDialog({
-      title: 'Remove subtree configuration',
-      message: `Remove the configuration of subtree "${t.name}" (path ${t.path})? Working tree content is not touched.`,
-      confirmLabel: 'Remove',
+      title: t('pages.subtreeRemoveTitle'),
+      message: t('pages.subtreeRemoveMessage', { name: sub.name, path: sub.path }),
+      confirmLabel: t('common.remove'),
       danger: true,
     });
     if (!ok) return;
-    await withBusy(`rm-${t.name}`, () => api.git.subtreeRemove(repo.path, t.name), 'Subtree configuration removed');
+    await withBusy(`rm-${sub.name}`, () => api.git.subtreeRemove(repo.path, sub.name), t('pages.subtreeRemoved'));
   };
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
         <GitMerge size={18} className="text-accent shrink-0" />
-        <h1 className="text-sm font-semibold">Subtrees</h1>
+        <h1 className="text-sm font-semibold">{t('nav.subtrees')}</h1>
         <span className="text-xs text-text-tertiary">
-          Integrate other repositories into sub-folders — an alternative to submodules
+          {t('pages.subtreeSubtitle')}
         </span>
         <div className="flex-1" />
         <button
@@ -118,12 +120,12 @@ export function SubtreesPage() {
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded hover:opacity-90"
         >
           <Plus size={14} />
-          Add Subtree
+          {t('pages.addSubtree')}
         </button>
         <button
           onClick={load}
           className="p-1.5 rounded hover:bg-surface-hover text-text-secondary hover:text-text-primary"
-          title="Refresh"
+          title={t('common.refresh')}
         >
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
         </button>
@@ -132,17 +134,17 @@ export function SubtreesPage() {
       {showAdd && (
         <div className="px-4 py-3 border-b border-border bg-surface/40 grid grid-cols-2 gap-3">
           <label className="text-xs text-text-secondary flex flex-col gap-1">
-            Relative path (e.g. vendor/mylib) *
+            {t('pages.subtreePathLabel')}
             <input value={path} onChange={(e) => { setPath(e.target.value); if (!name.trim()) setName(e.target.value.split('/').pop() ?? ''); }} placeholder="vendor/mylib"
               className="px-2.5 py-1.5 text-xs bg-surface border border-border rounded focus:outline-none focus:border-accent" />
           </label>
           <label className="text-xs text-text-secondary flex flex-col gap-1">
-            Name (config key)
+            {t('pages.subtreeNameLabel')}
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="mylib"
               className="px-2.5 py-1.5 text-xs bg-surface border border-border rounded focus:outline-none focus:border-accent" />
           </label>
           <label className="text-xs text-text-secondary flex flex-col gap-1">
-            Remote name * (created from URL if missing)
+            {t('pages.subtreeRemoteLabel')}
             <input value={remoteName} onChange={(e) => setRemoteName(e.target.value)} placeholder="mylib-remote" list="subtree-remotes"
               className="px-2.5 py-1.5 text-xs bg-surface border border-border rounded focus:outline-none focus:border-accent" />
             <datalist id="subtree-remotes">
@@ -150,27 +152,27 @@ export function SubtreesPage() {
             </datalist>
           </label>
           <label className="text-xs text-text-secondary flex flex-col gap-1">
-            Remote URL (only when creating a new remote)
+            {t('pages.subtreeRemoteUrlLabel')}
             <input value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)} placeholder="https://…"
               className="px-2.5 py-1.5 text-xs bg-surface border border-border rounded focus:outline-none focus:border-accent" />
           </label>
           <label className="text-xs text-text-secondary flex flex-col gap-1">
-            Remote branch *
+            {t('pages.subtreeBranchLabel')}
             <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main"
               className="px-2.5 py-1.5 text-xs bg-surface border border-border rounded focus:outline-none focus:border-accent" />
           </label>
           <div className="flex items-end gap-3">
             <label className="flex items-center gap-1.5 text-xs text-text-secondary">
               <input type="checkbox" checked={squash} onChange={(e) => setSquash(e.target.checked)} className="accent-current" />
-              Squash subtree into a single commit
+              {t('pages.subtreeSquashLabel')}
             </label>
           </div>
           <div className="col-span-2 flex justify-end gap-2">
             <button onClick={() => { setShowAdd(false); resetForm(); }}
-              className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover">Cancel</button>
+              className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover">{t('common.cancel')}</button>
             <button onClick={handleAdd} disabled={busy === 'add'}
               className="px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded hover:opacity-90 disabled:opacity-40">
-              {busy === 'add' ? 'Adding…' : 'Add Subtree'}
+              {busy === 'add' ? t('pages.adding') : t('pages.addSubtree')}
             </button>
           </div>
         </div>
@@ -180,72 +182,72 @@ export function SubtreesPage() {
         {subtrees.length === 0 && !loading ? (
           <div className="flex flex-col items-center justify-center h-64 text-text-tertiary text-sm gap-2">
             <GitMerge size={32} className="opacity-40" />
-            <div>No subtrees configured</div>
-            <div className="text-xs opacity-70">Use “Add Subtree” to integrate another repository into a sub-folder</div>
+            <div>{t('pages.noSubtrees')}</div>
+            <div className="text-xs opacity-70">{t('pages.noSubtreesHint')}</div>
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {subtrees.map((t) => (
-              <div key={t.name} className="px-4 py-3 hover:bg-surface/50 group">
+            {subtrees.map((sub) => (
+              <div key={sub.name} className="px-4 py-3 hover:bg-surface/50 group">
                 <div className="flex items-center gap-2">
                   <Folder size={15} className="text-text-tertiary shrink-0" />
-                  <span className="text-sm font-medium">{t.path}</span>
-                  <span className={cn('text-xs px-1.5 py-0.5 rounded', t.squash ? 'bg-accent/15 text-accent' : 'bg-surface text-text-tertiary')}>
-                    {t.squash ? 'squashed' : 'full history'}
+                  <span className="text-sm font-medium">{sub.path}</span>
+                  <span className={cn('text-xs px-1.5 py-0.5 rounded', sub.squash ? 'bg-accent/15 text-accent' : 'bg-surface text-text-tertiary')}>
+                    {sub.squash ? t('pages.badgeSquashed') : t('pages.badgeFullHistory')}
                   </span>
                   <span className="text-xs text-text-tertiary">
-                    remote <b className="text-text-secondary">{t.remote}</b> · branch <b className="text-text-secondary">{t.branch}</b>
+                    {t('pages.remoteWord')} <b className="text-text-secondary">{sub.remote}</b> · {t('pages.branchWord')} <b className="text-text-secondary">{sub.branch}</b>
                   </span>
                   <div className="flex-1" />
                   <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
                     {/* Cross-tool: file-history scoped to the subtree folder */}
                     <button
                       onClick={() => {
-                        useSelectionStore.getState().selectFile(t.path);
-                        useSelectionStore.getState().setPathFilter(t.path);
+                        useSelectionStore.getState().selectFile(sub.path);
+                        useSelectionStore.getState().setPathFilter(sub.path);
                         window.location.hash = '#/history';
                       }}
                       className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-border hover:bg-surface-hover"
-                      title={`Show log of '${t.path}/' in History`}
+                      title={t('pages.subtreeLogTitle', { path: sub.path })}
                     >
                       <History size={13} />
-                      Log
+                      {t('branches.log')}
                     </button>
                     <button
-                      onClick={() => withBusy(`pull-${t.name}`, () => api.git.subtreePull(repo.path, t.name), `Pulled upstream into ${t.path}`)}
+                      onClick={() => withBusy(`pull-${sub.name}`, () => api.git.subtreePull(repo.path, sub.name), t('pages.subtreePulled', { path: sub.path }))}
                       disabled={busy !== null}
                       className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-border hover:bg-surface-hover disabled:opacity-40"
-                      title="git subtree pull — fetch and merge new upstream changes"
+                      title={t('pages.subtreePullTitle')}
                     >
-                      <CloudDownload size={13} className={busy === `pull-${t.name}` ? 'animate-pulse' : ''} />
-                      Pull
+                      <CloudDownload size={13} className={busy === `pull-${sub.name}` ? 'animate-pulse' : ''} />
+                      {t('remotes.pull')}
                     </button>
                     <button
-                      onClick={() => withBusy(`push-${t.name}`, () => api.git.subtreePush(repo.path, t.name), `Pushed ${t.path} changes back to ${t.remote}`)}
+                      onClick={() => withBusy(`push-${sub.name}`, () => api.git.subtreePush(repo.path, sub.name), t('pages.subtreePushed', { path: sub.path, remote: sub.remote }))}
                       disabled={busy !== null}
                       className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-border hover:bg-surface-hover disabled:opacity-40"
-                      title="git subtree push — split local changes and push to the subtree remote"
+                      title={t('pages.subtreePushTitle')}
                     >
-                      <CloudUpload size={13} className={busy === `push-${t.name}` ? 'animate-pulse' : ''} />
-                      Push
+                      <CloudUpload size={13} className={busy === `push-${sub.name}` ? 'animate-pulse' : ''} />
+                      {t('remotes.push')}
                     </button>
                     <button
-                      onClick={() => withBusy(`split-${t.name}`, async () => {
-                        const b = await api.git.subtreeSplit(repo.path, t.name, { rejoin: true });
-                        toast.success(`Subtree commits extracted to branch ${b}`);
-                      }, `Split complete — see branch subtree/${t.name}`)}
+                      onClick={() => withBusy(`split-${sub.name}`, async () => {
+                        const b = await api.git.subtreeSplit(repo.path, sub.name, { rejoin: true });
+                        toast.success(t('pages.subtreeSplitToast', { branch: b }));
+                      }, t('pages.subtreeSplitDone', { name: sub.name }))}
                       disabled={busy !== null}
                       className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-border hover:bg-surface-hover disabled:opacity-40"
-                      title="git subtree split — extract subtree commits into a local branch for review"
+                      title={t('pages.subtreeSplitTitle')}
                     >
-                      <SplitSquareHorizontal size={13} className={busy === `split-${t.name}` ? 'animate-pulse' : ''} />
-                      Split
+                      <SplitSquareHorizontal size={13} className={busy === `split-${sub.name}` ? 'animate-pulse' : ''} />
+                      {t('pages.split')}
                     </button>
                     <button
-                      onClick={() => handleRemove(t)}
+                      onClick={() => handleRemove(sub)}
                       disabled={busy !== null}
                       className="p-1 rounded hover:bg-surface-hover text-red-400 disabled:opacity-40"
-                      title="Remove subtree configuration"
+                      title={t('pages.subtreeRemoveTitle')}
                     >
                       <Trash size={13} />
                     </button>

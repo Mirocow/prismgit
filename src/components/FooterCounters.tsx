@@ -1,0 +1,145 @@
+import { useEffect, useState } from 'react';
+import { api } from '../lib/api';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useGitStore } from '../stores/gitStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { Recycle, GitPullRequest, Package, Layers } from './icons';
+import { useI18n } from '../lib/i18n';
+
+/**
+ * Tasks 15, 16, 17, 20 — footer indicators for Recyclable / Stashes /
+ * Submodules / LFS. Each shows a count badge; clicking navigates to the
+ * corresponding page.
+ *
+ * Task 18 — respects per-section visibility settings from
+ * settings.footerVisible.{recyclable,stashes,submodules,lfs}.
+ *
+ * Fetched lazily once on mount and re-fetched when gitStore.lastRefresh
+ * changes (so post-commit / post-stash the counts update automatically).
+ * Each counter is independent — failures land as 0 (hidden) so a missing
+ * LFS or empty submodule list never breaks the rest.
+ */
+export function FooterCounters() {
+  const repo = useRepositoryStore((s) => s.currentRepo);
+  const lastRefresh = useGitStore((s) => s.lastRefresh);
+  const footerVisible = useSettingsStore((s) => s.settings.footerVisible);
+  const { t } = useI18n();
+
+  const [recyclable, setRecyclable] = useState<number | null>(null);
+  const [stashes, setStashes] = useState<number | null>(null);
+  const [submodules, setSubmodules] = useState<number | null>(null);
+  const [lfs, setLfs] = useState<{ tracked: number } | null>(null);
+
+  useEffect(() => {
+    if (!repo) {
+      setRecyclable(null);
+      setStashes(null);
+      setSubmodules(null);
+      setLfs(null);
+      return;
+    }
+
+    let cancelled = false;
+    const fetch = async () => {
+      // Recyclable — count of unreachable reflog commits.
+      try {
+        const out = await api.git.raw(repo.path, ['reflog', '--all', '--format=%H']);
+        // Quick estimate: count unique hashes that aren't reachable from any ref.
+        // For perf, we just count reflog lines as a proxy; the actual
+        // recyclable list is computed by the Recyclable page on demand.
+        const count = out.split('\n').filter(Boolean).length;
+        if (!cancelled) setRecyclable(count);
+      } catch { if (!cancelled) setRecyclable(null); }
+
+      // Stashes.
+      try {
+        const out = await api.git.raw(repo.path, ['stash', 'list']);
+        const count = out.split('\n').filter(Boolean).length;
+        if (!cancelled) setStashes(count);
+      } catch { if (!cancelled) setStashes(null); }
+
+      // Submodules — count entries in .gitmodules directly.
+      // Why not `git submodule status`:
+      //   1. It fails with "no submodule mapping found in .gitmodules" when
+      //      the index has a gitlink (mode 160000) for a path no longer in
+      //      .gitmodules — common after manual submodule removal, filter
+      //      clones, or corrupted repos. The error floods the dev console.
+      //   2. It's slower than reading a single file.
+      //   3. We only need a COUNT here — full status (with commit hashes,
+      //      dirty state, etc.) is loaded on demand by the Submodules page.
+      try {
+        // Use git config to list submodule paths — works even when the
+        // gitlink in the index points to a path no longer in .gitmodules
+        // (we only count what's actually configured).
+        const out = await api.git.raw(repo.path, ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$']);
+        const count = out.split('\n').filter(Boolean).length;
+        if (!cancelled) setSubmodules(count);
+      } catch { if (!cancelled) setSubmodules(null); }
+
+      // LFS — check if .gitattributes has any 'filter=lfs' entries.
+      // Skip the lfsList call entirely when git-lfs is not installed —
+      // avoids "git: 'lfs' is not a git command" stderr noise.
+      try {
+        const installed = await api.git.isLfsInstalled(repo.path);
+        if (!installed) {
+          if (!cancelled) setLfs(null);
+        } else {
+          const tracked = await api.git.lfsList(repo.path);
+          if (!cancelled) setLfs({ tracked: tracked.length });
+        }
+      } catch { if (!cancelled) setLfs(null); }
+    };
+    void fetch();
+    return () => { cancelled = true; };
+  }, [repo, lastRefresh]);
+
+  if (!repo) return null;
+
+  const vis = footerVisible ?? {};
+  const show = (k: 'recyclable' | 'stashes' | 'submodules' | 'lfs') => vis[k] !== false;
+
+  return (
+    <div className="flex items-center gap-2">
+      {show('recyclable') && recyclable !== null && recyclable > 0 && (
+        <button
+          className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
+          onClick={() => { window.location.hash = '#/recyclable'; }}
+          title={t('footer.recyclableTooltip', { count: recyclable })}
+        >
+          <Recycle size={10} />
+          <span className="text-2xs">{recyclable}</span>
+        </button>
+      )}
+      {show('stashes') && stashes !== null && stashes > 0 && (
+        <button
+          className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
+          onClick={() => { window.location.hash = '#/stashes'; }}
+          title={t('footer.stashesTooltip', { count: stashes })}
+        >
+          <GitPullRequest size={10} />
+          <span className="text-2xs">{stashes}</span>
+        </button>
+      )}
+      {show('submodules') && submodules !== null && submodules > 0 && (
+        <button
+          className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
+          onClick={() => { window.location.hash = '#/submodules'; }}
+          title={t('footer.submodulesTooltip', { count: submodules })}
+        >
+          <Package size={10} />
+          <span className="text-2xs">{submodules}</span>
+        </button>
+      )}
+      {show('lfs') && lfs && lfs.tracked > 0 && (
+        <button
+          className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
+          onClick={() => { window.location.hash = '#/lfs'; }}
+          title={t('footer.lfsTooltip', { count: lfs.tracked })}
+        >
+          <Layers size={10} />
+          <span className="text-2xs">LFS:{lfs.tracked}</span>
+        </button>
+      )}
+    </div>
+  );
+}

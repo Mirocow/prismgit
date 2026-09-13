@@ -7,8 +7,18 @@
  * clipboard, directory scoping).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { useSelectionStore } from '../../src/stores/selectionStore';
 
 // --- api mock (vi.hoisted — factories run before module top-level code) -----
+const apiVscodeMock = vi.hoisted(() => ({
+  open: vi.fn().mockResolvedValue({ ok: true, via: 'cli' }),
+  openFileDiff: vi.fn().mockResolvedValue({ ok: true }),
+  openMerge: vi.fn().mockResolvedValue({ ok: true }),
+  openFileVersion: vi.fn().mockResolvedValue({ ok: true }),
+  openCommitFileDiff: vi.fn().mockResolvedValue({ ok: true }),
+  openCommitPatch: vi.fn().mockResolvedValue({ ok: true }),
+  openWorkspace: vi.fn().mockResolvedValue({ ok: true }),
+}));
 const apiGitMock = vi.hoisted(() => ({
   add: vi.fn().mockResolvedValue(undefined),
   resetFile: vi.fn().mockResolvedValue(undefined),
@@ -25,7 +35,7 @@ const apiGitMock = vi.hoisted(() => ({
   getIndexFlags: vi.fn().mockResolvedValue({ assumeUnchanged: false, skipWorktree: false, tracked: true }),
 }));
 
-vi.mock('../../src/lib/api', () => ({ api: { git: apiGitMock } }));
+vi.mock('../../src/lib/api', () => ({ api: { git: apiGitMock, vscode: apiVscodeMock } }));
 
 // --- dialogs mock (auto-confirm; configurable per test) ----------------------
 let confirmAnswer = true;
@@ -39,6 +49,8 @@ import {
   buildFileMenu,
   runFileAction,
   getIndexFlagsAsync,
+  actionTargets,
+  bulkSuffix,
   baseName,
   dirName,
   fullPathOf,
@@ -76,7 +88,7 @@ describe('buildFileMenu — changes mode', () => {
     expect(items).toContain('Reveal in File Manager');
     expect(items).toContain('Show Changes');
     expect(items).toContain('File History (Log)');
-    expect(items).toContain('Blame');
+    expect(items).toContain('Blame this file');
     expect(items).toContain('Stage');
     expect(items).toContain('Commit...');
     expect(items).toContain('Stash Selection...');
@@ -120,9 +132,14 @@ describe('buildFileMenu — changes mode', () => {
     expect(items).not.toContain("Toggle 'Skip Worktree'");
   });
 
-  it('offers Resolve Conflict for conflicted files', () => {
-    const items = labels(buildFileMenu(baseCtx({ isConflict: true })));
-    expect(items).toContain('Resolve Conflict...');
+  it('offers Resolve submenu for conflicted files', () => {
+    const items = buildFileMenu(baseCtx({ isConflicted: true }));
+    const labels = items.map(i => i.label).filter(Boolean);
+    // After the SmartGit-style refactor, the menu has a "Resolve" submenu
+    // (Take Ours / Take Theirs / Open Diff Tool / Discard) instead of a
+    // flat "Resolve Conflict..." item.
+    expect(labels).toContain('Resolve');
+    expect(labels).toContain('Resolve Conflict...');
   });
 });
 
@@ -132,12 +149,50 @@ describe('buildFileMenu — diff / history modes', () => {
     expect(items).not.toContain('Stage');
     expect(items).not.toContain('Discard Changes...');
     expect(items).not.toContain('Move or Rename...');
-    expect(items).toContain('Blame');
+    expect(items).toContain('Blame this file');
   });
 
   it('history mode adds Open in Diff tool', () => {
     const items = labels(buildFileMenu(baseCtx({ mode: 'history', onOpenDiff: vi.fn() })));
     expect(items).toContain('Open in Diff tool');
+  });
+});
+
+describe('VS Code commit archaeology — history mode with commitSha', () => {
+  it('offers version-open and parent-diff items ONLY when commitSha is present', () => {
+    const withSha = labels(buildFileMenu(baseCtx({ mode: 'history', commitSha: 'abc1234' })));
+    expect(withSha).toContain('Open this version in VS Code');
+    expect(withSha).toContain('Open file diff (parent vs commit) in VS Code');
+
+    const withoutSha = labels(buildFileMenu(baseCtx({ mode: 'history' })));
+    expect(withoutSha).not.toContain('Open this version in VS Code');
+    expect(withoutSha).not.toContain('Open file diff (parent vs commit) in VS Code');
+  });
+
+  it('changes mode never shows the commit-archaeology items', () => {
+    const items = labels(buildFileMenu(baseCtx({ mode: 'changes', commitSha: 'abc1234' })));
+    expect(items).not.toContain('Open this version in VS Code');
+    expect(items).not.toContain('Open file diff (parent vs commit) in VS Code');
+  });
+
+  it('open-vscode-version passes repo, commitSha and file to the IPC layer', async () => {
+    await runFileAction('open-vscode-version', baseCtx({ mode: 'history', commitSha: 'deadbeef' }));
+    expect(apiVscodeMock.openFileVersion).toHaveBeenCalledWith('/repo', 'deadbeef', 'src/app/main.ts');
+  });
+
+  it('open-vscode-commit-diff passes repo, commitSha and file to the IPC layer', async () => {
+    await runFileAction('open-vscode-commit-diff', baseCtx({ mode: 'history', commitSha: 'feedface' }));
+    expect(apiVscodeMock.openCommitFileDiff).toHaveBeenCalledWith('/repo', 'feedface', 'src/app/main.ts');
+  });
+
+  it('open-vscode-version is a no-op without commitSha', async () => {
+    await runFileAction('open-vscode-version', baseCtx({ mode: 'history' }));
+    expect(apiVscodeMock.openFileVersion).not.toHaveBeenCalled();
+  });
+
+  it('open-vscode-diff still routes to the working-tree diff (HEAD vs WT)', async () => {
+    await runFileAction('open-vscode-diff', baseCtx({ mode: 'changes' }));
+    expect(apiVscodeMock.openFileDiff).toHaveBeenCalledWith('/repo', 'src/app/main.ts');
   });
 });
 
@@ -263,5 +318,165 @@ describe('helpers', () => {
     expect(dirName('src/app/main.ts')).toBe('src/app');
     expect(dirName('README.md')).toBe('');
     expect(fullPathOf('/repo', 'src/a.ts')).toBe('/repo/src/a.ts');
+  });
+});
+
+// =====================================================================
+// Multi-selection (Ctrl/Cmd+click, Ctrl/Cmd+A): bulk menu operations
+// =====================================================================
+describe('multi-selection — actionTargets / bulkSuffix', () => {
+  it('falls back to the clicked file when no selection is given', () => {
+    expect(actionTargets({ path: 'a.ts' })).toEqual(['a.ts']);
+    expect(actionTargets({ path: 'a.ts', paths: [] })).toEqual(['a.ts']);
+    expect(bulkSuffix({ path: 'a.ts' })).toBe('');
+  });
+
+  it('returns the full selection (dedup, always includes the clicked file)', () => {
+    expect(actionTargets({ path: 'b.ts', paths: ['a.ts', 'b.ts', 'c.ts'] }))
+      .toEqual(['a.ts', 'b.ts', 'c.ts']);
+    // clicked file missing from the selection → still included first
+    expect(actionTargets({ path: 'z.ts', paths: ['a.ts', 'b.ts'] }))
+      .toEqual(['z.ts', 'a.ts', 'b.ts']);
+    // duplicates are dropped
+    expect(actionTargets({ path: 'a.ts', paths: ['a.ts', 'a.ts', 'b.ts'] }))
+      .toEqual(['a.ts', 'b.ts']);
+    expect(bulkSuffix({ path: 'b.ts', paths: ['a.ts', 'b.ts', 'c.ts'] })).toBe(' (3 files)');
+  });
+});
+
+describe('multi-selection — buildFileMenu labels show the file count', () => {
+  const multi = { paths: ['a.ts', 'b.ts', 'c.ts'], path: 'a.ts' };
+
+  it('annotates bulk operations with " (N files)"', () => {
+    const items = labels(buildFileMenu(baseCtx(multi)));
+    expect(items).toContain('Open (3 files)');
+    expect(items).toContain('Reveal in File Manager (3 files)');
+    expect(items).toContain('Stage (3 files)');
+    expect(items).toContain('Stash Selection... (3 files)');
+    expect(items).toContain('Discard Changes... (3 files)');
+    expect(items).toContain('Restore from Ref... (3 files)');
+    expect(items).toContain('Remove... (3 files)');
+  });
+
+  it('annotates staged bulk operations too', () => {
+    const items = labels(buildFileMenu(baseCtx({ ...multi, isStaged: true })));
+    expect(items).toContain('Unstage (3 files)');
+    expect(items).toContain('Discard Staged Changes... (3 files)');
+  });
+
+  it('single-file menu keeps the plain labels', () => {
+    const items = labels(buildFileMenu(baseCtx()));
+    expect(items).toContain('Stage');
+    expect(items).not.toContain('Stage (1 files)');
+  });
+});
+
+describe('multi-selection — runFileAction bulk operations', () => {
+  const multi = { paths: ['a.ts', 'b.ts', 'c.ts'], path: 'a.ts' };
+
+  it('stages EVERY selected file in one git add call', async () => {
+    const ctx = baseCtx(multi);
+    const handled = await runFileAction('stage', ctx);
+    expect(handled).toBe(true);
+    expect(apiGitMock.add).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.add).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
+    expect(ctx.refresh).toHaveBeenCalled();
+  });
+
+  it('unstages EVERY selected file', async () => {
+    await runFileAction('unstage', baseCtx({ ...multi, isStaged: true }));
+    expect(apiGitMock.resetFile).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.resetFile).toHaveBeenCalledWith('/repo', 'a.ts');
+    expect(apiGitMock.resetFile).toHaveBeenCalledWith('/repo', 'c.ts');
+  });
+
+  it('stashes EVERY selected file with one prompt', async () => {
+    promptAnswer = 'WIP: batch';
+    await runFileAction('stash-file', baseCtx(multi));
+    expect(apiGitMock.stashPush).toHaveBeenCalledWith('/repo', 'WIP: batch', false, false, ['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('discards EVERY selected file after ONE confirmation', async () => {
+    confirmAnswer = true;
+    await runFileAction('discard', baseCtx(multi));
+    expect(apiGitMock.restore).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.restore).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('discarding a multi staged selection unstages AND restores all', async () => {
+    confirmAnswer = true;
+    await runFileAction('discard', baseCtx({ ...multi, isStaged: true }));
+    expect(apiGitMock.resetFile).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.restore).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('restores EVERY selected file from the prompted ref', async () => {
+    promptAnswer = 'HEAD~1';
+    await runFileAction('restore-from-ref', baseCtx(multi));
+    expect(apiGitMock.checkoutFile).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.checkoutFile).toHaveBeenCalledWith('/repo', 'c.ts', 'HEAD~1');
+  });
+
+  it('deletes EVERY selected file after ONE confirmation', async () => {
+    confirmAnswer = true;
+    await runFileAction('delete-file', baseCtx(multi));
+    expect(apiGitMock.deleteFile).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.deleteFile).toHaveBeenCalledWith('/repo', 'b.ts');
+  });
+
+  it('does not delete anything when the bulk confirmation is declined', async () => {
+    confirmAnswer = false;
+    await runFileAction('delete-file', baseCtx(multi));
+    expect(apiGitMock.deleteFile).not.toHaveBeenCalled();
+  });
+
+  it('ignores EVERY selected untracked file', async () => {
+    await runFileAction('ignore', baseCtx({ ...multi, isUntracked: true, indexFlags: undefined }));
+    expect(apiGitMock.ignore).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('toggles an index flag on EVERY selected file', async () => {
+    await runFileAction('toggle-skip-worktree', baseCtx(multi));
+    expect(apiGitMock.setIndexFlag).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.setIndexFlag).toHaveBeenCalledWith('/repo', 'a.ts', 'skip-worktree', true);
+    expect(apiGitMock.setIndexFlag).toHaveBeenCalledWith('/repo', 'b.ts', 'skip-worktree', true);
+  });
+
+  it('copies ALL selected paths (one per line) in the three copy variants', async () => {
+    await runFileAction('copy-name', baseCtx(multi));
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('a.ts\nb.ts\nc.ts');
+
+    await runFileAction('copy-rel-path', baseCtx(multi));
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('a.ts\nb.ts\nc.ts');
+
+    await runFileAction('copy-full-path', baseCtx({ path: 'src/a.ts', paths: ['src/a.ts', 'src/b.ts'] }));
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('/repo/src/a.ts\n/repo/src/b.ts');
+  });
+
+  it('opens/reveals EVERY selected file', async () => {
+    await runFileAction('open', baseCtx(multi));
+    expect(apiGitMock.openFile).toHaveBeenCalledTimes(3);
+    expect(apiGitMock.openFile).toHaveBeenCalledWith('/repo/b.ts');
+
+    await runFileAction('reveal', baseCtx(multi));
+    expect(apiGitMock.revealInFileManager).toHaveBeenCalledTimes(3);
+  });
+
+  it('navigation actions stay on the CLICKED file (blame, file history)', async () => {
+    const sel = useSelectionStore.getState();
+    const selectFileSpy = vi.spyOn(sel, 'selectFile');
+    await runFileAction('blame', baseCtx(multi));
+    expect(selectFileSpy).toHaveBeenLastCalledWith('a.ts');
+    selectFileSpy.mockRestore();
+  });
+
+  it('single-file behavior is unchanged (no paths in ctx)', async () => {
+    confirmAnswer = true;
+    await runFileAction('stage', baseCtx());
+    expect(apiGitMock.add).toHaveBeenCalledWith('/repo', ['src/app/main.ts']);
+
+    await runFileAction('delete-file', baseCtx());
+    expect(apiGitMock.deleteFile).toHaveBeenCalledTimes(1);
+    expect(apiGitMock.deleteFile).toHaveBeenCalledWith('/repo', 'src/app/main.ts');
   });
 });

@@ -1,29 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import type { AppSettings } from '../../electron/types/settings-api';
+import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
+import { CommitTypeDropdown } from '../components/CommitTypeDropdown';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronsDownUp, ChevronsUpDown, Download, EyeOff, Folder, FolderOpen, GitCommit, GitPullRequest, Minus, Plus, RefreshCw, RotateCcw, Trash, X, Sparkles } from '../components/icons';
+import { FilterInput } from '../components/FilterInput';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FilePlus, FileCheck, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Loader, Lock, Minus, Plus, PlugZap, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { LazyFileList } from '../components/LazyFileList';
+import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
-import { LazyFileList } from '../components/LazyFileList';
-import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
+import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, generateCommitMessageStream, type LLMProvider } from '../lib/aiCommitMessages';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
-import { useContextMenu } from '../lib/useContextMenu';
-import { buildFileMenu, runFileAction, getIndexFlagsAsync, type IndexFlags } from '../lib/fileContextMenu';
-import { RefBadges } from '../lib/refBadge';
+import { buildFileMenu, getIndexFlagsAsync, invalidateIndexFlagsCache, runFileAction, type IndexFlags } from '../lib/fileContextMenu';
+import { useI18n } from '../lib/i18n';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
+import { describePushResult } from '../lib/pushResult';
+import { RefBadges } from '../lib/refBadge';
+import { isCommitBlocked } from '../lib/repoState';
+import { useContextMenu } from '../lib/useContextMenu';
 import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useSelectionStore } from '../stores/selectionStore';
+import { useSelectionStore, type FileDisplayFlag } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore } from '../stores/toastStore';
-import { generateCommitMessage, applyAIPlaceholder, detectAIPlaceholder, type LLMProvider } from '../lib/aiCommitMessages';
-import type { AppSettings } from '../../electron/types/settings-api';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 
-import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 /** Build an LLMProvider from settings, or null if not configured. */
 function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvider | null {
@@ -45,6 +51,10 @@ function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvide
 
 interface ChangesPageProps {
   onResolveConflict?: (file: string) => void;
+  /** Inline per-file conflict resolution — Take ours / Take theirs / Take both / Mark resolved.
+   *  Wired to the App.tsx resolveConflict handler so these run the same git commands
+   *  as the menu-driven actions (git checkout --ours/--theirs + git add). */
+  onResolveConflictAction?: (file: string, mode: 'ours' | 'theirs' | 'both' | 'resolved') => void;
 }
 
 type FileSortKey = 'name' | 'state' | 'dir';
@@ -68,6 +78,7 @@ function SortableHeader({
   /** When set, renders a drag handle on the column's left edge to resize it. */
   onResizeStart?: (e: ReactMouseEvent) => void;
 }) {
+  const { t } = useI18n();
   const active = sort.key === sortKey;
   return (
     <button
@@ -78,7 +89,7 @@ function SortableHeader({
       )}
       style={width ? { width } : { flex: 1 }}
       onClick={() => onSort(sortKey)}
-      title={`Sort by ${label.toLowerCase()}`}
+      title={t('changes.sortBy', { what: label.toLowerCase() })}
     >
       <span className="truncate">{label}</span>
       {active ? (
@@ -93,7 +104,7 @@ function SortableHeader({
         // the handle discoverable; the 12px hit area stays forgiving.
         <span
           className="absolute -left-1.5 -top-1 -bottom-1 w-3 z-20 cursor-col-resize flex items-center"
-          title="Drag to resize column"
+          title={t('changes.dragResizeColumn')}
           onMouseDown={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -108,11 +119,22 @@ function SortableHeader({
   );
 }
 
-export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
+export function ChangesPage({ onResolveConflict, onResolveConflictAction }: ChangesPageProps = {}) {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const { status, lastRefresh, refreshStatus, stageFiles, stageAll, commit, push, pull } = useGitStore();
+  // Granular selectors — previously destructured the whole store so any
+  // state change (e.g. clone progress, fetch metadata) re-rendered the
+  // entire 1969-line page. Now only `status` changes trigger re-render.
+  const status = useGitStore((s) => s.status);
+  const lastRefresh = useGitStore((s) => s.lastRefresh);
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const stageFiles = useGitStore((s) => s.stageFiles);
+  const stageAll = useGitStore((s) => s.stageAll);
+  const commit = useGitStore((s) => s.commit);
+  const push = useGitStore((s) => s.push);
+  const pull = useGitStore((s) => s.pull);
   const settings = useSettingsStore((s) => s.settings);
-  const toast = useToastStore();
+  const toast = useToastActions();
 
   // Listen for conflict resolution requests from GitToolbar
   useEffect(() => {
@@ -127,17 +149,13 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   }, [onResolveConflict]);
   // Global UI state for file filtering and tree mode
   const fileViewMode = useSelectionStore((s) => s.fileViewMode);
-  const separateStagedView = useSelectionStore((s) => s.separateStagedView);
-  const setSeparateStagedView = useSelectionStore((s) => s.setSeparateStagedView);
+  const setFileViewMode = useSelectionStore((s) => s.setFileViewMode);
   const groupByState = useSelectionStore((s) => s.groupByState);
   const setGroupByState = useSelectionStore((s) => s.setGroupByState);
   const compressFilePaths = useSelectionStore((s) => s.compressFilePaths);
   const setCompressFilePaths = useSelectionStore((s) => s.setCompressFilePaths);
-  const fileStatusFilter = useSelectionStore((s) => s.fileStatusFilter);
-  const setFileStatusFilter = useSelectionStore((s) => s.setFileStatusFilter);
-  const fileStatusFilterSet = useSelectionStore((s) => s.fileStatusFilterSet);
-  const toggleFileStatusFilter = useSelectionStore((s) => s.toggleFileStatusFilter);
-  const clearFileStatusFilterSet = useSelectionStore((s) => s.clearFileStatusFilterSet);
+  const fileDisplayFlags = useSelectionStore((s) => s.fileDisplayFlags);
+  const toggleFileDisplayFlag = useSelectionStore((s) => s.toggleFileDisplayFlag);
   const fileScopeDir = useSelectionStore((s) => s.fileScopeDir);
   const setFileScopeDir = useSelectionStore((s) => s.setFileScopeDir);
   const fileSort = useSelectionStore((s) => s.fileSort);
@@ -148,6 +166,17 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const toggleDirTreeVisible = useSelectionStore((s) => s.toggleDirTreeVisible);
   const colWidths = useSelectionStore((s) => s.colWidths);
   const setColWidth = useSelectionStore((s) => s.setColWidth);
+
+  // Sync 'subdirectories' flag with file scope:
+  //   subdirectories ON  → show files from current dir AND all subdirectories
+  //   subdirectories OFF → show files from current dir ONLY (no subdirectories)
+  //   The "current dir" is fileScopeDir (null = repo root, or a folder selected
+  //   in the directory tree panel).
+  //
+  //   We store this as a separate flag `showSubdirs` and use it in matchesDirScope
+  //   rather than overwriting fileScopeDir — that way the user's tree-panel
+  //   selection is preserved when toggling subdirectories on/off.
+  const showSubdirs = fileDisplayFlags.has('subdirectories');
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const fileExtensionFilter = useSelectionStore((s) => s.fileExtensionFilter);
   const setFileExtensionFilter = useSelectionStore((s) => s.setFileExtensionFilter);
@@ -158,6 +187,18 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   // selectedFilePath, so History/Blame/Diff and the global menu actions
   // (Stage/Unstage/Discard/Ignore/Index Editor) all operate on the SAME file.
   const selectFileGlobal = useSelectionStore((s) => s.selectFile);
+  // Reverse sync: when ANOTHER tool selects a file globally (Annotate, LFS,
+  // Investigate, Diff, History, deep link), Changes highlights it and loads
+  // its diff. Equal values (own write-through) are ignored — no loop.
+  const globalSelectedFilePath = useSelectionStore((s) => s.selectedFilePath);
+  const selectedFileRef = useRef(selectedFile);
+  selectedFileRef.current = selectedFile;
+  useEffect(() => {
+    if (!globalSelectedFilePath) return;
+    if (globalSelectedFilePath === selectedFileRef.current) return;
+    setSelectedFile(globalSelectedFilePath);
+    setSelectedFiles(new Set([globalSelectedFilePath]));
+  }, [globalSelectedFilePath]);
 
   const handleFileClick = (e: React.MouseEvent, filePath: string) => {
     if (e.ctrlKey || e.metaKey) {
@@ -187,17 +228,47 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       selectFileGlobal(filePath);
     }
   };
+
+  // Double-click on a file row:
+  //   - If the file is conflicted → dispatch 'smartgit:resolve-conflict' (opens 3-way merge panel)
+  //   - If the file is NOT conflicted → open in Diff tool (navigate to #/diff with file selected)
+  const handleFileDoubleClick = (filePath: string) => {
+    const isConflicted = (status?.conflicted ?? []).includes(filePath);
+    if (isConflicted) {
+      // Resolve conflict — same as right-click → "Resolve Conflict..."
+      window.dispatchEvent(new CustomEvent('smartgit:resolve-conflict', { detail: { file: filePath } }));
+    } else {
+      // Open in Diff tool — select file globally and navigate to #/diff
+      selectFileGlobal(filePath);
+      window.location.hash = '#/diff';
+    }
+  };
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [commitMsg, setCommitMsg] = useState('');
   const [amend, setAmend] = useState(false);
+  // ── Auto-suggest commit message ───────────────────────────────────────
+  // When the user stages files and the commit message is empty, the AI
+  // suggests a commit message after a 2s debounce. Non-blocking — runs
+  // in the background, doesn't freeze the UI. The suggestion appears as
+  // a subtle hint above the textarea; clicking it fills the field.
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [aiSuggesting, setAiSuggesting] = useState(false);
+  const aiSuggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aiSuggestAbortRef = useRef<AbortController | null>(null);
   // When true, commit auto-stages all changes before committing (git add . && git commit)
   const [commitAll, setCommitAll] = useState(false);
   const [fileFilter, setFileFilter] = useState('');
   const [draggedFile, setDraggedFile] = useState<string | null>(null);
   const [journal, setJournal] = useState<LogEntry[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
-  const [showSplitView, setShowSplitView] = useState(true);
+  // Journal panel collapsed state — when true, only the header bar is shown.
+  // Task 9 — default to COLLAPSED so the journal doesn't grab vertical
+  // real estate from the diff/commit-message editor on first open.
+  // Users who expand it will get the persisted expanded state (saved by
+  // the projectPrefs effect below).
+  const [journalCollapsed, setJournalCollapsed] = useState(true);
+  const [showSplitView, setShowSplitView] = useState(false);
   const { width: leftWidth, setWidth: setLeftWidth, handleResize: handleLeftResize } = useResizableWidth(500, 250, 800);
   const { width: treeWidth, setWidth: setTreeWidth, handleResize: handleTreeResize } = useResizableWidth(210, 140, 380);
   const { height: journalHeight, setHeight: setJournalHeight, handleResize: handleJournalResize } = useResizableHeight(180, 60, 400);
@@ -206,6 +277,22 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const [dirTree, setDirTree] = useState<DirNode[]>([]);
   const [dirTreeLoading, setDirTreeLoading] = useState(false);
   const [trackedTotal, setTrackedTotal] = useState(0);
+  /** Full list of tracked file paths (from git ls-files). Used for:
+   *  - 'unchanged' flag → show tracked files that have no changes
+   *  - hiddenCount calculation
+   */
+  const [trackedFilesList, setTrackedFilesList] = useState<string[]>([]);
+  /** Git-ignored files (from git status --porcelain --ignored). Used for
+   *  the 'ignored' display flag. */
+  const [ignoredFiles, setIgnoredFiles] = useState<string[]>([]);
+  /** Assume-unchanged files (from git ls-files -v). Used for the
+   *  'assumeUnchanged' display flag. */
+  const [assumeUnchangedFiles, setAssumeUnchangedFiles] = useState<string[]>([]);
+  /** Skip-worktree files (from git ls-files -v). Used for the
+   *  'skipped' display flag. */
+  const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
+  /** Submodule change entries. Used for the 'submodules' display flag. */
+  const [submoduleChanges, setSubmoduleChanges] = useState<string[]>([]);
   // Per-file line-change counts for the Changes table (+N -M), like History.
   const [numstat, setNumstat] = useState<{ staged: Map<string, { add: number; del: number; binary: boolean }>; unstaged: Map<string, { add: number; del: number; binary: boolean }> }>({
     staged: new Map(),
@@ -246,7 +333,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         const result = await api.git.diff(repo.path, file, { staged });
         setDiff(result);
       } catch (e) {
-        toast.error('Failed to load diff', String(e));
+        toast.error(t('changes.loadDiffFailed'), String(e));
         setDiff(null);
       } finally {
         setDiffLoading(false);
@@ -260,12 +347,17 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     try {
       const result = await api.git.log(repo.path, { maxCount: 20 });
       setJournal(result);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      // Previously this was a silent catch — but it hid real bugs (the most
+      // common: index.lock from a previous failed git operation, or the
+      // repo path being inside a parent .git directory). Surface the error
+      // via toast so the user knows WHY their commit history is empty after
+      // they just made a commit.
+      toast.error(t('changes.loadJournalFailed') || 'Failed to load commit history', String(e));
     } finally {
       setJournalLoading(false);
     }
-  }, [repo.path]);
+  }, [repo.path, toast, t]);
 
   // Load diff when selected file changes — debounced to avoid multiple calls
   // when status refreshes or multiple events fire simultaneously.
@@ -295,21 +387,98 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const loadDirTree = useCallback(async () => {
     setDirTreeLoading(true);
     try {
-      const tree = await api.git.listDirectories(repo.path);
+      // When 'ignored' flag is ON, load ALL directories (including
+      // node_modules, dist, etc.) so the user can browse ignored content.
+      // Otherwise, use the default which skips VCS/build directories.
+      const showIgnored = fileDisplayFlags.has('ignored');
+      const tree = showIgnored
+        ? await api.git.listAllDirectories(repo.path)
+        : await api.git.listDirectories(repo.path);
       setDirTree(tree);
     } catch {
       setDirTree([]);
     } finally {
       setDirTreeLoading(false);
     }
-  }, [repo.path]);
+  }, [repo.path, fileDisplayFlags]);
 
   const loadTrackedCount = useCallback(async () => {
     try {
       const out = await api.git.raw(repo.path, ['ls-files']);
-      setTrackedTotal(out ? out.split('\n').filter(Boolean).length : 0);
+      const list = out ? out.split('\n').filter(Boolean) : [];
+      setTrackedTotal(list.length);
+      setTrackedFilesList(list);
     } catch {
       setTrackedTotal(0);
+      setTrackedFilesList([]);
+    }
+  }, [repo.path]);
+
+  /** Load git-ignored files for the 'ignored' display flag.
+   *  Uses `git status --porcelain --ignored` which respects .gitignore rules
+   *  and returns both files and directories. */
+  const loadIgnored = useCallback(async () => {
+    try {
+      const out = await api.git.raw(repo.path, ['status', '--porcelain', '--ignored']);
+      const list = out.split('\n')
+        .filter(l => l.startsWith('!! '))
+        .map(l => l.slice(3).trim())
+        .filter(Boolean);
+      setIgnoredFiles(list);
+    } catch {
+      setIgnoredFiles([]);
+    }
+  }, [repo.path]);
+
+  /** Load assume-unchanged + skip-worktree files via `git ls-files -v`.
+   *  Lines starting with lowercase letter (h,k,l,m,n) = assume-unchanged.
+   *  Lines starting with 'S' = skip-worktree. */
+  const loadIndexFlags = useCallback(async () => {
+    try {
+      const out = await api.git.raw(repo.path, ['ls-files', '-v']);
+      const assumeUnchanged: string[] = [];
+      const skipped: string[] = [];
+      for (const line of out.split('\n').filter(Boolean)) {
+        const tag = line[0];
+        const path = line.slice(1).trim();
+        if (!path) continue;
+        // Lowercase tags = assume-unchanged (h, k, l, m, n)
+        if (tag === 'h' || tag === 'k' || tag === 'l' || tag === 'm' || tag === 'n') {
+          assumeUnchanged.push(path);
+        }
+        // 'S' = skip-worktree
+        if (tag === 'S') {
+          skipped.push(path);
+        }
+      }
+      setAssumeUnchangedFiles(assumeUnchanged);
+      setSkippedFiles(skipped);
+    } catch {
+      setAssumeUnchangedFiles([]);
+      setSkippedFiles([]);
+    }
+  }, [repo.path]);
+
+  /** Load submodule changes via `git submodule summary`. */
+  const loadSubmoduleChanges = useCallback(async () => {
+    try {
+      const out = await api.git.raw(repo.path, ['submodule', 'summary']);
+      // Format: '* <hash> <name> <commits>
+      //          <commit lines>
+      // Lines starting with '* ' are submodule entries with changes
+      const list: string[] = [];
+      for (const line of out.split('\n')) {
+        if (line.startsWith('* ') || line.startsWith(' * ')) {
+          // Extract submodule path: '* <hash> <path> <count>'
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 3) {
+            list.push(parts[2]); // path is the 3rd element
+          }
+        }
+      }
+      setSubmoduleChanges(list);
+    } catch {
+      setSubmoduleChanges([]);
     }
   }, [repo.path]);
 
@@ -345,8 +514,11 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   useEffect(() => {
     loadDirTree();
     loadTrackedCount();
+    loadIgnored();
+    loadIndexFlags();
+    loadSubmoduleChanges();
     loadNumstat();
-  }, [loadDirTree, loadTrackedCount, loadNumstat, lastRefresh, status]);
+  }, [loadDirTree, loadTrackedCount, loadIgnored, loadIndexFlags, loadSubmoduleChanges, loadNumstat, lastRefresh, status]);
 
   // Reset folder scope and tree expansion when switching repositories
   useEffect(() => {
@@ -390,12 +562,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   // column's visible boundary moved LEFT). With the handle on the column's
   // left boundary and width = start - dx, the boundary under the mouse tracks
   // the cursor 1:1 in both directions — the expected table-resize feel.
-  const startColResize = (e: ReactMouseEvent, col: 'state' | 'dir') => {
+  const startColResize = (e: ReactMouseEvent, col: 'state' | 'dir' | 'name') => {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = colWidths[col];
-    const min = col === 'state' ? 46 : 50;
-    const max = col === 'state' ? 220 : 480;
+    const min = col === 'state' ? 46 : col === 'dir' ? 50 : 100;
+    const max = col === 'state' ? 220 : col === 'dir' ? 480 : 800;
     const onMove = (ev: MouseEvent) => {
       setColWidth(col, Math.max(min, Math.min(max, startWidth - (ev.clientX - startX))));
     };
@@ -435,9 +607,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const handleStageAll = async () => {
     try {
       await stageAll(repo.path);
-      toast.success('All changes staged');
+      toast.success(t('changes.allChangesStaged'));
     } catch (e) {
-      toast.error('Failed to stage', String(e));
+      toast.error(t('changes.stageFailed'), String(e));
     }
   };
 
@@ -445,7 +617,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     try {
       await stageFiles(repo.path, [file]);
     } catch (e) {
-      toast.error('Failed to stage file', String(e));
+      toast.error(t('changes.stageFileFailed'), String(e));
     }
   };
 
@@ -455,33 +627,33 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       await api.git.resetFile(repo.path, file);
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Failed to unstage', String(e));
+      toast.error(t('changes.unstageFailed'), String(e));
     }
   };
 
   const handleRestoreFile = async (file: string) => {
     if (!(await confirmDialog({
-      title: 'Restore file',
-      message: `Restore '${file}' to the last commit?\nLocal changes will be lost.`,
-      confirmLabel: 'Restore',
+      title: t('changes.restoreFileTitle'),
+      message: t('changes.restoreFileConfirm', { file }),
+      confirmLabel: t('changes.restore'),
       danger: true,
     }))) return;
     try {
       await api.git.restore(repo.path, [file]);
-      toast.success('File restored');
+      toast.success(t('changes.fileRestored'));
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Restore failed', String(e));
+      toast.error(t('changes.restoreFailed'), String(e));
     }
   };
 
   const handleIgnoreFile = async (file: string) => {
     try {
       await api.git.ignore(repo.path, [file]);
-      toast.success('Added to .gitignore');
+      toast.success(t('changes.addedToGitignore'));
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Failed to ignore', String(e));
+      toast.error(t('changes.ignoreFailed'), String(e));
     }
   };
 
@@ -502,7 +674,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       setCleanPreview(result);
       setShowCleanDialog(true);
     } catch (e) {
-      toast.error('Clean preview failed', String(e));
+      toast.error(t('changes.cleanPreviewFailed'), String(e));
     } finally {
       setCleanBusy(false);
     }
@@ -512,11 +684,11 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     setCleanBusy(true);
     try {
       const removed = await api.git.clean(repo.path, [], false, true, true);
-      toast.success(`Removed ${removed.length} path${removed.length === 1 ? '' : 's'}`);
+      toast.success(removed.length === 1 ? t('changes.removedOnePath') : t('changes.removedNPaths', { count: removed.length }));
       setShowCleanDialog(false);
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Clean failed', String(e));
+      toast.error(t('changes.cleanFailed'), String(e));
     } finally {
       setCleanBusy(false);
     }
@@ -524,19 +696,19 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
 
   const handleDeleteFile = async (file: string) => {
     if (!(await confirmDialog({
-      title: 'Delete file',
-      message: `Delete '${file}'? This cannot be undone.`,
-      confirmLabel: 'Delete',
+      title: t('changes.deleteFileTitle'),
+      message: t('changes.deleteFileConfirm', { file }),
+      confirmLabel: t('common.delete'),
       danger: true,
     }))) return;
     try {
       // deleteFile handles BOTH tracked (git rm -f) and untracked (fs delete)
       // files — the old `git rm`-only version silently failed for untracked.
       await api.git.deleteFile(repo.path, file);
-      toast.success('File deleted');
+      toast.success(t('changes.fileDeleted'));
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Delete failed', String(e));
+      toast.error(t('changes.deleteFailed'), String(e));
     }
   };
 
@@ -545,18 +717,31 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       const fullPath = `${repo.path}/${file}`.replace(/\/+/g, '/');
       await api.git.revealInFileManager(fullPath);
     } catch (e) {
-      toast.error('Failed to reveal', String(e));
+      toast.error(t('changes.revealFailed'), String(e));
     }
   };
 
   const handleCommit = async () => {
     if (!commitMsg.trim()) {
-      toast.warning('Commit message is required');
+      toast.warning(t('changes.commitMessageRequired'));
+      return;
+    }
+    // SmartGit: while the working tree is in a sequencer state (cherry-pick /
+    // revert / rebase / bisect) only the state-resolving actions are allowed —
+    // a plain commit would consume the operation. MERGE is the exception: a
+    // plain commit is THE way to complete a (conflicted) merge.
+    if (isCommitBlocked(status)) {
+      toast.warning(
+        status?.isCherryPicking ? 'Cherry-pick in progress'
+          : status?.isReverting ? 'Revert in progress'
+          : status?.isRebasing ? 'Rebase in progress'
+          : 'Bisect in progress',
+        'Finish it first: use the buttons in the banner above'
+      );
       return;
     }
     try {
       // SmartGit Manual: AI Commit Messages — @ai placeholder → replace with AI-generated
-      // message; WIP (entire message) → "WIP: <ai message>"
       let finalMsg = commitMsg.trim();
       const placeholder = detectAIPlaceholder(finalMsg);
       if (placeholder && settings?.aiCommitMessagesEnabled) {
@@ -572,9 +757,9 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             });
             finalMsg = applyAIPlaceholder(finalMsg, aiMessage, placeholder);
             setCommitMsg(finalMsg);
-            toast.success('AI message generated', 'Review and commit');
+            toast.success(t('changes.aiMessageGenerated'), t('changes.reviewAndCommit'));
           } catch (e) {
-            toast.warning('AI generation failed — keeping placeholder', String(e));
+            toast.warning(t('changes.aiGenFailedPlaceholder'), String(e));
             return;
           } finally {
             setAiGenerating(false);
@@ -586,45 +771,108 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         await stageAll(repo.path);
       }
       const hash = await commit(repo.path, finalMsg, amend);
-      toast.success('Commit created', `Hash: ${hash.substring(0, 7)}`);
+      toast.success(t('status.commitCreated'), t('changes.hashDetail', { hash: hash.substring(0, 7) }));
+      // Save commit message to per-project history for reuse
+      const prefs = loadProjectPrefs(repo.path);
+      const history = prefs.commitMessageHistory || [];
+      // Deduplicate: remove the same message if it already exists
+      const filtered = history.filter(m => m !== finalMsg);
+      // Add to front, cap at 50 entries
+      const newHistory = [finalMsg, ...filtered].slice(0, 50);
+      saveProjectPrefs(repo.path, { commitMessageHistory: newHistory });
+      setCommitMsgHistory(newHistory);
       setCommitMsg('');
       setAmend(false);
       setCommitAll(false);
       await loadJournal();
     } catch (e) {
-      toast.error('Commit failed', String(e));
+      toast.error(t('changes.commitFailed'), String(e));
     }
   };
 
   // AI Commit Messages helper — builds an LLMProvider from settings
   const [aiGenerating, setAiGenerating] = useState(false);
+  // Commit message history dropdown
+  const [showMsgHistory, setShowMsgHistory] = useState(false);
+  const [commitMsgHistory, setCommitMsgHistory] = useState<string[]>([]);
+
+  /**
+   * QW-3 — apply a Conventional-Commits prefix ('feat', 'fix', …) to the
+   * commit-message textarea.
+   *  - If textarea is empty → insert `${type}: `.
+   *  - If textarea already starts with `<one of the 11 types>: ` → strip the
+   *    existing prefix and replace with `${type}: ` (so users can switch
+   *    feat → fix without manually editing).
+   *  - Otherwise → prepend `${type}: ` to the existing text.
+   * Also re-focuses the textarea and moves the caret to the end so the user
+   * can keep typing.
+   */
+  const handlePickCommitType = useCallback((type: string) => {
+    const CONVENTIONAL_PREFIX = /^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert):\s/;
+    setCommitMsg((prev) => {
+      const stripped = prev.replace(CONVENTIONAL_PREFIX, '');
+      const trimmed = stripped.replace(/^\s+/, '');
+      return trimmed.length === 0 ? `${type}: ` : `${type}: ${trimmed}`;
+    });
+    // Re-focus the textarea at end so the user can continue typing.
+    requestAnimationFrame(() => {
+      const ta = document.getElementById('commit-message-input') as HTMLTextAreaElement | null;
+      if (ta) {
+        ta.focus();
+        const end = ta.value.length;
+        ta.setSelectionRange(end, end);
+      }
+    });
+  }, [setCommitMsg]);
+
+  // Load commit message history when repo changes
+  useEffect(() => {
+    if (repo) {
+      const prefs = loadProjectPrefs(repo.path);
+      setCommitMsgHistory(prefs.commitMessageHistory || []);
+    }
+  }, [repo?.path]);
 
   const handleAIGenerate = async () => {
     if (!settings?.aiCommitMessagesEnabled) {
-      toast.warning('AI integration is disabled', 'Enable it in Settings → AI Commit Messages');
+      toast.warning(t('changes.aiDisabled'), t('changes.aiEnableHint'));
       return;
     }
     const provider = buildAIProvider(settings);
     if (!provider) {
-      toast.warning('No AI provider configured', 'Set provider in Settings');
+      toast.warning(t('changes.aiNoProvider'), t('changes.aiSetProviderHint'));
       return;
     }
     setAiGenerating(true);
     try {
       const diffText = await buildDiffForAI();
       if (!diffText.trim()) {
-        toast.info('No changes to generate a commit message for');
+        toast.info(t('changes.aiNoChanges'));
         return;
       }
-      const aiMessage = await generateCommitMessage({
+      // LAR-1 — streaming AI: tokens arrive as they're generated, so the
+      // user sees the commit message compose itself in real time.
+      setCommitMsg(''); // clear the textarea so we can stream into it
+      let accumulated = '';
+      for await (const _tok of generateCommitMessageStream({
         diff: diffText,
         provider,
         recentMessages: journal.slice(0, 5).map(j => j.subject),
-      });
-      setCommitMsg(aiMessage);
-      toast.success('AI message generated', 'Review before committing');
+      }, {
+        onToken: (token) => {
+          accumulated += token;
+          setCommitMsg(accumulated);
+        },
+      })) {
+        // tokens are applied via the onToken callback above; we don't
+        // need to do anything extra in the loop body.
+      }
+      if (accumulated) {
+        setCommitMsg(accumulated.trim());
+        toast.success(t('changes.aiMessageGenerated'), t('changes.reviewBeforeCommitting'));
+      }
     } catch (e) {
-      toast.error('AI generation failed', String(e));
+      toast.error(t('changes.aiGenerationFailed'), String(e));
     } finally {
       setAiGenerating(false);
     }
@@ -652,22 +900,22 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   useEffect(() => {
     const handler = async () => {
       if (selectedFiles.size === 0) {
-        toast.warning('No files selected', 'Select files in the table first, then Local | Stash Selection');
+        toast.warning(t('changes.noFilesSelected'), t('changes.stashSelectionHint'));
         return;
       }
       const msg = await promptDialog({
-        title: 'Stash Selection',
-        message: `Stash ${selectedFiles.size} selected file(s)`,
+        title: t('changes.stashSelectionTitle'),
+        message: t('changes.stashSelectionMessage', { count: selectedFiles.size }),
         input: { initialValue: 'Selected files' },
       });
       if (!msg) return;
       try {
         await api.git.stashPush(repo.path, msg, true, false, Array.from(selectedFiles));
-        toast.success(`Stashed ${selectedFiles.size} file(s)`);
+        toast.success(t('changes.stashedSelection', { count: selectedFiles.size }));
         setSelectedFiles(new Set());
         refreshStatus(repo.path);
       } catch (e) {
-        toast.error('Stash failed', String(e));
+        toast.error(t('changes.stashFailed'), String(e));
       }
     };
     window.addEventListener('smartgit:stash-selection', handler);
@@ -677,16 +925,236 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
   const handleCommitAndPush = async () => {
     await handleCommit();
     try {
-      await push(repo.path);
-      toast.success('Pushed successfully');
+      const res = await push(repo.path);
+      const t = describePushResult(res);
+      if (t.kind === 'error') toast.error(t.title, t.detail);
+      else if (t.kind === 'info') toast.info(t.title, t.detail);
+      else toast.success(t.title, t.detail);
     } catch (e) {
-      toast.error('Push failed', String(e));
+      toast.error(t('changes.pushFailed'), String(e));
+    }
+  };
+
+  // ===== Cherry-pick state (SmartGit: "The working tree is in cherry-picking-state.") =====
+  // While CHERRY_PICK_HEAD exists only Abort / Continue / Skip / Commit Empty
+  // are allowed — every other HEAD-moving operation would discard the pick.
+  const [cpBusy, setCpBusy] = useState(false);
+  const runCherryPickOp = async (title: string, cmd: string, fn: () => Promise<void>, okMsg: string) => {
+    setCpBusy(true);
+    try {
+      await useOperationLogStore.getState().logOperation(title, repo.path, cmd, fn);
+      toast.success(okMsg);
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error(`${title} failed`, String(e));
+    } finally {
+      setCpBusy(false);
+    }
+  };
+  const handleCpContinue = () => {
+    if (!status?.isCherryPicking) return;
+    void (async () => {
+      setCpBusy(true);
+      try {
+        const res = await useOperationLogStore.getState().logOperation(
+          'Cherry-pick Continue', repo.path, 'git cherry-pick --continue',
+          () => api.git.cherryPickContinue(repo.path)
+        );
+        if (res?.empty) {
+          toast.warning('The previous cherry-pick is now empty', 'Use Skip (drop it) or Commit Empty (commit it anyway)');
+        } else {
+          toast.success('Cherry-pick finished — commit created');
+        }
+        await refreshStatus(repo.path);
+      } catch (e) {
+        toast.error('Cherry-pick Continue failed', String(e));
+      } finally {
+        setCpBusy(false);
+      }
+    })();
+  };
+  const handleCpCommitEmpty = () => {
+    if (!status?.isCherryPicking) return;
+    void runCherryPickOp(
+      'Cherry-pick Commit Empty', 'git commit --allow-empty',
+      () => api.git.cherryPickContinue(repo.path, true).then(() => undefined),
+      'Empty commit created — cherry-pick finished'
+    );
+  };
+  const handleCpSkip = () => {
+    if (!status?.isCherryPicking) return;
+    void runCherryPickOp(
+      'Cherry-pick Skip', 'git cherry-pick --skip',
+      () => api.git.cherryPickSkip(repo.path),
+      'Cherry-pick skipped'
+    );
+  };
+  const handleCpAbort = async () => {
+    if (!status?.isCherryPicking) return;
+    if (!(await confirmDialog({
+      title: 'Abort cherry-pick',
+      message: 'Cancel the cherry-pick and restore the branch to its previous state?\n\nPicked changes will be discarded.',
+      confirmLabel: 'Abort',
+      danger: true,
+    }))) return;
+    void runCherryPickOp(
+      'Cherry-pick Abort', 'git cherry-pick --abort',
+      () => api.git.cherryPickAbort(repo.path),
+      'Cherry-pick aborted'
+    );
+  };
+
+  // ===== Revert state (SmartGit: "The working tree is in reverting-state.") =====
+  const handleRvContinue = () => {
+    if (!status?.isReverting) return;
+    void runCherryPickOp(
+      'Revert Continue', 'git revert --continue',
+      () => api.git.revertContinue(repo.path),
+      'Revert finished — commit created'
+    );
+  };
+  const handleRvSkip = () => {
+    if (!status?.isReverting) return;
+    void runCherryPickOp(
+      'Revert Skip', 'git revert --skip',
+      () => api.git.revertSkip(repo.path),
+      'Revert step skipped'
+    );
+  };
+  const handleRvAbort = async () => {
+    if (!status?.isReverting) return;
+    if (!(await confirmDialog({
+      title: 'Abort revert',
+      message: 'Cancel the revert and restore the branch to its previous state?\n\nRevert changes will be discarded.',
+      confirmLabel: 'Abort',
+      danger: true,
+    }))) return;
+    void runCherryPickOp(
+      'Revert Abort', 'git revert --abort',
+      () => api.git.revertAbort(repo.path),
+      'Revert aborted'
+    );
+  };
+
+  // ===== Merge state (SmartGit: "The working tree is in merging-state.") =====
+  // A plain COMMIT completes the merge (allowed); Abort Merge cancels it.
+  const handleMergeAbort = async () => {
+    if (!status?.isMerging) return;
+    if (!(await confirmDialog({
+      title: 'Abort merge',
+      message: 'Cancel the merge and restore the branch to its pre-merge state?\n\nMerged changes will be discarded.',
+      confirmLabel: 'Abort Merge',
+      danger: true,
+    }))) return;
+    void runCherryPickOp(
+      'Merge Abort', 'git merge --abort',
+      () => api.git.abortMerge(repo.path),
+      'Merge aborted'
+    );
+  };
+
+  // ===== Rebase state (SmartGit: "The working tree is in rebasing-state.") =====
+  const handleRbContinue = () => {
+    if (!status?.isRebasing) return;
+    void runCherryPickOp(
+      'Rebase Continue', 'git rebase --continue',
+      () => api.git.rebase(repo.path, '', { continue: true }),
+      'Rebase continued'
+    );
+  };
+  const handleRbSkip = () => {
+    if (!status?.isRebasing) return;
+    void runCherryPickOp(
+      'Rebase Skip', 'git rebase --skip',
+      () => api.git.rebase(repo.path, '', { skip: true }),
+      'Rebase step skipped'
+    );
+  };
+  const handleRbAbort = async () => {
+    if (!status?.isRebasing) return;
+    if (!(await confirmDialog({
+      title: 'Abort rebase',
+      message: 'Cancel the rebase and restore the branch to its original state?\n\nRebased commits will be discarded.',
+      confirmLabel: 'Abort',
+      danger: true,
+    }))) return;
+    void runCherryPickOp(
+      'Rebase Abort', 'git rebase --abort',
+      () => api.git.rebase(repo.path, '', { abort: true }),
+      'Rebase aborted'
+    );
+  };
+
+  // ===== Bisect state (SmartGit: "The working tree is in bisecting-state.") =====
+  const handleBsGood = () => {
+    if (!status?.isBisecting) return;
+    void runCherryPickOp(
+      'Bisect Good', 'git bisect good',
+      () => api.git.bisectGood(repo.path),
+      'Marked good — bisect continues'
+    );
+  };
+  const handleBsBad = () => {
+    if (!status?.isBisecting) return;
+    void runCherryPickOp(
+      'Bisect Bad', 'git bisect bad',
+      () => api.git.bisectBad(repo.path),
+      'Marked bad — bisect continues'
+    );
+  };
+  const handleBsSkip = () => {
+    if (!status?.isBisecting) return;
+    void runCherryPickOp(
+      'Bisect Skip', 'git bisect skip',
+      () => api.git.bisectSkip(repo.path),
+      'Revision skipped — bisect continues'
+    );
+  };
+  const handleBsReset = async () => {
+    if (!status?.isBisecting) return;
+    if (!(await confirmDialog({
+      title: 'Reset bisect',
+      message: 'End the bisect session and return to the original branch?',
+      confirmLabel: 'Reset',
+    }))) return;
+    void runCherryPickOp(
+      'Bisect Reset', 'git bisect reset',
+      () => api.git.bisectReset(repo.path),
+      'Bisect finished — back on the original branch'
+    );
+  };
+
+  // ===== Stash All + Abort (SmartGit escape hatch) =====
+  // When conflicts are overwhelming, stash everything (incl. untracked)
+  // then abort the in-progress operation. The stash is recoverable via
+  // the Stashes page. This is the "start fresh" option SmartGit offers.
+  const handleStashAll = async () => {
+    if (!(await confirmDialog({
+      title: 'Stash all and abort?',
+      message: 'This will stash ALL local changes (including untracked files) and abort the current operation.\n\nThe stash is saved with a descriptive message and is recoverable via the Stashes page.',
+      confirmLabel: 'Stash All & Abort',
+      danger: true,
+    }))) return;
+    try {
+      const stateLabel = status?.isMerging ? 'merge' : status?.isRebasing ? 'rebase' : status?.isCherryPicking ? 'cherry-pick' : status?.isReverting ? 'revert' : 'operation';
+      await api.git.stashPush(repo.path, `auto-stash before abort (${stateLabel})`, true, false);
+      toast.success('All changes stashed', 'Now aborting the operation…');
+      // Abort the in-progress operation based on the active state
+      if (status?.isMerging) await api.git.abortMerge(repo.path);
+      else if (status?.isRebasing) await api.git.rebase(repo.path, '', { abort: true });
+      else if (status?.isCherryPicking) await api.git.cherryPickAbort(repo.path);
+      else if (status?.isReverting) await api.git.revertAbort(repo.path);
+      else if (status?.isBisecting) await api.git.bisectReset(repo.path);
+      toast.success('Operation aborted', 'Stash is available on the Stashes page.');
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error('Stash & abort failed', String(e));
     }
   };
 
   // File filter helper: substring, or regular expression when .* mode is on.
   // Invalid regexes never hide files.
-  const matchesFileFilter = (path: string): boolean => {
+  const matchesFileFilter = useCallback((path: string): boolean => {
     const q = fileFilter.trim();
     if (!q) return true;
     if (fileFilterRegex) {
@@ -697,12 +1165,31 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       }
     }
     return path.toLowerCase().includes(q.toLowerCase());
-  };
+  }, [fileFilter, fileFilterRegex]);
 
-  // Directory scope helper: only files inside the folder selected in the tree.
+  // Directory scope helper:
+  //   fileScopeDir === null  → current dir is repo root
+  //   fileScopeDir === 'src' → current dir is src/
+  //   showSubdirs = true     → include files from subdirectories of the current dir
+  //   showSubdirs = false    → only files directly in the current dir (no subdirs)
   const matchesDirScope = (path: string): boolean => {
-    if (!fileScopeDir) return true;
-    return path === fileScopeDir || path.startsWith(`${fileScopeDir}/`);
+    const currentDir = fileScopeDir ?? '';  // null = repo root = ''
+    if (showSubdirs) {
+      // ON: show files from current dir AND all subdirectories
+      if (currentDir === '') return true;  // root + all subdirs = everything
+      return path === currentDir || path.startsWith(`${currentDir}/`);
+    } else {
+      // OFF: show files directly in the current dir only (no subdirectories)
+      // A file is "directly in" currentDir if it has no '/' after the dir prefix.
+      if (currentDir === '') {
+        // Root: file must not contain '/' at all
+        return !path.includes('/');
+      }
+      // Non-root: file must be inside currentDir but NOT in a subdirectory of it
+      if (!path.startsWith(`${currentDir}/`)) return false;
+      const remainder = path.slice(currentDir.length + 1);
+      return !remainder.includes('/');
+    }
   };
 
   // Sort helper for the Changes table (Name / State / Relative Directory).
@@ -731,81 +1218,338 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     });
   };
 
-  // Multi-select status set helper
-  const matchesStatusSet = (file: FileStatus, isStaged: boolean): boolean => {
-    if (fileStatusFilterSet.size === 0) return true;
-    const idx = file.index as string;
-    const wd = file.working_dir as string;
-    const code = idx !== ' ' && idx !== '?' ? idx : wd;
-    if (fileStatusFilterSet.has('staged') && isStaged) return true;
-    if (fileStatusFilterSet.has('unstaged') && !isStaged) return true;
-    if (fileStatusFilterSet.has('modified') && (code === 'M' || code === 'R' || code === 'C' || code === 'T')) return true;
-    if (fileStatusFilterSet.has('added') && code === 'A') return true;
-    if (fileStatusFilterSet.has('deleted') && code === 'D') return true;
-    if (fileStatusFilterSet.has('renamed') && (code === 'R' || code === 'C')) return true;
-    if (fileStatusFilterSet.has('untracked') && code === '?') return true;
-    return false;
-  };
+  // File display flags — SmartGit-style toggles.
+  // Default: subdirectories (flat list) + unversioned (show new files).
+  // Changed files are ALWAYS shown. Flags ADD categories (union).
+  const hasFlag = useCallback((flag: FileDisplayFlag) => fileDisplayFlags.has(flag), [fileDisplayFlags]);
 
   // Memoize file lists to avoid re-sorting on every render (e.g. when
   // hovering over rows causes a re-render but status hasn't changed).
+  // Staged files go to their own section — NOT affected by display flags.
   const stagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
-    const staged = status?.staged.find((s) => s.path === f.path);
-    if (!staged) return false;
-    const idx = staged.index as string;
-    return idx !== ' ' && idx !== '?' && idx !== '!';
-  }).filter((f) => matchesFileFilter(f.path))
-    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-    .filter((f) => matchesDirScope(f.path))
-    .filter(f => matchesStatusSet(f, true))
-    .filter(f => {
-      if (fileStatusFilter === 'all') return true;
-      const idx = f.index as string;
-      const code = idx !== ' ' && idx !== '?' ? idx : (f.working_dir as string);
-      if (fileStatusFilter === 'modified') return code === 'M' || code === 'R' || code === 'C' || code === 'T';
-      if (fileStatusFilter === 'added') return code === 'A';
-      if (fileStatusFilter === 'deleted') return code === 'D';
-      if (fileStatusFilter === 'untracked') return code === '?';
-      return true;
-    })), [status, sortFiles, fileStatusFilter, fileStatusFilterSet]);
-
-  const unstagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
-    const staged = status?.staged.find((s) => s.path === f.path);
-    if (!staged) {
-      const wd = f.working_dir as string;
-      // Exclude untracked ('??') — they render in their own Untracked section;
-      // including them here duplicated every untracked file in both sections.
-      return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');
-    }
-    const wd = staged.working_dir as string;
-    return wd !== ' ' && wd !== '!';
-  }).filter((f) => matchesFileFilter(f.path))
-    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-    .filter((f) => matchesDirScope(f.path))
-    .filter(f => matchesStatusSet(f, false))
-    .filter(f => {
-      if (fileStatusFilter === 'all') return true;
-      const idx = f.index as string;
-      const code = idx !== ' ' && idx !== '?' ? idx : (f.working_dir as string);
-      if (fileStatusFilter === 'modified') return code === 'M' || code === 'R' || code === 'C' || code === 'T';
-      if (fileStatusFilter === 'added') return code === 'A';
-      if (fileStatusFilter === 'deleted') return code === 'D';
-      if (fileStatusFilter === 'untracked') return code === '?';
-      return true;
-    })), [status, sortFiles, fileStatusFilter, fileStatusFilterSet]);
-
-  const untrackedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
+    // Exclude conflicted files (UU/AU/UA/DD etc.) — they show in the
+    // Conflicts section, NOT in Staged. A conflicted file has index='U'
+    // or working_dir='U' in git porcelain status.
     const idx = f.index as string;
     const wd = f.working_dir as string;
-    return idx === '?' && wd === '?';
+    if (idx === 'U' || wd === 'U') return false;
+    const staged = status?.staged.find((s) => s.path === f.path);
+    if (!staged) return false;
+    const stagedIdx = staged.index as string;
+    return stagedIdx !== ' ' && stagedIdx !== '?' && stagedIdx !== '!' && stagedIdx !== 'U';
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
-    .filter((f) => matchesStatusSet(f, false))
-    .filter(() => {
-      if (fileStatusFilter === 'all' || fileStatusFilter === 'untracked') return true;
-      return false;
-    })), [status, sortFiles, fileFilter, fileStatusFilter, fileStatusFilterSet, fileScopeDir]);
+    ), [status, sortFiles, fileDisplayFlags]);
+
+  // Detect unstaged renames by comparing content hashes of deleted tracked
+  // files with untracked files. Delegates the heavy lifting to a single
+  // `git:detectWorkingTreeRenames` IPC call (which batches ls-tree +
+  // hash-object server-side — see electron/services/git.ts
+  // detectWorkingTreeRenames()).
+  //
+  // The effect is debounced 500ms to coalesce rapid status updates (auto-
+  // refresh, user actions firing several status changes in a row), and
+  // aborts any in-flight check when the inputs change so stale results
+  // never overwrite fresh ones.
+  //
+  // No spinner overlay — detection is fully background. The file list
+  // just updates in place when results arrive (deleted + untracked rows
+  // collapse into a single Renamed row). The previous spinner was
+  // annoying users ("бесит крутилка Detecting renames") because it
+  // appeared on every status refresh, not just when renames were
+  // actually being detected.
+  const [detectedRenames, setDetectedRenames] = useState<{ oldPath: string; newPath: string }[]>([]);
+  useEffect(() => {
+    if (!repo?.path || !status) return;
+    const deletedFiles = status.files
+      .filter(f => {
+        const wd = f.working_dir as string;
+        const idx = f.index as string;
+        return wd === 'D' || (idx === 'D' && wd === ' ');
+      })
+      .map(f => f.path);
+    const untrackedFiles = status.files
+      .filter(f => {
+        const idx = f.index as string;
+        const wd = f.working_dir as string;
+        return idx === '?' && wd === '?';
+      })
+      .map(f => f.path);
+
+    // Fast path: nothing to detect.
+    if (deletedFiles.length === 0 || untrackedFiles.length === 0) {
+      // Use functional update — only set [] if previous value was non-empty.
+      // This avoids creating a new array reference when there's nothing to
+      // change, preventing unnecessary re-renders of downstream memos and
+      // LazyFileList resets.
+      setDetectedRenames(prev => prev.length === 0 ? prev : []);
+      return;
+    }
+
+    // Debounce 500ms — coalesce bursts of status updates into one detection
+    // pass. Without this, a fast-refresh loop (auto-refresh + user actions)
+    // would fire one detection per status change, piling up IPC calls.
+    // (Was 200ms — still too aggressive on repos with frequent watcher
+    // events; 500ms gives the system time to settle before the expensive
+    // hash-object calls fire.)
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const result = await api.git.detectWorkingTreeRenames(repo.path, deletedFiles, untrackedFiles);
+        if (!cancelled) {
+          // Only update state if the result actually changed. Returning the
+          // previous reference skips the re-render entirely when the detected
+          // renames are the same as before (common case on auto-refresh).
+          // This prevents the cascade: detectedRenames → renamedOldPaths →
+          // renamedNewPaths → unstagedFiles/renamedFiles → LazyFileList
+          // files prop → visibleCount reset.
+          setDetectedRenames(prev => {
+            if (prev.length === result.length) {
+              let same = true;
+              for (let i = 0; i < result.length; i++) {
+                if (prev[i].oldPath !== result[i].oldPath || prev[i].newPath !== result[i].newPath) {
+                  same = false;
+                  break;
+                }
+              }
+              if (same) return prev;
+            }
+            return result;
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setDetectedRenames(prev => prev.length === 0 ? prev : []);
+        }
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [repo?.path, status]);
+
+  // Sets of old/new paths for detected renames — used to filter out the
+  // individual delete + untracked entries and show a single renamed entry.
+  const renamedOldPaths = useMemo(() => new Set(detectedRenames.map(r => r.oldPath)), [detectedRenames]);
+  const renamedNewPaths = useMemo(() => new Set(detectedRenames.map(r => r.newPath)), [detectedRenames]);
+
+  // ── Auto-suggest commit message ───────────────────────────────────────
+  // Fires when: (1) there are staged files, (2) the commit message is
+  // empty, (3) AI is enabled in settings. Debounced 2s — doesn't fire on
+  // every stage/unstage, only when the user stops staging for 2s.
+  // Non-blocking: uses AbortController, textarea stays fully editable.
+  useEffect(() => {
+    if (aiSuggestTimerRef.current) clearTimeout(aiSuggestTimerRef.current);
+    aiSuggestAbortRef.current?.abort();
+    aiSuggestAbortRef.current = null;
+
+    if (!settings?.aiCommitMessagesEnabled) { setAiSuggestion(null); return; }
+    if (commitMsg.trim()) { setAiSuggestion(null); return; }
+    if (stagedFiles.length === 0) { setAiSuggestion(null); return; }
+
+    aiSuggestTimerRef.current = setTimeout(async () => {
+      const provider = buildAIProvider(settings);
+      if (!provider) return;
+      const controller = new AbortController();
+      aiSuggestAbortRef.current = controller;
+      setAiSuggesting(true);
+      try {
+        const diffArgs = ['diff', '--cached', '--stat'];
+        const diffText = await api.git.raw(repo.path, diffArgs);
+        if (controller.signal.aborted) return;
+        if (!diffText.trim()) { setAiSuggestion(null); return; }
+        const recentMsgs = journal.slice(0, 5).map(j => j.subject);
+        const result = await generateCommitMessage({
+          diff: diffText,
+          recentMessages: recentMsgs,
+          provider,
+        });
+        if (controller.signal.aborted) return;
+        const cleaned = result.trim();
+        if (cleaned) setAiSuggestion(cleaned);
+      } catch {
+        // Silently fail — user can click AI button for manual feedback.
+      } finally {
+        if (!controller.signal.aborted) setAiSuggesting(false);
+      }
+    }, 2000);
+
+    return () => {
+      if (aiSuggestTimerRef.current) clearTimeout(aiSuggestTimerRef.current);
+    };
+  }, [stagedFiles.length, commitMsg, settings?.aiCommitMessagesEnabled, settings, repo.path, journal]);
+
+  // Unstaged (changed, non-staged) files — always visible (default).
+  // Exclude files that are part of a detected rename (old path = delete,
+  // new path = untracked) — they'll be shown as a single Renamed entry.
+  const unstagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
+    // Skip files that are the OLD path of a detected rename — they show as
+    // a Renamed row instead of a Deleted row.
+    if (renamedOldPaths.has(f.path)) return false;
+    // Skip files that are the NEW path of a detected rename — they show as
+    // a Renamed row instead of an Untracked row.
+    if (renamedNewPaths.has(f.path)) return false;
+    // Exclude conflicted files — they show in the Conflicts section only.
+    const idx = f.index as string;
+    const wd = f.working_dir as string;
+    if (idx === 'U' || wd === 'U') return false;
+    const staged = status?.staged.find((s) => s.path === f.path);
+    if (!staged) {
+      // Exclude untracked ('??') from the unstaged list — they render in
+      // their own Untracked section (if 'unversioned' flag is ON).
+      return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');
+    }
+    const stagedWd = staged.working_dir as string;
+    return stagedWd !== ' ' && stagedWd !== '!' && stagedWd !== 'U';
+  }).filter((f) => matchesFileFilter(f.path))
+    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+    .filter((f) => matchesDirScope(f.path))
+    ), [status, sortFiles, fileDisplayFlags, renamedOldPaths, renamedNewPaths, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs]);
+
+  // Detected rename entries — shown in the unstaged section as Renamed rows.
+  // Each entry has the new path as the file path and old_path set.
+  // working_dir MUST be ' ' (porcelain unmodified), NOT 'unmodified' —
+  // renderFileRow's isUnmodified check fires on wd==='unmodified' BEFORE
+  // the renamed check, which would misclassify these rows as 'Unchanged'.
+  const renamedFiles: FileStatus[] = useMemo(() => {
+    return detectedRenames.map(r => ({
+      path: r.newPath,
+      index: 'renamed' as FileStatus['index'],
+      working_dir: ' ' as FileStatus['working_dir'],
+      old_path: r.oldPath,
+    }));
+  }, [detectedRenames]);
+
+  // Conflicted files — shown in their OWN section (red accent) ABOVE staged.
+  const conflictedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
+    const idx = f.index as string;
+    const wd = f.working_dir as string;
+    return idx === 'U' || wd === 'U';
+  }).filter((f) => matchesFileFilter(f.path))
+    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+    .filter((f) => matchesDirScope(f.path))), [status, sortFiles, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs]);
+
+  // Untracked files — shown only when 'unversioned' flag is ON.
+  // Exclude files that are the NEW path of a detected rename — they show
+  // as Renamed rows in the unstaged list, not as Untracked.
+  const untrackedFiles: FileStatus[] = useMemo(() => {
+    if (!hasFlag('unversioned')) return [];
+    return sortFiles((status?.files || []).filter((f) => {
+      const idx = f.index as string;
+      const wd = f.working_dir as string;
+      if (idx !== '?' || wd !== '?') return false;
+      // Skip new paths of detected renames — shown as Renamed instead.
+      if (renamedNewPaths.has(f.path)) return false;
+      return true;
+    }).filter((f) => matchesFileFilter(f.path))
+      .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+      .filter((f) => matchesDirScope(f.path)));
+  }, [status, sortFiles, hasFlag, fileFilter, fileScopeDir, renamedNewPaths]);
+
+  // Unchanged tracked files — shown only when 'unchanged' flag is ON.
+  // These are tracked files (from git ls-files) that have NO changes in
+  // the working tree or index (not in status.files at all).
+  const unchangedFiles: FileStatus[] = useMemo(() => {
+    if (!hasFlag('unchanged')) return [];
+    const changedPaths = new Set((status?.files ?? []).map(f => f.path));
+    return trackedFilesList
+      .filter(p => !changedPaths.has(p))
+      .filter(p => matchesFileFilter(p))
+      .filter(p => !fileExtensionFilter || p.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+      .filter(p => matchesDirScope(p))
+      .map(p => ({
+        path: p,
+        index: 'unmodified' as FileStatus['index'],
+        working_dir: 'unmodified' as FileStatus['working_dir'],
+      }));
+  }, [hasFlag, status, trackedFilesList, fileFilter, fileExtensionFilter, showSubdirs, fileScopeDir]);
+
+  // Ignored files AND directories — shown only when 'ignored' flag is ON.
+  // Loaded via `git status --porcelain --ignored` which respects .gitignore.
+  // Entries from git can be files (debug.log) or directories (node_modules/).
+  // Directory entries end with '/' — we show them as-is.
+  const ignoredFileList: FileStatus[] = useMemo(() => {
+    if (!hasFlag('ignored')) return [];
+    return ignoredFiles
+      .filter(p => matchesFileFilter(p))
+      .filter(p => {
+        // For directory entries (ending with '/'), skip extension filter
+        if (p.endsWith('/')) return true;
+        return !fileExtensionFilter || p.toLowerCase().endsWith(fileExtensionFilter.toLowerCase());
+      })
+      .filter(p => {
+        // For directory entries, always show (don't apply dirScope filtering
+        // since the directory itself is a top-level entry).
+        if (p.endsWith('/')) return true;
+        return matchesDirScope(p);
+      })
+      .map(p => ({
+        path: p,
+        index: 'ignored' as FileStatus['index'],
+        working_dir: 'ignored' as FileStatus['working_dir'],
+      }));
+  }, [hasFlag, ignoredFiles, fileFilter, fileExtensionFilter, showSubdirs, fileScopeDir]);
+
+  // Assume-Unchanged files — shown only when 'assumeUnchanged' flag is ON.
+  const assumeUnchangedFileList: FileStatus[] = useMemo(() => {
+    if (!hasFlag('assumeUnchanged')) return [];
+    return assumeUnchangedFiles
+      .filter(p => matchesFileFilter(p))
+      .filter(p => !fileExtensionFilter || p.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+      .filter(p => matchesDirScope(p))
+      .map(p => ({
+        path: p,
+        index: 'modified' as FileStatus['index'],
+        working_dir: 'unmodified' as FileStatus['working_dir'],
+      }));
+  }, [hasFlag, assumeUnchangedFiles, fileFilter, fileExtensionFilter, showSubdirs, fileScopeDir]);
+
+  // Skipped (skip-worktree) files — shown only when 'skipped' flag is ON.
+  const skippedFileList: FileStatus[] = useMemo(() => {
+    if (!hasFlag('skipped')) return [];
+    return skippedFiles
+      .filter(p => matchesFileFilter(p))
+      .filter(p => !fileExtensionFilter || p.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+      .filter(p => matchesDirScope(p))
+      .map(p => ({
+        path: p,
+        index: 'modified' as FileStatus['index'],
+        working_dir: 'unmodified' as FileStatus['working_dir'],
+      }));
+  }, [hasFlag, skippedFiles, fileFilter, fileExtensionFilter, showSubdirs, fileScopeDir]);
+
+  // Submodule changes — shown only when 'submodules' flag is ON.
+  const submoduleFileList: FileStatus[] = useMemo(() => {
+    if (!hasFlag('submodules')) return [];
+    return submoduleChanges
+      .filter(p => matchesFileFilter(p))
+      .filter(p => matchesDirScope(p))
+      .map(p => ({
+        path: p,
+        index: 'modified' as FileStatus['index'],
+        working_dir: 'unmodified' as FileStatus['working_dir'],
+      }));
+  }, [hasFlag, submoduleChanges, fileFilter, showSubdirs, fileScopeDir]);
+
+  // Ctrl/Cmd+A: select all visible files in the file list
+  // (placed after stagedFiles/unstagedFiles/untrackedFiles are declared)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      if (isInInput) return;
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        e.preventDefault();
+        const allFiles = [...stagedFiles, ...unstagedFiles, ...untrackedFiles];
+        setSelectedFiles(new Set(allFiles.map(f => f.path)));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [stagedFiles, unstagedFiles, untrackedFiles]);
 
   const totalChanged = (status?.files.length ?? 0);
 
@@ -853,19 +1597,70 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
     const isSelected = selectedFiles.has(file.path);
     const idx = file.index as string;
     const wd = file.working_dir as string;
-    const code = idx !== ' ' && idx !== '?' ? idx : wd;
-    const statusCode =
-      code === '?' ? 'untracked' :
-      code === 'U' ? 'conflict' :
-      code === 'M' ? 'modified' :
-      code === 'A' ? 'added' :
-      code === 'D' ? 'deleted' :
-      code === 'R' ? 'renamed' :
-      code === 'C' ? 'copied' :
-      'modified';
+
+    // Status letter shown in the gutter — single char for git porcelain codes,
+    // custom letters for our synthetic statuses (unchanged/ignored/assumeUnchanged/skipped).
+    // Assume-unchanged and skip-worktree files have index='modified' wd='unmodified'
+    // in our synthetic FileStatus — we identify them by checking against the loaded lists.
+    const isAssumeUnchanged = assumeUnchangedFiles.includes(file.path);
+    const isSkipped = skippedFiles.includes(file.path);
+    const isSubmodule = submoduleChanges.includes(file.path);
     const isUntracked = idx === '?' && wd === '?';
-    const isConflict = code === 'U' || idx === 'U' || wd === 'U';
-    const stateLabel = statusCode.charAt(0).toUpperCase() + statusCode.slice(1);
+    const isConflicted = idx === 'U' || wd === 'U';
+    const isIgnored = idx === 'ignored' || wd === 'ignored';
+    const isUnmodified = idx === 'unmodified' || wd === 'unmodified';
+
+    // Status code for color + label
+    const statusCode =
+      isUntracked ? 'untracked' :
+      isConflicted ? 'conflicted' :
+      isIgnored ? 'ignored' :
+      isAssumeUnchanged ? 'assumeUnchanged' :
+      isSkipped ? 'skipped' :
+      isSubmodule ? 'submodule' :
+      isUnmodified ? 'unmodified' :
+      idx === 'R' || idx === 'renamed' ? 'renamed' :
+      idx === 'C' || idx === 'copied' ? 'copied' :
+      wd === 'R' || wd === 'renamed' ? 'renamed' :
+      wd === 'C' || wd === 'copied' ? 'copied' :
+      (isStaged ? idx : wd) === 'A' ? 'added' :
+      (isStaged ? idx : wd) === 'D' ? 'deleted' :
+      (isStaged ? idx : wd) === 'M' ? 'modified' :
+      'modified';
+
+    // Single-char status letter for the gutter
+    const statusLetter =
+      isUntracked ? '?' :
+      isConflicted ? 'U' :
+      isIgnored ? 'I' :
+      isAssumeUnchanged ? 'L' :
+      isSkipped ? 'S' :
+      isSubmodule ? 'S' :
+      isUnmodified ? '-' :
+      statusCode === 'renamed' ? 'R' :
+      statusCode === 'copied' ? 'C' :
+      statusCode === 'added' ? 'A' :
+      statusCode === 'deleted' ? 'D' :
+      statusCode === 'modified' ? 'M' :
+      '?';
+
+    // Row opacity — ignored, unchanged, assume-unchanged, skipped files are dimmed
+    const isDimmed = isIgnored || isUnmodified || isAssumeUnchanged || isSkipped || isSubmodule;
+    const stateKeys: Record<string, string> = {
+      untracked: 'changes.statusUntracked',
+      conflicted: 'changes.conflicted',
+      modified: 'changes.statusModified',
+      added: 'changes.stateAdded',
+      deleted: 'changes.statusDeleted',
+      renamed: 'changes.statusRenamed',
+      copied: 'changes.stateCopied',
+      unmodified: 'Unchanged',
+      ignored: 'Ignored',
+      assumeUnchanged: 'Assume-Unch',
+      skipped: 'Skipped',
+      submodule: 'Submodule',
+    };
+    const stateLabel = t(stateKeys[statusCode] ?? 'changes.statusModified');
     // Untracked directories come from porcelain as 'dir/' — show the folder
     // itself as the name and its parent as the relative directory.
     const isDirEntry = file.path.endsWith('/');
@@ -873,6 +1668,17 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       ? file.path.slice(file.path.lastIndexOf('/', file.path.length - 2) + 1)
       : getFileName(file.path);
     const relDir = getRelativeDir(isDirEntry ? file.path.slice(0, -1) : file.path);
+    // For renamed files (detected via --find-renames), show old_path → new_path
+    // Only show the old path when 'movedRename' flag is ON — otherwise just
+    // show the new path with 'Renamed' status (SmartGit behavior).
+    const isRenamed = statusCode === 'renamed' && file.old_path;
+    const showRenameSource = hasFlag('movedRename');
+    const renameLabel = (isRenamed && showRenameSource)
+      ? `${getFileName(file.old_path!)} → ${displayName}`
+      : displayName;
+    const renameTitle = (isRenamed && showRenameSource)
+      ? `${file.old_path} → ${file.path}`
+      : file.path;
     // Line-change counts (+N -M) from numstat; untracked files have none.
     const stats = isUntracked ? undefined : (isStaged ? numstat.staged : numstat.unstaged).get(file.path);
 
@@ -881,7 +1687,8 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         key={file.path}
         className={cn(
           'group flex items-center gap-2 px-2 py-1 cursor-pointer text-xs border-b border-border-subtle',
-          isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover'
+          isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
+          isDimmed && 'opacity-50',
         )}
         draggable
         onDragStart={(e) => {
@@ -903,13 +1710,51 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           }
           setDraggedFile(null);
         }}
+        // A11Y-1 — keyboard alternative to drag-drop for screen reader
+        // and keyboard-only users. Space/Enter toggles the file's stage
+        // state — same effect as dropping the file onto the opposite
+        // section. role='option' + aria-selected lets SR users navigate
+        // the list with arrow keys.
+        role="option"
+        aria-selected={isSelected}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (isStaged) handleUnstageFile(file.path);
+            else handleStageFile(file.path);
+          }
+        }}
         onClick={(e) => handleFileClick(e, file.path)}
+        onDoubleClick={() => handleFileDoubleClick(file.path)}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setSelectedFiles(new Set([file.path]));
+          // SmartGit behavior: right-clicking a file that is ALREADY part of
+          // the multi-selection keeps the selection (menu actions then apply
+          // to every selected file); right-clicking OUTSIDE it re-selects
+          // just the clicked file.
+          const keepSelection = selectedFiles.has(file.path);
+          if (!keepSelection) {
+            setSelectedFiles(new Set([file.path]));
+          }
           setSelectedFile(file.path);
           selectFileGlobal(file.path);
+          // Bulk targets = the kept selection scoped to THIS list's section
+          // (staged vs unstaged/untracked): staging a staged file or
+          // unstaging an unstaged one from a mixed selection would be wrong.
+          // NOTE: These arrays are recomputed on every right-click — they're
+          // cheap (.map over ~50-200 files = ~1ms) but if profiling shows
+          // them as a hotspot, they could be memoized via useMemo with deps
+          // on stagedFiles / unstagedFiles / untrackedFiles.
+          const sectionPaths = isStaged
+            ? stagedFiles.map((f) => f.path)
+            : [...unstagedFiles, ...untrackedFiles].map((f) => f.path);
+          const sectionSet = new Set(sectionPaths);
+          const multiPaths = keepSelection
+            ? Array.from(selectedFiles).filter((p) => sectionSet.has(p))
+            : [file.path];
           const focusCommitBox = () => {
             const box = document.getElementById('commit-message-input') as HTMLTextAreaElement | null;
             box?.focus();
@@ -918,29 +1763,67 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           const makeCtx = (indexFlags?: IndexFlags) => ({
             repoPath: repo.path,
             path: file.path,
+            paths: multiPaths.length > 1 ? multiPaths : undefined,
             mode: 'changes' as const,
             isStaged,
             isUntracked,
-            isConflict,
+            isConflicted,
             indexFlags,
             onShowChanges: () => {
-              setSelectedFiles(new Set([file.path]));
               setSelectedFile(file.path);
               selectFileGlobal(file.path);
+            },
+            onOpenDiff: () => {
+              // Navigate to the Diff tool with this file pre-selected.
+              // Compare working tree vs HEAD for this file.
+              setSelectedFile(file.path);
+              selectFileGlobal(file.path);
+              window.location.hash = '#/diff';
             },
             onSelectDirectory: handleSelectDir,
             onFocusCommit: focusCommitBox,
             refresh: () => refreshStatus(repo.path),
           });
-          // SmartGit-style unified menu: fetch live index flags first so the
-          // 'Assume Unchanged' / 'Skip Worktree' checkboxes show real state.
-          const flagsPromise: Promise<IndexFlags | undefined> =
-            isUntracked || isDirEntry ? Promise.resolve(undefined) : getIndexFlagsAsync(repo.path, file.path);
-          flagsPromise.then((indexFlags) => {
-            showContextMenu(buildFileMenu(makeCtx(indexFlags)), async (action) => {
-              await runFileAction(action, makeCtx(indexFlags));
-            });
+
+          // ── Show menu IMMEDIATELY with default flags ──────────────────────
+          // The user reported that right-click was slow. Root cause: the
+          // previous code awaited getIndexFlagsAsync (IPC + git ls-files
+          // subprocess, 100-300ms) BEFORE calling showContextMenu. That
+          // made every first-right-click-on-a-file feel sluggish.
+          //
+          // New approach: show the menu INSTANTLY with default flags
+          // (assumeUnchanged=false, skipWorktree=false, tracked=true).
+          // The 'Assume Unchanged' / 'Skip Worktree' checkboxes will show
+          // their DEFAULT state on the first right-click — almost always
+          // correct (most files are NOT assume-unchanged). If the flags
+          // turn out to be different, the user sees the correct state on
+          // the NEXT right-click (the cache is populated in the background
+          // below, so the second open is instant AND correct).
+          //
+          // For untracked / directory entries, there are no index flags
+          // to fetch — skip the background refresh entirely.
+          const defaultFlags: IndexFlags | undefined =
+            (isUntracked || isDirEntry) ? undefined : { assumeUnchanged: false, skipWorktree: false, tracked: true };
+          showContextMenu(buildFileMenu(makeCtx(defaultFlags)), async (action) => {
+            await runFileAction(action, makeCtx(defaultFlags));
+            // After a flag toggle (assume-unchanged / skip-worktree), bust
+            // this file's cache so the next right-click reflects the new state.
+            if (action === 'assume-unchanged' || action === 'skip-worktree' ||
+                action === 'no-assume-unchanged' || action === 'no-skip-worktree') {
+              invalidateIndexFlagsCache(repo.path, file.path);
+            }
           });
+
+          // ── Background refresh of index flags ─────────────────────────────
+          // Fire-and-forget: fetch the REAL index flags in the background
+          // and store them in the cache. On the NEXT right-click, the cache
+          // will hit and the menu will show the correct checkbox state.
+          // We don't update the menu that's currently open — Electron's
+          // native menu API doesn't support live updates, and rebuilding
+          // the menu mid-open would flicker.
+          if (!isUntracked && !isDirEntry) {
+            void getIndexFlagsAsync(repo.path, file.path).catch(() => { /* cache miss is fine */ });
+          }
         }}
       >
         {/* State icon */}
@@ -948,15 +1831,15 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           className="w-4 text-center font-bold flex-shrink-0"
           style={{ color: getStatusColor(statusCode) }}
         >
-          {code}
+          {statusLetter}
         </span>
         {/* Name */}
-        <span className="flex-1 truncate font-mono whitespace-nowrap" title={file.path}>{displayName}</span>
+        <span className="flex-1 truncate font-mono whitespace-nowrap" title={renameTitle}>{renameLabel}</span>
         {/* Line-change counts (+N -M) — reserved width keeps columns aligned */}
         <span
           className="text-2xs flex-shrink-0 text-right tabular-nums whitespace-nowrap overflow-hidden"
           style={{ width: 74 }}
-          title="Lines added / removed"
+          title={t('changes.linesAddedRemoved')}
         >
           {stats && !stats.binary && (stats.add > 0 || stats.del > 0) && (
             <>
@@ -975,40 +1858,31 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         )}
         {/* Actions — fixed width so all rows stay column-aligned */}
         <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0 overflow-hidden" style={{ width: 92 }}>
-          {isConflict && onResolveConflict && (
-            <button
-              className="btn btn-primary text-2xs !py-0.5 !px-2"
-              title="Open Conflict Solver"
-              onClick={(e) => { e.stopPropagation(); onResolveConflict(file.path); }}
-            >
-              Resolve
-            </button>
-          )}
           {isStaged ? (
-            <button className="icon-btn !w-5 !h-5" title="Unstage" onClick={(e) => { e.stopPropagation(); handleUnstageFile(file.path); }}>
+            <button className="icon-btn !w-5 !h-5" title={t('changes.unstage')} onClick={(e) => { e.stopPropagation(); handleUnstageFile(file.path); }}>
               <Minus size={11} />
             </button>
           ) : (
             <>
-              <button className="icon-btn !w-5 !h-5" title="Stage" onClick={(e) => { e.stopPropagation(); handleStageFile(file.path); }}>
+              <button className="icon-btn !w-5 !h-5" title={t('changes.stage')} onClick={(e) => { e.stopPropagation(); handleStageFile(file.path); }}>
                 <Plus size={11} />
               </button>
               {!isUntracked && (
-                <button className="icon-btn !w-5 !h-5" title="Restore" onClick={(e) => { e.stopPropagation(); handleRestoreFile(file.path); }}>
+                <button className="icon-btn !w-5 !h-5" title={t('changes.restore')} onClick={(e) => { e.stopPropagation(); handleRestoreFile(file.path); }}>
                   <RotateCcw size={11} />
                 </button>
               )}
               {isUntracked && (
                 <>
-                  <button className="icon-btn !w-5 !h-5" title="Ignore" onClick={(e) => { e.stopPropagation(); handleIgnoreFile(file.path); }}>
+                  <button className="icon-btn !w-5 !h-5" title={t('changes.ignore')} onClick={(e) => { e.stopPropagation(); handleIgnoreFile(file.path); }}>
                     <EyeOff size={11} />
                   </button>
-                  <button className="icon-btn !w-5 !h-5 hover:!text-status-deleted" title="Delete" onClick={(e) => { e.stopPropagation(); handleDeleteFile(file.path); }}>
+                  <button className="icon-btn !w-5 !h-5 hover:!text-status-deleted" title={t('common.delete')} onClick={(e) => { e.stopPropagation(); handleDeleteFile(file.path); }}>
                     <Trash size={11} />
                   </button>
                 </>
               )}
-              <button className="icon-btn !w-5 !h-5" title="Reveal in file manager" onClick={(e) => { e.stopPropagation(); handleRevealFile(file.path); }}>
+              <button className="icon-btn !w-5 !h-5" title={t('changes.revealInFileManager')} onClick={(e) => { e.stopPropagation(); handleRevealFile(file.path); }}>
                 <FolderOpen size={11} />
               </button>
             </>
@@ -1023,116 +1897,64 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium">Files</span>
+          <span className="text-xs font-medium">{t('changes.files')}</span>
           {totalChanged > 0 && (
             <span className="text-2xs text-text-tertiary">
-              {stagedFiles.length} staged · {unstagedFiles.length + untrackedFiles.length} unstaged
+              {t('changes.stagedUnstagedCounts', { staged: stagedFiles.length, unstaged: unstagedFiles.length + renamedFiles.length + untrackedFiles.length })}
             </span>
           )}
-          {hiddenCount > 0 && (
+          {hiddenCount > 0 && !hasFlag('unchanged') && (
             <button
               className="clickable-text text-2xs"
-              title="Tracked files without changes. Click to toggle visibility."
-              onClick={() => {
-                // Toggle showing all tracked files (even unchanged).
-                // We piggyback on the file status filter — when ALL is set,
-                // the file list includes unchanged tracked files too.
-                const store = useSelectionStore.getState();
-                store.setFileStatusFilter(store.fileStatusFilter === 'all' ? 'modified' : 'all');
-              }}
+              title="Show unchanged files"
+              onClick={() => toggleFileDisplayFlag('unchanged')}
             >
-              {hiddenCount.toLocaleString()} files hidden
+              {t('changes.filesHidden', { count: hiddenCount.toLocaleString() })}
             </button>
           )}
         </div>
-        <div className="flex items-center gap-1">
-          <input
-            type="text"
-            className="text-xs w-32 px-2 py-0.5"
-            placeholder="File Filter"
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+          <FilterInput
             value={fileFilter}
-            onChange={(e) => setFileFilter(e.target.value)}
+            onChange={setFileFilter}
+            placeholder={t('changes.fileFilter')}
+            ariaLabel={t('changes.fileFilter')}
+            isRegex={fileFilterRegex}
+            onToggleRegex={toggleFileFilterRegex}
+            regexTitle={t('changes.fileFilterRegexTitle')}
           />
-          <button
-            className={cn('text-2xs px-1.5 py-0.5 border rounded font-mono',
-              fileFilterRegex
-                ? 'border-accent bg-accent-muted text-accent'
-                : 'border-border-default bg-bg-tertiary text-text-secondary hover:text-text-primary')}
-            onClick={toggleFileFilterRegex}
-            title="Treat File Filter as a regular expression"
-          >
-            .*
-          </button>
-          {/* Multi-select status filter — SmartGit-style icon toolbar buttons + dropdown */}
+          {/* File display flags — SmartGit-style toggle buttons with meaningful icons.
+              Each icon visually represents what the toggle controls.
+              Default: Subdir + Unver ON. Changed files always visible.
+              Flags ADD categories (union). Staged files go to their own section. */}
           <div className="flex items-center gap-0.5">
-            {/* Quick toggle buttons — SmartGit uses small icon buttons above the table */}
             {([
-              { id: 'modified', label: 'M', title: 'Show Modified files', color: 'text-status-modified' },
-              { id: 'added', label: 'A', title: 'Show Added files', color: 'text-status-added' },
-              { id: 'deleted', label: 'D', title: 'Show Deleted files', color: 'text-status-deleted' },
-              { id: 'untracked', label: 'U', title: 'Show Untracked files', color: 'text-status-untracked' },
-              { id: 'staged', label: 'S', title: 'Show Staged files', color: 'text-status-added' },
-              { id: 'unstaged', label: 'U2', title: 'Show Unstaged files', color: 'text-status-modified' },
-            ] as const).map(opt => (
+              { id: 'subdirectories' as const, Icon: ListTree, title: 'Files From Subdirectories (flat list vs tree)' },
+              { id: 'unchanged' as const, Icon: FileCheck, title: 'Show Unchanged Files' },
+              { id: 'unversioned' as const, Icon: FilePlus, title: 'Show Unversioned (untracked) Files' },
+              { id: 'ignored' as const, Icon: EyeOff, title: 'Show Ignored Files (.gitignore)' },
+              { id: 'assumeUnchanged' as const, Icon: Lock, title: 'Show Assume-Unchanged Files' },
+              { id: 'skipped' as const, Icon: SkipForward, title: 'Show Skipped (skip-worktree) Files' },
+              { id: 'movedRename' as const, Icon: Route, title: 'Show Rename Source Files' },
+              { id: 'submodules' as const, Icon: Cubes, title: 'Show Files From Submodules' },
+            ]).map(opt => {
+              const Icon = opt.Icon;
+              return (
               <button
                 key={opt.id}
                 className={cn(
-                  'text-2xs w-5 h-5 rounded flex items-center justify-center font-mono font-bold transition-colors',
-                  fileStatusFilterSet.has(opt.id)
+                  'w-5 h-5 rounded flex items-center justify-center transition-colors',
+                  hasFlag(opt.id)
                     ? 'bg-accent-muted text-accent'
                     : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'
                 )}
                 title={opt.title}
-                onClick={() => toggleFileStatusFilter(opt.id)}
+                onClick={() => toggleFileDisplayFlag(opt.id)}
               >
-                {opt.label}
+                <Icon size={11} />
               </button>
-            ))}
-          </div>
-          {/* Dropdown for more options */}
-          <div className="relative">
-            <button
-              className={cn('text-2xs px-2 py-0.5 border rounded flex items-center gap-1',
-                fileStatusFilterSet.size > 0
-                  ? 'border-accent bg-accent-muted text-accent'
-                  : 'border-border-default bg-bg-tertiary text-text-secondary')}
-              onClick={() => setShowStatusPicker(!showStatusPicker)}
-              title="Filter files by status (multi-select)"
-            >
-              <span>Status:</span>
-              <span>{fileStatusFilterSet.size > 0 ? `${fileStatusFilterSet.size} filters` : 'All'}</span>
-              <ChevronDown size={9} />
-            </button>
-            {showStatusPicker && (
-              <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-56">
-                <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs border-b border-border-subtle">
-                  <input type="checkbox"
-                    checked={fileStatusFilterSet.size === 0}
-                    onChange={() => clearFileStatusFilterSet()}
-                  />
-                  <span className="font-medium">All statuses</span>
-                </label>
-                {([
-                  { id: 'staged', label: 'Staged' },
-                  { id: 'unstaged', label: 'Unstaged' },
-                  { id: 'modified', label: 'Modified' },
-                  { id: 'added', label: 'Added (new)' },
-                  { id: 'deleted', label: 'Deleted' },
-                  { id: 'renamed', label: 'Renamed' },
-                  { id: 'untracked', label: 'Untracked' },
-                ] as const).map(opt => (
-                  <label key={opt.id} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
-                    <input type="checkbox" checked={fileStatusFilterSet.has(opt.id)}
-                      onChange={() => toggleFileStatusFilter(opt.id)} />
-                    <span>{opt.label}</span>
-                  </label>
-                ))}
-                <div className="px-3 py-1 border-t border-border-subtle flex justify-between">
-                  <button className="text-2xs text-accent" onClick={() => clearFileStatusFilterSet()}>Clear</button>
-                  <button className="text-2xs btn btn-primary !py-0.5 !px-2" onClick={() => setShowStatusPicker(false)}>Done</button>
-                </div>
-              </div>
-            )}
+              );
+            })}
           </div>
           {/* Extension filter */}
           <input
@@ -1141,12 +1963,12 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             placeholder=".ts"
             value={fileExtensionFilter || ''}
             onChange={(e) => setFileExtensionFilter(e.target.value || null)}
-            title="Filter by extension (e.g. .ts, .tsx)"
+            title={t('changes.filterByExtensionTitle')}
           />
           {/* Directory tree panel toggle (folder scope lives in the tree) */}
           <button
             className={cn('icon-btn !w-5 !h-5', dirTreeVisible && 'active')}
-            title="Toggle directory tree panel"
+            title={t('changes.toggleDirTree')}
             onClick={toggleDirTreeVisible}
           >
             {dirTreeVisible ? <FolderOpen size={11} /> : <Folder size={11} />}
@@ -1154,67 +1976,80 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           {/* Path compression toggle — EyeOff = hide relative dir column */}
           <button
             className={cn('icon-btn !w-5 !h-5', !compressFilePaths && 'active')}
-            title={compressFilePaths ? 'Show relative directory column' : 'Hide relative directory column (compressed view)'}
+            title={compressFilePaths ? t('changes.showRelDirColumn') : t('changes.hideRelDirColumn')}
             onClick={() => setCompressFilePaths(!compressFilePaths)}
           >
             <EyeOff size={11} />
           </button>
-          {/* Separate Staged/Unstaged view toggle (SmartGit 20.1) */}
+          {/* Diff panel toggle — show/hide the right-side diff viewer */}
           <button
-            className={cn('icon-btn !w-5 !h-5', separateStagedView && 'active')}
-            title={separateStagedView ? 'Combined view (all files in one list)' : 'Separate Working Tree and Index (SmartGit 20.1)'}
-            onClick={() => setSeparateStagedView(!separateStagedView)}
+            className={cn('icon-btn !w-5 !h-5', showSplitView && 'active')}
+            title={showSplitView ? t('changes.hideDiffPanel') : t('changes.showDiffPanel')}
+            onClick={() => setShowSplitView(!showSplitView)}
           >
-            <ChevronsUpDown size={11} />
+            <SplitSquareHorizontal size={11} />
           </button>
-          {/* Group by State toggle (SmartGit 23.1) */}
-          <button
-            className={cn('icon-btn !w-5 !h-5', groupByState && 'active')}
-            title={groupByState ? 'Ungroup files (default order)' : 'Group files by state (Modified/Added/Deleted)'}
-            onClick={() => setGroupByState(!groupByState)}
-          >
-            <ChevronsDownUp size={11} />
-          </button>
-          <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={handleRefresh}>
+          <button className="icon-btn !w-5 !h-5" title={t('common.refresh')} onClick={handleRefresh}>
             <RefreshCw size={11} />
           </button>
           <button
             className="icon-btn !w-5 !h-5 hover:!text-status-deleted"
-            title="Clean untracked files and directories (git clean -fd) — shows a preview first"
+            title={t('changes.cleanTooltip')}
             onClick={handleCleanPreview}
           >
             <Trash size={11} />
           </button>
           {selectedFiles.size > 1 && (
             <>
-              <button className="icon-btn !w-5 !h-5 hover:!text-status-added" title={`Stage ${selectedFiles.size} selected files`}
+              <button className="icon-btn !w-5 !h-5 hover:!text-status-added" title={t('changes.stageNSelected', { count: selectedFiles.size })}
                 onClick={async () => {
                   try {
                     await stageFiles(repo.path, Array.from(selectedFiles));
-                    toast.success(`Staged ${selectedFiles.size} files`);
+                    toast.success(t('changes.stagedNFiles', { count: selectedFiles.size }));
                     setSelectedFiles(new Set());
-                  } catch (e) { toast.error('Stage failed', String(e)); }
+                  } catch (e) { toast.error(t('changes.bulkStageFailed'), String(e)); }
                 }}>
                 <Plus size={11} />
               </button>
-              <button className="icon-btn !w-5 !h-5 hover:!text-status-modified" title={`Stash ${selectedFiles.size} selected files`}
+              <button className="icon-btn !w-5 !h-5 hover:!text-status-modified" title={t('changes.stashNSelected', { count: selectedFiles.size })}
                 onClick={async () => {
                   try {
                     await api.git.stashPush(repo.path, `Selected ${selectedFiles.size} files`, false, false, Array.from(selectedFiles));
-                    toast.success(`Stashed ${selectedFiles.size} files`);
+                    toast.success(t('changes.stashedNFiles', { count: selectedFiles.size }));
                     setSelectedFiles(new Set());
                     refreshStatus(repo.path);
-                  } catch (e) { toast.error('Stash failed', String(e)); }
+                  } catch (e) { toast.error(t('changes.stashFailed'), String(e)); }
                 }}>
                 <Download size={11} />
               </button>
             </>
           )}
-          <button className="icon-btn !w-5 !h-5" title="Stage All" onClick={handleStageAll}>
+          <button className="icon-btn !w-5 !h-5" title={t('changes.stageAll')} onClick={handleStageAll}>
             <Plus size={11} />
           </button>
         </div>
       </div>
+
+      {/* SmartGit: "The working tree is in cherry-picking/merging/rebasing/reverting/bisecting-state." —
+          only the state-resolving actions are allowed (Pull is blocked, Fetch stays available) */}
+      {status && (status.isCherryPicking || status.isReverting || status.isMerging || status.isRebasing || status.isBisecting) && (
+        <RepoStateBanner
+          status={status}
+          busy={cpBusy}
+          handlers={{
+            cherryPick: {
+              onContinue: handleCpContinue,
+              onSkip: handleCpSkip,
+              onCommitEmpty: handleCpCommitEmpty,
+              onAbort: handleCpAbort,
+            },
+            revert: { onContinue: handleRvContinue, onSkip: handleRvSkip, onAbort: handleRvAbort },
+            merge: { onAbort: handleMergeAbort },
+            rebase: { onContinue: handleRbContinue, onSkip: handleRbSkip, onAbort: handleRbAbort },
+            bisect: { onGood: handleBsGood, onBad: handleBsBad, onSkip: handleBsSkip, onReset: handleBsReset },
+          }}
+        />
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Directory tree panel (SmartGit-style) — selects the folder scope */}
@@ -1222,18 +2057,18 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
           <>
             <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: treeWidth }}>
               <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
-                <span className="text-2xs font-semibold uppercase text-text-secondary">Repositories</span>
+                <span className="text-2xs font-semibold uppercase text-text-secondary">{t('sidebar.repositories')}</span>
                 <div className="flex items-center gap-0.5">
                   <button
                     className="icon-btn !w-4 !h-4"
-                    title="Expand all folders"
+                    title={t('changes.expandAllFolders')}
                     onClick={expandAllDirs}
                   >
                     <ChevronsUpDown size={11} />
                   </button>
                   <button
                     className="icon-btn !w-4 !h-4"
-                    title="Collapse all folders"
+                    title={t('changes.collapseAllFolders')}
                     onClick={collapseAllDirs}
                   >
                     <ChevronsDownUp size={11} />
@@ -1241,7 +2076,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                   {fileScopeDir && (
                     <button
                       className="icon-btn !w-4 !h-4"
-                      title="Clear folder scope — show all files"
+                      title={t('changes.clearFolderScope')}
                       onClick={() => setFileScopeDir(null)}
                     >
                       <X size={10} />
@@ -1261,6 +2096,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                   onSelectDir={handleSelectDir}
                   changeCounts={dirChangeCounts}
                   totalChanges={totalChanged}
+                  ignoredPaths={new Set(ignoredFiles)}
                 />
               </div>
             </div>
@@ -1269,190 +2105,159 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
         )}
 
         {/* Left: File list + Journal + Commit editor */}
-        <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: leftWidth }}>
+        <div className="flex flex-col overflow-hidden" style={{ width: showSplitView ? leftWidth : '100%', flexShrink: showSplitView ? 0 : 1 }}>
           {/* File list with table header */}
           {/* SmartGit background color highlighting: light red = committable files hidden,
               light yellow = name-filtered, gray = unchanged files shown by name match */}
-          <div className={cn(
-            'flex-1 overflow-y-auto transition-colors',
-            // Light red: committable files (untracked/modified) are being hidden by state filter
-            (fileStatusFilterSet.size > 0 && !fileStatusFilterSet.has('untracked') && !fileStatusFilterSet.has('modified')) ? 'bg-red-50 dark:bg-red-950/10' : '',
-            // Light yellow: files are being name-filtered
-            (fileFilter.trim().length > 0) ? 'bg-yellow-50 dark:bg-yellow-950/10' : '',
-          )}>
+          <div
+            className={cn(
+              'relative flex-1 overflow-y-auto transition-colors',
+              // Light yellow: files are being name-filtered
+              (fileFilter.trim().length > 0) ? 'bg-yellow-50 dark:bg-yellow-950/10' : '',
+            )}
+            data-file-scroll-container={true}
+          >
+            {/* Rename detection is now fully background — no spinner.
+                The previous centered spinner overlay was annoying users
+                ("бесит крутилка Detecting renames") because:
+                  1. It appeared on every status refresh (watcher events,
+                     post-commit auto-refresh, etc.) — not just when renames
+                     were actually being detected.
+                  2. The 300ms delay before showing it still flashed on
+                     slow machines / large repos.
+                  3. Even when it didn't flash, it occupied visual space
+                     with a centered overlay that blocked clicks (despite
+                     pointer-events-none) for ~300ms.
+                Detection still runs in the background; the file list just
+                updates in place when results arrive. If a rename is found,
+                the deleted + untracked rows collapse into a single Renamed
+                row — a benign visual update, no spinner needed. */}
             {/* Table header — click a column to sort (SmartGit-style) */}
             <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-default text-2xs font-semibold uppercase text-text-secondary sticky top-0 z-10">
               <span className="w-4"></span>
-              <SortableHeader label="Name" sortKey="name" sort={fileSort} onSort={handleSort} />
-              <span style={{ width: 74 }} title="Added/removed lines"></span>
-              <SortableHeader label="State" sortKey="state" sort={fileSort} onSort={handleSort} width={colWidths.state} onResizeStart={(e) => startColResize(e, 'state')} />
+              <SortableHeader label={t('changes.colName')} sortKey="name" sort={fileSort} onSort={handleSort} width={colWidths.name} onResizeStart={(e) => startColResize(e, 'name')} />
+              <span style={{ width: 74 }} title={t('changes.addedRemovedLines')}></span>
+              <SortableHeader label={t('changes.colState')} sortKey="state" sort={fileSort} onSort={handleSort} width={colWidths.state} onResizeStart={(e) => startColResize(e, 'state')} />
               {!compressFilePaths && (
-                <SortableHeader label="Relative Directory" sortKey="dir" sort={fileSort} onSort={handleSort} width={colWidths.dir} onResizeStart={(e) => startColResize(e, 'dir')} />
+                <SortableHeader label={t('changes.colRelDir')} sortKey="dir" sort={fileSort} onSort={handleSort} width={colWidths.dir} onResizeStart={(e) => startColResize(e, 'dir')} />
               )}
               <span style={{ width: 92 }}></span>
             </div>
 
-            {/* Conflicts */}
-            {status?.conflicted && status.conflicted.length > 0 && (
-              <div className="border-b border-status-conflict/30 bg-status-conflict/5">
-                {status.conflicted.map((filePath) => (
-                  <div
-                    key={filePath}
-                    className="group flex items-center gap-2 px-2 py-1 cursor-pointer text-xs hover:bg-bg-hover border-l-2 border-status-conflict"
-                    onClick={() => onResolveConflict && onResolveConflict(filePath)}
-                  >
-                    <span className="font-bold w-4 text-center text-status-conflict">U</span>
-                    <span className="flex-1 truncate font-mono whitespace-nowrap">{filePath}</span>
-                    <span style={{ width: 74 }}></span>
-                    <span className="text-text-tertiary italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>Conflict</span>
-                    {!compressFilePaths && (
-                      <span className="truncate whitespace-nowrap" style={{ width: colWidths.dir }}></span>
-                    )}
-                    <span className="flex justify-end flex-shrink-0 overflow-hidden" style={{ width: 92 }}>
-                      <button className="btn btn-primary text-2xs !py-0.5 !px-2" onClick={(e) => { e.stopPropagation(); onResolveConflict && onResolveConflict(filePath); }}>
-                        Resolve
-                      </button>
-                    </span>
-                  </div>
-                ))}
-              </div>
+            {/* === Two groups: Staged (if any) + Everything else === */}
+            {/* Conflicts — shown above everything when there are conflicted files */}
+            {conflictedFiles.length > 0 && (
+              <>
+                <div
+                  className="px-2 py-1 bg-status-conflict/8 text-2xs font-bold uppercase text-status-conflict border-b border-status-conflict/20 border-l-2 border-l-status-conflict/40 flex items-center justify-between"
+                >
+                  <span>{t('changes.conflictedCount', { count: conflictedFiles.length })}</span>
+                  <span className="text-text-tertiary normal-case font-normal">{t('changes.resolveHint')}</span>
+                </div>
+                <div className="border-l-2 border-l-status-conflict/20">
+                  <LazyFileList files={conflictedFiles} isStaged={false} renderRow={renderFileRow} />
+                </div>
+              </>
             )}
 
-            {/* === SEPARATE VIEW (SmartGit 20.1): Staged / Changes / Untracked in separate lists === */}
-            {separateStagedView ? (
-              <>
-            {/* Staged — green accent left border, clickable header to stage all/unstage all */}
+            {/* GROUP 1: Staged — green header, clickable to unstage all */}
             {stagedFiles.length > 0 && (
-              <div
-                className="px-2 py-1 bg-status-added/8 text-2xs font-bold uppercase text-status-added border-b border-status-added/20 border-l-2 border-l-status-added/40 flex items-center justify-between cursor-pointer hover:bg-status-added/12 transition-colors"
-                onClick={() => {
-                  // Click on header = unstage all
-                  if (repo) {
-                    useOperationLogStore.getState().logOperation(
-                      'Unstage All', repo.path, 'git reset HEAD -- .',
-                      () => api.git.raw(repo.path, ['reset', 'HEAD', '--', '.'])
-                    ).then(() => refreshStatus(repo.path))
-                     .catch((e: unknown) => toast.error('Unstage failed', String(e)));
-                  }
-                }}
-                title="Click to unstage all"
-              >
-                <span>Staged ({stagedFiles.length})</span>
-                <span className="text-text-tertiary normal-case font-normal">click to unstage all</span>
-              </div>
-            )}
-            <div className={stagedFiles.length > 0 ? 'border-l-2 border-l-status-added/20' : ''}>
-              <LazyFileList files={stagedFiles} isStaged={true} renderRow={renderFileRow} />
-            </div>
-
-            {/* Unstaged — orange accent */}
-            {unstagedFiles.length > 0 && (
-              <div
-                className="px-2 py-1 bg-status-modified/8 text-2xs font-bold uppercase text-status-modified border-b border-status-modified/20 border-l-2 border-l-status-modified/40 flex items-center justify-between cursor-pointer hover:bg-status-modified/12 transition-colors"
-                onClick={() => {
-                  // Click on header = stage all unstaged
-                  if (repo) {
-                    useGitStore.getState().stageAll(repo.path);
-                  }
-                }}
-                title="Click to stage all"
-              >
-                <span>Changes ({unstagedFiles.length})</span>
-                <span className="text-text-tertiary normal-case font-normal">click to stage all</span>
-              </div>
-            )}
-            <div className={unstagedFiles.length > 0 ? 'border-l-2 border-l-status-modified/20' : ''}>
-              <LazyFileList files={unstagedFiles} isStaged={false} renderRow={renderFileRow} />
-            </div>
-
-            {/* Untracked — cyan accent */}
-            {untrackedFiles.length > 0 && (
-              <div
-                className="px-2 py-1 bg-status-untracked/8 text-2xs font-bold uppercase text-status-untracked border-b border-status-untracked/20 border-l-2 border-l-status-untracked/40 flex items-center justify-between cursor-pointer hover:bg-status-untracked/12 transition-colors"
-                onClick={() => {
-                  // Click on header = stage all untracked
-                  if (repo) {
-                    useGitStore.getState().stageAll(repo.path);
-                  }
-                }}
-                title="Click to stage all untracked"
-              >
-                <span>Untracked ({untrackedFiles.length})</span>
-                <span className="text-text-tertiary normal-case font-normal">click to stage all</span>
-              </div>
-            )}
-            <div className={untrackedFiles.length > 0 ? 'border-l-2 border-l-status-untracked/20' : ''}>
-              <LazyFileList files={untrackedFiles} isStaged={false} renderRow={renderFileRow} />
-            </div>
-              </>
-            ) : (
-              /* === COMBINED VIEW: all files in one list === */
               <>
-                {/* Group by State (SmartGit 23.1): group files by their git status code */}
-                {groupByState ? (
-                  (() => {
-                    const groups: Record<string, typeof stagedFiles> = {};
-                    const allFiles = [...stagedFiles, ...unstagedFiles, ...untrackedFiles];
-                    for (const f of allFiles) {
-                      const code = (f.index as string) === '?' ? 'untracked' :
-                                   (f.index as string) === 'A' ? 'added' :
-                                   (f.index as string) === 'D' ? 'deleted' :
-                                   (f.index as string) === 'R' ? 'renamed' :
-                                   'modified';
-                      if (!groups[code]) groups[code] = [];
-                      groups[code].push(f);
+                <div
+                  className="px-2 py-1 bg-status-added/8 text-2xs font-bold uppercase text-status-added border-b border-status-added/20 border-l-2 border-l-status-added/40 flex items-center justify-between cursor-pointer hover:bg-status-added/12 transition-colors"
+                  onClick={() => {
+                    if (repo) {
+                      useOperationLogStore.getState().logOperation(
+                        t('changes.unstageAll'), repo.path, 'git reset HEAD -- .',
+                        () => api.git.raw(repo.path, ['reset', 'HEAD', '--', '.'])
+                      ).then(() => refreshStatus(repo.path))
+                       .catch((e: unknown) => toast.error(t('changes.bulkUnstageFailed'), String(e)));
                     }
-                    const groupLabels: Record<string, { label: string; color: string; bg: string }> = {
-                      modified: { label: 'Modified', color: 'text-status-modified', bg: 'bg-status-modified/8' },
-                      added: { label: 'Added', color: 'text-status-added', bg: 'bg-status-added/8' },
-                      deleted: { label: 'Deleted', color: 'text-status-deleted', bg: 'bg-status-deleted/8' },
-                      renamed: { label: 'Renamed', color: 'text-status-renamed', bg: 'bg-status-renamed/8' },
-                      untracked: { label: 'Untracked', color: 'text-status-untracked', bg: 'bg-status-untracked/8' },
-                    };
-                    return Object.entries(groups).map(([code, files]) => {
-                      const info = groupLabels[code] || groupLabels.modified;
-                      return (
-                        <div key={code}>
-                          <div className={cn('px-2 py-1 text-2xs font-bold uppercase border-b border-border-subtle', info.color, info.bg)}>
-                            {info.label} ({files.length})
-                          </div>
-                          <LazyFileList files={files} isStaged={false} renderRow={renderFileRow} />
-                        </div>
-                      );
-                    });
-                  })()
-                ) : (
-                  <LazyFileList
-                    files={[...stagedFiles, ...unstagedFiles, ...untrackedFiles]}
-                    isStaged={false}
-                    renderRow={renderFileRow}
-                  />
-                )}
+                  }}
+                  title={t('changes.clickToUnstageAll')}
+                >
+                  <span>{t('changes.stagedCount', { count: stagedFiles.length })}</span>
+                  <span className="text-text-tertiary normal-case font-normal">{t('changes.clickToUnstageAllHint')}</span>
+                </div>
+                <LazyFileList files={stagedFiles} isStaged={true} renderRow={renderFileRow} />
               </>
             )}
 
-            {totalChanged === 0 && (
+            {/* GROUP 2: Unstaged — all non-staged files in one flat list */}
+            {(() => {
+              const combined = [
+                ...unstagedFiles,
+                ...renamedFiles,
+                ...untrackedFiles,
+                ...ignoredFileList,
+                ...assumeUnchangedFileList,
+                ...skippedFileList,
+                ...submoduleFileList,
+                ...unchangedFiles, // unchanged always last
+              ];
+              if (combined.length === 0) return null;
+              // Count only actual changes (modified/added/deleted/renamed/
+              // untracked) — NOT ignored/assume-unchanged/skipped/submodule/
+              // unchanged, which are shown in the same section when their
+              // respective display flags are ON but are not "changes".
+              const changesCount =
+                unstagedFiles.length + renamedFiles.length + untrackedFiles.length;
+              return (
+                <>
+                  <div
+                    className="px-2 py-1 bg-status-modified/8 text-2xs font-bold uppercase text-status-modified border-b border-status-modified/20 border-l-2 border-l-status-modified/40 flex items-center justify-between cursor-pointer hover:bg-status-modified/12 transition-colors"
+                    onClick={() => {
+                      if (repo) {
+                        useGitStore.getState().stageAll(repo.path);
+                      }
+                    }}
+                    title={t('changes.clickToStageAll')}
+                  >
+                    <span>{t('changes.changesCount', { count: changesCount })}</span>
+                    <span className="text-text-tertiary normal-case font-normal">{t('changes.clickToStageAllHint')}</span>
+                  </div>
+                  <LazyFileList files={combined} isStaged={false} renderRow={renderFileRow} />
+                </>
+              );
+            })()}
+
+            {/* Empty state — only when truly nothing to show */}
+            {stagedFiles.length === 0 && conflictedFiles.length === 0 &&
+             unstagedFiles.length === 0 && renamedFiles.length === 0 &&
+             untrackedFiles.length === 0 && ignoredFileList.length === 0 &&
+             assumeUnchangedFileList.length === 0 && skippedFileList.length === 0 &&
+             submoduleFileList.length === 0 && unchangedFiles.length === 0 && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">
                 <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
-                Working tree clean — no changes to commit
+                {t('changes.workingTreeClean')}
               </div>
             )}
           </div>
 
           {/* Journal panel (bottom) — shows recent commits like SmartGit */}
-          <div className="flex-shrink-0" style={{ height: journalHeight }}>
-            <ResizableSplitter direction="vertical" onResize={(d) => handleJournalResize(-d)} />
+          <div className="flex-shrink-0" style={{ height: journalCollapsed ? 24 : journalHeight }}>
+            {!journalCollapsed && (
+              <ResizableSplitter direction="vertical" onResize={(d) => handleJournalResize(-d)} />
+            )}
             <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
-              <span className="text-2xs font-semibold uppercase text-text-secondary">Journal</span>
-              <span className="text-2xs text-text-tertiary">{journal.length} commits</span>
+              <button
+                className="flex items-center gap-1 text-2xs font-semibold uppercase text-text-secondary hover:text-text-primary transition-colors"
+                onClick={() => setJournalCollapsed(!journalCollapsed)}
+                title={journalCollapsed ? t('changes.expandJournal') : t('changes.collapseJournal')}
+              >
+                {journalCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                {t('changes.journal')}
+              </button>
+              <span className="text-2xs text-text-tertiary">{t('history.commits', { count: journal.length })}</span>
             </div>
+            {!journalCollapsed && (
             <div className="overflow-y-auto" style={{ height: 'calc(100% - 24px)' }}>
               {journalLoading ? (
                 <div className="px-2 py-2 text-xs text-text-tertiary flex items-center gap-2">
-                  <span className="spinner" /> Loading...
+                  <span className="spinner" /> {t('common.loading')}
                 </div>
               ) : journal.length === 0 ? (
-                <div className="px-2 py-2 text-xs text-text-tertiary">No commits yet</div>
+                <div className="px-2 py-2 text-xs text-text-tertiary">{t('changes.noCommits')}</div>
               ) : (
                 (() => {
                   // Group commits by relative time period for better scannability.
@@ -1474,7 +2279,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                     <div key={gi}>
                       {grp.entries.length > 1 && (
                         <div className="px-2 py-0.5 bg-bg-tertiary/50 text-2xs text-text-tertiary border-b border-border-subtle">
-                          {grp.entries.length} commits · {grp.label}
+                          {t('changes.commitsGroupLabel', { count: grp.entries.length, time: grp.label })}
                         </div>
                       )}
                       {grp.entries.map((entry) => {
@@ -1488,7 +2293,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                               useSelectionStore.getState().selectCommit(entry.hash);
                               window.location.hash = '#/history';
                             }}
-                            title="Click to view this commit in History"
+                            title={t('changes.viewInHistoryTitle')}
                           >
                             <span
                               className="flex-shrink-0 rounded author-badge text-center"
@@ -1511,6 +2316,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                 })()
               )}
             </div>
+            )}
           </div>
 
           {/* Commit editor — resizable with markdown preview */}
@@ -1523,20 +2329,20 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                   checked={amend}
                   onChange={(e) => setAmend(e.target.checked)}
                 />
-                Amend
+                {t('changes.amend')}
               </label>
-              <label className="flex items-center gap-1 text-2xs text-text-secondary cursor-pointer" title="Stage all changes before committing (git add . && git commit)">
+              <label className="flex items-center gap-1 text-2xs text-text-secondary cursor-pointer" title={t('changes.commitAllTitle')}>
                 <input
                   type="checkbox"
                   checked={commitAll}
                   onChange={(e) => setCommitAll(e.target.checked)}
                 />
-                Commit All
+                {t('changes.commitAll')}
               </label>
               <button
                 className={cn('text-2xs px-1.5 py-0.5 rounded', showMarkdownPreview ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
                 onClick={() => setShowMarkdownPreview(!showMarkdownPreview)}
-                title="Toggle markdown preview"
+                title={t('changes.toggleMarkdownPreview')}
               >
                 MD
               </button>
@@ -1550,36 +2356,130 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                 )}
                 onClick={handleAIGenerate}
                 disabled={!settings?.aiCommitMessagesEnabled || aiGenerating}
-                title="Generate commit message with AI (configure in Settings → AI Commit Messages)"
+                title={t('changes.aiGenerateTitle')}
               >
                 <Sparkles size={10} className={aiGenerating ? 'animate-pulse' : ''} />
                 AI
               </button>
+              {/* Conventional Commits prefix dropdown (QW-3) */}
+              <CommitTypeDropdown onPickType={handlePickCommitType} />
+              {/* Commit message history dropdown */}
+              <div className="relative">
+                <button
+                  className={cn('text-2xs px-1.5 py-0.5 rounded flex items-center gap-1',
+                    commitMsgHistory.length > 0 ? 'text-text-secondary hover:bg-bg-hover' : 'text-text-tertiary opacity-50 cursor-not-allowed')}
+                  onClick={() => commitMsgHistory.length > 0 && setShowMsgHistory(!showMsgHistory)}
+                  disabled={commitMsgHistory.length === 0}
+                  title={t('changes.recentCommitMessages')}
+                >
+                  {t('nav.history')}
+                </button>
+                {showMsgHistory && commitMsgHistory.length > 0 && (
+                  <div className="absolute bottom-full left-0 mb-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-64 max-h-48 overflow-y-auto">
+                    {commitMsgHistory.map((msg, i) => (
+                      <button
+                        key={i}
+                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover truncate border-b border-border-subtle last:border-b-0"
+                        title={msg}
+                        onClick={() => {
+                          setCommitMsg(msg);
+                          setShowMsgHistory(false);
+                        }}
+                      >
+                        {msg.split('\n')[0]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex-1" />
+              {/* Sync indicator — same as in History page. Uses plug/zap icons:
+                  PlugZap when in sync (вилка в розетке), ArrowUp/Down when
+                  push/pull needed. Only shown when there's an upstream tracking
+                  branch configured. */}
+              {status?.current && status?.tracking && (
+                <div
+                  className={cn('flex items-center gap-0.5 px-1.5 py-0.5 mr-1 rounded border text-2xs font-medium',
+                    status.ahead > 0 && status.behind > 0
+                      ? 'border-status-modified/40 bg-status-modified/10 text-status-modified'
+                      : status.ahead > 0
+                        ? 'border-status-added/40 bg-status-added/10 text-status-added'
+                        : status.behind > 0
+                          ? 'border-status-info/40 bg-status-info/10 text-status-info'
+                          : 'border-status-added/30 bg-status-added/5 text-status-added')}
+                  title={
+                    status.ahead === 0 && status.behind === 0
+                      ? `In sync with ${status.tracking}`
+                      : `Local: ${status.current} · Upstream: ${status.tracking}\n` +
+                        `↑ ${status.ahead} commit(s) ahead · ↓ ${status.behind} commit(s) behind`
+                  }
+                >
+                  {status.ahead > 0 && (
+                    <span className="flex items-center gap-0.5">
+                      <ArrowUp size={10} />
+                      {status.ahead}
+                    </span>
+                  )}
+                  {status.behind > 0 && (
+                    <span className="flex items-center gap-0.5">
+                      <ArrowDown size={10} />
+                      {status.behind}
+                    </span>
+                  )}
+                  {status.ahead === 0 && status.behind === 0 && (
+                    <span className="flex items-center gap-0.5">
+                      <PlugZap size={12} />
+                    </span>
+                  )}
+                </div>
+              )}
               <button
                 className="btn btn-secondary text-xs"
                 onClick={handleCommitAndPush}
-                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0)}
-                title="Commit then push"
+                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || isCommitBlocked(status)}
+                title={isCommitBlocked(status) ? t('changes.operationBlockedTitle') : t('changes.commitThenPushTitle')}
               >
                 <GitPullRequest size={11} />
-                Commit & Push
+                {t('changes.commitAndPush')}
               </button>
               <button
                 className="btn btn-primary text-xs"
                 onClick={handleCommit}
-                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0)}
-                title="Ctrl+Enter"
+                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || isCommitBlocked(status)}
+                title={isCommitBlocked(status) ? 'A git operation is in progress — finish it first (use the banner above)' : 'Ctrl+Enter'}
               >
                 <GitCommit size={11} />
                 Commit
               </button>
             </div>
-            <div className="flex-1 flex overflow-hidden">
-              <textarea
+            <div className="flex-1 flex overflow-hidden flex-col">
+              {/* AI auto-suggestion hint — appears above the textarea when
+                  the AI has generated a suggestion in the background.
+                  Click to fill the textarea. Non-intrusive: subtle styling,
+                  dismissable by just typing in the textarea (which sets
+                  commitMsg → the useEffect clears the suggestion). */}
+              {aiSuggestion && !commitMsg.trim() && (
+                <button
+                  className="flex items-center gap-1.5 px-2 py-1 bg-accent-muted/50 border-b border-accent/20 text-2xs text-accent hover:bg-accent-muted transition-colors text-left"
+                  onClick={() => { setCommitMsg(aiSuggestion); setAiSuggestion(null); }}
+                  title="Click to use this AI-generated commit message"
+                >
+                  <Sparkles size={9} className="flex-shrink-0" />
+                  <span className="truncate flex-1 font-mono">{aiSuggestion.split('\n')[0]}</span>
+                  <span className="text-3xs text-text-tertiary flex-shrink-0">click to use</span>
+                </button>
+              )}
+              {aiSuggesting && !aiSuggestion && !commitMsg.trim() && (
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs text-text-tertiary">
+                  <Loader size={9} className="animate-spin" />
+                  <span>Suggesting commit message…</span>
+                </div>
+              )}
+              <div className="flex-1 flex overflow-hidden">
+                <textarea
                 id="commit-message-input"
                 className="flex-1 text-sm font-mono resize-none p-2 bg-bg-primary border-r border-border-subtle"
-                placeholder="Commit message... (supports markdown)"
+                placeholder={t('changes.commitMessage')}
                 value={commitMsg}
                 onChange={(e) => setCommitMsg(e.target.value)}
                 onKeyDown={(e) => {
@@ -1595,6 +2495,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                   <CommitMarkdownPreview content={commitMsg} />
                 </div>
               )}
+              </div>
             </div>
           </div>
         </div>
@@ -1626,19 +2527,18 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
       {/* Clean untracked: dry-run preview → confirm → git clean -fd */}
       {showCleanDialog && (
         <div
-          className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
           onClick={() => setShowCleanDialog(false)}
         >
           <div className="panel w-[480px] max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-medium px-4 pt-4">Clean Untracked Files</h3>
+            <h3 className="text-base font-medium px-4 pt-4">{t('changes.cleanDialogTitle')}</h3>
             <div className="px-4 py-2 text-xs text-text-tertiary">
-              The following untracked files and directories will be permanently removed
-              (git clean -fd). This cannot be undone.
+              {t('changes.cleanDialogBody')}
             </div>
             <div className="flex-1 overflow-y-auto mx-4 border border-border-default rounded bg-bg-tertiary">
               {cleanPreview.length === 0 ? (
                 <div className="p-4 text-xs text-text-tertiary text-center">
-                  Nothing to clean — no untracked files or directories.
+                  {t('changes.cleanNothing')}
                 </div>
               ) : (
                 cleanPreview.map((p) => (
@@ -1650,7 +2550,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
             </div>
             <div className="flex justify-end gap-2 px-4 py-3">
               <button className="btn btn-secondary" onClick={() => setShowCleanDialog(false)}>
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 className="btn btn-primary hover:!bg-status-deleted"
@@ -1658,7 +2558,7 @@ export function ChangesPage({ onResolveConflict }: ChangesPageProps = {}) {
                 disabled={cleanBusy || cleanPreview.length === 0}
               >
                 <Trash size={13} />
-                Clean {cleanPreview.length > 0 ? `${cleanPreview.length} paths` : ''}
+                {cleanPreview.length > 0 ? t('changes.cleanNPaths', { count: cleanPreview.length }) : t('changes.clean')}
               </button>
             </div>
           </div>

@@ -1,14 +1,18 @@
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { useToastStore } from '../stores/toastStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { memo, useEffect, useState, useCallback } from 'react';
 import { ArrowUp, ArrowDown, Loader, ChevronUp, ChevronDown } from './icons';
+import { FooterCounters } from './FooterCounters';
 import { useContextMenu } from '../lib/useContextMenu';
 import { buildHashMenu, runHashMenuAction } from '../lib/commitMenu';
+import { describePushResult } from '../lib/pushResult';
+import { useI18n } from '../lib/i18n';
 
 /**
  * Clickable commit hash — clicking jumps to History and focuses that commit.
@@ -37,6 +41,7 @@ export const CommitHashLink = memo(function CommitHashLink({ hash, short = true,
   const selectCommit = useSelectionStore((s) => s.selectCommit);
   const repo = useRepositoryStore((s) => s.currentRepo);
   const showContextMenu = useContextMenu();
+  const { t } = useI18n();
   const handleClick = useCallback((e: React.MouseEvent) => {
     // Don't let the row's own click handler also fire — the hash targets its
     // own commit (same behavior as clicking a parent hash in PARENTS).
@@ -65,7 +70,7 @@ export const CommitHashLink = memo(function CommitHashLink({ hash, short = true,
       )}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
-      title={`Click to view commit ${hash} in History`}
+      title={t('shell.clickToViewCommit', { hash })}
     >
       {displayText}
     </code>
@@ -85,7 +90,12 @@ export function StatusBar({
   // Global selected commit — visible from anywhere in the app
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
   const selectCommit = useSelectionStore((s) => s.selectCommit);
-  const toast = useToastStore();
+  const toast = useToastActions();
+  const { t } = useI18n();
+  // Task 18 — VSCode-style footer display settings.
+  const footerVisible = useSettingsStore((s) => s.settings.footerVisible);
+  const vis = (k: 'head' | 'inProgress' | 'selectedCommit' | 'stagedChanged' | 'aheadBehind' | 'updatedAt' | 'outputToggle') =>
+    (footerVisible ?? {})[k] !== false;
   // Running operations — show a spinner + progress in the status bar
   const runningIds = useOperationLogStore((s) => s.runningIds);
   const ops = useOperationLogStore((s) => s.ops);
@@ -109,11 +119,11 @@ export function StatusBar({
       <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
         <span className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-status-success inline-block" />
-          Ready
+          {t('shell.ready')}
         </span>
         <span className="flex items-center gap-3">
           <span className="hidden sm:inline">
-            Press <kbd>Ctrl</kbd>+<kbd>?</kbd> for shortcuts
+            {t('shell.pressPrefix')} <kbd>Ctrl</kbd>+<kbd>?</kbd> {t('shell.shortcutsSuffix')}
           </span>
           <span className="font-mono">PrismGit v2.0</span>
         </span>
@@ -127,24 +137,50 @@ export function StatusBar({
   return (
     <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
       <div className="flex items-center gap-3">
-        {/* HEAD indicator — always visible, shows where you are */}
-        {status?.current && headHash && (
-          <span className="flex items-center gap-1.5" title="Current HEAD">
-            <span className="text-accent font-semibold tracking-wide">HEAD</span>
-            <span className="text-text-tertiary">→</span>
-            <span className="text-text-primary font-medium">{status.current}</span>
+        {/* HEAD indicator — always visible, shows where you are.
+            Bright accent background + ">" makes the current branch
+            unmistakable from across the screen. */}
+        {vis('head') && status?.current && headHash && (
+          <span className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-accent-muted border border-accent/40" title={t('shell.currentHead')}>
+            <span className="text-accent font-bold">{'>'}</span>
+            <span className="text-accent font-semibold">{status.current}</span>
+            <span className="text-text-tertiary">·</span>
             <CommitHashLink hash={headHash} />
           </span>
         )}
+        {/* In-progress operation indicator — bright warning so the user
+            knows the working tree is in a special state and destructive
+            operations are blocked. Clicking it jumps to Changes where the
+            SequencerPanel / MergePanel / RebasePanel banners live. */}
+        {vis('inProgress') && (() => {
+          const m = status?.isMerging, r = status?.isRebasing, c = status?.isCherryPicking, v = status?.isReverting, b = status?.isBisecting;
+          if (!m && !r && !c && !v && !b) return null;
+          let label = '';
+          if (m) label = 'Merging';
+          else if (r) label = 'Rebasing';
+          else if (c) label = 'Cherry-picking';
+          else if (v) label = 'Reverting';
+          else if (b) label = 'Bisecting';
+          return (
+            <a
+              href="#/changes"
+              className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-status-warning/15 border border-status-warning/50 text-status-warning font-medium hover:bg-status-warning/25 transition-colors"
+              title={`Working tree is in ${label.toLowerCase()} state. Click to open Changes and Continue / Skip / Abort.`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-status-warning inline-block animate-pulse" />
+              {label} in progress
+            </a>
+          );
+        })()}
         {/* Selected commit (if different from HEAD) */}
-        {selectedCommitHash && selectedCommitHash !== headHash && (
-          <span className="flex items-center gap-1.5" title="Globally selected commit (from any tool)">
-            <span className="text-text-tertiary">selected:</span>
+        {vis('selectedCommit') && selectedCommitHash && selectedCommitHash !== headHash && (
+          <span className="flex items-center gap-1.5" title={t('shell.selectedCommitTooltip')}>
+            <span className="text-text-tertiary">{t('shell.selectedLabel')}</span>
             <CommitHashLink hash={selectedCommitHash} />
             <button
               className="text-text-tertiary hover:text-text-primary transition-colors px-1"
               onClick={() => selectCommit(null)}
-              title="Clear selection"
+              title={t('shell.clearSelection')}
             >
               ✕
             </button>
@@ -158,77 +194,89 @@ export function StatusBar({
             <Loader size={10} className="spin" />
             <span className="text-2xs font-medium">{currentRunningOp.action}</span>
             {runningCount > 1 && (
-              <span className="text-2xs text-text-tertiary">+{runningCount - 1} more</span>
+              <span className="text-2xs text-text-tertiary">{t('shell.moreOps', { count: runningCount - 1 })}</span>
             )}
           </span>
         ) : (
           /* Clickable counters — quick jump to the working tree */
+          vis('stagedChanged') && (
           <button
             className="flex items-center gap-1 hover:text-text-primary transition-colors cursor-pointer px-1 rounded"
             onClick={() => { window.location.hash = '#/changes'; }}
-            title="Open Changes (Ctrl+1)"
+            title={t('shell.openChangesTooltip')}
           >
             {staged > 0 && (
               <span className="flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
-                {staged} staged
+                {t('shell.nStaged', { count: staged })}
               </span>
             )}
             {changed > 0 && (
               <span className="flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-status-modified inline-block" />
-                {changed} changed
+                {t('shell.nChanged', { count: changed })}
               </span>
             )}
           </button>
+          )
         )}
+        {/* Tasks 15/16/17/20 — footer counters for Recyclable/Stashes/Submodules/LFS.
+            Click to jump to the corresponding page. */}
+        <FooterCounters />
         {/* Ahead / behind — click to push / pull (VS Code-style sync buttons) */}
-        {status?.ahead ? (
+        {vis('aheadBehind') && status?.ahead ? (
           <button
             className="text-status-added flex items-center gap-0.5 font-medium hover:bg-bg-hover rounded px-1 py-0.5 transition-colors cursor-pointer"
             onClick={() => {
               if (!currentRepo) return;
               useGitStore.getState().push(currentRepo.path)
-                .then(() => toast.success('Pushed successfully'))
-                .catch((e) => toast.error('Push failed', String(e)));
+                .then((res) => {
+                  const result = describePushResult(res);
+                  if (result.kind === 'error') toast.error(result.title, result.detail);
+                  else if (result.kind === 'info') toast.info(result.title, result.detail);
+                  else toast.success(result.title, result.detail);
+                })
+                .catch((e) => toast.error(t('shell.pushFailed'), String(e)));
             }}
-            title={`${status.ahead} commit(s) ahead — click to push`}
+            title={t('shell.aheadTooltip', { count: status.ahead })}
           >
             <ArrowUp size={9} />{status.ahead}
           </button>
         ) : null}
-        {status?.behind ? (
+        {vis('aheadBehind') && status?.behind ? (
           <button
             className="text-status-modified flex items-center gap-0.5 font-medium hover:bg-bg-hover rounded px-1 py-0.5 transition-colors cursor-pointer"
             onClick={() => {
               if (!currentRepo) return;
               useGitStore.getState().pull(currentRepo.path)
-                .then(() => toast.success('Pulled successfully'))
-                .catch((e) => toast.error('Pull failed', String(e)));
+                .then(() => toast.success(t('status.pulledSuccessfully')))
+                .catch((e) => toast.error(t('shell.pullFailed'), String(e)));
             }}
-            title={`${status.behind} commit(s) behind — click to pull`}
+            title={t('shell.behindTooltip', { count: status.behind })}
           >
             <ArrowDown size={9} />{status.behind}
           </button>
         ) : null}
-        {lastRefresh > 0 && (
+        {vis('updatedAt') && lastRefresh > 0 && (
           <button
             className="text-text-tertiary hover:text-text-primary transition-colors cursor-pointer"
             onClick={() => currentRepo && useGitStore.getState().refreshStatus(currentRepo.path)}
-            title="Refresh status (F5)"
+            title={t('shell.refreshStatusTooltip')}
           >
-            updated {new Date(lastRefresh).toLocaleTimeString()}
+            {t('shell.updatedAt', { time: new Date(lastRefresh).toLocaleTimeString() })}
           </button>
         )}
         {/* Command Log toggle button */}
+        {vis('outputToggle') && (
         <button
           className="flex items-center gap-1 text-text-tertiary hover:text-text-primary transition-colors cursor-pointer px-1"
           onClick={() => onToggleCommandLog && onToggleCommandLog()}
-          title="Toggle Output panel (Ctrl+Shift+L)"
+          title={t('shell.toggleOutputTooltip')}
         >
           {showCommandLog ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
-          <span className="text-2xs">Output</span>
+          <span className="text-2xs">{t('shell.outputPanel')}</span>
         </button>
+        )}
       </div>
     </footer>
   );

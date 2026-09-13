@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, Folder, FolderOpen, FolderGit, FolderGitOpen } from './icons';
 import type { DirNode } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 interface DirTreePanelProps {
   repoName: string;
@@ -15,14 +16,17 @@ interface DirTreePanelProps {
   changeCounts: Map<string, number>;
   /** Total number of changed files in the repository (for the root badge). */
   totalChanges: number;
+  /** Set of ignored paths (from git status --ignored). Directories end with '/'. */
+  ignoredPaths?: Set<string>;
 }
 
 /** Small rounded counter shown next to folders that contain changed files. */
 function ChangeBadge({ count }: { count: number }) {
+  const { t } = useI18n();
   return (
     <span
       className="ml-auto flex-shrink-0 min-w-[18px] text-center rounded-full bg-accent-muted text-accent text-2xs font-bold px-1.5 leading-[14px]"
-      title={`${count} changed file${count === 1 ? '' : 's'}`}
+      title={count === 1 ? t('changes.changedFileCountOne', { count }) : t('changes.changedFileCountMany', { count })}
     >
       {count}
     </span>
@@ -39,6 +43,7 @@ function DirRows({
   selectedDir,
   onSelectDir,
   changeCounts,
+  ignoredPaths,
 }: {
   node: DirNode;
   depth: number;
@@ -47,31 +52,40 @@ function DirRows({
   selectedDir: string | null;
   onSelectDir: (dir: string | null) => void;
   changeCounts: Map<string, number>;
+  ignoredPaths?: Set<string>;
 }) {
+  const { t } = useI18n();
   const open = expanded.has(node.path);
   const hasChildren = node.children.length > 0;
   const selected = selectedDir === node.path;
   const changeCount = changeCounts.get(node.path) ?? 0;
   const hasChanges = changeCount > 0;
+  // Check if this directory is git-ignored (path matches an entry in ignoredPaths,
+  // either as 'path/' for a directory or 'path' for a file)
+  const isIgnored = ignoredPaths?.has(node.path) || ignoredPaths?.has(`${node.path}/`);
   return (
     <>
       <div
         className={cn(
           'flex items-center gap-1 h-[24px] pr-2 cursor-pointer text-xs transition-colors',
-          selected ? 'bg-bg-selected' : 'hover:bg-bg-hover'
+          selected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
+          isIgnored && 'opacity-50',
         )}
         style={{ paddingLeft: 6 + depth * 14 }}
         onClick={() => onSelectDir(node.path)}
-        title={node.path}
+        title={isIgnored ? `${node.path} (ignored)` : node.path}
       >
         {hasChildren ? (
           <button
-            className="w-4 h-4 grid place-items-center rounded-sm text-text-tertiary hover:text-text-primary hover:bg-bg-hover flex-shrink-0 transition-colors"
+            className={cn(
+              'w-4 h-4 grid place-items-center rounded-sm flex-shrink-0 transition-colors',
+              isIgnored ? 'text-text-tertiary' : 'text-text-tertiary hover:text-text-primary hover:bg-bg-hover',
+            )}
             onClick={(e) => {
               e.stopPropagation();
               onToggleExpand(node.path);
             }}
-            title={open ? 'Collapse' : 'Expand'}
+            title={open ? t('changes.collapse') : t('changes.expand')}
           >
             {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           </button>
@@ -81,15 +95,19 @@ function DirRows({
         {open ? (
           <FolderOpen
             size={13}
-            className={cn('flex-shrink-0', hasChanges ? 'text-accent' : 'text-text-tertiary')}
+            className={cn('flex-shrink-0', hasChanges ? 'text-accent' : isIgnored ? 'text-text-tertiary' : 'text-text-tertiary')}
           />
         ) : (
           <Folder
             size={13}
-            className={cn('flex-shrink-0', hasChanges ? 'text-accent' : 'text-text-tertiary')}
+            className={cn('flex-shrink-0', hasChanges ? 'text-accent' : isIgnored ? 'text-text-tertiary' : 'text-text-tertiary')}
           />
         )}
-        <span className={cn('truncate', hasChanges && 'text-accent font-semibold')}>{node.name}</span>
+        <span className={cn(
+          'truncate',
+          hasChanges && 'text-accent font-semibold',
+          isIgnored && !hasChanges && 'text-text-tertiary italic',
+        )}>{node.name}</span>
         {hasChanges && <ChangeBadge count={changeCount} />}
       </div>
       {open &&
@@ -104,6 +122,7 @@ function DirRows({
             selectedDir={selectedDir}
             onSelectDir={onSelectDir}
             changeCounts={changeCounts}
+            ignoredPaths={ignoredPaths}
           />
         ))}
     </>
@@ -116,6 +135,7 @@ function DirRows({
  * the file list; selecting the repository root shows everything.
  */
 export function DirTreePanel(p: DirTreePanelProps) {
+  const { t } = useI18n();
   const rootOpen = p.expanded.has(ROOT_KEY);
   return (
     <div className="py-1 select-none">
@@ -125,7 +145,7 @@ export function DirTreePanel(p: DirTreePanelProps) {
           p.selectedDir === null ? 'bg-bg-selected' : 'hover:bg-bg-hover'
         )}
         onClick={() => p.onSelectDir(null)}
-        title="Show all changed files"
+        title={t('changes.showAllChanged')}
       >
         <button
           className="w-4 h-4 grid place-items-center rounded-sm text-text-tertiary hover:text-text-primary hover:bg-bg-hover flex-shrink-0 transition-colors"
@@ -133,7 +153,7 @@ export function DirTreePanel(p: DirTreePanelProps) {
             e.stopPropagation();
             p.onToggleExpand(ROOT_KEY);
           }}
-          title={rootOpen ? 'Collapse' : 'Expand'}
+          title={rootOpen ? t('changes.collapse') : t('changes.expand')}
         >
           {rootOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         </button>
@@ -147,9 +167,9 @@ export function DirTreePanel(p: DirTreePanelProps) {
 
       {rootOpen &&
         (p.loading && p.tree.length === 0 ? (
-          <div className="pl-8 py-1 text-2xs text-text-tertiary animate-pulse">Loading...</div>
+          <div className="pl-8 py-1 text-2xs text-text-tertiary animate-pulse">{t('common.loading')}</div>
         ) : p.tree.length === 0 ? (
-          <div className="pl-8 py-1 text-2xs text-text-tertiary">No folders</div>
+          <div className="pl-8 py-1 text-2xs text-text-tertiary">{t('changes.noFolders')}</div>
         ) : (
           p.tree.map((node) => (
             <DirRows
@@ -161,6 +181,7 @@ export function DirTreePanel(p: DirTreePanelProps) {
               selectedDir={p.selectedDir}
               onSelectDir={p.onSelectDir}
               changeCounts={p.changeCounts}
+              ignoredPaths={p.ignoredPaths}
             />
           ))
         ))}

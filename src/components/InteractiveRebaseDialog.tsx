@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, RefreshCw, AlertCircle, Loader, ChevronUp, ChevronDown, GitCommit, CornerDownRight, GitMerge, Scissors, Layers } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type LogEntry } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 type RebaseAction = 'pick' | 'reword' | 'edit' | 'squash' | 'fixup' | 'drop';
@@ -45,7 +47,15 @@ export function InteractiveRebaseDialog({
   useEscapeKey(open, onClose);
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
+  const { t } = useI18n();
+  // SmartGit linkage: without an explicit prop, the rebase target defaults to
+  // the globally selected branch, then the current HEAD — the dialog used to
+  // be unusable (always warning "Target branch is required") when opened from
+  // the Commands menu.
+  const globalSelectedBranch = useSelectionStore((s) => s.selectedBranch);
+  const headBranch = useGitStore((s) => s.status?.current ?? null);
+  const effectiveOntoBranch = ontoBranch || globalSelectedBranch || headBranch || '';
   const [todos, setTodos] = useState<RebaseTodoItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -75,7 +85,7 @@ export function InteractiveRebaseDialog({
       }));
       setTodos(items);
     } catch (e) {
-      toast.error('Failed to load commits', String(e));
+      toast.error(t('toast.iRebase.loadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -137,7 +147,7 @@ export function InteractiveRebaseDialog({
       const [moved] = next.splice(newer, 1);
       next.splice(older + 1, 0, { ...moved, action: 'squash' });
       setTodos(next);
-      toast.info(`Coalescing "${moved.subject.substring(0, 30)}" into "${next[older].subject.substring(0, 30)}"`);
+      toast.info(t('toast.iRebase.coalescing', { detail: `"${moved.subject.substring(0, 30)}" into "${next[older].subject.substring(0, 30)}"` }));
     } else {
       // Plain reorder
       const next = [...todos];
@@ -184,9 +194,9 @@ export function InteractiveRebaseDialog({
     }
     if (changes > 0) {
       setTodos(next);
-      toast.success(`Auto-squashed ${changes} commit${changes > 1 ? 's' : ''}`, 'Adjacent commits with same subject are now fixup');
+      toast.success(t('toast.iRebase.autoSquashed', { count: changes }), 'Adjacent commits with same subject are now fixup');
     } else {
-      toast.info('No adjacent commits with same subject to auto-squash');
+      toast.info(t('toast.iRebase.noCoalesce'));
     }
   };
 
@@ -196,7 +206,7 @@ export function InteractiveRebaseDialog({
     const next = [...todos];
     next[idx] = { ...next[idx], action: 'edit' };
     setTodos(next);
-    toast.info(`Marked "${next[idx].subject.substring(0, 30)}" for split`, 'Rebase will pause here. Use "Split off Files" after pause.');
+    toast.info(t('toast.iRebase.marked', { detail: `"${next[idx].subject.substring(0, 30)}" for split` }), 'Rebase will pause here. Use "Split off Files" after pause.');
   };
 
   const setAction = (idx: number, action: RebaseAction) => {
@@ -227,8 +237,8 @@ export function InteractiveRebaseDialog({
   // Generate a git rebase todo script and execute via filter-branch
   // (Real interactive rebase requires an editor; we use a simpler approach)
   const handleExecute = async () => {
-    if (!ontoBranch) {
-      toast.warning('Target branch is required');
+    if (!effectiveOntoBranch) {
+      toast.warning(t('toast.iRebase.targetRequired'));
       return;
     }
     setExecuting(true);
@@ -252,15 +262,15 @@ export function InteractiveRebaseDialog({
       // This is a simplified version - real interactive rebase requires more complex handling
       await api.git.raw(repo.path, [
         '-c', 'sequence.editor=cp ' + todoPath,
-        'rebase', '-i', ontoBranch,
+        'rebase', '-i', effectiveOntoBranch,
       ]);
 
-      toast.success('Interactive rebase completed');
+      toast.success(t('toast.merge.rebaseCompleted'));
       await refreshStatus(repo.path);
       onClose();
       fs.unlinkSync(todoPath);
     } catch (e) {
-      toast.error('Rebase failed', String(e));
+      toast.error(t('toast.merge.rebaseFailed'), String(e));
     } finally {
       setExecuting(false);
     }
@@ -291,7 +301,16 @@ export function InteractiveRebaseDialog({
 
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border-default bg-bg-tertiary text-xs">
           <span className="text-text-tertiary">Rebasing onto:</span>
-          <code className="mono text-accent">{ontoBranch || 'HEAD~' + numCommits}</code>
+          <code
+            className="mono text-accent cursor-pointer hover:underline"
+            title="Select this branch (visible in all tools) — click to view in History"
+            onClick={effectiveOntoBranch ? () => {
+              useSelectionStore.getState().selectBranch(effectiveOntoBranch);
+              window.location.hash = '#/history';
+            } : undefined}
+          >
+            {effectiveOntoBranch || 'HEAD~' + numCommits}
+          </code>
           <span className="text-text-tertiary ml-auto">{todos.length} commits</span>
         </div>
 
@@ -365,8 +384,17 @@ export function InteractiveRebaseDialog({
                   ))}
                 </select>
 
-                {/* Hash */}
-                <code className="text-xs mono text-text-tertiary flex-shrink-0 mt-0.5 w-16">
+                {/* Hash — click selects the commit globally (Toolbar chip,
+                    History, Diff, Notes all follow) */}
+                <code
+                  className="text-xs mono text-text-tertiary hover:text-accent cursor-pointer flex-shrink-0 mt-0.5 w-16"
+                  title="Select this commit — click to view in History"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    useSelectionStore.getState().selectCommit(item.hash);
+                    window.location.hash = '#/history';
+                  }}
+                >
                   {item.hashAbbrev}
                 </code>
 
@@ -395,14 +423,14 @@ export function InteractiveRebaseDialog({
                     <>
                       <button
                         className="icon-btn !w-6 !h-6"
-                        title="Save"
+                        title={t('action.button.save')}
                         onClick={saveMessage}
                       >
                         <RefreshCw size={11} />
                       </button>
                       <button
                         className="icon-btn !w-6 !h-6"
-                        title="Cancel"
+                        title={t('action.button.cancel')}
                         onClick={() => setEditingMessage(null)}
                       >
                         <X size={11} />
@@ -413,7 +441,7 @@ export function InteractiveRebaseDialog({
                       {item.action === 'reword' && (
                         <button
                           className="icon-btn !w-6 !h-6 opacity-0 group-hover:opacity-100"
-                          title="Edit message"
+                          title={t('action.button.editMessage')}
                           onClick={() => startEditMessage(idx)}
                         >
                           <CornerDownRight size={11} />
@@ -429,7 +457,7 @@ export function InteractiveRebaseDialog({
                       </button>
                       <button
                         className="icon-btn !w-6 !h-6 opacity-0 group-hover:opacity-100"
-                        title="Move up"
+                        title={t('action.title.moveUp')}
                         onClick={() => moveUp(idx)}
                         disabled={idx === 0}
                       >
@@ -437,7 +465,7 @@ export function InteractiveRebaseDialog({
                       </button>
                       <button
                         className="icon-btn !w-6 !h-6 opacity-0 group-hover:opacity-100"
-                        title="Move down"
+                        title={t('action.title.moveDown')}
                         onClick={() => moveDown(idx)}
                         disabled={idx === todos.length - 1}
                       >
@@ -474,7 +502,7 @@ export function InteractiveRebaseDialog({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button className="btn btn-secondary" onClick={onClose}>{t('action.button.cancel')}</button>
             <button
               className="btn btn-primary"
               onClick={handleExecute}

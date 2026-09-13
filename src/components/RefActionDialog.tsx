@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { X, Search, Loader } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type BranchInfo } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 export type RefAction =
   | 'checkout'
@@ -13,13 +15,14 @@ export type RefAction =
   | 'revert'
   | 'delete-branch';
 
-const ACTION_META: Record<RefAction, { title: string; targetLabel: string; confirmLabel: string; branchOnly?: boolean; localOnly?: boolean }> = {
-  checkout: { title: 'Check Out', targetLabel: 'Branch or commit to check out', confirmLabel: 'Check Out' },
-  merge: { title: 'Merge', targetLabel: 'Branch/commit to merge INTO the current branch', confirmLabel: 'Merge' },
-  rebase: { title: 'Rebase', targetLabel: 'Branch/commit to rebase the current branch ONTO', confirmLabel: 'Rebase' },
-  'cherry-pick': { title: 'Cherry-Pick', targetLabel: 'Commit to cherry-pick into the current branch', confirmLabel: 'Cherry-Pick' },
-  revert: { title: 'Revert', targetLabel: 'Commit to revert (creates a revert commit)', confirmLabel: 'Revert' },
-  'delete-branch': { title: 'Delete Branch', targetLabel: 'Branch to delete', confirmLabel: 'Delete', branchOnly: true },
+/** i18n keys per action — resolved with t() inside the component. */
+const ACTION_META: Record<RefAction, { titleKey: string; targetKey: string; confirmKey: string; branchOnly?: boolean; localOnly?: boolean }> = {
+  checkout: { titleKey: 'dialogs.checkOut', targetKey: 'dialogs.checkoutTarget', confirmKey: 'dialogs.checkOut' },
+  merge: { titleKey: 'toolbar.merge', targetKey: 'dialogs.mergeTarget', confirmKey: 'toolbar.merge' },
+  rebase: { titleKey: 'toolbar.rebase', targetKey: 'dialogs.rebaseTarget', confirmKey: 'toolbar.rebase' },
+  'cherry-pick': { titleKey: 'dialogs.cherryPick', targetKey: 'dialogs.cherryPickTarget', confirmKey: 'dialogs.cherryPick' },
+  revert: { titleKey: 'dialogs.revert', targetKey: 'dialogs.revertTarget', confirmKey: 'dialogs.revert' },
+  'delete-branch': { titleKey: 'dialogs.deleteBranchTitle', targetKey: 'dialogs.deleteBranchTarget', confirmKey: 'common.delete', branchOnly: true },
 };
 
 /**
@@ -28,8 +31,9 @@ const ACTION_META: Record<RefAction, { title: string; targetLabel: string; confi
  * type a commit hash/SHA prefix, preview, and run the REAL git operation.
  */
 export function RefActionDialog({ action, onClose }: { action: RefAction; onClose: () => void }) {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const meta = ACTION_META[action];
 
   const [branches, setBranches] = useState<BranchInfo[]>([]);
@@ -48,14 +52,18 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
         ]);
         setBranches(bs);
         setCurrent(cur);
-        // Sensible default: for checkout pick another branch, for merge/rebase pick main/master
+        // Sensible default: the branch GLOBALLY selected in another tool
+        // (Branches/History/Toolbar chip) wins over the old name heuristic —
+        // that's the whole point of the cross-tool selection.
+        const globalSel = useSelectionStore.getState().selectedBranch;
         const preferred =
-          action === 'checkout'
+          (globalSel && bs.some((b) => b.name === globalSel && !b.current) ? globalSel : undefined)
+          ?? (action === 'checkout'
             ? bs.find((b) => !b.current && !b.remote)?.name
-            : bs.find((b) => /^(main|master|develop)$/.test(b.name) && !b.current)?.name;
+            : bs.find((b) => /^(main|master|develop)$/.test(b.name) && !b.current)?.name);
         if (preferred) setSelected(preferred);
       } catch (e) {
-        toast.error('Failed to load branches', String(e));
+        toast.error(t('dialogs.loadBranchesFailed'), String(e));
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -92,54 +100,54 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
         case 'checkout': {
           const isRemote = branches.some((b) => b.remote && b.name === target);
           await api.git.checkout(repo.path, target, { track: isRemote });
-          toast.success(`Checked out ${target}`);
+          toast.success(t('dialogs.checkedOut', { ref: target }));
           break;
         }
         case 'merge': {
           await api.git.merge(repo.path, target);
-          toast.success(`Merged ${target}`);
+          toast.success(t('dialogs.merged', { ref: target }));
           break;
         }
         case 'rebase': {
           await api.git.rebase(repo.path, target);
-          toast.success(`Rebased onto ${target}`);
+          toast.success(t('dialogs.rebasedOnto', { ref: target }));
           break;
         }
         case 'cherry-pick': {
           await api.git.cherryPick(repo.path, [target]);
-          toast.success(`Cherry-picked ${shortHash(target)}`);
+          toast.success(t('dialogs.cherryPicked', { hash: shortHash(target) }));
           break;
         }
         case 'revert': {
           await api.git.revert(repo.path, [target]);
-          toast.success(`Reverted ${shortHash(target)}`);
+          toast.success(t('dialogs.reverted', { hash: shortHash(target) }));
           break;
         }
         case 'delete-branch': {
           await api.git.deleteBranch(repo.path, target);
-          toast.success(`Deleted branch ${target}`);
+          toast.success(t('dialogs.branchDeleted', { ref: target }));
           break;
         }
       }
       onClose();
     } catch (e) {
-      toast.error(`${meta.title} failed`, String(e));
+      toast.error(t('dialogs.actionFailed', { action: t(meta.titleKey) }), String(e));
     } finally {
       setBusy(false);
     }
-  }, [action, selected, repo.path, branches, toast, onClose, meta.title]);
+  }, [action, selected, repo.path, branches, toast, onClose, t, meta.titleKey]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={onClose}>
       <div className="panel w-full max-w-lg flex flex-col max-h-[70vh]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center px-4 py-3 border-b border-border">
-          <span className="text-sm font-semibold">{meta.title}…</span>
+          <span className="text-sm font-semibold">{t(meta.titleKey)}…</span>
           <div className="flex-1" />
           <button onClick={onClose} className="p-1 rounded hover:bg-surface-hover"><X size={14} /></button>
         </div>
         <div className="px-4 pt-3 pb-1 text-xs text-text-secondary">
-          {meta.targetLabel}
-          {current && <span className="text-text-tertiary"> — current branch: <b>{current}</b></span>}
+          {t(meta.targetKey)}
+          {current && <span className="text-text-tertiary"> — {t('dialogs.currentBranch')} <b>{current}</b></span>}
         </div>
         <div className="px-4 pb-2">
           <div className="relative">
@@ -149,7 +157,7 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
               value={query}
               onChange={(e) => { setQuery(e.target.value); setSelected(e.target.value.trim() || selected); }}
               onKeyDown={(e) => { if (e.key === 'Enter' && selected) run(); }}
-              placeholder="branch name or commit hash…"
+              placeholder={t('dialogs.refPlaceholder')}
               className="w-full pl-8 pr-3 py-2 text-xs mono bg-surface border border-border rounded focus:outline-none focus:border-accent"
             />
           </div>
@@ -158,7 +166,13 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
           {filtered.map((b) => (
             <button
               key={b.name}
-              onClick={() => { setSelected(b.name); setQuery(b.name); }}
+              onClick={() => {
+                setSelected(b.name);
+                setQuery(b.name);
+                // Cross-tool: picking a branch here also becomes the global
+                // selection so Branches/History/Toolbar stay in sync.
+                if (!b.remote) useSelectionStore.getState().selectBranch(b.name);
+              }}
               className={cn(
                 'w-full text-left px-3 py-1.5 rounded text-xs flex items-center gap-2 hover:bg-surface-hover',
                 selected === b.name && 'bg-accent/15 text-accent'
@@ -173,7 +187,7 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
           ))}
           {filtered.length === 0 && query && (
             <div className="px-3 py-4 text-xs text-text-tertiary">
-              No matching branch — press Enter to use “{query}” as commit hash
+              {t('dialogs.noMatchingBranch', { query })}
             </div>
           )}
         </div>
@@ -185,14 +199,14 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
           </div>
         )}
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
-          <button className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover" onClick={onClose}>Cancel</button>
+          <button className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover" onClick={onClose}>{t('common.cancel')}</button>
           <button
             className="px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded hover:opacity-90 disabled:opacity-40 flex items-center gap-1"
             disabled={!selected || busy}
             onClick={run}
           >
             {busy && <Loader size={12} className="animate-spin" />}
-            {meta.confirmLabel}
+            {t(meta.confirmKey)}
           </button>
         </div>
       </div>

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Tag as TagIcon, Plus, Trash, RefreshCw, Check, Pencil, ChevronDown, ChevronRight, FolderTree } from '../components/icons';
+import { EmptyState } from '../components/EmptyState';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { CommitHashLink } from '../components/StatusBar';
@@ -11,6 +12,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useContextMenu } from '../lib/useContextMenu';
 import { copyToClipboard } from '../lib/utils';
+import { useI18n, t as standaloneT } from '../lib/i18n';
 
 /** SmartGit Manual: Tag-Grouping — group tags by pattern (e.g., v1.0.0, v1.0.1 → "v1.0"). */
 interface TagGroup {
@@ -41,14 +43,16 @@ function groupTagsByPattern(tags: TagInfo[]): TagGroup[] {
   }
   result.sort((a, b) => (b.latest?.date || '').localeCompare(a.latest?.date || ''));
   if (ungrouped.length > 0) {
-    result.push({ name: 'Other', tags: ungrouped });
+    // Module-scope helper — use the standalone t() (call-time locale read)
+    result.push({ name: standaloneT('tags.otherGroup'), tags: ungrouped });
   }
   return result;
 }
 
 export function TagsPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
+  const { t } = useI18n();
   const showContextMenu = useContextMenu();
   const [tags, setTags] = useState<TagInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -67,6 +71,8 @@ export function TagsPage() {
   // Globally selected tag — written on click, highlighted in the list, shown
   // as a chip in the Toolbar so other tools see the same tag selection.
   const selectedTag = useSelectionStore((s) => s.selectedTag);
+  // New Tag targets the commit selected in History/another tool when present.
+  const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
 
   const handleRename = async (tag: TagInfo) => {
     const newName = renameValue.trim();
@@ -84,11 +90,11 @@ export function TagsPage() {
           await api.git.deleteTag(repo.path, tag.name);
         }
       );
-      toast.success(`Tag '${tag.name}' renamed to '${newName}'`);
+      toast.success(t('tags.renamed', { old: tag.name, new: newName }));
       setRenamingTag(null);
       await load();
     } catch (e) {
-      toast.error('Failed to rename tag', String(e));
+      toast.error(t('tags.renameFailed'), String(e));
       setRenamingTag(null);
     }
   };
@@ -99,7 +105,7 @@ export function TagsPage() {
       const result = await api.git.tags(repo.path);
       setTags(result);
     } catch (e) {
-      toast.error('Failed to load tags', String(e));
+      toast.error(t('tags.loadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -111,42 +117,42 @@ export function TagsPage() {
 
   const handleCreate = async () => {
     if (!name.trim()) {
-      toast.warning('Tag name is required');
+      toast.warning(t('tags.nameRequired'));
       return;
     }
     try {
       if (annotated) {
         // addAnnotatedTag returns the tag object hash (createTag is fire-and-forget)
         const tagHash = await api.git.addAnnotatedTag(repo.path, name, message, ref || undefined);
-        toast.success(`Annotated tag '${name}' created${tagHash ? ` (${tagHash.slice(0, 7)})` : ''}`);
+        toast.success(tagHash ? t('tags.annotatedCreatedHash', { name, hash: tagHash.slice(0, 7) }) : t('tags.annotatedCreated', { name }));
       } else {
         await api.git.createTag(repo.path, name, undefined, ref || undefined);
-        toast.success(`Tag '${name}' created`);
+        toast.success(t('tags.created', { name }));
       }
       setShowDialog(false);
       setName('');
       setMessage('');
-      setRef('HEAD');
+      setRef(selectedCommitHash || 'HEAD');
       setAnnotated(true);
       await load();
     } catch (e) {
-      toast.error('Failed to create tag', String(e));
+      toast.error(t('tags.createFailed'), String(e));
     }
   };
 
   const handleDelete = async (tag: TagInfo) => {
     if (!(await confirmDialog({
-      title: `Delete tag '${tag.name}'`,
-      message: 'This permanently removes the tag reference. The tagged commit is not affected.',
-      confirmLabel: 'Delete',
+      title: t('tags.deleteTitle', { name: tag.name }),
+      message: t('tags.deleteMessage'),
+      confirmLabel: t('common.delete'),
       danger: true,
     }))) return;
     try {
       await api.git.deleteTag(repo.path, tag.name);
-      toast.success(`Tag '${tag.name}' deleted`);
+      toast.success(t('tags.deleted', { name: tag.name }));
       await load();
     } catch (e) {
-      toast.error('Failed to delete tag', String(e));
+      toast.error(t('tags.deleteFailed'), String(e));
     }
   };
 
@@ -154,27 +160,32 @@ export function TagsPage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Tags</span>
-          <span className="text-2xs text-text-tertiary">{tags.length} tags</span>
+          <span className="text-sm font-medium">{t('tags.title')}</span>
+          <span className="text-2xs text-text-tertiary">{t('tags.count', { count: tags.length })}</span>
         </div>
         <div className="flex items-center gap-2">
           {/* SmartGit Manual: Tag-Grouping toggle */}
           <button
             className={`icon-btn ${groupByPattern ? 'active' : ''}`}
-            title="Group tags by version pattern (e.g., v1.0.0, v1.0.1 → 'v1.0')"
+            title={t('tags.groupTooltip')}
             onClick={() => setGroupByPattern(!groupByPattern)}
           >
             <FolderTree size={13} />
           </button>
-          <button className="icon-btn" title="Refresh" onClick={load}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={13} />
           </button>
           <button
             className="btn btn-primary text-xs"
-            onClick={() => setShowDialog(true)}
+            onClick={() => {
+              // Cross-tool: default the new tag's ref to the commit selected
+              // in History (or any other tool) instead of blind HEAD.
+              setRef(selectedCommitHash || 'HEAD');
+              setShowDialog(true);
+            }}
           >
             <Plus size={12} />
-            New Tag
+            {t('tags.new')}
           </button>
         </div>
       </div>
@@ -183,17 +194,14 @@ export function TagsPage() {
         {loading ? (
           <div className="empty-state">
             <div className="spinner mb-3" />
-            <div className="empty-state-title">Loading tags...</div>
+            <div className="empty-state-title">{t('tags.loading')}</div>
           </div>
         ) : tags.length === 0 ? (
-          <div className="empty-state">
-            <TagIcon size={48} className="empty-state-icon" />
-            <div className="empty-state-title">No tags yet</div>
-            <div className="empty-state-desc">
-              Tags mark specific commits — useful for releases, milestones, or
-              important checkpoints. Click "New Tag" above to create one.
-            </div>
-          </div>
+          <EmptyState
+            icon={TagIcon}
+            title={t('tags.empty')}
+            description={t('tags.emptyDesc')}
+          />
         ) : groupByPattern ? (
           // SmartGit Manual: Tag-Grouping display — groups tags by pattern
           (() => {
@@ -215,10 +223,10 @@ export function TagsPage() {
                       >
                         {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                         <span>{group.name}</span>
-                        <span className="text-2xs text-text-tertiary font-normal">({group.tags.length} tags)</span>
+                        <span className="text-2xs text-text-tertiary font-normal">{t('tags.groupCount', { count: group.tags.length })}</span>
                         {group.latest && (
                           <span className="text-2xs text-text-tertiary ml-auto font-mono">
-                            latest: {group.latest.name}
+                            {t('tags.latest', { name: group.latest.name })}
                           </span>
                         )}
                       </div>
@@ -246,7 +254,7 @@ export function TagsPage() {
           <>
             {tags.length > 200 && (
               <div className="px-3 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
-                Showing first 200 of {tags.length} tags
+                {t('tags.showingFirst200', { count: tags.length })}
               </div>
             )}
             {tags.slice(0, 200).map((t) => (
@@ -270,14 +278,14 @@ export function TagsPage() {
 
       {showDialog && (
         <div
-          className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
           onClick={() => setShowDialog(false)}
         >
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-medium mb-4">New Tag</h3>
+            <h3 className="text-base font-medium mb-4">{t('tags.new')}</h3>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Name</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('tags.nameLabel')}</label>
                 <input
                   type="text"
                   className="w-full text-sm"
@@ -288,13 +296,13 @@ export function TagsPage() {
                 />
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Reference</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('tags.refLabel')}</label>
                 <input
                   type="text"
                   className="w-full text-sm font-mono"
                   value={ref}
                   onChange={(e) => setRef(e.target.value)}
-                  placeholder="HEAD, branch name, or commit hash"
+                  placeholder={t('tags.refPlaceholder')}
                 />
               </div>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -303,14 +311,14 @@ export function TagsPage() {
                   checked={annotated}
                   onChange={(e) => setAnnotated(e.target.checked)}
                 />
-                Annotated tag
+                {t('tags.annotatedTag')}
               </label>
               {annotated && (
                 <div>
-                  <label className="text-xs text-text-tertiary block mb-1">Message</label>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('tags.messageLabel')}</label>
                   <textarea
                     className="w-full text-sm h-20 resize-none"
-                    placeholder="Release v1.0.0"
+                    placeholder={t('tags.messagePlaceholder')}
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                   />
@@ -319,11 +327,11 @@ export function TagsPage() {
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowDialog(false)}>
-                Cancel
+                {t('common.cancel')}
               </button>
               <button className="btn btn-primary" onClick={handleCreate}>
                 <Check size={13} />
-                Create
+                {t('common.create')}
               </button>
             </div>
           </div>
@@ -335,7 +343,7 @@ export function TagsPage() {
 
 /** Tag row — used in both flat and grouped display. */
 function TagRow({
-  tag: t,
+  tag: t2,
   renamingTag,
   renameValue,
   setRenameValue,
@@ -356,36 +364,37 @@ function TagRow({
   /** Whether this tag is the globally selected tag (Toolbar chip / other tools see it too). */
   selected: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <div
       className={`group flex items-center gap-3 px-3 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer ${selected ? 'bg-accent/10 border-l-2 border-l-accent' : ''}`}
       onClick={() => {
         // Cross-tool selection: the tag name AND its commit become global —
         // Toolbar shows the tag chip, History opens the tagged commit.
-        useSelectionStore.getState().selectTag(t.name);
-        useSelectionStore.getState().selectCommit(t.hash);
+        useSelectionStore.getState().selectTag(t2.name);
+        useSelectionStore.getState().selectCommit(t2.hash);
         window.location.hash = '#/history';
       }}
-      title="Click to select this tag and view its commit in History"
+      title={t('tags.rowTooltip')}
       onContextMenu={(e) => {
         e.preventDefault();
         showContextMenu([
-          { label: 'Copy Name', clickId: 'copy-name' },
-          { label: 'Copy Hash', clickId: 'copy-hash' },
+          { label: t('tags.copyName'), clickId: 'copy-name' },
+          { label: t('tags.copyHash'), clickId: 'copy-hash' },
           { type: 'separator' },
-          { label: `Rename '${t.name}'...`, clickId: 'rename' },
-          { label: `Delete Tag '${t.name}'...`, clickId: 'delete' },
+          { label: t('tags.renameItem', { name: t2.name }), clickId: 'rename' },
+          { label: t('tags.deleteTagItem', { name: t2.name }), clickId: 'delete' },
           { type: 'separator' },
-          { label: 'View Commit in History', clickId: 'view-commit' },
+          { label: t('tags.viewCommitInHistory'), clickId: 'view-commit' },
         ], (action) => {
           switch (action) {
-            case 'copy-name': copyToClipboard(t.name); break;
-            case 'copy-hash': copyToClipboard(t.hash); break;
-            case 'rename': setRenamingTag(t.name); setRenameValue(t.name); break;
-            case 'delete': handleDelete(t); break;
+            case 'copy-name': copyToClipboard(t2.name); break;
+            case 'copy-hash': copyToClipboard(t2.hash); break;
+            case 'rename': setRenamingTag(t2.name); setRenameValue(t2.name); break;
+            case 'delete': handleDelete(t2); break;
             case 'view-commit':
-              useSelectionStore.getState().selectTag(t.name);
-              useSelectionStore.getState().selectCommit(t.hash);
+              useSelectionStore.getState().selectTag(t2.name);
+              useSelectionStore.getState().selectCommit(t2.hash);
               window.location.hash = '#/history';
               break;
           }
@@ -395,7 +404,7 @@ function TagRow({
       <TagIcon size={14} className="text-status-modified flex-shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          {renamingTag === t.name ? (
+          {renamingTag === t2.name ? (
             <input
               type="text"
               className="text-xs w-32 px-1 py-0.5"
@@ -403,40 +412,40 @@ function TagRow({
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleRename(t);
+                if (e.key === 'Enter') handleRename(t2);
                 if (e.key === 'Escape') setRenamingTag(null);
               }}
-              onBlur={() => handleRename(t)}
+              onBlur={() => handleRename(t2)}
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
-            <span className="text-sm font-medium text-text-primary">{t.name}</span>
+            <span className="text-sm font-medium text-text-primary">{t2.name}</span>
           )}
-          {!t.lightweight && (
-            <span className="badge badge-modified">ANNOTATED</span>
+          {!t2.lightweight && (
+            <span className="badge badge-modified">{t('tags.annotatedBadge')}</span>
           )}
         </div>
-        {t.annotation && (
+        {t2.annotation && (
           <div className="text-xs text-text-secondary truncate mt-0.5">
-            {t.annotation}
+            {t2.annotation}
           </div>
         )}
         <div className="text-xs text-text-tertiary mt-0.5">
-          <CommitHashLink hash={t.hash} />
+          <CommitHashLink hash={t2.hash} />
         </div>
       </div>
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
         <button
           className="icon-btn !w-6 !h-6"
-          title="Rename"
-          onClick={(e) => { e.stopPropagation(); setRenamingTag(t.name); setRenameValue(t.name); }}
+          title={t('common.rename')}
+          onClick={(e) => { e.stopPropagation(); setRenamingTag(t2.name); setRenameValue(t2.name); }}
         >
           <Pencil size={12} />
         </button>
         <button
           className="icon-btn !w-6 !h-6 hover:!text-status-deleted"
-          title="Delete"
-          onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
+          title={t('common.delete')}
+          onClick={(e) => { e.stopPropagation(); handleDelete(t2); }}
         >
           <Trash size={12} />
         </button>

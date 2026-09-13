@@ -33,6 +33,16 @@ export interface StatusResult {
   isCherryPicking: boolean;
   isReverting: boolean;
   isBisecting: boolean;
+  /** Present ONLY while a cherry-pick is in progress (SmartGit: "cherry-picking-state"). */
+  cherryPick?: { commit: string; subject: string; /** pick has nothing to commit — needs Skip or Commit Empty */ empty: boolean };
+  /** Present ONLY while a revert is in progress (REVERT_HEAD). */
+  revert?: { commit: string; subject: string };
+  /** Present ONLY while a merge is in progress (MERGE_HEAD / MERGE_MSG). */
+  merge?: { message: string };
+  /** Present ONLY while a rebase is in progress (rebase-merge / rebase-apply). */
+  rebase?: { step?: number; total?: number };
+  /** Present ONLY while bisecting (HEAD detached at the current candidate). */
+  bisect?: { rev: string };
   detached: boolean;
 }
 
@@ -69,6 +79,34 @@ export interface BranchInfo {
 export interface RemoteInfo {
   name: string;
   refs: { fetch: string; push: string };
+}
+
+/**
+ * Result of a periodic remote check for one repository in the sidebar list:
+ * fetches all remotes, then counts incoming/outgoing commits and local
+ * (uncommitted) changes. All counters are cheap local rev-list computations
+ * performed AFTER the fetch.
+ */
+export interface RemoteCheckSummary {
+  path: string;
+  /** Repo has at least one configured remote. */
+  hasRemote: boolean;
+  /** Remote names found in the repo (e.g. ["origin"]). */
+  remotes: string[];
+  /** Commits present on remote-tracking branches but missing locally. */
+  incoming: number;
+  /** Commits on local branches not present on any remote. */
+  outgoing: number;
+  /** Number of changed (unstaged+staged+untracked) files in the working tree. */
+  dirty: number;
+  /** Current checked-out branch (null when detached HEAD or not a repo). */
+  branch: string | null;
+  /** True when a `git fetch --all` succeeded during this check. */
+  fetched: boolean;
+  /** Epoch ms of the check. */
+  checkedAt: number;
+  /** Network/other error message (counters still reflect the last successful fetch). */
+  error?: string;
 }
 
 /** Real remote properties for the "Properties..." context-menu dialog. */
@@ -216,13 +254,66 @@ export interface GitConfigEntry {
   source?: string;
 }
 
+/** Status of one ref update as reported by `git push` output. */
+export interface PushRefStatus {
+  /** remote branch name, e.g. `main` */
+  remoteRef: string;
+  /** local side of the refspec, e.g. `main` (may differ — case, or Main vs main) */
+  localRef?: string;
+  /** new branch was created on the remote */
+  created?: boolean;
+  deleted?: boolean;
+  forced?: boolean;
+  /** server refused this ref (protected branch, permissions, ...) */
+  rejected?: boolean;
+  /** reason given by the server, e.g. `protected branch hook declined` */
+  reason?: string;
+  oldHash?: string;
+  newHash?: string;
+  /** `= [up to date]` for this ref */
+  upToDate?: boolean;
+}
+
+/** Post-push verification: does the remote branch now point at the local commit? */
+export interface PushVerification {
+  branch: string;
+  localHash: string;
+  /** hash the remote branch points at after the push, null when missing */
+  remoteHash: string | null;
+  /** localHash === remoteHash */
+  ok: boolean;
+}
+
+/**
+ * Honest result of a push. `git push` exits 0 in cases where the user's
+ * intent was NOT fulfilled ("Everything up-to-date", pushing `Main` when the
+ * remote branch is `main` — a new branch appears). The UI must not report
+ * "Pushed successfully" without checking this result.
+ */
+export interface PushResult {
+  /** git said "Everything up-to-date" — nothing was sent */
+  upToDate: boolean;
+  /** at least one ref was updated (or created) on the remote */
+  updated: boolean;
+  /** per-ref details as reported by git */
+  refs: PushRefStatus[];
+  /** post-push ls-remote verification of the pushed branch */
+  verification?: PushVerification;
+  /** remote that received (or would have received) the push */
+  remote: string;
+  /** branch refspec that was pushed (resolved current branch when omitted) */
+  branch?: string;
+  /** short human-readable summary for the operation log */
+  summary: string;
+}
+
 export interface GitApi {
   status: (repoPath: string) => Promise<StatusResult>;
   add: (repoPath: string, files: string[]) => Promise<void>;
   addAll: (repoPath: string) => Promise<void>;
   restore: (repoPath: string, files: string[], staged?: boolean) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean, signoff?: boolean, noVerify?: boolean) => Promise<string>;
-  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean) => Promise<void>;
+  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string) => Promise<PushResult>;
   pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) => Promise<void>;
   fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) => Promise<void>;
   fetchAll: (repoPath: string, prune?: boolean) => Promise<void>;
@@ -232,7 +323,7 @@ export interface GitApi {
   setFetchDepth: (repoPath: string, remote?: string, depth?: number) => Promise<void>;
   /** Read real remote properties (URLs, HEAD branch, tracking branches, config). */
   remoteProperties: (repoPath: string, name: string) => Promise<RemoteProperties>;
-  log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) => Promise<LogEntry[]>;
+  log: (repoPath: string, options?: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean }) => Promise<LogEntry[]>;
   /** Resolve a commit by full/abbreviated hash (prefix search) — null when not found. */
   findCommit: (repoPath: string, query: string) => Promise<LogEntry | null>;
   branches: (repoPath: string) => Promise<BranchInfo[]>;
@@ -249,10 +340,24 @@ export interface GitApi {
   mergeTree: (repoPath: string, ours: string, theirs: string) => Promise<{ conflicts: string[]; clean: boolean }>;
   /** Returns ahead/behind counts between two refs without touching the working tree. */
   aheadBehind: (repoPath: string, base: string, compare: string) => Promise<{ ahead: number; behind: number }>;
+  /**
+   * Periodic remote check for the repository list: `git fetch --all` then
+   * compute incoming/outgoing/dirty counters. Never throws — failures are
+   * reported in the summary's `error` field.
+   */
+  pollRemoteSummary: (repoPath: string) => Promise<RemoteCheckSummary>;
+  /** Batch version over several repos with bounded concurrency. */
+  pollRemoteSummaries: (paths: string[]) => Promise<Record<string, RemoteCheckSummary>>;
   diff: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) => Promise<DiffResult>;
   diffBranches: (repoPath: string, base: string, compare: string) => Promise<DiffResult>;
   diffCommit: (repoPath: string, hash: string, parentHash?: string) => Promise<DiffResult>;
   commitFiles: (repoPath: string, hash: string) => Promise<CommitFile[]>;
+  /** Nested commits brought in by a MERGE commit (git log <merge>^1..<merge>, merge itself included). Empty for non-merges. */
+  mergeNestedCommits: (repoPath: string, hash: string) => Promise<LogEntry[]>;
+  /** Tags pointing AT a commit with annotated-tag metadata (tagger, date, message). */
+  tagsAt: (repoPath: string, hash: string) => Promise<{ name: string; annotated: boolean; tagger?: string; date?: string; message?: string }[]>;
+  /** All tracked files (git ls-files) — file-name search for the Search tool. */
+  trackedFiles: (repoPath: string) => Promise<string[]>;
   /**
    * Cheap preflight: does the commit object exist in the repo?
    * Returns false silently for non-existent / unreachable commits
@@ -294,9 +399,16 @@ export interface GitApi {
   revParse: (repoPath: string, ref: string) => Promise<string>;
   revParseArgs: (repoPath: string, args: string[]) => Promise<string>;
   raw: (repoPath: string, args: string[]) => Promise<string>;
+  /**
+   * Detect renames in the working tree (staged + unstaged) in a single
+   * optimized IPC call. Returns { oldPath, newPath }[] for every detected
+   * rename. Pass the file lists from `git status` so we don't recompute them.
+   * Distinct from detectRenames() (which uses --find-renames=<threshold>%).
+   */
+  detectWorkingTreeRenames: (repoPath: string, deletedFiles: string[], untrackedFiles: string[]) => Promise<{ oldPath: string; newPath: string }[]>;
 
   // New: full git CLI surface coverage (added per simple-git comprehensive test spec)
-  grep: (repoPath: string, pattern: string, options?: string[]) => Promise<string>;
+  grep: (repoPath: string, pattern: string, options?: string[], pathspec?: string) => Promise<string>;
   applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => Promise<string>;
   show: (repoPath: string, args: string[]) => Promise<string>;
   showBuffer: (repoPath: string, args: string[]) => Promise<Buffer>;
@@ -316,13 +428,17 @@ export interface GitApi {
   reflog: (repoPath: string, ref?: string, maxCount?: number) => Promise<ReflogEntry[]>;
   reflogDelete: (repoPath: string, index: number, ref?: string) => Promise<void>;
 
-  cherryPick: (repoPath: string, hashes: string[], noCommit?: boolean) => Promise<{ conflicts: string[] }>;
+  cherryPick: (repoPath: string, hashes: string[], noCommit?: boolean) => Promise<{ conflicts: string[]; empty?: boolean; error?: string }>;
   cherryPickAbort: (repoPath: string) => Promise<void>;
-  cherryPickContinue: (repoPath: string) => Promise<void>;
+  /** Continue after conflict resolution; returns {empty:true} when the pick has nothing to commit (use allowEmpty to commit it anyway). */
+  cherryPickContinue: (repoPath: string, allowEmpty?: boolean) => Promise<{ empty?: boolean }>;
+  /** Skip the current pick (git cherry-pick --skip) — drops an empty step. */
+  cherryPickSkip: (repoPath: string) => Promise<void>;
 
   revert: (repoPath: string, hashes: string[], noCommit?: boolean) => Promise<{ conflicts: string[] }>;
   revertAbort: (repoPath: string) => Promise<void>;
   revertContinue: (repoPath: string) => Promise<void>;
+  revertSkip: (repoPath: string) => Promise<void>;
 
   rebase: (repoPath: string, onto: string, options?: { interactive?: boolean; autosquash?: boolean; abort?: boolean; continue?: boolean; skip?: boolean }) => Promise<void>;
 
@@ -375,6 +491,8 @@ export interface GitApi {
 
   // LFS support
   lfsStatus: (repoPath: string) => Promise<{ installed: boolean; files: { path: string; size: string; status: string }[] }>;
+  /** Check if git-lfs is installed (preflight before any LFS command). */
+  isLfsInstalled: (repoPath: string) => Promise<boolean>;
   lfsPull: (repoPath: string, files?: string[]) => Promise<void>;
   lfsPush: (repoPath: string) => Promise<void>;
   lfsFetch: (repoPath: string) => Promise<void>;
@@ -391,6 +509,9 @@ export interface GitApi {
 
   // Repository directory tree (Changes view)
   listDirectories: (repoPath: string, maxDepth?: number) => Promise<DirNode[]>;
+  /** Like listDirectories but includes ALL directories — even those normally
+   *  skipped (node_modules, dist, .cache). Used when 'ignored' flag is ON. */
+  listAllDirectories: (repoPath: string, maxDepth?: number) => Promise<DirNode[]>;
 
   // ===== Git Notes (SmartGit Notes feature) =====
   noteCategories: (repoPath: string) => Promise<NoteCategory[]>;
@@ -476,6 +597,41 @@ export interface GitApi {
   squashCommits: (repoPath: string, fromHash: string, toHash: string, message?: string) => Promise<void>;
   /** Coalesce two adjacent commits (combine messages). */
   coalesceCommits: (repoPath: string, firstHash: string, secondHash: string) => Promise<void>;
+
+  // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
+  /** Smart Pull — prevents divergence after remote force-push. */
+  smartPull: (repoPath: string, remote?: string, branch?: string) => Promise<SmartPullResult>;
+  /** Octopus Merge — merge 3+ branches in one commit. */
+  octopusMerge: (repoPath: string, branches: string[]) => Promise<{ conflicts: string[]; success: boolean }>;
+  /** Check if force-push is allowed by policy. */
+  isForcePushAllowed: (branch: string | undefined, policy: ForcePushPolicy, protectedBranches?: string[]) => Promise<{ allowed: boolean; reason: string }>;
+  /** Edit code in Diff view — apply a single-line change. */
+  applyLineEdit: (repoPath: string, file: string, lineNumber: number, newContent: string, isStaged?: boolean) => Promise<void>;
+  /** Edit .git/info/exclude (local-only ignore patterns). */
+  editInfoExclude: (repoPath: string) => Promise<string>;
+  /** Trace which .gitignore rule matches a file. */
+  traceIgnoreRule: (repoPath: string, file: string) => Promise<IgnoreRuleTrace | null>;
+  /** Detect repository object format (SHA-1 vs SHA-256) and ref storage. */
+  detectRepoFormat: (repoPath: string) => Promise<RepoFormatInfo>;
+  /** Commit with GPG/SSH signing (-S flag). */
+  commitSigned: (repoPath: string, message: string, options?: { gpgSign?: boolean; sshSign?: boolean; signingKey?: string; noVerify?: boolean }) => Promise<string>;
+  /** Create signed tag (annotated + signed). */
+  createSignedTag: (repoPath: string, name: string, message: string, ref?: string, sshSign?: boolean) => Promise<void>;
+  /** LFS fsck — validate LFS object integrity. */
+  lfsFsck: (repoPath: string) => Promise<LfsFsckResult>;
+  /** Multi-repo batch operation. */
+  batchOperation: (repos: string[], operation: 'fetch' | 'pull' | 'push' | 'status', options?: { remote?: string; branch?: string; force?: boolean }) => Promise<BatchOpResult[]>;
+  /** Export repo config as JSON for backup/migration. */
+  exportConfig: (repoPath: string | null) => Promise<ExportableConfig>;
+  /** Import config from JSON blob into a repo. */
+  importConfig: (repoPath: string, config: ExportableConfig) => Promise<void>;
+  /**
+   * Release the cached SimpleGit instance (and its child process pool) for
+   * the given repo. Pass undefined to clear the entire cache. Called by the
+   * renderer when a repo is closed to avoid leaking SimpleGit instances
+   * across the session.
+   */
+  invalidateCache: (repoPath?: string) => Promise<void>;
 }
 
 /** Recyclable commit (unreachable reflog commit). */
@@ -561,4 +717,60 @@ export interface BugtraqConfig {
   logfilterregex?: string;
   /** Project prefixes substituted into %PROJECT%. */
   projects?: string[];
+}
+
+// ============================================================
+// SmartGit Manual v25/26 — extended types (batch 1-7)
+// ============================================================
+
+/** Force-push safety policy (SmartGit Manual: Force Push policies). */
+export type ForcePushPolicy = 'deny' | 'feature-only' | 'allow';
+
+/** Repository object format (Git 3.0 readiness — SHA-1 vs SHA-256). */
+export type ObjectFormat = 'sha1' | 'sha256';
+
+/** Reference storage backend (Git 3.0 readiness — files vs reftable). */
+export type RefStorage = 'files' | 'reftable';
+
+/** Result of a smart pull (prevents divergence after remote force-push). */
+export interface SmartPullResult {
+  strategy: 'reset' | 'rebase' | 'merge' | 'noop';
+  message: string;
+}
+
+/** Repository format detection result. */
+export interface RepoFormatInfo {
+  objectFormat: ObjectFormat;
+  refStorage: RefStorage;
+}
+
+/** Batch operation result for one repo. */
+export interface BatchOpResult {
+  repo: string;
+  success: boolean;
+  error?: string;
+}
+
+/** Trace result for `git check-ignore -v`. */
+export interface IgnoreRuleTrace {
+  source: string;
+  lineNumber: number;
+  pattern: string;
+}
+
+/** Exportable config blob for backup/migration. */
+export interface ExportableConfig {
+  version: string;
+  exportedAt: string;
+  gitConfig?: { key: string; value: string }[];
+  gitignore?: string;
+  infoExclude?: string;
+  bugtraq?: string;
+  gitreview?: string;
+}
+
+/** LFS fsck validation result. */
+export interface LfsFsckResult {
+  ok: boolean;
+  output: string;
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { GitPullRequest, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type LogEntry } from '../lib/api';
 import {
@@ -18,6 +18,7 @@ import { cn, formatDate, shortHash } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useI18n } from '../lib/i18n';
 type Severity = 'info' | 'suggestion' | 'warning' | 'critical';
 
 const SEVERITY_COLORS: Record<Severity, string> = {
@@ -35,8 +36,9 @@ const SEVERITY_BADGES: Record<Severity, string> = {
 };
 
 export function ReviewsPage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [commits, setCommits] = useState<LogEntry[]>([]);
@@ -59,7 +61,7 @@ export function ReviewsPage() {
       setReviews(reviewList);
       setCommits(commitList);
     } catch (e) {
-      toast.error('Failed to load reviews', String(e));
+      toast.error(t('pages.reviewsLoadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -71,7 +73,7 @@ export function ReviewsPage() {
 
   const handleAdd = async () => {
     if (!newComment.commitHash || !newComment.filePath || !newComment.body) {
-      toast.warning('Commit, file path, and body are required');
+      toast.warning(t('pages.reviewFieldsRequired'));
       return;
     }
     setBusy('add');
@@ -85,12 +87,12 @@ export function ReviewsPage() {
         severity: (newComment.severity as Severity) || 'info',
         resolved: false,
       });
-      toast.success('Comment added');
+      toast.success(t('pages.commentAdded'));
       setShowAdd(false);
       setNewComment({});
       await load();
     } catch (e) {
-      toast.error('Failed to add comment', String(e));
+      toast.error(t('pages.commentAddFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -98,17 +100,17 @@ export function ReviewsPage() {
 
   const handleDelete = async (commitHash: string, commentId: string) => {
     if (!(await confirmDialog({
-      title: 'Delete comment',
-      message: 'Delete this review comment? This cannot be undone.',
-      confirmLabel: 'Delete',
+      title: t('pages.commentDeleteTitle'),
+      message: t('pages.commentDeleteMessage'),
+      confirmLabel: t('common.delete'),
       danger: true,
     }))) return;
     try {
       await deleteReviewComment(repo.path, commitHash, commentId);
-      toast.success('Comment deleted');
+      toast.success(t('pages.commentDeleted'));
       await load();
     } catch (e) {
-      toast.error('Failed to delete', String(e));
+      toast.error(t('pages.deleteFailed'), String(e));
     }
   };
 
@@ -117,7 +119,7 @@ export function ReviewsPage() {
       await setCommentResolved(repo.path, commitHash, commentId, !resolved);
       await load();
     } catch (e) {
-      toast.error('Failed to update', String(e));
+      toast.error(t('pages.updateFailed'), String(e));
     }
   };
 
@@ -125,9 +127,9 @@ export function ReviewsPage() {
     setBusy('push');
     try {
       await pushReviews(repo.path);
-      toast.success('Reviews pushed to remote');
+      toast.success(t('pages.reviewsPushed'));
     } catch (e) {
-      toast.error('Push failed', String(e));
+      toast.error(t('pages.pushFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -137,10 +139,10 @@ export function ReviewsPage() {
     setBusy('fetch');
     try {
       await fetchReviews(repo.path);
-      toast.success('Reviews fetched from remote');
+      toast.success(t('pages.reviewsFetched'));
       await load();
     } catch (e) {
-      toast.error('Fetch failed', String(e));
+      toast.error(t('pages.fetchFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -161,32 +163,32 @@ export function ReviewsPage() {
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
           <GitPullRequest size={14} />
-          <span className="text-sm font-medium">Distributed Reviews</span>
+          <span className="text-sm font-medium">{t('pages.reviewsTitle')}</span>
           <span className="text-2xs text-text-tertiary">
-            {totalComments} comments · {unresolvedCount} unresolved
+            {t('pages.reviewsCounts', { comments: totalComments, unresolved: unresolvedCount })}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button className="icon-btn" title="Refresh" onClick={load}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={13} />
           </button>
           <button
             className="btn btn-secondary text-xs"
             onClick={handleFetch}
             disabled={!!busy}
-            title="Fetch reviews from remote"
+            title={t('pages.reviewsFetchTitle')}
           >
             {busy === 'fetch' ? <Loader size={12} className="spin" /> : <Download size={12} />}
-            Fetch
+            {t('remotes.fetch')}
           </button>
           <button
             className="btn btn-secondary text-xs"
             onClick={handlePush}
             disabled={!!busy}
-            title="Push reviews to remote"
+            title={t('pages.reviewsPushTitle')}
           >
             {busy === 'push' ? <Loader size={12} className="spin" /> : <Upload size={12} />}
-            Push
+            {t('remotes.push')}
           </button>
           <button
             className="btn btn-primary text-xs"
@@ -196,7 +198,7 @@ export function ReviewsPage() {
             }}
           >
             <Plus size={12} />
-            Add Comment
+            {t('pages.addComment')}
           </button>
         </div>
       </div>
@@ -205,13 +207,13 @@ export function ReviewsPage() {
         {/* Commit list with review count */}
         <div className="w-72 border-r border-border-default overflow-y-auto flex-shrink-0">
           <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default">
-            Reviewed Commits ({reviews.length})
+            {t('pages.reviewedCommits', { count: reviews.length })}
           </div>
           {loading ? (
-            <div className="p-4 text-center text-text-tertiary text-sm">Loading...</div>
+            <div className="p-4 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
           ) : reviews.length === 0 ? (
             <div className="p-4 text-center text-text-tertiary text-xs">
-              No reviews yet. Add a comment to start.
+              {t('pages.noReviewsYet')}
             </div>
           ) : (
             reviews.map(review => {
@@ -231,10 +233,10 @@ export function ReviewsPage() {
                     {unresolved > 0 && <span className="badge badge-deleted">{unresolved}</span>}
                   </div>
                   <div className="text-xs text-text-secondary truncate mt-0.5">
-                    {commit?.subject || '(commit not in history)'}
+                    {commit?.subject || t('pages.commitNotInHistory')}
                   </div>
                   <div className="text-2xs text-text-tertiary mt-0.5">
-                    {review.comments.length} comments
+                    {t('pages.commentsCount', { count: review.comments.length })}
                   </div>
                 </div>
               );
@@ -266,7 +268,7 @@ export function ReviewsPage() {
                         </span>
                         <span className="text-xs text-text-secondary">{comment.author}</span>
                         <span className="text-2xs text-text-tertiary">· {formatDate(comment.date)}</span>
-                        {comment.resolved && <span className="badge badge-added">RESOLVED</span>}
+                        {comment.resolved && <span className="badge badge-added">{t('pages.resolvedBadge')}</span>}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-text-tertiary mt-1">
                         <FileText size={11} />
@@ -280,14 +282,14 @@ export function ReviewsPage() {
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <button
                         className="icon-btn !w-6 !h-6"
-                        title={comment.resolved ? 'Mark unresolved' : 'Mark resolved'}
+                        title={comment.resolved ? t('pages.markUnresolved') : t('pages.markResolved')}
                         onClick={() => handleToggleResolved(filteredReviews[0].commitHash, comment.id, comment.resolved)}
                       >
                         <Check size={12} />
                       </button>
                       <button
                         className="icon-btn !w-6 !h-6 hover:!text-status-deleted"
-                        title="Delete"
+                        title={t('common.delete')}
                         onClick={() => handleDelete(filteredReviews[0].commitHash, comment.id)}
                       >
                         <Trash size={12} />
@@ -298,14 +300,14 @@ export function ReviewsPage() {
               ))
             ) : (
               <div className="p-8 text-center text-text-tertiary text-sm">
-                No comments for this commit
+                {t('pages.noCommentsForCommit')}
               </div>
             )
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-text-tertiary">
               <GitPullRequest size={32} className="mb-2 opacity-50" />
-              <div className="text-sm">Select a commit to view its review comments</div>
-              <div className="text-xs mt-1">Or click "Add Comment" to review a commit</div>
+              <div className="text-sm">{t('pages.selectCommitForReviews')}</div>
+              <div className="text-xs mt-1">{t('pages.addCommentHint')}</div>
             </div>
           )}
         </div>
@@ -321,7 +323,7 @@ export function ReviewsPage() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
               <h3 className="text-base font-medium flex items-center gap-2">
                 <Plus size={16} />
-                Add Review Comment
+                {t('pages.addReviewCommentTitle')}
               </h3>
               <button className="icon-btn" onClick={() => setShowAdd(false)}>
                 <X size={14} />
@@ -329,13 +331,13 @@ export function ReviewsPage() {
             </div>
             <div className="p-4 space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Commit</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('pages.commitLabel')}</label>
                 <select
                   className="w-full text-sm mono"
                   value={newComment.commitHash || ''}
                   onChange={e => setNewComment({ ...newComment, commitHash: e.target.value })}
                 >
-                  <option value="">Select a commit...</option>
+                  <option value="">{t('pages.selectCommitPlaceholder')}</option>
                   {commits.slice(0, 50).map(c => (
                     <option key={c.hash} value={c.hash}>
                       {shortHash(c.hash)} — {c.subject.substring(0, 50)}
@@ -345,7 +347,7 @@ export function ReviewsPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-text-tertiary block mb-1">File path</label>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('pages.filePathLabel')}</label>
                   <input
                     type="text"
                     className="w-full text-sm mono"
@@ -355,7 +357,7 @@ export function ReviewsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-text-tertiary block mb-1">Line (optional)</label>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('pages.lineOptionalLabel')}</label>
                   <input
                     type="number"
                     className="w-full text-sm"
@@ -366,7 +368,7 @@ export function ReviewsPage() {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Severity</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('pages.severityLabel')}</label>
                 <div className="flex gap-1">
                   {(['info', 'suggestion', 'warning', 'critical'] as Severity[]).map(s => (
                     <button
@@ -386,24 +388,24 @@ export function ReviewsPage() {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Comment</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('pages.commentLabel')}</label>
                 <textarea
                   className="w-full text-sm h-24 resize-none"
-                  placeholder="Your review comment..."
+                  placeholder={t('pages.commentPlaceholder')}
                   value={newComment.body || ''}
                   onChange={e => setNewComment({ ...newComment, body: e.target.value })}
                 />
               </div>
             </div>
             <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
-              <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>{t('common.cancel')}</button>
               <button
                 className="btn btn-primary"
                 onClick={handleAdd}
                 disabled={busy === 'add' || !newComment.commitHash || !newComment.filePath || !newComment.body}
               >
                 {busy === 'add' ? <Loader size={13} className="spin" /> : <Plus size={13} />}
-                Add
+                {t('common.add')}
               </button>
             </div>
           </div>

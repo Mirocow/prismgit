@@ -1,10 +1,15 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
 import { type DiffResult, type DiffHunk, type DiffLine } from '../lib/api';
 import { api } from '../lib/api';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { cn } from '../lib/utils';
-import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader } from './icons';
+import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader, ExternalLink } from './icons';
 import { wordDiff, type WordSegment } from '../lib/wordDiff';
+import { useI18n } from '../lib/i18n';
+import { useContextMenu } from '../lib/useContextMenu';
+import {
+  tokenizeLine, tokensToHtml, detectLang, type SupportedLang,
+} from '../lib/syntaxHighlight';
 
 interface DiffViewerProps {
   diff: DiffResult | null;
@@ -23,82 +28,25 @@ interface DiffViewerProps {
 
 type ViewMode = 'unified' | 'split';
 type WhitespaceMode = 'normal' | 'ignore-all' | 'ignore-trailing';
+/**
+ * Diff highlight mode:
+ *   - 'background'  : diff lines get a background tint (green=add, red=del).
+ *                     Text color comes from syntax highlighting (tok-*).
+ *                     Matches the 3-way conflict panel exactly. No +/- markers.
+ *   - 'text'        : classic diff style — +/- markers in the gutter +
+ *                     text colored green (add) / red (del). No syntax highlighting
+ *                     on the text (the whole line is one color).
+ */
+type HighlightMode = 'background' | 'text';
 
-// Minimal syntax highlighting for common languages
-const KEYWORDS: Record<string, string[]> = {
-  ts: ['const', 'let', 'var', 'function', 'class', 'interface', 'type', 'enum', 'import', 'export', 'from', 'default', 'extends', 'implements', 'public', 'private', 'protected', 'readonly', 'static', 'async', 'await', 'new', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'throw', 'try', 'catch', 'finally', 'typeof', 'instanceof', 'in', 'of', 'void', 'delete', 'yield', 'this', 'super', 'null', 'undefined', 'true', 'false'],
-  js: ['const', 'let', 'var', 'function', 'class', 'import', 'export', 'from', 'default', 'extends', 'new', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'throw', 'try', 'catch', 'finally', 'typeof', 'instanceof', 'in', 'of', 'void', 'delete', 'yield', 'this', 'super', 'null', 'undefined', 'true', 'false'],
-  py: ['def', 'class', 'import', 'from', 'as', 'return', 'if', 'elif', 'else', 'for', 'while', 'break', 'continue', 'pass', 'try', 'except', 'finally', 'raise', 'with', 'lambda', 'yield', 'global', 'nonlocal', 'True', 'False', 'None', 'and', 'or', 'not', 'in', 'is', 'self'],
-  go: ['func', 'var', 'const', 'type', 'struct', 'interface', 'package', 'import', 'return', 'if', 'else', 'for', 'range', 'switch', 'case', 'default', 'break', 'continue', 'fallthrough', 'go', 'defer', 'select', 'chan', 'map', 'make', 'new', 'nil', 'true', 'false'],
-  rs: ['fn', 'let', 'mut', 'const', 'static', 'struct', 'enum', 'trait', 'impl', 'pub', 'use', 'mod', 'crate', 'self', 'super', 'as', 'return', 'if', 'else', 'for', 'while', 'loop', 'break', 'continue', 'match', 'true', 'false', 'Some', 'None', 'Ok', 'Err'],
-  java: ['public', 'private', 'protected', 'class', 'interface', 'extends', 'implements', 'static', 'final', 'void', 'int', 'long', 'double', 'float', 'boolean', 'char', 'byte', 'short', 'new', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'throw', 'throws', 'try', 'catch', 'finally', 'import', 'package', 'this', 'super', 'null', 'true', 'false'],
-  c: ['int', 'long', 'short', 'char', 'float', 'double', 'void', 'unsigned', 'signed', 'const', 'static', 'extern', 'register', 'volatile', 'struct', 'union', 'enum', 'typedef', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'goto', 'sizeof', '#include', '#define', '#ifndef', '#ifdef', '#endif'],
-  cpp: ['int', 'long', 'short', 'char', 'float', 'double', 'void', 'unsigned', 'signed', 'const', 'static', 'extern', 'struct', 'class', 'public', 'private', 'protected', 'virtual', 'override', 'namespace', 'using', 'template', 'typename', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'new', 'delete', 'try', 'catch', 'throw', 'true', 'false', 'nullptr'],
-  sh: ['if', 'then', 'else', 'elif', 'fi', 'for', 'in', 'do', 'done', 'while', 'case', 'esac', 'function', 'return', 'exit', 'echo', 'export', 'local', 'readonly', 'unset', 'shift', 'source', 'alias'],
-  yml: ['true', 'false', 'null', 'yes', 'no', 'on', 'off'],
-  json: ['true', 'false', 'null'],
-};
-
-function getLangFromFile(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() || '';
-  const map: Record<string, string> = {
-    ts: 'ts', tsx: 'ts', js: 'js', jsx: 'js', mjs: 'js', cjs: 'js',
-    py: 'py', go: 'go', rs: 'rs', java: 'java', kt: 'java',
-    c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp', cxx: 'cpp',
-    sh: 'sh', bash: 'sh', zsh: 'sh',
-    yml: 'yml', yaml: 'yml',
-    json: 'json',
-  };
-  return map[ext] || '';
-}
-
-function highlightLine(content: string, lang: string): React.ReactNode {
-  if (!lang || !KEYWORDS[lang]) return content;
-
-  // Tokenize: strings, comments, numbers, keywords
-  const tokens: React.ReactNode[] = [];
-  let remaining = content;
-  let keyCounter = 0;
-
-  const patterns: { regex: RegExp; className: string }[] = [
-    // Comments (// ... and /* ... */ and # ...)
-    { regex: /^(\/\/.*|#.*)/, className: 'text-comment' },
-    { regex: /^(\/\*[\s\S]*?\*\/)/, className: 'text-comment' },
-    // Strings (single, double, backtick)
-    { regex: /^("(?:[^"\\]|\\.)*")/, className: 'text-string' },
-    { regex: /^('(?:[^'\\]|\\.)*')/, className: 'text-string' },
-    { regex: /^(`(?:[^`\\]|\\.)*`)/, className: 'text-string' },
-    // Numbers
-    { regex: /^\b(\d+\.?\d*)\b/, className: 'text-number' },
-  ];
-
-  while (remaining.length > 0) {
-    let matched = false;
-    for (const { regex, className } of patterns) {
-      const m = remaining.match(regex);
-      if (m) {
-        tokens.push(<span key={keyCounter++} className={className}>{m[0]}</span>);
-        remaining = remaining.substring(m[0].length);
-        matched = true;
-        break;
-      }
-    }
-    if (!matched) {
-      // Try keyword
-      const kwRegex = new RegExp(`^\\b(${KEYWORDS[lang].join('|')})\\b`);
-      const kwMatch = remaining.match(kwRegex);
-      if (kwMatch) {
-        tokens.push(<span key={keyCounter++} className="text-keyword">{kwMatch[0]}</span>);
-        remaining = remaining.substring(kwMatch[0].length);
-      } else {
-        // Take one char
-        tokens.push(<span key={keyCounter++}>{remaining[0]}</span>);
-        remaining = remaining.substring(1);
-      }
-    }
-  }
-  return tokens;
-}
+// Minimal syntax highlighting is provided by src/lib/syntaxHighlight.ts —
+// shared with ConflictMergeView so both tools use the SAME tokenizer and
+// color scheme. Supports 13 languages: Python, Go, JSON, CSV, JS/TS, Java,
+// C/C++, Rust, YAML, Bash, Markdown.
+//
+// The DiffViewer uses detectLang() to identify the language from the file
+// extension, then tokenizeLine() + tokensToHtml() to produce the highlighted
+// HTML for each line.
 
 function shouldShowLine(line: DiffLine, wsMode: WhitespaceMode): boolean {
   if (wsMode === 'normal') return true;
@@ -107,10 +55,45 @@ function shouldShowLine(line: DiffLine, wsMode: WhitespaceMode): boolean {
   return true;
 }
 
+/**
+ * Render a single line of code with syntax highlighting.
+ *
+ * Uses the shared `tokenizeLine` + `tokensToHtml` from src/lib/syntaxHighlight.ts
+ * so the DiffViewer and ConflictMergeView use the SAME tokenizer and color
+ * scheme. Returns a React node — for the DiffViewer we wrap the HTML in a
+ * <span dangerouslySetInnerHTML> because the token HTML contains nested
+ * <span class="tok-*"> elements.
+ *
+ * Falls back to plain text if the language is 'text' (unknown extension).
+ */
+function highlightLine(content: string, lang: SupportedLang): React.ReactNode {
+  if (lang === 'text' || !content) return content;
+  const tokens = tokenizeLine(content, lang);
+  const html = tokensToHtml(tokens);
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit', onStaged, onForceCompare }: DiffViewerProps) {
-  const toast = useToastStore();
+  const toast = useToastActions();
+  const { t } = useI18n();
+  const showContextMenu = useContextMenu();
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
-  const [wsMode, setWsMode] = useState<WhitespaceMode>('normal');
+  // Whitespace ignore options — independent flags (Task: whitespace as checkbox).
+  //   wsIgnoreAll      — drop entirely-blank lines from each hunk.
+  //   wsIgnoreTrailing — drop lines whose only change is trailing whitespace.
+  // Both can be on at the same time (they were a mutually-exclusive <select>
+  // before — confusing because 'ignore trailing' is a strict subset of
+  // 'ignore all', so additive flags make the UX clearer).
+  const [wsIgnoreAll, setWsIgnoreAll] = useState(false);
+  const [wsIgnoreTrailing, setWsIgnoreTrailing] = useState(false);
+  // Derived 'wsMode' for the existing shouldShowLine() helper:
+  //   ignore-all takes precedence (it's the broader filter)
+  //   ignore-trailing falls back when only that flag is on
+  //   'normal' when neither flag is on
+  const wsMode: WhitespaceMode = wsIgnoreAll ? 'ignore-all' : wsIgnoreTrailing ? 'ignore-trailing' : 'normal';
+  // Highlight mode: 'background' (3-way panel style) or 'text' (classic + / - style).
+  // Default 'background' to match the 3-way conflict panel.
+  const [highlightMode, setHighlightMode] = useState<HighlightMode>('background');
   // Lazy loading: show first N lines per hunk, expand on demand
   const [expandedHunks, setExpandedHunks] = useState<Set<number>>(new Set());
   const MAX_LINES_PER_HUNK = 100;
@@ -124,41 +107,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   const [currentHunkIdx, setCurrentHunkIdx] = useState(0);
   const diffScrollRef = useRef<HTMLDivElement>(null);
 
-  const lang = useMemo(() => (filePath ? getLangFromFile(filePath) : ''), [filePath]);
-
-  /**
-   * Render a diff line with word-level highlighting.
-   * For paired del+add lines (a common pattern in unified diffs), we compute the word diff
-   * between them and highlight only the changed words.
-   */
-  const renderLineWithWordDiff = useCallback(
-    (line: DiffLine, pairedLine: DiffLine | null): React.ReactNode => {
-      const content = line.content || ' ';
-      if (!useWordDiff || !pairedLine) {
-        return lang ? highlightLine(content, lang) : content;
-      }
-      // Compute word diff against the paired line
-      const oldContent = line.type === 'del' ? content : (pairedLine.content || '');
-      const newContent = line.type === 'add' ? content : (pairedLine.content || '');
-      const { old: oldSegs, new: newSegs } = wordDiff(oldContent, newContent);
-      const segs = line.type === 'del' ? oldSegs : newSegs;
-
-      return segs.map((seg, i) => {
-        if (seg.kind === 'equal') {
-          return <span key={i}>{seg.text}</span>;
-        }
-        // Highlight added/removed word with a stronger background — theme-aware via CSS variables
-        const highlightClass = seg.kind === 'added'
-          ? 'rounded-sm'
-          : 'rounded-sm line-through';
-        const highlightStyle = seg.kind === 'added'
-          ? { backgroundColor: 'var(--diff-added-word)' }
-          : { backgroundColor: 'var(--diff-removed-word)' };
-        return <span key={i} className={highlightClass} style={highlightStyle}>{seg.text}</span>;
-      });
-    },
-    [useWordDiff, lang]
-  );
+  const lang = useMemo<SupportedLang>(() => (filePath ? detectLang(filePath) : 'text'), [filePath]);
 
   /**
    * Find the paired line for word-diff: for a 'del' line, look at the next line;
@@ -183,6 +132,83 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
     return null;
   }, []);
 
+  /**
+   * Pre-compute word-diff segments ONCE per diff/hunk content (NOT per render).
+   * Previously `renderLineWithWordDiff` was called inside `rendered` useMemo
+   * which depended on `selectedLines` — so EVERY line click triggered
+   * wordDiff() re-computation for ALL visible lines. wordDiff is O(m·n) LCS
+   * and allocates a Uint32Array up to 2MB per call. For a 1000-line diff this
+   * was 1000 wordDiff() calls on every click = 1-5s of frozen UI.
+   *
+   * Now: wordDiff is computed once and cached by line identity. Clicking a
+   * line only triggers a cheap JSX re-render (Set.has lookup) — no LCS.
+   */
+  const wordDiffCache = useMemo(() => {
+    if (!diff || !useWordDiff) return null;
+    // Key: `${hunkIdx}:${lineIdx}` → WordSegment[] for that line
+    const cache = new Map<string, { segs: WordSegment[]; isDel: boolean }>();
+    diff.hunks.forEach((hunk, hi) => {
+      hunk.lines.forEach((line, li) => {
+        if (line.type !== 'add' && line.type !== 'del') return;
+        const paired = findPairedLine(hunk.lines, li);
+        if (!paired) return;
+        const content = line.content || '';
+        const oldContent = line.type === 'del' ? content : (paired.content || '');
+        const newContent = line.type === 'add' ? content : (paired.content || '');
+        const { old: oldSegs, new: newSegs } = wordDiff(oldContent, newContent);
+        cache.set(`${hi}:${li}`, {
+          segs: line.type === 'del' ? oldSegs : newSegs,
+          isDel: line.type === 'del',
+        });
+      });
+    });
+    return cache;
+  }, [diff, useWordDiff, findPairedLine]);
+
+  /**
+   * Render a diff line with word-level highlighting.
+   * Reads from `wordDiffCache` instead of recomputing — see comment above.
+   *
+   * When word-diff is active, the line is split into segments (equal / added /
+   * removed). 'equal' segments are rendered with SYNTAX HIGHLIGHTING (so
+   * 'const', 'function', strings etc. keep their colors). 'added'/'removed'
+   * segments get a background highlight (var(--diff-added-word) /
+   * var(--diff-removed-word)) — matching the 3-way panel style where
+   * background indicates the diff status, NOT text color.
+   */
+  const renderLineWithWordDiff = useCallback(
+    (line: DiffLine, pairedLine: DiffLine | null, hunkIdx: number, lineIdx: number): React.ReactNode => {
+      const content = line.content || ' ';
+      if (!useWordDiff || !pairedLine) {
+        return lang ? highlightLine(content, lang) : content;
+      }
+      const cached = wordDiffCache?.get(`${hunkIdx}:${lineIdx}`);
+      if (!cached) {
+        return lang ? highlightLine(content, lang) : content;
+      }
+      return cached.segs.map((seg, i) => {
+        if (seg.kind === 'equal') {
+          // Apply syntax highlighting to 'equal' segments so keywords/strings
+          // keep their colors even when word-diff is active.
+          if (lang) {
+            return <span key={i} dangerouslySetInnerHTML={{ __html: tokensToHtml(tokenizeLine(seg.text, lang)) }} />;
+          }
+          return <span key={i}>{seg.text}</span>;
+        }
+        // Highlight added/removed word with a BACKGROUND color (not text color) —
+        // matches the 3-way conflict panel where background shows diff status.
+        const highlightClass = seg.kind === 'added'
+          ? 'rounded-sm'
+          : 'rounded-sm line-through';
+        const highlightStyle = seg.kind === 'added'
+          ? { backgroundColor: 'var(--diff-added-word)' }
+          : { backgroundColor: 'var(--diff-removed-word)' };
+        return <span key={i} className={highlightClass} style={highlightStyle}>{seg.text}</span>;
+      });
+    },
+    [useWordDiff, lang, wordDiffCache]
+  );
+
   const toggleHunk = useCallback((idx: number) => {
     setCollapsedHunks(prev => {
       const next = new Set(prev);
@@ -191,6 +217,51 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       return next;
     });
   }, []);
+
+  /**
+   * MED-4 — show a context menu for a diff line offering to open the
+   * underlying file in VSCode at the given line number. Calls
+   * api.vscode.open(repoPath, { file, line }) which already supports
+   * the --goto flag on the backend (electron/services/vscode.ts).
+   *
+   * Also offers "Copy line number" as a secondary action.
+   */
+  const showLineContextMenu = useCallback((e: React.MouseEvent, lineNo: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!repoPath || !filePath) return;
+    showContextMenu(
+      [
+        {
+          label: t('vscode.openAtLine', { line: lineNo }),
+          clickId: 'open-vscode-at-line',
+        },
+        {
+          label: t('common.copyLineNumber', { n: lineNo }),
+          clickId: 'copy-line-number',
+        },
+      ],
+      async (clickId: string) => {
+        if (clickId === 'open-vscode-at-line') {
+          try {
+            const res = await api.vscode.open(repoPath, { file: filePath, line: lineNo });
+            if (!res.ok) {
+              toast.error(t('vscode.openFailed'), `via=${res.via}`);
+            }
+          } catch (err) {
+            toast.error(t('vscode.openFailed'), String(err));
+          }
+        } else if (clickId === 'copy-line-number') {
+          try {
+            await navigator.clipboard.writeText(String(lineNo));
+            toast.success(t('common.copied'));
+          } catch (err) {
+            toast.error(t('common.copyFailed'), String(err));
+          }
+        }
+      },
+    );
+  }, [repoPath, filePath, showContextMenu, t, toast]);
 
   const toggleLineSelection = useCallback((hunkIdx: number, lineIdx: number) => {
     const key = `${hunkIdx}:${lineIdx}`;
@@ -230,17 +301,17 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
     try {
       if (mode === 'staged') {
         await api.git.unstageLines(repoPath, filePath, ranges);
-        toast.success(`Unstaged ${sorted.length} line${sorted.length > 1 ? 's' : ''}`);
+        toast.success(sorted.length === 1 ? t('diff.unstagedLine', { count: sorted.length }) : t('diff.unstagedLines', { count: sorted.length }));
       } else {
         await api.git.stageLines(repoPath, filePath, ranges);
-        toast.success(`Staged ${sorted.length} line${sorted.length > 1 ? 's' : ''}`);
+        toast.success(sorted.length === 1 ? t('diff.stagedLine', { count: sorted.length }) : t('diff.stagedLines', { count: sorted.length }));
       }
       setSelectedLines(new Set());
       onStaged?.();
     } catch (e) {
-      toast.error('Partial staging failed', String(e));
+      toast.error(t('diff.partialStageFailed'), String(e));
     }
-  }, [repoPath, filePath, selectedLines, diff, mode, onStaged, toast]);
+  }, [repoPath, filePath, selectedLines, diff, mode, onStaged, toast, t]);
 
   /** Save the HEAD version of a binary file to disk (git show HEAD:path via showBuffer). */
   const handleSaveBlob = useCallback(async () => {
@@ -257,13 +328,13 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       a.download = filePath.split('/').pop() || 'blob';
       a.click();
       URL.revokeObjectURL(url);
-      toast.success(`Saved ${filePath.split('/').pop()} (${bytes.length} bytes from HEAD)`);
+      toast.success(t('diff.blobSaved', { name: filePath.split('/').pop() ?? '', bytes: bytes.length }));
     } catch (e) {
-      toast.error('Failed to save blob', String(e));
+      toast.error(t('diff.blobSaveFailed'), String(e));
     } finally {
       setSavingBlob(false);
     }
-  }, [repoPath, filePath, toast]);
+  }, [repoPath, filePath, toast, t]);
 
   const rendered = useMemo(() => {
     if (!diff || diff.binary) return null;
@@ -299,13 +370,25 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               return (
                 <>
                   {linesToShow.map((line, li) => {
-                    const bg =
-                      line.type === 'add' ? 'bg-status-added/10' :
-                      line.type === 'del' ? 'bg-status-deleted/10' : '';
-                    const color =
-                      line.type === 'add' ? 'text-status-added' :
-                      line.type === 'del' ? 'text-status-deleted' :
-                      'text-text-primary';
+                    // Two highlight modes — selectable via the toolbar:
+                    //
+                    // 'background' (default, matches 3-way conflict panel):
+                    //   - Row background: green tint (add) / red tint (del) / none (context)
+                    //   - Text color: syntax highlighting (tok-* spans)
+                    //   - No +/- marker in the gutter
+                    //
+                    // 'text' (classic diff style):
+                    //   - No row background
+                    //   - Text color: green (add) / red (del) / normal (context)
+                    //   - +/- marker in the gutter, colored to match
+                    const isAdd = line.type === 'add';
+                    const isDel = line.type === 'del';
+                    const bg = highlightMode === 'background'
+                      ? (isAdd ? 'bg-status-added/15' : isDel ? 'bg-status-deleted/15' : '')
+                      : '';
+                    const textColor = highlightMode === 'text'
+                      ? (isAdd ? 'text-status-added' : isDel ? 'text-status-deleted' : 'text-text-primary')
+                      : '';
                     const key = `${hi}:${li}`;
                     const isSelected = selectedLines.has(key);
                     const paired = findPairedLine(visibleLines, li);
@@ -313,12 +396,22 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                 <div
                   key={li}
                   className={cn(
-                    'flex hover:bg-bg-hover cursor-pointer group',
+                    'flex hover:bg-bg-hover cursor-pointer group font-mono text-xs',
                     bg,
                     isSelected && 'ring-1 ring-accent'
                   )}
                   style={{ lineHeight: '20px', minHeight: '20px' }}
-                  onClick={() => (line.type === 'add' || line.type === 'del') && toggleLineSelection(hi, li)}
+                  onClick={() => (isAdd || isDel) && toggleLineSelection(hi, li)}
+                  onContextMenu={(e) => {
+                    // MED-4 — "Open in VSCode at Line N" context menu.
+                    // Prefers the new-line number (matches the working tree
+                    // the user will land in), falls back to old-line for
+                    // pure-deletion rows.
+                    const lineNo = line.newLineNumber ?? line.oldLineNumber ?? null;
+                    if (!repoPath || !filePath || lineNo === null) return;
+                    e.preventDefault();
+                    showLineContextMenu(e, lineNo);
+                  }}
                 >
                   <span className="w-12 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
                     {line.oldLineNumber ?? ''}
@@ -326,16 +419,25 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                   <span className="w-12 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
                     {line.newLineNumber ?? ''}
                   </span>
-                  <span
-                    className={cn('w-6 flex-shrink-0 text-center select-none font-bold', color)}
-                  >
-                    {line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '}
-                  </span>
+                  {highlightMode === 'text' && (
+                    <span
+                      className={cn(
+                        'w-6 flex-shrink-0 text-center select-none font-bold',
+                        isAdd ? 'text-status-added' : isDel ? 'text-status-deleted' : 'text-text-tertiary'
+                      )}
+                    >
+                      {isAdd ? '+' : isDel ? '-' : ' '}
+                    </span>
+                  )}
                   <pre
-                    className={cn('flex-1 pl-2 whitespace-pre-wrap break-all', color)}
+                    // 'background' mode: no color class → syntax highlighting (tok-*) decides.
+                    // 'text' mode: whole-line color override (green/red) → classic diff.
+                    className={cn('flex-1 pl-2 whitespace-pre-wrap m-0', textColor)}
                     style={{ fontFamily: 'inherit' }}
                   >
-                    {renderLineWithWordDiff(line, paired)}
+                    {highlightMode === 'text'
+                      ? (line.content || ' ')
+                      : renderLineWithWordDiff(line, paired, hi, li)}
                   </pre>
                 </div>
               );
@@ -349,7 +451,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                         return next;
                       })}
                     >
-                      ▼ Show {visibleLines.length - MAX_LINES_PER_HUNK} more lines
+                      ▼ {t('diff.showMoreLines', { count: visibleLines.length - MAX_LINES_PER_HUNK })}
                     </div>
                   )}
                 </>
@@ -376,25 +478,34 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                 {visibleLines.map((line, li) => {
                   if (line.type === 'add') {
                     return (
-                      <div key={li} className="flex hover:bg-bg-hover" style={{ lineHeight: '20px', minHeight: '20px' }}>
+                      <div key={li} className="flex hover:bg-bg-hover font-mono text-xs" style={{ lineHeight: '20px', minHeight: '20px' }}>
                         <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
-                        <pre className="flex-1 pl-2 whitespace-pre-wrap text-text-tertiary" style={{ fontFamily: 'inherit', background: 'var(--diff-added-line)' }}> </pre>
+                        {/* Empty placeholder for 'add' line in the OLD pane —
+                            background tint (not text color) for both modes. */}
+                        <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit', background: 'var(--diff-added-line)' }}> </pre>
                       </div>
                     );
                   }
-                  const bg = line.type === 'del' ? 'bg-status-deleted/10' : '';
-                  const color = line.type === 'del' ? 'text-status-deleted' : 'text-text-primary';
+                  const isDel = line.type === 'del';
+                  // Background mode: red tint for del lines.
+                  // Text mode: red text for del lines.
+                  const bg = highlightMode === 'background' && isDel ? 'bg-status-deleted/15' : '';
+                  const textColor = highlightMode === 'text' && isDel ? 'text-status-deleted' : '';
                   const key = `${hi}:${li}`;
                   const isSelected = selectedLines.has(key);
                   return (
                     <div
                       key={li}
-                      className={cn('flex hover:bg-bg-hover cursor-pointer', bg, isSelected && 'ring-1 ring-accent')}
+                      className={cn('flex hover:bg-bg-hover cursor-pointer group font-mono text-xs', bg, isSelected && 'ring-1 ring-accent')}
                       style={{ lineHeight: '20px', minHeight: '20px' }}
-                      onClick={() => line.type === 'del' && toggleLineSelection(hi, li)}
+                      onClick={() => isDel && toggleLineSelection(hi, li)}
                     >
                       <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
-                      <pre className={cn('flex-1 pl-2 whitespace-pre-wrap', color)} style={{ fontFamily: 'inherit' }}>{line.content || ' '}</pre>
+                      <pre className={cn('flex-1 pl-2 whitespace-pre-wrap m-0', textColor)} style={{ fontFamily: 'inherit' }}>
+                        {highlightMode === 'background' && lang
+                          ? highlightLine(line.content || ' ', lang)
+                          : (line.content || ' ')}
+                      </pre>
                     </div>
                   );
                 })}
@@ -404,26 +515,33 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                 {visibleLines.map((line, li) => {
                   if (line.type === 'del') {
                     return (
-                      <div key={li} className="flex hover:bg-bg-hover" style={{ lineHeight: '20px', minHeight: '20px' }}>
+                      <div key={li} className="flex hover:bg-bg-hover font-mono text-xs" style={{ lineHeight: '20px', minHeight: '20px' }}>
                         <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.newLineNumber ?? ''}</span>
-                        <pre className="flex-1 pl-2 whitespace-pre-wrap text-text-tertiary" style={{ fontFamily: 'inherit', background: 'var(--diff-removed-line)' }}> </pre>
+                        {/* Empty placeholder for 'del' line in the NEW pane —
+                            background tint (not text color) for both modes. */}
+                        <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit', background: 'var(--diff-removed-line)' }}> </pre>
                       </div>
                     );
                   }
-                  const bg = line.type === 'add' ? 'bg-status-added/10' : '';
-                  const color = line.type === 'add' ? 'text-status-added' : 'text-text-primary';
+                  const isAdd = line.type === 'add';
+                  // Background mode: green tint for add lines.
+                  // Text mode: green text for add lines.
+                  const bg = highlightMode === 'background' && isAdd ? 'bg-status-added/15' : '';
+                  const textColor = highlightMode === 'text' && isAdd ? 'text-status-added' : '';
                   const key = `${hi}:${li}`;
                   const isSelected = selectedLines.has(key);
                   return (
                     <div
                       key={li}
-                      className={cn('flex hover:bg-bg-hover cursor-pointer group', bg, isSelected && 'ring-1 ring-accent')}
+                      className={cn('flex hover:bg-bg-hover cursor-pointer group font-mono text-xs', bg, isSelected && 'ring-1 ring-accent')}
                       style={{ lineHeight: '20px', minHeight: '20px' }}
-                      onClick={() => line.type === 'add' && toggleLineSelection(hi, li)}
+                      onClick={() => isAdd && toggleLineSelection(hi, li)}
                     >
                       <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none group-hover:bg-bg-hover">{line.newLineNumber ?? ''}</span>
-                      <pre className={cn('flex-1 pl-2 whitespace-pre-wrap', color)} style={{ fontFamily: 'inherit' }}>
-                        {lang ? highlightLine(line.content || ' ', lang) : (line.content || ' ')}
+                      <pre className={cn('flex-1 pl-2 whitespace-pre-wrap m-0', textColor)} style={{ fontFamily: 'inherit' }}>
+                        {highlightMode === 'background' && lang
+                          ? highlightLine(line.content || ' ', lang)
+                          : (line.content || ' ')}
                       </pre>
                     </div>
                   );
@@ -434,13 +552,13 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
         </div>
       );
     });
-  }, [diff, viewMode, wsMode, collapsedHunks, selectedLines, lang, toggleHunk, toggleLineSelection, useWordDiff, renderLineWithWordDiff, findPairedLine]);
+  }, [diff, viewMode, wsMode, collapsedHunks, selectedLines, lang, highlightMode, toggleHunk, toggleLineSelection, useWordDiff, renderLineWithWordDiff, findPairedLine, compactMode]);
 
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
         <RefreshCw size={16} className="spin mr-2" />
-        Loading diff...
+        {t('diff.loading')}
       </div>
     );
   }
@@ -448,7 +566,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   if (!diff) {
     return (
       <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
-        Select a file to view its diff
+        {t('diff.selectFile')}
       </div>
     );
   }
@@ -456,20 +574,20 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   if (diff.binary) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary text-sm gap-3">
-        <div>Binary file — diff not available</div>
+        <div>{t('diff.binary')}</div>
         {repoPath && filePath && (
           <button className="btn btn-secondary text-xs" onClick={handleSaveBlob} disabled={savingBlob}>
             {savingBlob ? <Loader size={12} className="animate-spin" /> : <Download size={12} />}
-            Save version from HEAD
+            {t('diff.saveFromHead')}
           </button>
         )}
         {onForceCompare && (
           <button
             className="btn btn-secondary text-xs"
-            title="SmartGit Manual: Force Compare — bypass the maximumFileSize limit and compare anyway. May be slow for very large files."
+            title={t('diff.forceCompareTooltip')}
             onClick={onForceCompare}
           >
-            <RefreshCw size={12} /> Force Compare
+            <RefreshCw size={12} /> {t('diff.forceCompare')}
           </button>
         )}
       </div>
@@ -484,10 +602,10 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       {/* Diff header */}
       <div className="px-3 py-2 border-b border-border-default text-xs bg-bg-secondary flex items-center justify-between flex-shrink-0 gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          {diff.newFile && <span className="badge badge-added">NEW</span>}
-          {diff.deletedFile && <span className="badge badge-deleted">DELETED</span>}
-          {diff.renamedFile && <span className="badge badge-renamed">RENAMED</span>}
-          {diff.modeChange && <span className="badge badge-modified">MODE</span>}
+          {diff.newFile && <span className="badge badge-added">{t('diff.badgeNew')}</span>}
+          {diff.deletedFile && <span className="badge badge-deleted">{t('diff.badgeDeleted')}</span>}
+          {diff.renamedFile && <span className="badge badge-renamed">{t('diff.badgeRenamed')}</span>}
+          {diff.modeChange && <span className="badge badge-modified">{t('diff.badgeMode')}</span>}
           <span className="font-mono truncate text-text-primary">{diff.newPath}</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -498,12 +616,12 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               <div className="w-px h-4 bg-border-default mx-1" />
               <span className="text-2xs text-text-tertiary">
                 {collapsedHunks.size > 0
-                  ? `${diff.hunks.length - collapsedHunks.size}/${diff.hunks.length} hunks`
-                  : `${diff.hunks.length} hunks`}
+                  ? t('diff.hunksCount', { visible: diff.hunks.length - collapsedHunks.size, total: diff.hunks.length })
+                  : t('diff.hunksCountAll', { count: diff.hunks.length })}
               </span>
               <button
                 className="icon-btn !w-5 !h-5"
-                title="Collapse all hunks"
+                title={t('diff.collapseAll')}
                 onClick={() => {
                   const all = new Set(diff.hunks.map((_, i) => i));
                   setCollapsedHunks(collapsedHunks.size === diff.hunks.length ? new Set() : all);
@@ -514,41 +632,93 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
             </>
           )}
           <div className="w-px h-4 bg-border-default mx-1" />
-          <select
-            className="text-2xs bg-bg-tertiary border border-border-default rounded px-1.5 py-0.5"
-            value={wsMode}
-            onChange={(e) => setWsMode(e.target.value as WhitespaceMode)}
-            title="Whitespace mode"
+          {/* Whitespace ignore options — Task (whitespace as checkbox).
+              Replaced the 3-way <select> (Normal / Ignore All / Ignore
+              Trailing) with two independent checkboxes so the user can
+              stack options (was mutually-exclusive before, which was
+              confusing — 'Ignore trailing' is a strict subset of
+              'Ignore all', so they're now additive flags instead of
+              competing modes). */}
+          <label
+            className={cn(
+              'flex items-center gap-1 px-2 py-0.5 text-2xs rounded border cursor-pointer transition-colors',
+              wsIgnoreAll
+                ? 'bg-accent-muted text-accent border-accent/50'
+                : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover',
+            )}
+            title={t('diff.wsIgnoreAll')}
           >
-            <option value="normal">Normal</option>
-            <option value="ignore-all">Ignore all WS</option>
-            <option value="ignore-trailing">Ignore trailing</option>
-          </select>
+            <input
+              type="checkbox"
+              className="w-2.5 h-2.5"
+              checked={wsIgnoreAll}
+              onChange={(e) => setWsIgnoreAll(e.target.checked)}
+            />
+            {t('diff.wsIgnoreAllShort')}
+          </label>
+          <label
+            className={cn(
+              'flex items-center gap-1 px-2 py-0.5 text-2xs rounded border cursor-pointer transition-colors',
+              wsIgnoreTrailing
+                ? 'bg-accent-muted text-accent border-accent/50'
+                : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover',
+            )}
+            title={t('diff.wsIgnoreTrailing')}
+          >
+            <input
+              type="checkbox"
+              className="w-2.5 h-2.5"
+              checked={wsIgnoreTrailing}
+              onChange={(e) => setWsIgnoreTrailing(e.target.checked)}
+            />
+            {t('diff.wsIgnoreTrailingShort')}
+          </label>
           <button
             className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', useWordDiff
               ? 'bg-accent text-text-inverse border-accent'
               : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setUseWordDiff(!useWordDiff)}
-            title="Toggle word-level diff highlighting"
+            title={t('diff.wordDiffTooltip')}
           >
-            Word diff
+            {t('diff.wordDiffButton')}
           </button>
+          {/* Highlight mode toggle: 'background' (3-way panel style) ↔ 'text' (classic +/- style) */}
+          <div className="flex items-center gap-0.5 ml-1">
+            <button
+              className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', highlightMode === 'background'
+                ? 'bg-accent text-text-inverse border-accent'
+                : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover')}
+              onClick={() => setHighlightMode('background')}
+              title="Background highlight — diff lines get a green/red background tint; text uses syntax highlighting (matches 3-way conflict panel)"
+            >
+              BG
+            </button>
+            <button
+              className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', highlightMode === 'text'
+                ? 'bg-accent text-text-inverse border-accent'
+                : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover')}
+              onClick={() => setHighlightMode('text')}
+              title="Text highlight — classic diff style with +/- markers and green/red text"
+            >
+              +/-
+            </button>
+          </div>
           {/* SmartGit manual: Compact mode — hide unchanged sections */}
           <button
             className={cn('px-2 py-0.5 text-2xs rounded border transition-colors', compactMode
               ? 'bg-accent text-text-inverse border-accent'
               : 'bg-bg-tertiary text-text-secondary border-border-default hover:bg-bg-hover')}
             onClick={() => setCompactMode(!compactMode)}
-            title="Compact mode — hide unchanged lines (SmartGit)"
+            title={t('diff.compactTooltip')}
           >
-            Compact
+            {t('diff.compact')}
           </button>
           {/* SmartGit manual: prev/next hunk navigation arrows */}
           {diff.hunks.length > 1 && (
             <div className="flex items-center gap-0.5">
               <button
                 className="icon-btn !w-5 !h-5"
-                title="Previous hunk"
+                title={t('diff.prevHunk')}
                 onClick={() => {
                   const prev = Math.max(0, currentHunkIdx - 1);
                   setCurrentHunkIdx(prev);
@@ -563,7 +733,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               </span>
               <button
                 className="icon-btn !w-5 !h-5"
-                title="Next hunk"
+                title={t('diff.nextHunk')}
                 onClick={() => {
                   const next = Math.min(diff.hunks.length - 1, currentHunkIdx + 1);
                   setCurrentHunkIdx(next);
@@ -579,16 +749,16 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
             <button
               className={cn('px-2.5 py-0.5 text-2xs transition-colors', viewMode === 'unified' ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
               onClick={() => setViewMode('unified')}
-              title="Unified view"
+              title={t('diff.unifiedViewTooltip')}
             >
-              Unified
+              {t('diff.unified')}
             </button>
             <button
               className={cn('px-2.5 py-0.5 text-2xs transition-colors border-l border-border-default', viewMode === 'split' ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover')}
               onClick={() => setViewMode('split')}
-              title="Split view (side-by-side)"
+              title={t('diff.splitViewTooltip')}
             >
-              Split
+              {t('diff.splitButton')}
             </button>
           </div>
           {selectedLines.size > 0 && repoPath && mode !== 'commit' && (
@@ -596,10 +766,10 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               className="btn btn-primary text-2xs !py-0.5 !px-2"
               onClick={handleApplySelection}
               title={mode === 'staged'
-                ? 'Unstage the selected lines (mixed add+del hunks are unstaged as a whole)'
-                : 'Stage the selected lines (mixed add+del hunks are staged as a whole)'}
+                ? t('diff.unstageSelectionTooltip')
+                : t('diff.stageSelectionTooltip')}
             >
-              {mode === 'staged' ? 'Unstage' : 'Stage'} Selection ({selectedLines.size})
+              {mode === 'staged' ? t('diff.unstage') : t('toolbar.stage')} {t('diff.selectionCount', { count: selectedLines.size })}
             </button>
           )}
         </div>
@@ -608,7 +778,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       <div className="flex-1 overflow-auto">
         {rendered}
         {diff.hunks.length === 0 && (
-          <div className="p-4 text-sm text-text-tertiary">No changes</div>
+          <div className="p-4 text-sm text-text-tertiary">{t('diff.noChanges')}</div>
         )}
       </div>
     </div>

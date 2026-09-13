@@ -142,7 +142,13 @@ export const useOperationLogStore = create<OperationLogState>((set, get) => ({
     const opId = startOp(action, repoPath, command);
     try {
       const result = await fn();
-      finishOp(opId, result !== undefined ? String(result).substring(0, 200) : undefined);
+      finishOp(opId, result !== undefined
+        ? (typeof result === 'string'
+          ? result.substring(0, 200)
+          : typeof result === 'object' && result !== null
+            ? JSON.stringify(result).substring(0, 200)
+            : String(result).substring(0, 200))
+        : undefined);
       return result;
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
@@ -151,3 +157,71 @@ export const useOperationLogStore = create<OperationLogState>((set, get) => ({
     }
   },
 }));
+
+/**
+ * IPC bridge: listen for operation-log events from the main process.
+ *
+ * The main process (electron/services/git.ts) wraps mutating git operations
+ * (checkout, merge, cherry-pick, revert, rebase, stash, tag, clone, etc.)
+ * with withOperationLog(), which broadcasts start/finish/error events to
+ * all renderer windows. This listener feeds those events into the store
+ * so the Operations tab shows ALL user-initiated git commands — not just
+ * the ones manually instrumented in the UI layer.
+ *
+ * Called once from App.tsx on mount.
+ */
+export function initOperationLogIpcListener(): () => void {
+  // Guard: window.smartgit may not exist in test environments
+  if (typeof window === 'undefined' || !(window as any).smartgit) {
+    return () => {}; // no-op cleanup
+  }
+  // Use the preload bridge instead of require('electron') — the latter
+  // breaks under Vite ESM in the browser (require is not defined).
+  // Preload exposes operationLog.onStart / onFinish which subscribe to
+  // the same IPC channels ('operation-log:start' / 'operation-log:finish').
+  const api = (window as any).smartgit;
+  if (!api.operationLog) {
+    return () => {}; // preload bridge missing — silent no-op
+  }
+
+  const startListener = (entry: { id: string; timestamp: number; action: string; command?: string; repoPath: string; status: 'running' }) => {
+    const store = useOperationLogStore.getState();
+    const op: OperationLog = {
+      id: entry.id,
+      timestamp: entry.timestamp,
+      action: entry.action,
+      command: entry.command,
+      repoPath: entry.repoPath,
+      status: 'running',
+    };
+    useOperationLogStore.setState((state) => ({
+      ops: pruneOldOps([op, ...state.ops.filter(o => o.id !== entry.id)]),
+      runningIds: new Set([...state.runningIds, entry.id]),
+    }));
+  };
+
+  const finishListener = (entry: { id: string; status: 'success' | 'error'; result?: string; error?: string }) => {
+    const startTime = useOperationLogStore.getState().ops.find((o) => o.id === entry.id)?.timestamp;
+    const duration = startTime ? Date.now() - startTime : undefined;
+    useOperationLogStore.setState((state) => ({
+      ops: state.ops.map((o) =>
+        o.id === entry.id
+          ? { ...o, status: entry.status, duration, result: entry.result, error: entry.error }
+          : o
+      ),
+      runningIds: (() => {
+        const next = new Set(state.runningIds);
+        next.delete(entry.id);
+        return next;
+      })(),
+    }));
+  };
+
+  const unsubStart = api.operationLog.onStart(startListener);
+  const unsubFinish = api.operationLog.onFinish(finishListener);
+
+  return () => {
+    unsubStart();
+    unsubFinish();
+  };
+}

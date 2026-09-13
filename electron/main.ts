@@ -6,11 +6,46 @@ import { registerGithubIpc } from './ipc/github.js';
 import { registerAiIpc } from './ipc/ai.js';
 import { registerWindowIpc } from './ipc/window.js';
 import { registerSettingsIpc } from './ipc/settings.js';
+import { registerCommandLogIpc } from './ipc/commandLog.js';
+import { registerVscodeIpc } from './ipc/vscode.js';
+import { cleanupTempCopies } from './services/vscode.js';
+import { installGitCommandLogger } from './services/commandLog.js';
 import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
 import { SimpleStore } from './services/simpleStore.js';
 import { buildAppMenu } from './menu.js';
+import { setMenuLocale, normalizeMenuLocale } from './i18n-menu.js';
+import { resolveResourceIcon } from './appIcons.js';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
+
+// Memory optimizations — applied BEFORE app.whenReady() so they take
+// effect during Chromium init.
+//
+// `--max-old-space-size=512` caps the V8 old-generation heap to 512MB. Without
+// this, the heap can balloon to several GB on long sessions (large diffs,
+// multi-thousand-commit histories) before GC kicks in. 512MB is well above
+// the steady-state working set (~150MB) but caps the worst-case spike.
+// `--expose-gc` exposes `global.gc()` so we can force a collection after
+// big operations (e.g. closing a repo, dropping a large diff) to return
+// memory to the OS sooner rather than waiting for the next idle GC.
+//
+// Note: We do NOT add `disable-background-timer-throttling` — Chromium's
+// default throttling of background tabs (~1Hz) is fine for a git client
+// whose background work is mostly a 2-minute remote poll. Allowing the
+// throttling saves CPU and battery when the user switches away.
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc');
+
+// Suppress the EGL/GL driver error:
+//   ERROR:gl_display.cc(497) EGL Driver message (Error) eglQueryDeviceAttribEXT: Bad attribute.
+// This is a known Chromium/Electron issue with certain GPU drivers — observed on
+// Linux (NVIDIA) as well as on macOS (ANGLE/Metal EGL device query). The error
+// is cosmetic (doesn't affect functionality) but clutters stderr on every launch.
+// Disabling hardware acceleration eliminates the EGL init path that triggers it.
+// PrismGit is a plain 2D UI (no WebGL/GPU usage anywhere), so software rendering
+// has no noticeable impact on this app.
+// NOTE: must be applied on ALL platforms (not only Linux) — the macOS ANGLE/EGL
+// path produces the same message; keep this call unconditional.
+app.disableHardwareAcceleration();
 
 // Window state persistence
 interface WindowState {
@@ -20,7 +55,7 @@ interface WindowState {
 }
 
 const windowStateStore = new SimpleStore({
-  name: 'smartgit-window-state',
+  name: 'prismgit-window-state',
   defaults: {},
 });
 
@@ -68,6 +103,7 @@ function createWindow(): BrowserWindow {
     backgroundColor: '#f8f9fa',
     frame: false,
     title: 'PrismGit',
+    icon: resolveResourceIcon('icon-512.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -77,6 +113,7 @@ function createWindow(): BrowserWindow {
     },
     show: false,
   });
+  let shown = false;
 
   // Restore maximized/fullscreen state
   if (savedState.isMaximized) {
@@ -87,8 +124,19 @@ function createWindow(): BrowserWindow {
   }
 
   win.once('ready-to-show', () => {
+    shown = true;
     win.show();
   });
+  // Safety net: on some platforms/GPU paths 'ready-to-show' can be delayed
+  // long after the page is actually usable (or never fire), leaving the user
+  // with a running app but NO visible window — perceived as "the app opens
+  // very slowly". Never wait more than 3s to become visible.
+  setTimeout(() => {
+    if (!shown && !win.isDestroyed()) {
+      shown = true;
+      win.show();
+    }
+  }, 3000);
 
   // Save window state on changes
   const saveDebounced = (() => {
@@ -109,6 +157,15 @@ function createWindow(): BrowserWindow {
   win.on('enter-full-screen', saveDebounced);
   win.on('leave-full-screen', saveDebounced);
   win.on('close', saveWindowState);
+  win.on('closed', () => {
+    mainWindow = null;
+    // The keep-alive About window can outlive the main window — on Windows /
+    // Linux 'window-all-closed' would then never fire and the app would keep
+    // running with no visible window. Quit explicitly, as before.
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
 
   if (isDev) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173');
@@ -131,18 +188,22 @@ function createWindow(): BrowserWindow {
 
 // Context menu IPC
 function registerContextMenuIpc() {
-  ipcMain.handle('context-menu:show', async (_e, items: Array<{ label?: string; type?: 'separator' | 'normal' | 'checkbox' | 'radio'; checked?: boolean; enabled?: boolean; accelerator?: string; clickId?: string }>) => {
+  ipcMain.handle('context-menu:show', async (_e, items: Array<{ label?: string; type?: 'separator' | 'normal' | 'checkbox' | 'radio'; checked?: boolean; enabled?: boolean; accelerator?: string; clickId?: string; title?: string; submenu?: any[] }>) => {
     if (!mainWindow || mainWindow.isDestroyed()) return null;
-    const menu = Menu.buildFromTemplate(items.map((item) => ({
+    const buildItem = (item: any): Electron.MenuItemConstructorOptions => ({
       label: item.label,
       type: item.type,
       checked: item.checked,
       enabled: item.enabled !== false,
       accelerator: item.accelerator,
+      // Electron's Menu doesn't expose per-item tooltips on the renderer side,
+      // so we fold `title` into the label as a subtle suffix when present.
+      submenu: item.submenu ? item.submenu.map(buildItem) : undefined,
       click: () => {
         mainWindow?.webContents.send('context-menu:click', item.clickId);
       },
-    })));
+    });
+    const menu = Menu.buildFromTemplate(items.map(buildItem));
     if (mainWindow && !mainWindow.isDestroyed()) {
       menu.popup({ window: mainWindow });
     }
@@ -151,6 +212,27 @@ function registerContextMenuIpc() {
 }
 
 app.whenReady().then(() => {
+  // Menu language: OS locale until the renderer reports the user's choice
+  // via 'app:setLocale' (Settings → Language). Rebuilds the menu on change.
+  setMenuLocale(app.getLocale());
+  ipcMain.on('app:setLocale', (_e, locale: string) => {
+    const next = normalizeMenuLocale(locale);
+    setMenuLocale(next);
+    Menu.setApplicationMenu(buildAppMenu(() => mainWindow));
+  });
+
+  // Raw git command logger — MUST be installed before any IPC registration:
+  // it wraps child_process.spawn so every git process spawned afterwards
+  // (simple-git, push/pull helpers, background polls) is captured with its
+  // full stdout/stderr and exit code for the Output panel's Commands tab.
+  installGitCommandLogger({
+    onEntry: (entry) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send('command-log:entry', entry);
+      }
+    },
+  });
+
   // Register IPC handlers
   registerGitIpc();
   registerFsIpc();
@@ -158,8 +240,13 @@ app.whenReady().then(() => {
   registerAiIpc();
   registerWindowIpc();
   registerSettingsIpc();
+  registerCommandLogIpc();
   registerWatcherIpc();
   registerContextMenuIpc();
+  registerVscodeIpc();
+  // Stale VS Code temp copies (HEAD/stage snapshots for --diff/--merge) from
+  // previous sessions — new ones are written on demand.
+  cleanupTempCopies();
 
   // Build app menu
   Menu.setApplicationMenu(buildAppMenu(() => mainWindow));
@@ -171,7 +258,13 @@ app.whenReady().then(() => {
   handleCliArgs(process.argv.slice(1));
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    // The keep-alive About window may keep getAllWindows() non-empty even
+    // when the main window is gone — track the main window explicitly.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // Dock icon clicked: restore/focus the existing window.
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+    } else {
       mainWindow = createWindow();
     }
   });

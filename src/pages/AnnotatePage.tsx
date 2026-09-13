@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronRight, Tag as TagIcon, Search,
 } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type LogEntry, type CommitFile } from '../lib/api';
@@ -14,14 +14,16 @@ import { ResizableSplitter, useResizableWidth } from '../components/ResizableSpl
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { computeGraph, bezierPath, laneColor } from '../lib/gitGraph';
 import { useLazyList } from '../lib/useLazyList';
+import { useI18n } from '../lib/i18n';
 
 const ROW_HEIGHT = 28;
 const LANE_WIDTH = 20;
 const GRAPH_PAD = 6;
 
 export function AnnotatePage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const showContextMenu = useContextMenu();
   // Global selection — sync with History and other tools
   const selectCommit = useSelectionStore((s) => s.selectCommit);
@@ -52,7 +54,7 @@ export function AnnotatePage() {
       setSelectedIdx(0);
       if (result.length > 0) selectCommit(result[0].hash);
       setFileCounts({});
-    } catch (e) { toast.error('Failed to load history', String(e)); }
+    } catch (e) { toast.error(t('pages.annotateLoadFailed'), String(e)); }
     finally { setLoading(false); }
   }, [repo, toast, globalPathFilter, selectCommit]);
 
@@ -129,7 +131,7 @@ export function AnnotatePage() {
   const selected = selectedIdx !== null && selectedIdx >= 0 ? filtered[selectedIdx] : null;
 
   if (!repo) {
-    return <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">No repository open</div>;
+    return <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">{t('pages.noRepository')}</div>;
   }
 
   return (
@@ -137,19 +139,19 @@ export function AnnotatePage() {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary" style={{ height: 28 }}>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium">Annotate</span>
-          <span className="text-2xs text-text-tertiary">{filtered.length} commits</span>
+          <span className="text-xs font-medium">{t('pages.annotateTitle')}</span>
+          <span className="text-2xs text-text-tertiary">{t('pages.commitsCount', { count: filtered.length })}</span>
           {globalPathFilter && (
             <span className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/40 bg-status-modified/10 text-status-modified flex items-center gap-1 ml-2">
               <Search size={9} />{globalPathFilter}
-              <button onClick={() => useSelectionStore.getState().setPathFilter(null)} title="Clear file filter">✕</button>
+              <button onClick={() => useSelectionStore.getState().setPathFilter(null)} title={t('pages.clearFileFilter')}>✕</button>
             </span>
           )}
         </div>
         <div className="flex items-center gap-1">
-          <input type="text" placeholder="Filter..." value={search}
+          <input type="text" placeholder={t('pages.filterPlaceholder')} value={search}
             onChange={(e) => setSearch(e.target.value)} className="text-xs w-32 px-2 py-0.5" />
-          <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={loadHistory}>
+          <button className="icon-btn !w-5 !h-5" title={t('common.refresh')} onClick={loadHistory}>
             <RefreshCw size={11} />
           </button>
         </div>
@@ -159,9 +161,9 @@ export function AnnotatePage() {
         {/* Commit list — virtualized */}
         <div className="flex-1 overflow-y-auto" ref={lazyList.scrollRef} style={{ position: 'relative' }}>
           {loading ? (
-            <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+            <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
           ) : filtered.length === 0 ? (
-            <div className="p-8 text-center text-text-tertiary text-sm">No commits</div>
+            <div className="p-8 text-center text-text-tertiary text-sm">{t('pages.noCommits')}</div>
           ) : (
             <div style={{ position: 'relative' }}>
               {/* Graph SVG — full size, pointer-events: none, zIndex 5 (above row backgrounds) */}
@@ -243,12 +245,12 @@ export function AnnotatePage() {
                           setSelectedIdx(realIdx);
                           selectCommit(entry.hash);
                           const items: ContextMenuItem[] = [
-                            { label: 'View in History...', clickId: 'view-history' },
-                            { label: 'Create Tag here...', clickId: 'create-tag' },
+                            { label: t('pages.menuViewInHistory'), clickId: 'view-history' },
+                            { label: t('history.createTag'), clickId: 'create-tag' },
                             { type: 'separator' },
-                            { label: 'Copy Short Hash', clickId: 'copy-short' },
-                            { label: 'Copy Full Hash', clickId: 'copy-full' },
-                            { label: 'Copy Commit Message', clickId: 'copy-msg' },
+                            { label: t('history.copyShortHash'), clickId: 'copy-short' },
+                            { label: t('history.copyFullHash'), clickId: 'copy-full' },
+                            { label: t('history.copyMessage'), clickId: 'copy-msg' },
                           ];
                           showContextMenu(items, (action) => {
                             if (action === 'view-history') {
@@ -260,19 +262,19 @@ export function AnnotatePage() {
                               // History will handle the tag creation via its context menu
                             } else if (action === 'copy-short') {
                               copyToClipboard(shortHash(entry.hash));
-                              toast.success('Copied');
+                              toast.success(t('pages.copied'));
                             } else if (action === 'copy-full') {
                               copyToClipboard(entry.hash);
-                              toast.success('Copied');
+                              toast.success(t('pages.copied'));
                             } else if (action === 'copy-msg') {
                               copyToClipboard(entry.subject);
-                              toast.success('Copied');
+                              toast.success(t('pages.copied'));
                             }
                           });
                         }}
-                        title="Click to select · Right-click for more actions"
+                        title={t('pages.clickSelectHint')}
                       >
-                        {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
+                        {isHEAD && <span className="text-2xs text-accent font-bold flex-shrink-0" style={{ width: 8 }} title="Current branch (HEAD)">{'>'}</span>}
                         {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
                         {fileCount !== undefined && fileCount > 0 && (
                           <span className="text-2xs px-1 py-0 rounded bg-accent-muted text-accent flex-shrink-0" style={{ minWidth: 20, textAlign: 'center' }}>
@@ -316,7 +318,7 @@ export function AnnotatePage() {
               <div className="text-sm font-medium mb-2">{selected.subject}</div>
               <div className="flex items-center gap-2 mb-3">
                 <CommitHashLink hash={selected.hash} />
-                <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>
+                <button className="icon-btn !w-5 !h-5" title={t('common.copy')} onClick={() => { copyToClipboard(selected.hash); toast.success(t('pages.copied')); }}>
                   <GitCommit size={10} />
                 </button>
               </div>
@@ -332,7 +334,7 @@ export function AnnotatePage() {
               </div>
               {selected.parents.length > 0 && (
                 <div className="mb-3">
-                  <div className="text-2xs uppercase text-text-tertiary mb-1">Parents</div>
+                  <div className="text-2xs uppercase text-text-tertiary mb-1">{t('pages.parents')}</div>
                   {selected.parents.map((p, i) => (
                     <div key={i} className="flex items-center gap-1">
                       <CornerDownRight size={10} className="text-text-tertiary" />
@@ -345,12 +347,12 @@ export function AnnotatePage() {
               <div className="mt-3 pt-3 border-t border-border-default">
                 <button className="w-full flex items-center justify-between text-2xs uppercase text-text-tertiary mb-2"
                   onClick={() => setShowFiles(!showFiles)}>
-                  <span>Files ({commitFiles.length})</span>
+                  <span>{t('pages.filesCount', { count: commitFiles.length })}</span>
                   {showFiles ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
                 </button>
                 {showFiles && (
-                  loadingFiles ? <div className="text-2xs text-text-tertiary">Loading...</div> :
-                  commitFiles.length === 0 ? <div className="text-2xs text-text-tertiary">No files</div> :
+                  loadingFiles ? <div className="text-2xs text-text-tertiary">{t('common.loading')}</div> :
+                  commitFiles.length === 0 ? <div className="text-2xs text-text-tertiary">{t('pages.noFiles')}</div> :
                   commitFiles.map((f, i) => {
                     const isHighlighted = globalPathFilter === f.path || globalPathFilter === f.oldPath;
                     return (
@@ -367,11 +369,11 @@ export function AnnotatePage() {
                           e.preventDefault();
                           e.stopPropagation();
                           const items: ContextMenuItem[] = [
-                            { label: 'View file history...', clickId: 'file-history' },
-                            { label: 'Blame this file...', clickId: 'blame' },
+                            { label: t('pages.menuViewFileHistory'), clickId: 'file-history' },
+                            { label: t('pages.menuBlameThisFile'), clickId: 'blame' },
                             { type: 'separator' },
-                            { label: 'Copy path', clickId: 'copy-path' },
-                            { label: 'Copy full path', clickId: 'copy-full-path' },
+                            { label: t('pages.menuCopyPath'), clickId: 'copy-path' },
+                            { label: t('pages.menuCopyFullPath'), clickId: 'copy-full-path' },
                           ];
                           showContextMenu(items, (action) => {
                             if (action === 'file-history') {
@@ -383,14 +385,14 @@ export function AnnotatePage() {
                               window.location.hash = '#/blame';
                             } else if (action === 'copy-path') {
                               copyToClipboard(f.path);
-                              toast.success('Path copied');
+                              toast.success(t('pages.pathCopied'));
                             } else if (action === 'copy-full-path') {
                               copyToClipboard(`${repo.path}/${f.path}`.replace(/\/+/g, '/'));
-                              toast.success('Full path copied');
+                              toast.success(t('pages.fullPathCopied'));
                             }
                           });
                         }}
-                        title={isHighlighted ? `${f.path} — matches your file-history filter` : 'Click for file history · Right-click for more'}
+                        title={isHighlighted ? t('pages.fileMatchesFilterHint', { path: f.path }) : t('pages.fileRowHint')}
                       >
                         <span className="font-mono font-bold w-4 text-center"
                           style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
@@ -410,7 +412,7 @@ export function AnnotatePage() {
                 )}
               </div>
             </div>
-          ) : <div className="p-4 text-center text-text-tertiary text-sm">Select a commit</div>}
+          ) : <div className="p-4 text-center text-text-tertiary text-sm">{t('pages.selectCommit')}</div>}
         </div>
       </div>
     </div>

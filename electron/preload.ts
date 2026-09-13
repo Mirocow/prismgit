@@ -3,12 +3,15 @@ import type { GitApi } from './types/git-api.js';
 import type { GithubApi } from './types/github-api.js';
 import type { FsApi } from './types/fs-api.js';
 import type { SettingsApi } from './types/settings-api.js';
+import type { CommandLogEntry } from './types/command-log-api.js';
+import type { VsCodeApi } from './types/vscode-api.js';
 
 const api = {
   // Git operations
   git: {
     status: (repoPath: string) => ipcRenderer.invoke('git:status', repoPath),
     listDirectories: (repoPath: string, maxDepth?: number) => ipcRenderer.invoke('git:listDirectories', repoPath, maxDepth),
+    listAllDirectories: (repoPath: string, maxDepth?: number) => ipcRenderer.invoke('git:listAllDirectories', repoPath, maxDepth),
     add: (repoPath: string, files: string[]) => ipcRenderer.invoke('git:add', repoPath, files),
     addAll: (repoPath: string) => ipcRenderer.invoke('git:addAll', repoPath),
     restore: (repoPath: string, files: string[], staged?: boolean) => ipcRenderer.invoke('git:restore', repoPath, files, staged),
@@ -16,8 +19,8 @@ const api = {
       ipcRenderer.invoke('git:commit', repoPath, message, amend, signoff, noVerify),
     clean: (repoPath: string, paths: string[], dryRun?: boolean, force?: boolean, directories?: boolean) =>
       ipcRenderer.invoke('git:clean', repoPath, paths, dryRun, force, directories),
-    push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean) =>
-      ipcRenderer.invoke('git:push', repoPath, remote, branch, setUpstream, force, tags),
+    push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string) =>
+      ipcRenderer.invoke('git:push', repoPath, remote, branch, setUpstream, force, tags, targetBranch),
     pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) =>
       ipcRenderer.invoke('git:pull', repoPath, remote, branch, rebase, noFF),
     fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) =>
@@ -29,10 +32,13 @@ const api = {
       ipcRenderer.invoke('git:setFetchDepth', repoPath, remote, depth),
     remoteProperties: (repoPath: string, name: string) =>
       ipcRenderer.invoke('git:remoteProperties', repoPath, name),
-    log: (repoPath: string, options?: { maxCount?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean }) =>
+    log: (repoPath: string, options?: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean }) =>
       ipcRenderer.invoke('git:log', repoPath, options),
     findCommit: (repoPath: string, query: string) => ipcRenderer.invoke('git:findCommit', repoPath, query),
     commitFiles: (repoPath: string, hash: string) => ipcRenderer.invoke('git:commitFiles', repoPath, hash),
+    mergeNestedCommits: (repoPath: string, hash: string) => ipcRenderer.invoke('git:mergeNestedCommits', repoPath, hash),
+    tagsAt: (repoPath: string, hash: string) => ipcRenderer.invoke('git:tagsAt', repoPath, hash),
+    trackedFiles: (repoPath: string) => ipcRenderer.invoke('git:trackedFiles', repoPath),
     diffCommit: (repoPath: string, hash: string, parentHash?: string) =>
       ipcRenderer.invoke('git:diffCommit', repoPath, hash, parentHash),
     commitExists: (repoPath: string, hash: string) =>
@@ -56,6 +62,8 @@ const api = {
       ipcRenderer.invoke('git:mergeTree', repoPath, ours, theirs),
     aheadBehind: (repoPath: string, base: string, compare: string) =>
       ipcRenderer.invoke('git:aheadBehind', repoPath, base, compare),
+    pollRemoteSummary: (repoPath: string) => ipcRenderer.invoke('git:pollRemoteSummary', repoPath),
+    pollRemoteSummaries: (paths: string[]) => ipcRenderer.invoke('git:pollRemoteSummaries', paths),
     diff: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) =>
       ipcRenderer.invoke('git:diff', repoPath, file, options),
     diffBranches: (repoPath: string, base: string, compare: string) =>
@@ -103,8 +111,11 @@ const api = {
     revParse: (repoPath: string, ref: string) => ipcRenderer.invoke('git:revParse', repoPath, ref),
     revParseArgs: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:revParseArgs', repoPath, args),
     raw: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:raw', repoPath, args),
+    // Single IPC call replaces N+M per-file spawns for rename detection
+    detectWorkingTreeRenames: (repoPath: string, deletedFiles: string[], untrackedFiles: string[]) =>
+      ipcRenderer.invoke('git:detectWorkingTreeRenames', repoPath, deletedFiles, untrackedFiles),
     // New: full git CLI surface coverage
-    grep: (repoPath: string, pattern: string, options?: string[]) => ipcRenderer.invoke('git:grep', repoPath, pattern, options),
+    grep: (repoPath: string, pattern: string, options?: string[], pathspec?: string) => ipcRenderer.invoke('git:grep', repoPath, pattern, options, pathspec),
     applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => ipcRenderer.invoke('git:applyPatch', repoPath, patch, options),
     show: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:show', repoPath, args),
     showBuffer: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:showBuffer', repoPath, args),
@@ -129,11 +140,14 @@ const api = {
     cherryPick: (repoPath: string, hashes: string[], noCommit?: boolean) =>
       ipcRenderer.invoke('git:cherryPick', repoPath, hashes, noCommit),
     cherryPickAbort: (repoPath: string) => ipcRenderer.invoke('git:cherryPickAbort', repoPath),
-    cherryPickContinue: (repoPath: string) => ipcRenderer.invoke('git:cherryPickContinue', repoPath),
+    cherryPickContinue: (repoPath: string, allowEmpty?: boolean) =>
+      ipcRenderer.invoke('git:cherryPickContinue', repoPath, allowEmpty),
+    cherryPickSkip: (repoPath: string) => ipcRenderer.invoke('git:cherryPickSkip', repoPath),
     revert: (repoPath: string, hashes: string[], noCommit?: boolean) =>
       ipcRenderer.invoke('git:revert', repoPath, hashes, noCommit),
     revertAbort: (repoPath: string) => ipcRenderer.invoke('git:revertAbort', repoPath),
     revertContinue: (repoPath: string) => ipcRenderer.invoke('git:revertContinue', repoPath),
+    revertSkip: (repoPath: string) => ipcRenderer.invoke('git:revertSkip', repoPath),
     rebase: (repoPath: string, onto: string, options?: { interactive?: boolean; autosquash?: boolean; abort?: boolean; continue?: boolean; skip?: boolean }) =>
       ipcRenderer.invoke('git:rebase', repoPath, onto, options),
     bisectStart: (repoPath: string) => ipcRenderer.invoke('git:bisectStart', repoPath),
@@ -179,6 +193,7 @@ const api = {
 
     // LFS support
     lfsStatus: (repoPath: string) => ipcRenderer.invoke('git:lfsStatus', repoPath),
+    isLfsInstalled: (repoPath: string) => ipcRenderer.invoke('git:isLfsInstalled', repoPath),
     lfsPull: (repoPath: string, files?: string[]) => ipcRenderer.invoke('git:lfsPull', repoPath, files),
     lfsPush: (repoPath: string) => ipcRenderer.invoke('git:lfsPush', repoPath),
     lfsFetch: (repoPath: string) => ipcRenderer.invoke('git:lfsFetch', repoPath),
@@ -271,6 +286,38 @@ const api = {
       ipcRenderer.invoke('git:squashCommits', repoPath, fromHash, toHash, message),
     coalesceCommits: (repoPath: string, firstHash: string, secondHash: string) =>
       ipcRenderer.invoke('git:coalesceCommits', repoPath, firstHash, secondHash),
+
+    // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
+    smartPull: (repoPath: string, remote?: string, branch?: string) =>
+      ipcRenderer.invoke('git:smartPull', repoPath, remote, branch),
+    octopusMerge: (repoPath: string, branches: string[]) =>
+      ipcRenderer.invoke('git:octopusMerge', repoPath, branches),
+    isForcePushAllowed: (branch: string | undefined, policy: 'deny' | 'feature-only' | 'allow', protectedBranches?: string[]) =>
+      ipcRenderer.invoke('git:isForcePushAllowed', branch, policy, protectedBranches),
+    applyLineEdit: (repoPath: string, file: string, lineNumber: number, newContent: string, isStaged?: boolean) =>
+      ipcRenderer.invoke('git:applyLineEdit', repoPath, file, lineNumber, newContent, isStaged),
+    editInfoExclude: (repoPath: string) =>
+      ipcRenderer.invoke('git:editInfoExclude', repoPath),
+    traceIgnoreRule: (repoPath: string, file: string) =>
+      ipcRenderer.invoke('git:traceIgnoreRule', repoPath, file),
+    detectRepoFormat: (repoPath: string) =>
+      ipcRenderer.invoke('git:detectRepoFormat', repoPath),
+    commitSigned: (repoPath: string, message: string, options?: { gpgSign?: boolean; sshSign?: boolean; signingKey?: string; noVerify?: boolean }) =>
+      ipcRenderer.invoke('git:commitSigned', repoPath, message, options),
+    createSignedTag: (repoPath: string, name: string, message: string, ref?: string, sshSign?: boolean) =>
+      ipcRenderer.invoke('git:createSignedTag', repoPath, name, message, ref, sshSign),
+    lfsFsck: (repoPath: string) =>
+      ipcRenderer.invoke('git:lfsFsck', repoPath),
+    batchOperation: (repos: string[], operation: 'fetch' | 'pull' | 'push' | 'status', options?: { remote?: string; branch?: string; force?: boolean }) =>
+      ipcRenderer.invoke('git:batchOperation', repos, operation, options),
+    exportConfig: (repoPath: string | null) =>
+      ipcRenderer.invoke('git:exportConfig', repoPath),
+    importConfig: (repoPath: string, config: any) =>
+      ipcRenderer.invoke('git:importConfig', repoPath, config),
+    // Memory management: release the cached SimpleGit instance for a repo
+    // (closes its child process pool). Called by repositoryStore.closeRepository.
+    invalidateCache: (repoPath?: string) =>
+      ipcRenderer.invoke('git:invalidateCache', repoPath),
   } as GitApi,
 
   // GitHub integration
@@ -288,6 +335,21 @@ const api = {
       ipcRenderer.invoke('github:getCheckRuns', owner, repo, shas),
     logout: () => ipcRenderer.invoke('github:logout'),
     getAuthState: () => ipcRenderer.invoke('github:getAuthState'),
+    // SmartGit Manual: PR management
+    addPRLineComment: (owner: string, repo: string, prNumber: number, data: any) =>
+      ipcRenderer.invoke('github:addPRLineComment', owner, repo, prNumber, data),
+    addPRComment: (owner: string, repo: string, prNumber: number, body: string) =>
+      ipcRenderer.invoke('github:addPRComment', owner, repo, prNumber, body),
+    submitPRReview: (owner: string, repo: string, prNumber: number, event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT', body?: string) =>
+      ipcRenderer.invoke('github:submitPRReview', owner, repo, prNumber, event, body),
+    mergePR: (owner: string, repo: string, prNumber: number, options?: any) =>
+      ipcRenderer.invoke('github:mergePR', owner, repo, prNumber, options),
+    closePR: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:closePR', owner, repo, prNumber),
+    reopenPR: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:reopenPR', owner, repo, prNumber),
+    listPRComments: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:listPRComments', owner, repo, prNumber),
   } as GithubApi,
 
   // File system
@@ -325,6 +387,19 @@ const api = {
     addTag: (path: string, tag: string) => ipcRenderer.invoke('settings:addTag', path, tag),
     removeTag: (path: string, tag: string) => ipcRenderer.invoke('settings:removeTag', path, tag),
     refreshRepoStats: (path: string) => ipcRenderer.invoke('settings:refreshRepoStats', path),
+
+    // Repository groups (tree in the sidebar)
+    getRepoGroups: () => ipcRenderer.invoke('settings:getRepoGroups'),
+    createRepoGroup: (name: string, parentId?: string | null) =>
+      ipcRenderer.invoke('settings:createRepoGroup', name, parentId ?? null),
+    renameRepoGroup: (id: string, name: string) => ipcRenderer.invoke('settings:renameRepoGroup', id, name),
+    deleteRepoGroup: (id: string) => ipcRenderer.invoke('settings:deleteRepoGroup', id),
+    moveRepoGroup: (id: string, newParentId: string | null) =>
+      ipcRenderer.invoke('settings:moveRepoGroup', id, newParentId),
+    setRepoGroupExpanded: (id: string, expanded: boolean) =>
+      ipcRenderer.invoke('settings:setRepoGroupExpanded', id, expanded),
+    setRepoGroup: (path: string, groupId: string | null) =>
+      ipcRenderer.invoke('settings:setRepoGroup', path, groupId),
   } as SettingsApi,
 
   // Window controls
@@ -345,7 +420,31 @@ const api = {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
     openExternal: (url: string) => ipcRenderer.send('app:openExternal', url),
+    /** Locale override for e2e/tests (PRISMGIT_LOCALE), empty in normal runs. */
+    envLocale: (typeof process !== 'undefined' && process.env && process.env.PRISMGIT_LOCALE) || '',
+    /** Notify the main process of the active UI locale (rebuilds the menu). */
+    setLocale: (locale: string) => ipcRenderer.send('app:setLocale', locale),
   },
+
+  // VSCode integration
+  vscode: {
+    detect: (force?: boolean) => ipcRenderer.invoke('vscode:detect', force),
+    open: (repoPath: string, target?: { file?: string; line?: number }) =>
+      ipcRenderer.invoke('vscode:open', repoPath, target),
+    openFileDiff: (repoPath: string, file: string) => ipcRenderer.invoke('vscode:openFileDiff', repoPath, file),
+    openMerge: (repoPath: string, file: string) => ipcRenderer.invoke('vscode:openMerge', repoPath, file),
+    openFileVersion: (repoPath: string, sha: string, file: string) =>
+      ipcRenderer.invoke('vscode:openFileVersion', repoPath, sha, file),
+    openCommitFileDiff: (repoPath: string, sha: string, file: string) =>
+      ipcRenderer.invoke('vscode:openCommitFileDiff', repoPath, sha, file),
+    openCommitPatch: (repoPath: string, sha: string) =>
+      ipcRenderer.invoke('vscode:openCommitPatch', repoPath, sha),
+    openWorkspace: (name: string, folderPaths: string[]) =>
+      ipcRenderer.invoke('vscode:openWorkspace', name, folderPaths),
+    diffToolStatus: (repoPath: string) => ipcRenderer.invoke('vscode:diffToolStatus', repoPath),
+    installDiffTool: (repoPath: string) => ipcRenderer.invoke('vscode:installDiffTool', repoPath),
+    removeDiffTool: (repoPath: string) => ipcRenderer.invoke('vscode:removeDiffTool', repoPath),
+  } as VsCodeApi,
 
   // File watcher for auto-refresh
   watcher: {
@@ -360,7 +459,7 @@ const api = {
 
   // Context menu
   contextMenu: {
-    show: (items: Array<{ label?: string; type?: 'separator' | 'normal' | 'checkbox' | 'radio'; checked?: boolean; enabled?: boolean; accelerator?: string; clickId?: string }>) =>
+    show: (items: Array<{ label?: string; type?: 'separator' | 'normal' | 'checkbox' | 'radio'; checked?: boolean; enabled?: boolean; accelerator?: string; clickId?: string; title?: string; submenu?: any[] }>) =>
       ipcRenderer.invoke('context-menu:show', items),
     onClick: (cb: (clickId: string) => void) => {
       const listener = (_: unknown, clickId: string) => cb(clickId);
@@ -378,6 +477,50 @@ const api = {
   ai: {
     generateCommitMessage: (cfg: { url: string; apiKey?: string; model: string; maxDiffSize?: number; prompt?: string }, diff: string, hint?: string) =>
       ipcRenderer.invoke('ai:generateCommitMessage', cfg, diff, hint),
+    ollamaListModels: (url: string) =>
+      ipcRenderer.invoke('ai:ollamaListModels', url),
+    ollamaListLoadedModels: (url: string) =>
+      ipcRenderer.invoke('ai:ollamaListLoadedModels', url),
+    ollamaKeepAlive: (url: string, model: string, keepAlive?: string) =>
+      ipcRenderer.invoke('ai:ollamaKeepAlive', url, model, keepAlive),
+    memoryLoad: (repoPath: string) =>
+      ipcRenderer.invoke('ai:memory:load', repoPath),
+    memorySave: (repoPath: string, key: string, value: string, category?: string) =>
+      ipcRenderer.invoke('ai:memory:save', repoPath, key, value, category),
+    memorySummary: (repoPath: string) =>
+      ipcRenderer.invoke('ai:memory:summary', repoPath),
+    chat: (config: { url: string; headers: Record<string, string>; body: string; method?: string }) =>
+      ipcRenderer.invoke('ai:chat', config),
+  },
+
+  // Raw git command log (Output panel → Commands tab)
+  commandLog: {
+    list: () => ipcRenderer.invoke('command-log:list'),
+    clear: () => ipcRenderer.invoke('command-log:clear'),
+    onEntry: (cb: (entry: CommandLogEntry) => void) => {
+      const listener = (_: unknown, entry: CommandLogEntry) => cb(entry);
+      ipcRenderer.on('command-log:entry', listener);
+      return () => {
+        ipcRenderer.removeListener('command-log:entry', listener);
+      };
+    },
+  },
+
+  // Operation log — high-level operation start/finish events emitted by the
+  // main process (electron/services/operationLog.ts). Exposed here so the
+  // renderer can subscribe WITHOUT using require('electron') (which breaks
+  // under Vite ESM).
+  operationLog: {
+    onStart: (cb: (entry: { id: string; timestamp: number; action: string; command?: string; repoPath: string; status: 'running' }) => void) => {
+      const listener = (_: unknown, entry: any) => cb(entry);
+      ipcRenderer.on('operation-log:start', listener);
+      return () => ipcRenderer.removeListener('operation-log:start', listener);
+    },
+    onFinish: (cb: (entry: { id: string; status: 'success' | 'error'; result?: string; error?: string }) => void) => {
+      const listener = (_: unknown, entry: any) => cb(entry);
+      ipcRenderer.on('operation-log:finish', listener);
+      return () => ipcRenderer.removeListener('operation-log:finish', listener);
+    },
   },
 
   // Menu events (one-way from main to renderer)

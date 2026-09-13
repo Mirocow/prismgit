@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, X, GitBranch, Tag, CornerDownRight } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 
@@ -19,7 +20,7 @@ interface FindObjectDialogProps {
 
 export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogProps) {
   const repo = useRepositoryStore((s) => s.currentRepo);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoundRef[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,9 +61,19 @@ export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogPr
     if (onSelect) {
       onSelect(ref);
     } else {
-      // Default: copy hash to clipboard
-      navigator.clipboard.writeText(ref.hash);
-      toast.success(`Copied: ${ref.name}`);
+      // Default: write the global selection so EVERY tool (Toolbar chips,
+      // History, Diff, Branches, Tags) follows the found ref, then jump to
+      // History where the commit is highlighted.
+      const selection = useSelectionStore.getState();
+      if (ref.type === 'branch') {
+        selection.selectBranch(ref.name);
+      } else if (ref.type === 'tag') {
+        selection.selectTag(ref.name);
+      }
+      selection.selectCommit(ref.hash);
+      if (!window.location.hash.startsWith('#/history')) {
+        window.location.hash = '#/history';
+      }
     }
     onClose();
   };

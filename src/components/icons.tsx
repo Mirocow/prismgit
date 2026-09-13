@@ -32,6 +32,17 @@ export const GitBranch = (p: IconProps) => (
   </Icon>
 );
 
+// Palette — color theme picker icon.
+export const Palette = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+    <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+    <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+    <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.555C21.965 6.012 17.461 2 12 2z" />
+  </Icon>
+);
+
 export const GitCommit = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="3" />
@@ -251,6 +262,77 @@ export const ArrowDown = (p: IconProps) => (
   </Icon>
 );
 
+// Plug (розетка) — used in History/Changes sync indicator to mean "pull needed".
+// Standard Lucide "plug" path.
+export const Plug = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 22v-5" />
+    <path d="M9 8V2" />
+    <path d="M15 8V2" />
+    <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
+  </Icon>
+);
+
+// PlugZap (вилка в розетке) — used in History/Changes sync indicator to mean
+// "in sync with remote". Standard Lucide "plug-zap" path.
+export const PlugZap = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 13v2" />
+    <path d="M9 8V2" />
+    <path d="M15 8V2" />
+    <path d="M18 8v3a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V8Z" />
+    <path d="M5 19l4-4" />
+    <path d="M9 19l-4-4" />
+  </Icon>
+);
+
+// Power — alternative "in sync" icon (power symbol). Kept as alternative.
+export const Power = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 2v10" />
+    <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
+  </Icon>
+);
+
+// Cpu — used in the Ollama model picker to show parameter count.
+export const Cpu = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+    <rect x="9" y="9" width="6" height="6" />
+    <path d="M15 2v2" /><path d="M15 20v2" /><path d="M2 15h2" /><path d="M2 9h2" />
+    <path d="M20 15h2" /><path d="M20 9h2" /><path d="M9 2v2" /><path d="M9 20v2" />
+  </Icon>
+);
+
+// HardDrive — used in the Ollama model picker to show file size on disk.
+export const HardDrive = (p: IconProps) => (
+  <Icon {...p}>
+    <line x1="22" y1="12" x2="2" y2="12" />
+    <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    <line x1="6" y1="16" x2="6.01" y2="16" />
+    <line x1="10" y1="16" x2="10.01" y2="16" />
+  </Icon>
+);
+
+// Zap — used in the Ollama model picker to show "loaded / warm" models.
+export const Zap = (p: IconProps) => (
+  <Icon {...p}>
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+  </Icon>
+);
+
+// Square — used as the "Stop" button icon in the AI Assistant. The CSS
+// class `fill-current` fills the square (solid), distinguishing it from
+// the empty outline that the default stroke-only icon would produce.
+export const Square = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="5" y="5" width="14" height="14" rx="1" />
+  </Icon>
+);
+
+
+
+
 export const CloudDownload = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="8 17 12 21 16 17" />
@@ -328,6 +410,19 @@ export const EyeOff = (p: IconProps) => (
   <Icon {...p}>
     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
     <line x1="1" y1="1" x2="23" y2="23" />
+  </Icon>
+);
+
+export const Eye = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+    <circle cx="12" cy="12" r="3" />
+  </Icon>
+);
+
+export const KeyRound = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
   </Icon>
 );
 
@@ -562,5 +657,109 @@ export const Sparkles = (p: IconProps) => (
     <path d="M22 5h-4" />
     <path d="M4 17v2" />
     <path d="M5 18H3" />
+  </Icon>
+);
+
+export const ListChecks = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 5h1M3 12h1M3 19h1" />
+    <path d="m8 5 2 2 4-4" />
+    <path d="m8 12 2 2 4-4" />
+    <path d="m8 19 2 2 4-4" />
+  </Icon>
+);
+
+export const Terminal = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="4 17 10 11 4 5" />
+    <line x1="12" y1="19" x2="20" y2="19" />
+  </Icon>
+);
+
+// ── Filter toggle icons for Changes page ──────────────────────────
+
+/** File with plus — "untracked / new file" (fa-file-circle-plus) */
+export const FilePlus = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="12" y1="13" x2="18" y2="13" />
+    <line x1="15" y1="10" x2="15" y2="16" />
+  </Icon>
+);
+
+/** Route arrow A→B — "moved / renamed" (fa-route / drive_file_move) */
+export const Route = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="6" cy="19" r="2" />
+    <circle cx="18" cy="5" r="2" />
+    <path d="M8 19h6a4 4 0 0 0 4-4V8" strokeDasharray="3 2" />
+    <path d="m15 5 3 3 3-3" />
+    <path d="m5 17 1-4" strokeDasharray="3 2" />
+  </Icon>
+);
+
+/** Cubes — "submodules / nested repos" (fa-cubes / deployed_code) */
+export const Cubes = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 2 3 7l9 5 9-5-9-5z" />
+    <path d="M3 12l9 5 9-5" />
+    <path d="M3 17l9 5 9-5" />
+  </Icon>
+);
+
+/** List-tree — "subdirectories: flat list vs tree" (account_tree / list) */
+export const ListTree = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 6h7" />
+    <path d="M3 12h7" />
+    <path d="M3 18h7" />
+    <path d="M14 6h7" />
+    <path d="M14 12h7" />
+    <path d="M14 18h7" />
+    <path d="M10 6v6a2 2 0 0 0 2 2h2" strokeDasharray="3 2" />
+  </Icon>
+);
+
+/** File-check — "unchanged / clean file" (fa-file-circle-check) */
+export const FileCheck = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <path d="m9 15 2 2 4-4" />
+  </Icon>
+);
+
+/** User — chat bubble user icon (fa-user) */
+export const User = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </Icon>
+);
+
+/** Bot — chat bubble bot icon (fa-robot) */
+export const Bot = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="11" width="18" height="10" rx="2" />
+    <circle cx="12" cy="5" r="2" />
+    <path d="M12 7v4" />
+    <line x1="8" y1="16" x2="8" y2="16" />
+    <line x1="16" y1="16" x2="16" y2="16" />
+  </Icon>
+);
+
+/** Wrench — tools icon (fa-wrench) */
+export const Wrench = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+  </Icon>
+);
+
+/** Send — paper-plane icon (fa-paper-plane) */
+export const Send = (p: IconProps) => (
+  <Icon {...p}>
+    <line x1="22" y1="2" x2="11" y2="13" />
+    <polygon points="22 2 15 22 11 13 2 9 22 2" />
   </Icon>
 );

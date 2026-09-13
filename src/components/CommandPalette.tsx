@@ -9,9 +9,10 @@ import { NAV_ITEMS, NAV_SHORTCUTS } from './navItems';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 /** Minimal icon contract shared with ./icons */
 type IconType = typeof GitCommit;
@@ -24,6 +25,10 @@ export interface PaletteDialogTriggers {
   onApplyPatch: () => void;
   onClone: () => void;
   onInit: () => void;
+  /** View → Go to Deep Link... (paste a /page?params link). */
+  onGoDeepLink: () => void;
+  /** View → Copy Deep Link (copy a link for the current selection). */
+  onCopyDeepLink: () => void;
 }
 
 interface Command {
@@ -54,13 +59,24 @@ export function CommandPalette({ open, onClose, triggers }: {
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { t } = useI18n();
 
   const repos = useRepositoryStore((s) => s.repos);
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const theme = useSettingsStore((s) => s.theme);
-  const toast = useToastStore();
+  const toast = useToastActions();
 
   useEscapeKey(open, onClose);
+
+  // Group ids are stable English identifiers (used for search matching);
+  // headers are translated at render time.
+  const GROUP_LABELS: Record<string, string> = {
+    'Git Actions': 'shell.groupGitActions',
+    'Tools': 'shell.groupTools',
+    'Repositories': 'shell.groupRepositories',
+    'Navigation': 'shell.groupNavigation',
+    'Interface': 'shell.groupInterface',
+  };
 
   const buildCommands = useCallback((): Command[] => {
     const repo = useRepositoryStore.getState().currentRepo;
@@ -68,61 +84,63 @@ export function CommandPalette({ open, onClose, triggers }: {
     const withRepo = repo ? [
       // --- Git actions -------------------------------------------------------
       {
-        id: 'act-push', label: 'Push', group: 'Git Actions', icon: Upload,
+        id: 'act-push', label: t('toolbar.push'), group: 'Git Actions', icon: Upload,
         keywords: 'upload publish remote', hint: 'git push',
-        action: () => git.push(repo.path).then(() => toast.success('Pushed successfully')).catch((e) => toast.error('Push failed', String(e))),
+        action: () => git.push(repo.path).then(() => toast.success(t('status.pushedSuccessfully'))).catch((e) => toast.error(t('shell.pushFailed'), String(e))),
       },
       {
-        id: 'act-pull', label: 'Pull', group: 'Git Actions', icon: Download,
+        id: 'act-pull', label: t('toolbar.pull'), group: 'Git Actions', icon: Download,
         keywords: 'update remote fetch merge', hint: 'git pull',
-        action: () => git.pull(repo.path).then(() => toast.success('Pulled successfully')).catch((e) => toast.error('Pull failed', String(e))),
+        action: () => git.pull(repo.path).then(() => toast.success(t('status.pulledSuccessfully'))).catch((e) => toast.error(t('shell.pullFailed'), String(e))),
       },
       {
-        id: 'act-fetch', label: 'Fetch All', group: 'Git Actions', icon: CloudDownload,
+        id: 'act-fetch', label: t('toolbar.fetchAll'), group: 'Git Actions', icon: CloudDownload,
         keywords: 'sync remote prune', hint: 'git fetch',
-        action: () => git.fetch(repo.path).then(() => toast.success('Fetched successfully')).catch((e) => toast.error('Fetch failed', String(e))),
+        action: () => git.fetch(repo.path).then(() => toast.success(t('status.fetchedSuccessfully'))).catch((e) => toast.error(t('shell.fetchFailed'), String(e))),
       },
       {
-        id: 'act-refresh', label: 'Refresh Status', group: 'Git Actions', icon: RefreshCw,
+        id: 'act-refresh', label: t('shell.refreshStatus'), group: 'Git Actions', icon: RefreshCw,
         keywords: 'reload update working tree', hint: 'F5',
         action: () => { git.refreshStatus(repo.path); },
       },
       {
-        id: 'act-stageall', label: 'Stage All Changes', group: 'Git Actions', icon: Plus,
+        id: 'act-stageall', label: t('shell.stageAllChanges'), group: 'Git Actions', icon: Plus,
         keywords: 'add all index', hint: 'git add .',
-        action: () => git.stageAll(repo.path).then(() => toast.success('All changes staged')).catch((e) => toast.error('Stage failed', String(e))),
+        action: () => git.stageAll(repo.path).then(() => toast.success(t('shell.allStaged'))).catch((e) => toast.error(t('shell.stageFailed'), String(e))),
       },
       {
-        id: 'act-commit', label: 'Commit', group: 'Git Actions', icon: GitCommit,
+        id: 'act-commit', label: t('toolbar.commit'), group: 'Git Actions', icon: GitCommit,
         keywords: 'changes staged message', hint: 'Ctrl+1',
         action: () => navigate('/changes'),
       },
       // --- Tools (repo-scoped) ----------------------------------------------
-      { id: 'tool-find', label: 'Find Object…', group: 'Tools', icon: Search, keywords: 'search commit hash', hint: 'Ctrl+F', action: triggers.onFind },
-      { id: 'tool-repoinfo', label: 'Repository Info', group: 'Tools', icon: BookOpen, keywords: 'details summary objects gc', action: triggers.onRepoInfo },
-      { id: 'tool-applypatch', label: 'Apply Patch…', group: 'Tools', icon: FileText, keywords: 'patch diff import', action: triggers.onApplyPatch },
-      { id: 'tool-gitflow', label: 'Git-Flow…', group: 'Tools', icon: GitMerge, keywords: 'feature release hotfix workflow', hint: 'Ctrl+Shift+G', action: triggers.onGitFlow },
-      { id: 'tool-irebase', label: 'Interactive Rebase…', group: 'Tools', icon: ExternalLink, keywords: 'squash reword drop rebase', hint: 'Ctrl+Shift+R', action: triggers.onInteractiveRebase },
+      { id: 'tool-find', label: t('shell.findObjectMenu'), group: 'Tools', icon: Search, keywords: 'search commit hash', hint: 'Ctrl+F', action: triggers.onFind },
+      { id: 'tool-repoinfo', label: t('shell.repoInfo'), group: 'Tools', icon: BookOpen, keywords: 'details summary objects gc', action: triggers.onRepoInfo },
+      { id: 'tool-applypatch', label: t('shell.applyPatchMenu'), group: 'Tools', icon: FileText, keywords: 'patch diff import', action: triggers.onApplyPatch },
+      { id: 'tool-gitflow', label: t('shell.gitFlowMenu'), group: 'Tools', icon: GitMerge, keywords: 'feature release hotfix workflow', hint: 'Ctrl+Shift+G', action: triggers.onGitFlow },
+      { id: 'tool-irebase', label: t('shell.interactiveRebaseMenu'), group: 'Tools', icon: ExternalLink, keywords: 'squash reword drop rebase', hint: 'Ctrl+Shift+R', action: triggers.onInteractiveRebase },
+      { id: 'tool-deeplink-go', label: t('shell.goDeepLink'), group: 'Tools', icon: ExternalLink, keywords: 'url path link history file branch share open', hint: 'Ctrl+Shift+L', action: triggers.onGoDeepLink },
+      { id: 'tool-deeplink-copy', label: t('shell.copyDeepLink'), group: 'Tools', icon: FileText, keywords: 'copy url link share selection file branch commit', action: triggers.onCopyDeepLink },
       // --- Repositories ------------------------------------------------------
-      { id: 'repo-close', label: 'Close Repository', group: 'Repositories', icon: X, keywords: 'exit release memory', action: () => useRepositoryStore.getState().closeRepository() },
+      { id: 'repo-close', label: t('shell.closeRepository'), group: 'Repositories', icon: X, keywords: 'exit release memory', action: () => useRepositoryStore.getState().closeRepository() },
     ] : [];
 
     const repoSwitchers: Command[] = repos
       .filter((r) => r.path !== repo?.path)
       .map((r) => ({
         id: `repo-open-${r.path}`,
-        label: `Switch to "${r.name}"`,
+        label: t('shell.switchToRepo', { name: r.name }),
         group: 'Repositories',
         icon: FolderGit,
         keywords: r.path,
-        action: () => useRepositoryStore.getState().openRepository(r.path).catch((e) => toast.error('Failed to open repository', String(e))),
+        action: () => useRepositoryStore.getState().openRepository(r.path).catch((e) => toast.error(t('shell.openRepoFailed'), String(e))),
       }));
 
     return [
       // Navigation — only meaningful with an open repository
       ...(repo ? NAV_ITEMS.map<Command>((n) => ({
         id: `nav-${n.path}`,
-        label: `Go to ${n.label}`,
+        label: t('shell.goTo', { page: n.label }),
         group: 'Navigation',
         icon: n.icon,
         hint: NAV_SHORTCUTS[n.path],
@@ -131,20 +149,20 @@ export function CommandPalette({ open, onClose, triggers }: {
       })) : []),
       ...withRepo,
       ...repoSwitchers,
-      { id: 'repo-open-picker', label: 'Open Repository…', group: 'Repositories', icon: FolderPlus, keywords: 'folder add directory', action: () => useRepositoryStore.getState().openRepositoryPicker() },
-      { id: 'repo-clone', label: 'Clone Repository…', group: 'Repositories', icon: CloudDownload, keywords: 'url download copy', action: triggers.onClone },
-      { id: 'repo-init', label: 'Init New Repository…', group: 'Repositories', icon: Plus, keywords: 'create new folder', action: triggers.onInit },
+      { id: 'repo-open-picker', label: t('shell.openRepositoryMenu'), group: 'Repositories', icon: FolderPlus, keywords: 'folder add directory', action: () => useRepositoryStore.getState().openRepositoryPicker() },
+      { id: 'repo-clone', label: t('shell.cloneRepositoryMenu'), group: 'Repositories', icon: CloudDownload, keywords: 'url download copy', action: triggers.onClone },
+      { id: 'repo-init', label: t('shell.initRepositoryMenu'), group: 'Repositories', icon: Plus, keywords: 'create new folder', action: triggers.onInit },
       // Always available
       {
-        id: 'ui-theme', label: theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme',
+        id: 'ui-theme', label: theme === 'dark' ? t('shell.switchToLight') : t('shell.switchToDark'),
         group: 'Interface', icon: theme === 'dark' ? Sun : Moon,
         keywords: 'appearance dark light mode', hint: 'Ctrl+Shift+T',
         action: () => useSettingsStore.getState().toggleTheme(),
       },
-      { id: 'ui-shortcuts', label: 'Keyboard Shortcuts Help', group: 'Interface', icon: CheckCircle, keywords: 'keys hotkeys help', hint: '?', action: () => { window.dispatchEvent(new CustomEvent('prismgit:show-shortcuts')); } },
-      { id: 'ui-settings', label: 'Open Settings', group: 'Interface', icon: SettingsIcon, keywords: 'preferences options config', action: () => navigate('/settings') },
+      { id: 'ui-shortcuts', label: t('shell.shortcutsHelp'), group: 'Interface', icon: CheckCircle, keywords: 'keys hotkeys help', hint: '?', action: () => { window.dispatchEvent(new CustomEvent('prismgit:show-shortcuts')); } },
+      { id: 'ui-settings', label: t('shell.openSettings'), group: 'Interface', icon: SettingsIcon, keywords: 'preferences options config', action: () => navigate('/settings') },
     ];
-  }, [navigate, repos, theme, toast, triggers]);
+  }, [navigate, repos, theme, toast, triggers, t]);
 
   const commands = useMemo(() => buildCommands(), [buildCommands]);
 
@@ -221,21 +239,21 @@ export function CommandPalette({ open, onClose, triggers }: {
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[12vh] z-[70] animate-fade-in"
+      className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-start justify-center pt-[12vh] z-[70] animate-fade-in"
       onClick={onClose}
     >
       <div
         className="panel w-[560px] max-w-[92vw] overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="Command palette"
+        aria-label={t('shell.commandPalette')}
       >
         <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border-default">
           <Search size={15} className="text-text-tertiary flex-shrink-0" />
           <input
             ref={inputRef}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-text-tertiary"
-            placeholder="Type a command or page name…"
+            placeholder={t('shell.palettePlaceholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onInputKeyDown}
@@ -247,7 +265,7 @@ export function CommandPalette({ open, onClose, triggers }: {
         <div ref={listRef} className="max-h-[340px] overflow-y-auto py-1">
           {filtered.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-text-tertiary">
-              No commands matching “{query}”
+              {t('shell.noCommands', { query })}
             </div>
           ) : (
             rows.map((row) =>
@@ -256,7 +274,7 @@ export function CommandPalette({ open, onClose, triggers }: {
                   key={`h-${row.header}-${row.idx}`}
                   className="px-3 pt-2 pb-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary"
                 >
-                  {row.header}
+                  {GROUP_LABELS[row.header] ? t(GROUP_LABELS[row.header]) : row.header}
                 </div>
               ) : (() => {
                 const cmd = row.cmd!;
@@ -289,10 +307,10 @@ export function CommandPalette({ open, onClose, triggers }: {
         </div>
 
         <div className="flex items-center gap-3 px-3 py-1.5 border-t border-border-default text-2xs text-text-tertiary">
-          <span><kbd className="border border-border-subtle rounded px-1">↑↓</kbd> move</span>
-          <span><kbd className="border border-border-subtle rounded px-1">↵</kbd> run</span>
-          <span><kbd className="border border-border-subtle rounded px-1">esc</kbd> close</span>
-          <span className="ml-auto">{filtered.length} commands</span>
+          <span><kbd className="border border-border-subtle rounded px-1">↑↓</kbd> {t('shell.paletteMove')}</span>
+          <span><kbd className="border border-border-subtle rounded px-1">↵</kbd> {t('shell.paletteRun')}</span>
+          <span><kbd className="border border-border-subtle rounded px-1">esc</kbd> {t('shell.paletteClose')}</span>
+          <span className="ml-auto">{t('shell.commandsCount', { count: filtered.length })}</span>
         </div>
       </div>
     </div>

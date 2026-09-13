@@ -1,4 +1,6 @@
 import { defineConfig } from '@playwright/test';
+import * as os from 'os';
+import * as path from 'path';
 
 /**
  * Playwright config for PrismGit E2E tests.
@@ -17,8 +19,15 @@ import { defineConfig } from '@playwright/test';
 // that may not inherit it from the shell.
 process.env.DISPLAY = process.env.DISPLAY || ':99';
 
+// Fixture repo location — helpers.ts computes FIXTURE_REPO from this env var,
+// so it must be set HERE (config is loaded before any worker/helper import).
+// global-setup.ts then (re)creates the fixture at that path before the run,
+// making the suite self-sufficient on a fresh machine (empty /tmp etc.).
+process.env.PRISMGIT_TEST_REPOS = process.env.PRISMGIT_TEST_REPOS || path.join(os.tmpdir(), 'prismgit-e2e-repos');
+
 export default defineConfig({
   testDir: './tests/e2e',
+  globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: false, // single-window app — can't run multiple instances against the same DISPLAY
   forbidOnly: !!process.env.CI,
   retries: 0,

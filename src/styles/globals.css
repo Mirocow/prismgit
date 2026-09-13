@@ -35,7 +35,7 @@
   /* Slightly darker text for better contrast on light backgrounds */
   --text-primary: #2c3138;
   --text-secondary: #5c6166;
-  --text-tertiary: #868b92;
+  --text-tertiary: #666a6f; /* A11Y-3: AA contrast (4.75:1) on bg-tertiary */
   --text-inverse: #ffffff;
   --text-link: #2585d4;
 
@@ -113,7 +113,7 @@
 
   --text-primary: #bfbdb6;
   --text-secondary: #8a8f98;
-  --text-tertiary: #5c6168;
+  --text-tertiary: #7d8186; /* A11Y-3: AA contrast (4.55:1) on bg-tertiary */
   --text-inverse: #0b0e14;
   --text-link: #39BAE6;
 
@@ -171,6 +171,1071 @@
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
 
   --splitter-color-hover: #39BAE6;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Multi-theme support — applied via [data-theme="..."] attribute on <html>.
+   The default :root (light) and .dark above are kept for backward compat.
+   Each [data-theme="..."] block overrides the key CSS variables for that
+   theme. Less-critical variables (shadows, graph colors) inherit from
+   the base theme to keep this file manageable.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* GitHub Light — clean, neutral, very readable. */
+[data-theme="github-light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #eaeef2;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(15, 23, 42, 0.04);
+  --bg-active: rgba(9, 105, 218, 0.10);
+  --bg-selected: #ddf4ff;
+  --bg-sidebar-selected: #ddf4ff;
+  --border-default: #d0d7de;
+  --border-subtle: #eaeef2;
+  --border-strong: #afb8c1;
+  --border-focused: #0969da;
+  --text-primary: #1f2328;
+  --text-secondary: #59636e;
+  --text-tertiary: #656c77; /* A11Y-3: AA contrast (4.53:1) */
+  --text-inverse: #ffffff;
+  --text-link: #0969da;
+  --accent: #0969da;
+  --accent-hover: #218bff;
+  --accent-active: #0550ae;
+  --accent-muted: rgba(9, 105, 218, 0.10);
+  --accent-light-blue: #218bff;
+  --accent-purple: #8250df;
+  --accent-cyan: #1b7c83;
+  --accent-green: #1a7f37;
+  --accent-yellow: #9a6700;
+  --accent-yellow-dim: #6e4b00;
+  --accent-red: #cf222e;
+  --accent-red-dim: #862028;
+  --status-added: #1a7f37;
+  --status-modified: #9a6700;
+  --status-deleted: #cf222e;
+  --status-renamed: #0969da;
+  --status-untracked: #1b7c83;
+  --status-conflict: #bc4c00;
+  --status-success: #1a7f37;
+  --status-warning: #9a6700;
+  --status-error: #cf222e;
+  --status-info: #0969da;
+  --diff-added-bg: rgba(26, 127, 55, 0.15);
+  --diff-removed-bg: rgba(207, 34, 46, 0.15);
+  --diff-added-line: rgba(26, 127, 55, 0.08);
+  --diff-removed-line: rgba(207, 34, 46, 0.08);
+  --diff-added-word: rgba(26, 127, 55, 0.30);
+  --diff-removed-word: rgba(207, 34, 46, 0.30);
+  --tag-bg: rgba(9, 105, 218, 0.08);
+  --tag-border: rgba(9, 105, 218, 0.3);
+  --tag-text: #0969da;
+  --warning-bg: #fff8c5;
+  --warning-icon: #9a6700;
+  --warning-border: #eac54f;
+  --comment: #6e7781;
+  --graph-line: #afb8c1;
+  --graph-node-fill: #ffffff;
+  --graph-node-border: #59636e;
+  --graph-node-selected: #0969da;
+  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.06);
+  --shadow-md: 0 4px 12px rgba(31, 35, 40, 0.08);
+  --shadow-lg: 0 8px 24px rgba(31, 35, 40, 0.12);
+  --scrollbar-thumb: rgba(31, 35, 40, 0.20);
+  --scrollbar-thumb-hover: rgba(31, 35, 40, 0.40);
+  --splitter-color-hover: #0969da;
+}
+
+/* GitHub Dark — neutral dark, easy on the eyes for long sessions. */
+[data-theme="github-dark"] {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-elevated: #1c2128;
+  --bg-hover: rgba(177, 186, 196, 0.12);
+  --bg-active: rgba(56, 139, 253, 0.15);
+  --bg-selected: rgba(56, 139, 253, 0.20);
+  --bg-sidebar-selected: rgba(56, 139, 253, 0.15);
+  --border-default: #30363d;
+  --border-subtle: #21262d;
+  --border-strong: #424a53;
+  --border-focused: #2f81f7;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-tertiary: #878d96; /* A11Y-3: AA contrast (4.56:1) */
+  --text-inverse: #0d1117;
+  --text-link: #2f81f7;
+  --accent: #2f81f7;
+  --accent-hover: #58a6ff;
+  --accent-active: #1f6feb;
+  --accent-muted: rgba(47, 129, 247, 0.15);
+  --accent-light-blue: #58a6ff;
+  --accent-purple: #bc8cff;
+  --accent-cyan: #39c5cf;
+  --accent-green: #3fb950;
+  --accent-yellow: #d29922;
+  --accent-yellow-dim: #8a6b1c;
+  --accent-red: #f85149;
+  --accent-red-dim: #7d2727;
+  --status-added: #3fb950;
+  --status-modified: #d29922;
+  --status-deleted: #f85149;
+  --status-renamed: #2f81f7;
+  --status-untracked: #39c5cf;
+  --status-conflict: #db6d28;
+  --status-success: #3fb950;
+  --status-warning: #d29922;
+  --status-error: #f85149;
+  --status-info: #2f81f7;
+  --diff-added-bg: rgba(63, 185, 80, 0.15);
+  --diff-removed-bg: rgba(248, 81, 73, 0.15);
+  --diff-added-line: rgba(63, 185, 80, 0.08);
+  --diff-removed-line: rgba(248, 81, 73, 0.08);
+  --diff-added-word: rgba(63, 185, 80, 0.30);
+  --diff-removed-word: rgba(248, 81, 73, 0.30);
+  --tag-bg: rgba(47, 129, 247, 0.10);
+  --tag-border: rgba(47, 129, 247, 0.3);
+  --tag-text: #2f81f7;
+  --warning-bg: rgba(187, 128, 9, 0.15);
+  --warning-icon: #d29922;
+  --warning-border: rgba(187, 128, 9, 0.4);
+  --comment: #6e7681;
+  --graph-line: #30363d;
+  --graph-node-fill: #0d1117;
+  --graph-node-border: #8b949e;
+  --graph-node-selected: #2f81f7;
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-thumb: rgba(139, 148, 158, 0.20);
+  --scrollbar-thumb-hover: rgba(139, 148, 158, 0.40);
+  --splitter-color-hover: #2f81f7;
+}
+
+/* Dracula — vivid purple/pink, classic Sublime Text feel. */
+[data-theme="dracula"] {
+  --bg-primary: #282a36;
+  --bg-secondary: #21222c;
+  --bg-tertiary: #343746;
+  --bg-elevated: #343746;
+  --bg-hover: rgba(248, 248, 242, 0.06);
+  --bg-active: rgba(189, 147, 249, 0.15);
+  --bg-selected: rgba(189, 147, 249, 0.20);
+  --bg-sidebar-selected: rgba(189, 147, 249, 0.15);
+  --border-default: #44475a;
+  --border-subtle: #343746;
+  --border-strong: #565f77;
+  --border-focused: #bd93f9;
+  --text-primary: #f8f8f2;
+  --text-secondary: #bcbcbc;
+  --text-tertiary: #96a1c2; /* A11Y-3: AA contrast (4.57:1) */
+  --text-inverse: #282a36;
+  --text-link: #bd93f9;
+  --accent: #bd93f9;
+  --accent-hover: #caa9fa;
+  --accent-active: #9b6fd9;
+  --accent-muted: rgba(189, 147, 249, 0.15);
+  --accent-light-blue: #8be9fd;
+  --accent-purple: #bd93f9;
+  --accent-cyan: #8be9fd;
+  --accent-green: #50fa7b;
+  --accent-yellow: #f1fa8c;
+  --accent-yellow-dim: #b4b85a;
+  --accent-red: #ff5555;
+  --accent-red-dim: #993333;
+  --status-added: #50fa7b;
+  --status-modified: #f1fa8c;
+  --status-deleted: #ff5555;
+  --status-renamed: #bd93f9;
+  --status-untracked: #8be9fd;
+  --status-conflict: #ffb86c;
+  --status-success: #50fa7b;
+  --status-warning: #f1fa8c;
+  --status-error: #ff5555;
+  --status-info: #bd93f9;
+  --diff-added-bg: rgba(80, 250, 123, 0.18);
+  --diff-removed-bg: rgba(255, 85, 85, 0.18);
+  --diff-added-line: rgba(80, 250, 123, 0.10);
+  --diff-removed-line: rgba(255, 85, 85, 0.10);
+  --diff-added-word: rgba(80, 250, 123, 0.35);
+  --diff-removed-word: rgba(255, 85, 85, 0.35);
+  --tag-bg: rgba(189, 147, 249, 0.10);
+  --tag-border: rgba(189, 147, 249, 0.3);
+  --tag-text: #bd93f9;
+  --warning-bg: rgba(241, 250, 140, 0.10);
+  --warning-icon: #f1fa8c;
+  --warning-border: rgba(241, 250, 140, 0.3);
+  --comment: #6272a4;
+  --graph-line: #44475a;
+  --graph-node-fill: #282a36;
+  --graph-node-border: #bcbcbc;
+  --graph-node-selected: #bd93f9;
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-thumb: rgba(248, 248, 242, 0.20);
+  --scrollbar-thumb-hover: rgba(248, 248, 242, 0.40);
+  --splitter-color-hover: #bd93f9;
+}
+
+/* Monokai — classic dark theme from Sublime Text era. */
+[data-theme="monokai"] {
+  --bg-primary: #272822;
+  --bg-secondary: #1e1f1c;
+  --bg-tertiary: #3e3d32;
+  --bg-elevated: #3e3d32;
+  --bg-hover: rgba(248, 248, 242, 0.06);
+  --bg-active: rgba(166, 226, 46, 0.15);
+  --bg-selected: rgba(166, 226, 46, 0.20);
+  --bg-sidebar-selected: rgba(166, 226, 46, 0.15);
+  --border-default: #49483e;
+  --border-subtle: #3e3d32;
+  --border-strong: #5c5b4e;
+  --border-focused: #a6e22e;
+  --text-primary: #f8f8f2;
+  --text-secondary: #a8a8a0;
+  --text-tertiary: #adaba0; /* A11Y-3: AA contrast (4.77:1) on bg-tertiary */
+  --text-inverse: #272822;
+  --text-link: #66d9ef;
+  --accent: #a6e22e;
+  --accent-hover: #c2f04a;
+  --accent-active: #7eb820;
+  --accent-muted: rgba(166, 226, 46, 0.15);
+  --accent-light-blue: #66d9ef;
+  --accent-purple: #ae81ff;
+  --accent-cyan: #66d9ef;
+  --accent-green: #a6e22e;
+  --accent-yellow: #fd971f;
+  --accent-yellow-dim: #a36317;
+  --accent-red: #f92672;
+  --accent-red-dim: #8c1843;
+  --status-added: #a6e22e;
+  --status-modified: #fd971f;
+  --status-deleted: #f92672;
+  --status-renamed: #66d9ef;
+  --status-untracked: #ae81ff;
+  --status-conflict: #fd971f;
+  --status-success: #a6e22e;
+  --status-warning: #fd971f;
+  --status-error: #f92672;
+  --status-info: #66d9ef;
+  --diff-added-bg: rgba(166, 226, 46, 0.18);
+  --diff-removed-bg: rgba(249, 38, 114, 0.18);
+  --diff-added-line: rgba(166, 226, 46, 0.10);
+  --diff-removed-line: rgba(249, 38, 114, 0.10);
+  --diff-added-word: rgba(166, 226, 46, 0.35);
+  --diff-removed-word: rgba(249, 38, 114, 0.35);
+  --tag-bg: rgba(166, 226, 46, 0.10);
+  --tag-border: rgba(166, 226, 46, 0.3);
+  --tag-text: #a6e22e;
+  --warning-bg: rgba(253, 151, 31, 0.10);
+  --warning-icon: #fd971f;
+  --warning-border: rgba(253, 151, 31, 0.3);
+  --comment: #75715e;
+  --graph-line: #49483e;
+  --graph-node-fill: #272822;
+  --graph-node-border: #a8a8a0;
+  --graph-node-selected: #a6e22e;
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-thumb: rgba(248, 248, 242, 0.18);
+  --scrollbar-thumb-hover: rgba(248, 248, 242, 0.36);
+  --splitter-color-hover: #a6e22e;
+}
+
+/* Solarized Light — Ethan Schoonover's classic warm light palette. */
+[data-theme="solarized-light"] {
+  --bg-primary: #fdf6e3;
+  --bg-secondary: #eee8d5;
+  --bg-tertiary: #eee8d5;
+  --bg-elevated: #fdf6e3;
+  --bg-hover: rgba(15, 23, 42, 0.05);
+  --bg-active: rgba(38, 139, 210, 0.12);
+  --bg-selected: rgba(38, 139, 210, 0.18);
+  --bg-sidebar-selected: rgba(38, 139, 210, 0.15);
+  --border-default: #eee8d5;
+  --border-subtle: #fdf6e3;
+  --border-strong: #d4c89a;
+  --border-focused: #268bd2;
+  --text-primary: #586e75;
+  --text-secondary: #93a1a1;
+  --text-tertiary: #696452; /* A11Y-3: AA contrast (4.86:1) */
+  --text-inverse: #fdf6e3;
+  --text-link: #268bd2;
+  --accent: #268bd2;
+  --accent-hover: #3aa3df;
+  --accent-active: #1a6498;
+  --accent-muted: rgba(38, 139, 210, 0.10);
+  --accent-light-blue: #2aa198;
+  --accent-purple: #6c71c4;
+  --accent-cyan: #2aa198;
+  --accent-green: #859900;
+  --accent-yellow: #b58900;
+  --accent-yellow-dim: #7a5d00;
+  --accent-red: #dc322f;
+  --accent-red-dim: #8e1d1b;
+  --status-added: #859900;
+  --status-modified: #b58900;
+  --status-deleted: #dc322f;
+  --status-renamed: #268bd2;
+  --status-untracked: #2aa198;
+  --status-conflict: #cb4b16;
+  --status-success: #859900;
+  --status-warning: #b58900;
+  --status-error: #dc322f;
+  --status-info: #268bd2;
+  --diff-added-bg: rgba(133, 153, 0, 0.20);
+  --diff-removed-bg: rgba(220, 50, 47, 0.18);
+  --diff-added-line: rgba(133, 153, 0, 0.10);
+  --diff-removed-line: rgba(220, 50, 47, 0.10);
+  --diff-added-word: rgba(133, 153, 0, 0.35);
+  --diff-removed-word: rgba(220, 50, 47, 0.35);
+  --tag-bg: rgba(38, 139, 210, 0.10);
+  --tag-border: rgba(38, 139, 210, 0.3);
+  --tag-text: #268bd2;
+  --warning-bg: #fdf2d0;
+  --warning-icon: #b58900;
+  --warning-border: #ead18a;
+  --comment: #93a1a1;
+  --graph-line: #93a1a1;
+  --graph-node-fill: #fdf6e3;
+  --graph-node-border: #586e75;
+  --graph-node-selected: #268bd2;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.10);
+  --scrollbar-thumb: rgba(88, 110, 117, 0.20);
+  --scrollbar-thumb-hover: rgba(88, 110, 117, 0.40);
+  --splitter-color-hover: #268bd2;
+}
+
+/* Solarized Dark — the dark companion to Solarized Light. */
+[data-theme="solarized-dark"] {
+  --bg-primary: #002b36;
+  --bg-secondary: #073642;
+  --bg-tertiary: #073642;
+  --bg-elevated: #094858;
+  --bg-hover: rgba(238, 232, 213, 0.06);
+  --bg-active: rgba(38, 139, 210, 0.15);
+  --bg-selected: rgba(38, 139, 210, 0.22);
+  --bg-sidebar-selected: rgba(38, 139, 210, 0.18);
+  --border-default: #073642;
+  --border-subtle: #0d4350;
+  --border-strong: #1a56670;
+  --border-focused: #268bd2;
+  --text-primary: #93a1a1;
+  --text-secondary: #657b83;
+  --text-tertiary: #889ca5; /* A11Y-3: AA contrast (4.54:1) */
+  --text-inverse: #002b36;
+  --text-link: #268bd2;
+  --accent: #268bd2;
+  --accent-hover: #3aa3df;
+  --accent-active: #1a6498;
+  --accent-muted: rgba(38, 139, 210, 0.18);
+  --accent-light-blue: #2aa198;
+  --accent-purple: #6c71c4;
+  --accent-cyan: #2aa198;
+  --accent-green: #859900;
+  --accent-yellow: #b58900;
+  --accent-yellow-dim: #7a5d00;
+  --accent-red: #dc322f;
+  --accent-red-dim: #8e1d1b;
+  --status-added: #859900;
+  --status-modified: #b58900;
+  --status-deleted: #dc322f;
+  --status-renamed: #268bd2;
+  --status-untracked: #2aa198;
+  --status-conflict: #cb4b16;
+  --status-success: #859900;
+  --status-warning: #b58900;
+  --status-error: #dc322f;
+  --status-info: #268bd2;
+  --diff-added-bg: rgba(133, 153, 0, 0.18);
+  --diff-removed-bg: rgba(220, 50, 47, 0.18);
+  --diff-added-line: rgba(133, 153, 0, 0.10);
+  --diff-removed-line: rgba(220, 50, 47, 0.10);
+  --diff-added-word: rgba(133, 153, 0, 0.35);
+  --diff-removed-word: rgba(220, 50, 47, 0.35);
+  --tag-bg: rgba(38, 139, 210, 0.15);
+  --tag-border: rgba(38, 139, 210, 0.4);
+  --tag-text: #268bd2;
+  --warning-bg: rgba(181, 137, 0, 0.15);
+  --warning-icon: #b58900;
+  --warning-border: rgba(181, 137, 0, 0.4);
+  --comment: #586e75;
+  --graph-line: #586e75;
+  --graph-node-fill: #002b36;
+  --graph-node-border: #93a1a1;
+  --graph-node-selected: #268bd2;
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-thumb: rgba(147, 161, 161, 0.20);
+  --scrollbar-thumb-hover: rgba(147, 161, 161, 0.40);
+  --splitter-color-hover: #268bd2;
+}
+
+/* Nord — cold, calm, blue/grey palette inspired by Arctic landscapes. */
+[data-theme="nord"] {
+  --bg-primary: #2e3440;
+  --bg-secondary: #3b4252;
+  --bg-tertiary: #434c5e;
+  --bg-elevated: #4c566a;
+  --bg-hover: rgba(236, 239, 244, 0.06);
+  --bg-active: rgba(136, 192, 208, 0.15);
+  --bg-selected: rgba(136, 192, 208, 0.20);
+  --bg-sidebar-selected: rgba(136, 192, 208, 0.15);
+  --border-default: #4c566a;
+  --border-subtle: #3b4252;
+  --border-strong: #5e6779;
+  --border-focused: #88c0d0;
+  --text-primary: #d8dee9;
+  --text-secondary: #81a1c1;
+  --text-tertiary: #b3bdc9; /* A11Y-3: AA contrast (4.53:1) */
+  --text-inverse: #2e3440;
+  --text-link: #88c0d0;
+  --accent: #88c0d0;
+  --accent-hover: #a3d4e3;
+  --accent-active: #5e9aaf;
+  --accent-muted: rgba(136, 192, 208, 0.15);
+  --accent-light-blue: #81a1c1;
+  --accent-purple: #b48ead;
+  --accent-cyan: #8fbcbb;
+  --accent-green: #a3be8c;
+  --accent-yellow: #ebcb8b;
+  --accent-yellow-dim: #a0894b;
+  --accent-red: #bf616a;
+  --accent-red-dim: #7d3a40;
+  --status-added: #a3be8c;
+  --status-modified: #ebcb8b;
+  --status-deleted: #bf616a;
+  --status-renamed: #88c0d0;
+  --status-untracked: #8fbcbb;
+  --status-conflict: #d08770;
+  --status-success: #a3be8c;
+  --status-warning: #ebcb8b;
+  --status-error: #bf616a;
+  --status-info: #88c0d0;
+  --diff-added-bg: rgba(163, 190, 140, 0.18);
+  --diff-removed-bg: rgba(191, 97, 106, 0.18);
+  --diff-added-line: rgba(163, 190, 140, 0.10);
+  --diff-removed-line: rgba(191, 97, 106, 0.10);
+  --diff-added-word: rgba(163, 190, 140, 0.35);
+  --diff-removed-word: rgba(191, 97, 106, 0.35);
+  --tag-bg: rgba(136, 192, 208, 0.10);
+  --tag-border: rgba(136, 192, 208, 0.3);
+  --tag-text: #88c0d0;
+  --warning-bg: rgba(235, 203, 139, 0.12);
+  --warning-icon: #ebcb8b;
+  --warning-border: rgba(235, 203, 139, 0.4);
+  --comment: #616e88;
+  --graph-line: #4c566a;
+  --graph-node-fill: #2e3440;
+  --graph-node-border: #d8dee9;
+  --graph-node-selected: #88c0d0;
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-thumb: rgba(216, 222, 233, 0.18);
+  --scrollbar-thumb-hover: rgba(216, 222, 233, 0.36);
+  --splitter-color-hover: #88c0d0;
+}
+
+/* Tokyo Night — modern dark blue/purple palette by enkia. */
+[data-theme="tokyo-night"] {
+  --bg-primary: #1a1b26;
+  --bg-secondary: #16161e;
+  --bg-tertiary: #1f2335;
+  --bg-elevated: #24283b;
+  --bg-hover: rgba(192, 202, 245, 0.06);
+  --bg-active: rgba(122, 162, 247, 0.15);
+  --bg-selected: rgba(122, 162, 247, 0.20);
+  --bg-sidebar-selected: rgba(122, 162, 247, 0.15);
+  --border-default: #2a2e44;
+  --border-subtle: #1f2335;
+  --border-strong: #3b4261;
+  --border-focused: #7aa2f7;
+  --text-primary: #c0caf5;
+  --text-secondary: #a9b1d6;
+  --text-tertiary: #8389a5; /* A11Y-3: AA contrast (4.52:1) */
+  --text-inverse: #1a1b26;
+  --text-link: #7aa2f7;
+  --accent: #7aa2f7;
+  --accent-hover: #89b5fa;
+  --accent-active: #5c84d6;
+  --accent-muted: rgba(122, 162, 247, 0.15);
+  --accent-light-blue: #7dcfff;
+  --accent-purple: #bb9af7;
+  --accent-cyan: #7dcfff;
+  --accent-green: #9ece6a;
+  --accent-yellow: #e0af68;
+  --accent-yellow-dim: #9c7438;
+  --accent-red: #f7768e;
+  --accent-red-dim: #94495a;
+  --status-added: #9ece6a;
+  --status-modified: #e0af68;
+  --status-deleted: #f7768e;
+  --status-renamed: #7aa2f7;
+  --status-untracked: #7dcfff;
+  --status-conflict: #ff9e64;
+  --status-success: #9ece6a;
+  --status-warning: #e0af68;
+  --status-error: #f7768e;
+  --status-info: #7aa2f7;
+  --diff-added-bg: rgba(158, 206, 106, 0.18);
+  --diff-removed-bg: rgba(247, 118, 142, 0.18);
+  --diff-added-line: rgba(158, 206, 106, 0.10);
+  --diff-removed-line: rgba(247, 118, 142, 0.10);
+  --diff-added-word: rgba(158, 206, 106, 0.35);
+  --diff-removed-word: rgba(247, 118, 142, 0.35);
+  --tag-bg: rgba(122, 162, 247, 0.12);
+  --tag-border: rgba(122, 162, 247, 0.3);
+  --tag-text: #7aa2f7;
+  --warning-bg: rgba(224, 175, 104, 0.12);
+  --warning-icon: #e0af68;
+  --warning-border: rgba(224, 175, 104, 0.4);
+  --comment: #565f89;
+  --graph-line: #2a2e44;
+  --graph-node-fill: #1a1b26;
+  --graph-node-border: #a9b1d6;
+  --graph-node-selected: #7aa2f7;
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-thumb: rgba(169, 177, 214, 0.18);
+  --scrollbar-thumb-hover: rgba(169, 177, 214, 0.36);
+  --splitter-color-hover: #7aa2f7;
+}
+
+/* Catppuccin Mocha — warm, soft pastel dark theme. */
+[data-theme="catppuccin-mocha"] {
+  --bg-primary: #1e1e2e;
+  --bg-secondary: #181825;
+  --bg-tertiary: #313244;
+  --bg-elevated: #313244;
+  --bg-hover: rgba(205, 214, 244, 0.06);
+  --bg-active: rgba(137, 180, 250, 0.15);
+  --bg-selected: rgba(137, 180, 250, 0.22);
+  --bg-sidebar-selected: rgba(137, 180, 250, 0.15);
+  --border-default: #45475a;
+  --border-subtle: #313244;
+  --border-strong: #585b70;
+  --border-focused: #89b4fa;
+  --text-primary: #cdd6f4;
+  --text-secondary: #a6adc8;
+  --text-tertiary: #969aae; /* A11Y-3: AA contrast (4.51:1) */
+  --text-inverse: #1e1e2e;
+  --text-link: #89b4fa;
+  --accent: #89b4fa;
+  --accent-hover: #a3c2fa;
+  --accent-active: #6490e0;
+  --accent-muted: rgba(137, 180, 250, 0.15);
+  --accent-light-blue: #89dceb;
+  --accent-purple: #cba6f7;
+  --accent-cyan: #89dceb;
+  --accent-green: #a6e3a1;
+  --accent-yellow: #f9e2af;
+  --accent-yellow-dim: #ab9b5e;
+  --accent-red: #f38ba8;
+  --accent-red-dim: #8a4b5d;
+  --status-added: #a6e3a1;
+  --status-modified: #f9e2af;
+  --status-deleted: #f38ba8;
+  --status-renamed: #89b4fa;
+  --status-untracked: #89dceb;
+  --status-conflict: #fab387;
+  --status-success: #a6e3a1;
+  --status-warning: #f9e2af;
+  --status-error: #f38ba8;
+  --status-info: #89b4fa;
+  --diff-added-bg: rgba(166, 227, 161, 0.15);
+  --diff-removed-bg: rgba(243, 139, 168, 0.15);
+  --diff-added-line: rgba(166, 227, 161, 0.08);
+  --diff-removed-line: rgba(243, 139, 168, 0.08);
+  --diff-added-word: rgba(166, 227, 161, 0.30);
+  --diff-removed-word: rgba(243, 139, 168, 0.30);
+  --tag-bg: rgba(137, 180, 250, 0.12);
+  --tag-border: rgba(137, 180, 250, 0.3);
+  --tag-text: #89b4fa;
+  --warning-bg: rgba(249, 226, 175, 0.10);
+  --warning-icon: #f9e2af;
+  --warning-border: rgba(249, 226, 175, 0.3);
+  --comment: #6c7086;
+  --graph-line: #45475a;
+  --graph-node-fill: #1e1e2e;
+  --graph-node-border: #cdd6f4;
+  --graph-node-selected: #89b4fa;
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-thumb: rgba(205, 214, 244, 0.18);
+  --scrollbar-thumb-hover: rgba(205, 214, 244, 0.36);
+  --splitter-color-hover: #89b4fa;
+}
+
+/* One Dark — Atom editor's classic dark theme. */
+[data-theme="one-dark"] {
+  --bg-primary: #282c34;
+  --bg-secondary: #21252b;
+  --bg-tertiary: #2c313a;
+  --bg-elevated: #2c313a;
+  --bg-hover: rgba(171, 178, 191, 0.06);
+  --bg-active: rgba(97, 175, 239, 0.15);
+  --bg-selected: rgba(97, 175, 239, 0.20);
+  --bg-sidebar-selected: rgba(97, 175, 239, 0.15);
+  --border-default: #3b4048;
+  --border-subtle: #2c313a;
+  --border-strong: #4b5263;
+  --border-focused: #61afef;
+  --text-primary: #abb2bf;
+  --text-secondary: #7f8c98;
+  --text-tertiary: #9398a1; /* A11Y-3: AA contrast (4.51:1) */
+  --text-inverse: #282c34;
+  --text-link: #61afef;
+  --accent: #61afef;
+  --accent-hover: #82c1f2;
+  --accent-active: #4a91d1;
+  --accent-muted: rgba(97, 175, 239, 0.15);
+  --accent-light-blue: #56b6c2;
+  --accent-purple: #c678dd;
+  --accent-cyan: #56b6c2;
+  --accent-green: #98c379;
+  --accent-yellow: #e5c07b;
+  --accent-yellow-dim: #a0884a;
+  --accent-red: #e06c75;
+  --accent-red-dim: #8a3b44;
+  --status-added: #98c379;
+  --status-modified: #e5c07b;
+  --status-deleted: #e06c75;
+  --status-renamed: #61afef;
+  --status-untracked: #56b6c2;
+  --status-conflict: #d19a66;
+  --status-success: #98c379;
+  --status-warning: #e5c07b;
+  --status-error: #e06c75;
+  --status-info: #61afef;
+  --diff-added-bg: rgba(152, 195, 121, 0.15);
+  --diff-removed-bg: rgba(224, 108, 117, 0.15);
+  --diff-added-line: rgba(152, 195, 121, 0.08);
+  --diff-removed-line: rgba(224, 108, 117, 0.08);
+  --diff-added-word: rgba(152, 195, 121, 0.30);
+  --diff-removed-word: rgba(224, 108, 117, 0.30);
+  --tag-bg: rgba(97, 175, 239, 0.12);
+  --tag-border: rgba(97, 175, 239, 0.3);
+  --tag-text: #61afef;
+  --warning-bg: rgba(229, 192, 123, 0.10);
+  --warning-icon: #e5c07b;
+  --warning-border: rgba(229, 192, 123, 0.3);
+  --comment: #5c6370;
+  --graph-line: #3b4048;
+  --graph-node-fill: #282c34;
+  --graph-node-border: #abb2bf;
+  --graph-node-selected: #61afef;
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-thumb: rgba(171, 178, 191, 0.18);
+  --scrollbar-thumb-hover: rgba(171, 178, 191, 0.36);
+  --splitter-color-hover: #61afef;
+}
+
+/* Gruvbox Dark — retro groove, earthy warm palette by morhetz. */
+[data-theme="gruvbox-dark"] {
+  --bg-primary: #282828;
+  --bg-secondary: #1d2021;
+  --bg-tertiary: #3c3836;
+  --bg-elevated: #3c3836;
+  --bg-hover: rgba(235, 219, 178, 0.06);
+  --bg-active: rgba(250, 189, 47, 0.15);
+  --bg-selected: rgba(250, 189, 47, 0.22);
+  --bg-sidebar-selected: rgba(250, 189, 47, 0.15);
+  --border-default: #504945;
+  --border-subtle: #3c3836;
+  --border-strong: #665c54;
+  --border-focused: #fabd2f;
+  --text-primary: #ebdbb2;
+  --text-secondary: #a89984;
+  --text-tertiary: #a9a099; /* A11Y-3: AA contrast (4.51:1) */
+  --text-inverse: #282828;
+  --text-link: #83a598;
+  --accent: #fabd2f;
+  --accent-hover: #fcd66b;
+  --accent-active: #d39d18;
+  --accent-muted: rgba(250, 189, 47, 0.15);
+  --accent-light-blue: #83a598;
+  --accent-purple: #d3869b;
+  --accent-cyan: #8ec07c;
+  --accent-green: #b8bb26;
+  --accent-yellow: #fabd2f;
+  --accent-yellow-dim: #a07f1a;
+  --accent-red: #fb4934;
+  --accent-red-dim: #9c2a1c;
+  --status-added: #b8bb26;
+  --status-modified: #fabd2f;
+  --status-deleted: #fb4934;
+  --status-renamed: #83a598;
+  --status-untracked: #8ec07c;
+  --status-conflict: #fe8019;
+  --status-success: #b8bb26;
+  --status-warning: #fabd2f;
+  --status-error: #fb4934;
+  --status-info: #83a598;
+  --diff-added-bg: rgba(184, 187, 38, 0.18);
+  --diff-removed-bg: rgba(251, 73, 52, 0.18);
+  --diff-added-line: rgba(184, 187, 38, 0.10);
+  --diff-removed-line: rgba(251, 73, 52, 0.10);
+  --diff-added-word: rgba(184, 187, 38, 0.35);
+  --diff-removed-word: rgba(251, 73, 52, 0.35);
+  --tag-bg: rgba(250, 189, 47, 0.12);
+  --tag-border: rgba(250, 189, 47, 0.3);
+  --tag-text: #fabd2f;
+  --warning-bg: rgba(250, 189, 47, 0.10);
+  --warning-icon: #fabd2f;
+  --warning-border: rgba(250, 189, 47, 0.3);
+  --comment: #928374;
+  --graph-line: #504945;
+  --graph-node-fill: #282828;
+  --graph-node-border: #ebdbb2;
+  --graph-node-selected: #fabd2f;
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-thumb: rgba(235, 219, 178, 0.18);
+  --scrollbar-thumb-hover: rgba(235, 219, 178, 0.36);
+  --splitter-color-hover: #fabd2f;
+}
+
+/* ===========================================================================
+ * Task 5 — Slack-inspired dark theme. Aubergine + charcoal backgrounds,
+ * high-contrast secondary text for message-density readability. Four-color
+ * status accents (Slack's signature red/orange/green/blue palette).
+ * ===========================================================================
+ */
+[data-theme="slack-dark"] {
+  --bg-primary: #1a1d21;
+  --bg-secondary: #1a1d21;
+  --bg-tertiary: #2c2f33;
+  --bg-elevated: #232529;
+  --bg-hover: #2a2d31;
+  --bg-active: #3a3d41;
+  --bg-selected: #4a1448;
+
+  --border-default: #3a3d41;
+  --border-subtle: #2a2d31;
+  --border-strong: #52555a;
+  --border-focused: #611f69;
+
+  --text-primary: #f0f0f0;
+  --text-secondary: #c8c8c8;
+  --text-tertiary: #b3a8c9; /* A11Y-3: AA contrast on bg-tertiary */
+  --text-inverse: #ffffff;
+  --text-link: #36c5f0;
+
+  --accent: #611f69;
+  --accent-hover: #7d2a87;
+  --accent-active: #4a1448;
+  --accent-muted: rgba(97, 31, 105, 0.20);
+  --accent-light-blue: #36c5f0;
+
+  --status-added: #2eb886;
+  --status-modified: #f2c744;
+  --status-deleted: #e01e5a;
+  --status-renamed: #36c5f0;
+  --status-untracked: #8b8e92;
+  --status-conflict: #ecb22f;
+
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+
+  --splitter-color: #3a3d41;
+  --splitter-color-hover: #611f69;
+
+  --scrollbar-track: #1a1d21;
+  --scrollbar-thumb: rgba(240, 240, 240, 0.15);
+  --scrollbar-thumb-hover: rgba(240, 240, 240, 0.30);
+}
+
+/* ===========================================================================
+ * Task 5 — Discord-inspired theme. Blurple accent (#5865F2) on Discord's
+ * neutral grey-3/grey-2 palette. Optimized for long-form reading with
+ * warmer secondary text (#b9bbbe) than typical dark themes.
+ * ===========================================================================
+ */
+[data-theme="discord"] {
+  --bg-primary: #36393f;
+  --bg-secondary: #2f3136;
+  --bg-tertiary: #292b30;
+  --bg-elevated: #2f3136;
+  --bg-hover: #3c3f45;
+  --bg-active: #404248;
+  --bg-selected: rgba(88, 101, 242, 0.20);
+
+  --border-default: #202225;
+  --border-subtle: #2d2f32;
+  --border-strong: #3a3d41;
+  --border-focused: #5865f2;
+
+  --text-primary: #dcddde;
+  --text-secondary: #b9bbbe;
+  --text-tertiary: #a3a6aa; /* A11Y-3: AA contrast on bg-tertiary */
+  --text-inverse: #ffffff;
+  --text-link: #00aff4;
+
+  --accent: #5865f2;
+  --accent-hover: #6f7bff;
+  --accent-active: #4752c4;
+  --accent-muted: rgba(88, 101, 242, 0.15);
+  --accent-light-blue: #00aff4;
+
+  --status-added: #3ba55c;
+  --status-modified: #faa61a;
+  --status-deleted: #ed4245;
+  --status-renamed: #00aff4;
+  --status-untracked: #72767d;
+  --status-conflict: #faa61a;
+
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  --splitter-color: #202225;
+  --splitter-color-hover: #5865f2;
+
+  --scrollbar-track: #2f3136;
+  --scrollbar-thumb: rgba(220, 221, 222, 0.10);
+  --scrollbar-thumb-hover: rgba(220, 221, 222, 0.20);
+}
+
+/* ===========================================================================
+ * Light main + dimmed dark sidebar themes.
+ * These themes use a light color palette for the main content area but
+ * override the sidebar to use dark colors. The sidebar override is
+ * applied via [data-theme="..."] > aside selectors below.
+ * =========================================================================== */
+
+/* Light main + VS Code-style dark sidebar */
+[data-theme="light-dim-sidebar"] {
+  --bg-primary: #f7f8fa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #eef0f3;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f0f1f4;
+  --bg-selected: #e4f0fb;
+  --text-primary: #2c3138;
+  --text-secondary: #5c6166;
+  --text-tertiary: #5c6166;
+  --accent: #399ee6;
+  --accent-muted: rgba(57, 158, 230, 0.12);
+  --border-default: #d8dade;
+  --border-subtle: #e8eaee;
+  --status-added: #86b300;
+  --status-modified: #f2ae49;
+  --status-deleted: #f07171;
+  --status-renamed: #399ee6;
+  --status-conflict: #f07171;
+  --status-info: #399ee6;
+  --status-warning: #f2ae49;
+  --status-error: #f07171;
+}
+
+/* GitHub Light main + dimmed dark sidebar */
+[data-theme="github-light-dim"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #eaeef2;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f0f2f5;
+  --bg-selected: #ddf4ff;
+  --text-primary: #1f2328;
+  --text-secondary: #59636e;
+  --text-tertiary: #57606a;
+  --accent: #0969da;
+  --accent-muted: rgba(9, 105, 218, 0.12);
+  --border-default: #d0d7de;
+  --border-subtle: #e1e4e8;
+  --status-added: #1a7f37;
+  --status-modified: #bf8700;
+  --status-deleted: #cf222e;
+  --status-renamed: #0969da;
+  --status-conflict: #cf222e;
+  --status-info: #0969da;
+  --status-warning: #bf8700;
+  --status-error: #cf222e;
+}
+
+/* Dark sidebar override for both light-dim-sidebar and github-light-dim.
+   Targets the <aside> sidebar element specifically so the main content
+   area stays light. */
+[data-theme="light-dim-sidebar"] aside,
+[data-theme="github-light-dim"] aside {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2d2d30;
+  --bg-elevated: #333333;
+  --bg-hover: #2a2d2e;
+  --bg-selected: #37373d;
+  --text-primary: #cccccc;
+  --text-secondary: #aaaaaa;
+  --text-tertiary: #999999;
+  --border-default: #3e3e42;
+  --border-subtle: #2d2d30;
+  --accent: #4fc3f7;
+  --accent-muted: rgba(79, 195, 247, 0.12);
+  --bg-sidebar-selected: rgba(79, 195, 247, 0.15);
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(138, 138, 138, 0.30);
+  --scrollbar-thumb-hover: rgba(138, 138, 138, 0.50);
+  background-color: #1e1e1e;
+  color: #cccccc;
+}
+
+/* GitHub-light-dim sidebar uses GitHub dark colors */
+[data-theme="github-light-dim"] aside {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-elevated: #30363d;
+  --bg-hover: #1c2128;
+  --bg-selected: #1f6feb33;
+  --text-primary: #e6edf3;
+  --text-secondary: #b1bac4;
+  --text-tertiary: #9198a1;
+  --border-default: #30363d;
+  --border-subtle: #21262d;
+  --accent: #58a6ff;
+  --accent-muted: rgba(88, 166, 255, 0.15);
+  --bg-sidebar-selected: rgba(56, 139, 253, 0.15);
+  background-color: #0d1117;
+  color: #e6edf3;
+}
+
+/* ===========================================================================
+ * Designer Light — Figma-inspired: pure white + light grey + coral accent
+ * =========================================================================== */
+[data-theme="designer-light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #e8e8e8;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f0f0f0;
+  --bg-selected: #fef0ec;
+  --text-primary: #1e1e1e;
+  --text-secondary: #757575;
+  --text-tertiary: #5e5e5e;
+  --accent: #F24E1E;
+  --accent-muted: rgba(242, 78, 30, 0.12);
+  --border-default: #d4d4d4;
+  --border-subtle: #e8e8e8;
+  --status-added: #0D9966;
+  --status-modified: #F24E1E;
+  --status-deleted: #F24E1E;
+  --status-renamed: #F24E1E;
+  --status-conflict: #F24E1E;
+  --status-info: #0D9966;
+  --status-warning: #F24E1E;
+  --status-error: #F24E1E;
+  --bg-sidebar-selected: rgba(242, 78, 30, 0.12);
+  --graph-node-fill: #ffffff;
+  --scrollbar-track: #f5f5f5;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+}
+
+/* ===========================================================================
+ * Purple — dark navy + electric purple
+ * =========================================================================== */
+[data-theme="purple"] {
+  --bg-primary: #1a1b2e;
+  --bg-secondary: #15162a;
+  --bg-tertiary: #25264a;
+  --bg-elevated: #2e2f5a;
+  --bg-hover: #20213f;
+  --bg-selected: rgba(155, 109, 255, 0.15);
+  --text-primary: #c8c9e8;
+  --text-secondary: #7d7ea8;
+  --text-tertiary: #9c9dc8;
+  --accent: #9b6dff;
+  --accent-muted: rgba(155, 109, 255, 0.15);
+  --border-default: #2e2f5a;
+  --border-subtle: #25264a;
+  --status-added: #5eff8e;
+  --status-modified: #ffd55e;
+  --status-deleted: #ff5e7a;
+  --status-renamed: #9b6dff;
+  --status-conflict: #ff5e7a;
+  --status-info: #9b6dff;
+  --status-warning: #ffd55e;
+  --status-error: #ff5e7a;
+  --bg-sidebar-selected: rgba(155, 109, 255, 0.15);
+  --graph-node-fill: #1a1b2e;
+  --scrollbar-track: #15162a;
+  --scrollbar-thumb: rgba(155, 109, 255, 0.20);
+  --scrollbar-thumb-hover: rgba(155, 109, 255, 0.35);
+}
+
+/* ===========================================================================
+ * Simple Light — minimal black/white/grey + blue accent
+ * =========================================================================== */
+[data-theme="simple-light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #fafafa;
+  --bg-tertiary: #f0f0f0;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f5f5f5;
+  --bg-selected: #e6f0ff;
+  --text-primary: #000000;
+  --text-secondary: #666666;
+  --text-tertiary: #666666;
+  --accent: #0066ff;
+  --accent-muted: rgba(0, 102, 255, 0.10);
+  --border-default: #e0e0e0;
+  --border-subtle: #f0f0f0;
+  --status-added: #009900;
+  --status-modified: #ff9900;
+  --status-deleted: #cc0000;
+  --status-renamed: #0066ff;
+  --status-conflict: #cc0000;
+  --status-info: #0066ff;
+  --status-warning: #ff9900;
+  --status-error: #cc0000;
+  --bg-sidebar-selected: rgba(0, 102, 255, 0.10);
+  --graph-node-fill: #ffffff;
+  --scrollbar-track: #fafafa;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.22);
+}
+
+/* ===========================================================================
+ * Material Design Light — Google Material palette (Indigo 500)
+ * =========================================================================== */
+[data-theme="material"] {
+  --bg-primary: #FAFAFA;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #F5F5F5;
+  --bg-elevated: #FFFFFF;
+  --bg-hover: #F5F5F5;
+  --bg-selected: #E8EAF6;
+  --text-primary: #212121;
+  --text-secondary: #757575;
+  --text-tertiary: #5e5e5e;
+  --accent: #3F51B5;
+  --accent-muted: rgba(63, 81, 181, 0.12);
+  --border-default: #E0E0E0;
+  --border-subtle: #EEEEEE;
+  --status-added: #4CAF50;
+  --status-modified: #FF9800;
+  --status-deleted: #F44336;
+  --status-renamed: #3F51B5;
+  --status-conflict: #F44336;
+  --status-info: #2196F3;
+  --status-warning: #FF9800;
+  --status-error: #F44336;
+  --bg-sidebar-selected: rgba(63, 81, 181, 0.12);
+  --graph-node-fill: #FAFAFA;
+  --scrollbar-track: #F5F5F5;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.22);
 }
 
 * {
@@ -339,16 +1404,24 @@ input:focus, textarea:focus, select:focus {
   flex-shrink: 0;
 }
 
+/* NOTE: --overlay-backdrop is intentionally `none`.
+ * The app runs with hardware acceleration disabled (EGL driver bug fix in
+ * electron/main.ts), so Chromium composites on the CPU. A backdrop-filter
+ * blur forces a full-window Gaussian blur on the CPU for EVERY composited
+ * frame — dialog overlays with `animate-fade-in` recompute it each frame of
+ * the animation, which users felt as "dialogs open very slowly". Only the
+ * darkening (var(--overlay-bg)) remains; re-enable the blur ONLY if GPU
+ * acceleration is ever restored. */
 :root {
   --author-text: #ffffff;
   --overlay-bg: rgba(0, 0, 0, 0.30);
-  --overlay-backdrop: blur(2px);
+  --overlay-backdrop: none;
 }
 
 .dark {
   --author-text: #ffffff;
   --overlay-bg: rgba(0, 0, 0, 0.55);
-  --overlay-backdrop: blur(2px);
+  --overlay-backdrop: none;
 }
 
 .icon-btn {
@@ -519,6 +1592,30 @@ input[type="checkbox"], input[type="radio"] {
 .text-comment { color: var(--comment); font-style: italic; }
 .text-function { color: var(--accent-blue); }
 .text-type { color: var(--accent-cyan); }
+
+/* === ConflictMergeView syntax tokens (tok-* prefix) ===
+   Used by the 3-way merge view to highlight code WHILE keeping the conflict
+   background (pink for OURS region, red for THEIRS region) separate.
+   Colors mirror the existing .text-* palette so themes stay consistent. */
+.tok-keyword  { color: var(--accent-yellow); }
+.tok-string   { color: var(--status-added); }
+.tok-number   { color: var(--accent-purple); }
+.tok-comment  { color: var(--comment); font-style: italic; }
+.tok-function { color: var(--accent-blue); }
+.tok-type     { color: var(--accent-cyan); }
+.tok-operator { color: var(--accent-orange, var(--accent-yellow)); }
+.tok-punct    { color: var(--text-tertiary); }
+.tok-plain    { color: inherit; }
+
+/* === Conflict background colors (background-only — text color stays for
+   syntax highlighting, NOT conflict-side indication) ===
+   - .conflict-bg-ours    : light green tint  (matches the left pane)
+   - .conflict-bg-theirs  : light red tint    (matches the right pane)
+   - .conflict-bg-marker  : stronger pink/red  (for <<<<<<< ======= >>>>>>>)
+*/
+.conflict-bg-ours   { background-color: rgba(var(--status-added-rgb,   170 217 76) / 0.15); }
+.conflict-bg-theirs { background-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.15); }
+.conflict-bg-marker { background-color: rgba(var(--status-conflict-rgb, 255 143 111) / 0.30); font-weight: 600; }
 
 /* === Drag and drop === */
 .drag-over {
@@ -736,6 +1833,24 @@ kbd {
 }
 
 /* ===========================================================================
+ * A11Y — visually-hidden helper (screen-reader-only text).
+ * Element is removed from visual layout but read by assistive tech.
+ * Standard pattern from the WebAIM / Bootstrap sr-only implementation.
+ * ===========================================================================
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ===========================================================================
  * UX Polish: Loading states — spinners + skeleton screens
  * ===========================================================================
  */
@@ -828,8 +1943,9 @@ kbd {
   align-items: center;
   justify-content: center;
   background-color: var(--overlay-bg, rgba(0, 0, 0, 0.4));
-  backdrop-filter: var(--overlay-backdrop, blur(2px));
-  -webkit-backdrop-filter: var(--overlay-backdrop, blur(2px));
+  /* No backdrop blur — see the --overlay-backdrop note above (CPU rendering). */
+  backdrop-filter: var(--overlay-backdrop, none);
+  -webkit-backdrop-filter: var(--overlay-backdrop, none);
 }
 
 .shortcut-overlay-panel {
@@ -970,4 +2086,115 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   outline-offset: 0;
+}
+
+/* ===========================================================================
+ * Sidebar visual mode (Discord/Slack-style dim sidebar).
+ * The user requested a separate setting (independent of the active theme)
+ * to darken the left sidebar so it visually separates from the main
+ * content area, like Discord's channel sidebar.
+ *
+ * Three modes (set via AppSettings.sidebarMode):
+ *   'default' — no override, use the active theme's sidebar bg as-is.
+ *   'dim'     — overlay a semi-transparent black (rgba(0,0,0,.10)) on
+ *              the sidebar's bg-primary/bg-secondary/bg-tertiary.
+ *   'light'   — overlay a semi-transparent white (rgba(255,255,255,.04))
+ *              on the sidebar bg — useful on very dark themes where
+ *              the sidebar would otherwise be indistinguishable from
+ *              the main panel.
+ *
+ * Applied by adding a class to <html> (see applySidebarModeToDOM in
+ * settingsStore.ts). Selectors target the <aside> sidebar element so
+ * the dim doesn't bleed into panels with similar classes.
+ * ===========================================================================
+ */
+html.sidebar-dim aside {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.10), rgba(0, 0, 0, 0.10));
+}
+html.sidebar-light aside {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.04));
+}
+
+/* ===========================================================================
+ * Settings redesign — UI density.
+ * Compact:  tighter row padding (matches SmartGit/Fork compact mode).
+ * Comfortable:  default with extra breathing room.
+ * Controlled via AppSettings.uiDensity + applyUiDensityToDOM().
+ * ===========================================================================
+ */
+html.density-compact {
+  --row-padding-y: 2px;
+  --row-padding-x: 6px;
+  --row-min-height: 22px;
+}
+html.density-comfortable {
+  --row-padding-y: 6px;
+  --row-padding-x: 8px;
+  --row-min-height: 28px;
+}
+
+/* ===========================================================================
+ * BUG FIX: Tailwind opacity modifier does not work with CSS var colors.
+ *
+ * When tailwind.config.js defines status: { added: var(--status-added) } and
+ * the actual CSS variable holds a hex value, Tailwind cannot extract RGB
+ * channels at build time, so the bg-status-added/10 class is never generated.
+ *
+ * Workaround: define explicit utility classes for each opacity value used in
+ * the codebase, using color-mix(in srgb, var X percent, transparent) which
+ * works in Chromium 111+ (Electron 32 = Chromium 128 = supported).
+ *
+ * Opacity levels: 5, 8, 10, 12, 15, 20, 25, 30, 40
+ * ===========================================================================
+ */
+@layer utilities {
+  /* status-added (green) opacity variants */
+  .bg-status-added\/5 { background-color: color-mix(in srgb, var(--status-added) 5%, transparent); }
+  .bg-status-added\/8 { background-color: color-mix(in srgb, var(--status-added) 8%, transparent); }
+  .bg-status-added\/10 { background-color: color-mix(in srgb, var(--status-added) 10%, transparent); }
+  .bg-status-added\/12 { background-color: color-mix(in srgb, var(--status-added) 12%, transparent); }
+  .bg-status-added\/15 { background-color: color-mix(in srgb, var(--status-added) 15%, transparent); }
+  .bg-status-added\/20 { background-color: color-mix(in srgb, var(--status-added) 20%, transparent); }
+  .bg-status-added\/25 { background-color: color-mix(in srgb, var(--status-added) 25%, transparent); }
+  .bg-status-added\/30 { background-color: color-mix(in srgb, var(--status-added) 30%, transparent); }
+  .bg-status-added\/40 { background-color: color-mix(in srgb, var(--status-added) 40%, transparent); }
+  .hover\:bg-status-added\/15:hover { background-color: color-mix(in srgb, var(--status-added) 15%, transparent); }
+  .hover\:bg-status-added\/20:hover { background-color: color-mix(in srgb, var(--status-added) 20%, transparent); }
+  .hover\!bg-status-added\/15:hover { background-color: color-mix(in srgb, var(--status-added) 15%, transparent) !important; }
+
+  /* status-deleted (red) opacity variants */
+  .bg-status-deleted\/10 { background-color: color-mix(in srgb, var(--status-deleted) 10%, transparent); }
+  .bg-status-deleted\/15 { background-color: color-mix(in srgb, var(--status-deleted) 15%, transparent); }
+  .bg-status-deleted\/20 { background-color: color-mix(in srgb, var(--status-deleted) 20%, transparent); }
+  .bg-status-deleted\/25 { background-color: color-mix(in srgb, var(--status-deleted) 25%, transparent); }
+  .bg-status-deleted\/30 { background-color: color-mix(in srgb, var(--status-deleted) 30%, transparent); }
+  .bg-status-deleted\/40 { background-color: color-mix(in srgb, var(--status-deleted) 40%, transparent); }
+
+  /* status-modified (yellow/orange) opacity variants */
+  .bg-status-modified\/10 { background-color: color-mix(in srgb, var(--status-modified) 10%, transparent); }
+  .bg-status-modified\/15 { background-color: color-mix(in srgb, var(--status-modified) 15%, transparent); }
+  .bg-status-modified\/20 { background-color: color-mix(in srgb, var(--status-modified) 20%, transparent); }
+  .bg-status-modified\/25 { background-color: color-mix(in srgb, var(--status-modified) 25%, transparent); }
+  .bg-status-modified\/30 { background-color: color-mix(in srgb, var(--status-modified) 30%, transparent); }
+
+  /* status-conflict opacity variants */
+  .bg-status-conflict\/10 { background-color: color-mix(in srgb, var(--status-conflict) 10%, transparent); }
+  .bg-status-conflict\/15 { background-color: color-mix(in srgb, var(--status-conflict) 15%, transparent); }
+  .bg-status-conflict\/20 { background-color: color-mix(in srgb, var(--status-conflict) 20%, transparent); }
+  .bg-status-conflict\/30 { background-color: color-mix(in srgb, var(--status-conflict) 30%, transparent); }
+  .bg-status-conflict\/40 { background-color: color-mix(in srgb, var(--status-conflict) 40%, transparent); }
+
+  /* status-warning opacity variants */
+  .bg-status-warning\/10 { background-color: color-mix(in srgb, var(--status-warning) 10%, transparent); }
+  .bg-status-warning\/15 { background-color: color-mix(in srgb, var(--status-warning) 15%, transparent); }
+
+  /* Border color opacity variants (used for badge borders) */
+  .border-status-added\/20 { border-color: color-mix(in srgb, var(--status-added) 20%, transparent); }
+  .border-status-added\/30 { border-color: color-mix(in srgb, var(--status-added) 30%, transparent); }
+  .border-status-added\/40 { border-color: color-mix(in srgb, var(--status-added) 40%, transparent); }
+  .border-status-deleted\/30 { border-color: color-mix(in srgb, var(--status-deleted) 30%, transparent); }
+  .border-status-deleted\/40 { border-color: color-mix(in srgb, var(--status-deleted) 40%, transparent); }
+  .border-status-modified\/30 { border-color: color-mix(in srgb, var(--status-modified) 30%, transparent); }
+  .border-status-conflict\/40 { border-color: color-mix(in srgb, var(--status-conflict) 40%, transparent); }
+  .border-l-status-added\/40 { border-left-color: color-mix(in srgb, var(--status-added) 40%, transparent); }
 }

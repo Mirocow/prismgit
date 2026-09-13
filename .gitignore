@@ -50,3 +50,7 @@ debug-*.ts
 playwright-report/
 test-results/
 tests/e2e/screenshots/
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/gen/

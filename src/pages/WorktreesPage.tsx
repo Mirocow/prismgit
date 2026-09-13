@@ -1,16 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import { FolderTree, RefreshCw, Plus, Trash, Folder, GitBranch, AlertCircle, Loader, CheckCircle, CornerDownRight } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type WorktreeInfo } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { useI18n } from '../lib/i18n';
 export function WorktreesPage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -26,7 +28,7 @@ export function WorktreesPage() {
       const result = await api.git.worktrees(repo.path);
       setWorktrees(result);
     } catch (e) {
-      toast.error('Failed to load worktrees', String(e));
+      toast.error(t('pages.worktreeLoadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -43,20 +45,20 @@ export function WorktreesPage() {
 
   const handleAdd = async () => {
     if (!newPath.trim()) {
-      toast.warning('Target path is required');
+      toast.warning(t('pages.worktreePathRequired'));
       return;
     }
     setBusy('add');
     try {
       await api.git.worktreeAdd(repo.path, newPath, newBranch || undefined, undefined, detach);
-      toast.success('Worktree added');
+      toast.success(t('pages.worktreeAdded'));
       setShowAdd(false);
       setNewPath('');
       setNewBranch('');
       setDetach(false);
       await load();
     } catch (e) {
-      toast.error('Failed to add worktree', String(e));
+      toast.error(t('pages.worktreeAddFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -64,30 +66,30 @@ export function WorktreesPage() {
 
   const handleRemove = async (wt: WorktreeInfo) => {
     if (!(await confirmDialog({
-      title: 'Remove worktree',
-      message: `Remove the worktree at\n${wt.path}?\n\nThe branch is kept — only this working-copy folder is unlinked.`,
-      confirmLabel: 'Remove',
+      title: t('pages.worktreeRemoveTitle'),
+      message: t('pages.worktreeRemoveMessage', { path: wt.path }),
+      confirmLabel: t('common.remove'),
       danger: true,
     }))) return;
     setBusy(wt.path);
     try {
       await api.git.worktreeRemove(repo.path, wt.path, false);
-      toast.success('Worktree removed');
+      toast.success(t('pages.worktreeRemoved'));
       await load();
     } catch (e) {
       // Try with force if normal remove fails
       if (await confirmDialog({
-        title: 'Force remove worktree',
-        message: 'The worktree could not be removed cleanly — it may contain uncommitted changes.\nForce remove anyway?',
-        confirmLabel: 'Force remove',
+        title: t('pages.worktreeForceRemoveTitle'),
+        message: t('pages.worktreeForceRemoveMessage'),
+        confirmLabel: t('pages.forceRemove'),
         danger: true,
       })) {
         try {
           await api.git.worktreeRemove(repo.path, wt.path, true);
-          toast.success('Worktree force-removed');
+          toast.success(t('pages.worktreeForceRemoved'));
           await load();
         } catch (e2) {
-          toast.error('Force remove failed', String(e2));
+          toast.error(t('pages.forceRemoveFailed'), String(e2));
         }
       }
     } finally {
@@ -99,10 +101,10 @@ export function WorktreesPage() {
     setBusy('prune');
     try {
       await api.git.worktreePrune(repo.path);
-      toast.success('Worktrees pruned');
+      toast.success(t('pages.worktreesPruned'));
       await load();
     } catch (e) {
-      toast.error('Prune failed', String(e));
+      toast.error(t('pages.pruneFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -113,24 +115,36 @@ export function WorktreesPage() {
     await api.git.openFile(wt.path);
   };
 
+  // Open this worktree folder in VS Code (not the OS file manager)
+  const handleOpenInVsCode = async (wt: WorktreeInfo) => {
+    if (wt.bare) return;
+    try {
+      const res = await api.vscode.open(wt.path);
+      if (res.ok) toast.success(t('vscode.opened'));
+      else toast.error(t('vscode.openFailed'));
+    } catch (e) {
+      toast.error(t('vscode.openFailed'), String(e));
+    }
+  };
+
   // Move a linked worktree to a new location (git worktree move).
   // Does not touch the branch or the files inside — just relocates the directory.
   const handleMove = async (wt: WorktreeInfo) => {
     const target = await promptDialog({
-      title: 'Move worktree',
-      message: `Move the worktree to a new location.\nCurrent location:\n${wt.path}`,
-      confirmLabel: 'Move',
+      title: t('pages.worktreeMoveTitle'),
+      message: t('pages.worktreeMoveMessage', { path: wt.path }),
+      confirmLabel: t('pages.move'),
       input: { initialValue: wt.path, placeholder: '/new/path' },
-      validate: (v) => (!v ? 'Enter the new path' : null),
+      validate: (v) => (!v ? t('pages.enterNewPath') : null),
     });
     if (!target || target === wt.path) return;
     setBusy(wt.path);
     try {
       await api.git.worktreeMove(repo.path, wt.path, target.trim());
-      toast.success(`Worktree moved to ${target.trim()}`);
+      toast.success(t('pages.worktreeMoved', { path: target.trim() }));
       await load();
     } catch (e) {
-      toast.error('Move failed', String(e));
+      toast.error(t('pages.moveFailed'), String(e));
     } finally {
       setBusy(null);
     }
@@ -143,40 +157,40 @@ export function WorktreesPage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Worktrees</span>
-          <span className="text-2xs text-text-tertiary">{worktrees.length} worktrees</span>
+          <span className="text-sm font-medium">{t('nav.worktrees')}</span>
+          <span className="text-2xs text-text-tertiary">{t('pages.worktreesCount', { count: worktrees.length })}</span>
         </div>
         <div className="flex items-center gap-2">
-          <button className="icon-btn" title="Refresh" onClick={load}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={13} />
           </button>
           <button
             className="btn btn-secondary text-xs"
             onClick={handlePrune}
             disabled={busy === 'prune'}
-            title="Prune stale worktree metadata"
+            title={t('pages.pruneTitle')}
           >
             {busy === 'prune' ? <Loader size={12} className="animate-spin" /> : <Trash size={12} />}
-            Prune
+            {t('pages.prune')}
           </button>
           <button
             className="btn btn-primary text-xs"
             onClick={() => setShowAdd(true)}
           >
             <Plus size={12} />
-            Add Worktree
+            {t('pages.addWorktree')}
           </button>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+          <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
         ) : worktrees.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
             <FolderTree size={32} className="mb-2 opacity-50" />
-            <div className="text-sm">No worktrees</div>
-            <div className="text-xs mt-1">Add a worktree to work on multiple branches simultaneously</div>
+            <div className="text-sm">{t('pages.noWorktrees')}</div>
+            <div className="text-xs mt-1">{t('pages.noWorktreesHint')}</div>
           </div>
         ) : (
           <>
@@ -184,41 +198,59 @@ export function WorktreesPage() {
             {mainWorktree && (
               <div className="border-b border-border-default">
                 <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary flex items-center gap-2">
-                  <Folder size={11} /> Main
+                  <Folder size={11} /> {t('pages.mainSection')}
                 </div>
                 <div className="flex items-center gap-3 px-3 py-3">
                   <Folder size={16} className="text-accent" />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">{mainWorktree.path}</div>
                     <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
-                      <code className="font-mono">{shortHash(mainWorktree.head)}</code>
+                      <code
+                        className="font-mono cursor-pointer hover:text-accent hover:underline"
+                        title={t('pages.selectCommitHint')}
+                        onClick={() => {
+                          useSelectionStore.getState().selectCommit(mainWorktree.head);
+                          window.location.hash = '#/history';
+                        }}
+                      >
+                        {shortHash(mainWorktree.head)}
+                      </code>
                       {mainWorktree.branch && (
                         <span className="flex items-center gap-1">
                           <GitBranch size={10} />
                           {mainWorktree.branch}
                         </span>
                       )}
-                      {mainWorktree.bare && <span className="badge badge-modified">BARE</span>}
+                      {mainWorktree.bare && <span className="badge badge-modified">{t('pages.badgeBare')}</span>}
                     </div>
                   </div>
                   {mainWorktree.branch && (
                     <button
                       className="btn btn-secondary text-xs"
-                      title={`Show log of '${mainWorktree.branch}'`}
+                      title={t('pages.showLogOf', { name: mainWorktree.branch })}
                       onClick={() => {
                         useSelectionStore.getState().selectBranch(mainWorktree.branch!);
                         window.location.hash = '#/history';
                       }}
                     >
-                      Log
+                      {t('branches.log')}
                     </button>
                   )}
                   <button
                     className="btn btn-secondary text-xs"
                     onClick={() => handleOpen(mainWorktree)}
                   >
-                    Open
+                    {t('pages.open')}
                   </button>
+                  {!mainWorktree.bare && (
+                    <button
+                      className="btn btn-secondary text-xs"
+                      title={t('vscode.openInVscode')}
+                      onClick={() => handleOpenInVsCode(mainWorktree)}
+                    >
+                      VS Code
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -227,7 +259,7 @@ export function WorktreesPage() {
             {linkedWorktrees.length > 0 && (
               <div>
                 <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary flex items-center gap-2 mt-2">
-                  <CornerDownRight size={11} /> Linked ({linkedWorktrees.length})
+                  <CornerDownRight size={11} /> {t('pages.linkedCount', { count: linkedWorktrees.length })}
                 </div>
                 {linkedWorktrees.map((wt) => (
                   <div
@@ -238,21 +270,30 @@ export function WorktreesPage() {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate">{wt.path}</div>
                       <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5 flex-wrap">
-                        <code className="font-mono">{shortHash(wt.head)}</code>
+                        <code
+                          className="font-mono cursor-pointer hover:text-accent hover:underline"
+                          title={t('pages.selectCommitHint')}
+                          onClick={() => {
+                            useSelectionStore.getState().selectCommit(wt.head);
+                            window.location.hash = '#/history';
+                          }}
+                        >
+                          {shortHash(wt.head)}
+                        </code>
                         {wt.branch && (
                           <span className="flex items-center gap-1">
                             <GitBranch size={10} />
                             {wt.branch}
                           </span>
                         )}
-                        {wt.detached && <span className="badge badge-modified">DETACHED</span>}
+                        {wt.detached && <span className="badge badge-modified">{t('pages.badgeDetached')}</span>}
                         {wt.locked && (
                           <span className="badge badge-renamed flex items-center gap-1">
-                            <AlertCircle size={9} /> LOCKED
+                            <AlertCircle size={9} /> {t('pages.badgeLocked')}
                           </span>
                         )}
                         {wt.prunable && (
-                          <span className="badge badge-deleted">PRUNABLE</span>
+                          <span className="badge badge-deleted">{t('pages.badgePrunable')}</span>
                         )}
                       </div>
                       {wt.lockedReason && (
@@ -267,31 +308,38 @@ export function WorktreesPage() {
                           {wt.branch && (
                             <button
                               className="btn btn-secondary text-xs"
-                              title={`Show log of '${wt.branch}'`}
+                              title={t('pages.showLogOf', { name: wt.branch })}
                               onClick={() => {
                                 useSelectionStore.getState().selectBranch(wt.branch!);
                                 window.location.hash = '#/history';
                               }}
                             >
-                              Log
+                              {t('branches.log')}
                             </button>
                           )}
                           <button
                             className="btn btn-secondary text-xs"
                             onClick={() => handleOpen(wt)}
                           >
-                            Open
+                            {t('pages.open')}
+                          </button>
+                          <button
+                            className="btn btn-secondary text-xs"
+                            title={t('vscode.openInVscode')}
+                            onClick={() => handleOpenInVsCode(wt)}
+                          >
+                            VS Code
                           </button>
                           <button
                             className="btn btn-secondary text-xs"
                             onClick={() => handleMove(wt)}
-                            title="Move worktree to a new location (git worktree move)"
+                            title={t('pages.worktreeMoveButtonTitle')}
                           >
-                            Move
+                            {t('pages.move')}
                           </button>
                           <button
                             className="icon-btn !w-6 !h-6 hover:!text-status-deleted"
-                            title="Remove worktree"
+                            title={t('pages.worktreeRemoveTitle')}
                             onClick={() => handleRemove(wt)}
                           >
                             <Trash size={12} />
@@ -309,14 +357,14 @@ export function WorktreesPage() {
 
       {showAdd && (
         <div
-          className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
           onClick={() => setShowAdd(false)}
         >
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-medium mb-4">Add Worktree</h3>
+            <h3 className="text-base font-medium mb-4">{t('pages.addWorktree')}</h3>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Target path</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('pages.targetPathLabel')}</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -332,7 +380,7 @@ export function WorktreesPage() {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Branch name (optional)</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('pages.branchNameOptional')}</label>
                 <input
                   type="text"
                   className="w-full text-sm"
@@ -348,16 +396,16 @@ export function WorktreesPage() {
                   checked={detach}
                   onChange={(e) => setDetach(e.target.checked)}
                 />
-                Detach HEAD (no branch)
+                {t('pages.detachHead')}
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>
-                Cancel
+                {t('common.cancel')}
               </button>
               <button className="btn btn-primary" onClick={handleAdd} disabled={busy === 'add'}>
                 {busy === 'add' ? <Loader size={13} className="animate-spin" /> : <CheckCircle size={13} />}
-                Add
+                {t('common.add')}
               </button>
             </div>
           </div>

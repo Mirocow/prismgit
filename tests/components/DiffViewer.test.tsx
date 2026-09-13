@@ -101,9 +101,12 @@ describe('DiffViewer', () => {
   it('changes whitespace mode', () => {
     const diff = createMockDiff();
     render(<DiffViewer diff={diff} />);
-    const select = screen.getByTitle('Whitespace mode');
-    fireEvent.change(select, { target: { value: 'ignore-all' } });
-    // Should not crash
+    // The old <select title="Whitespace mode"> was replaced by two additive
+    // checkbox labels: "Ignore WS" (wsIgnoreAll) and "Ignore trailing".
+    // Toggle the "Ignore WS" checkbox — the diff should not crash and
+    // content should remain visible.
+    const wsLabel = screen.getByText('Ignore WS');
+    fireEvent.click(wsLabel);
     expect(screen.getByText('line1')).toBeInTheDocument();
   });
 

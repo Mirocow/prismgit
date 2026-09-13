@@ -6,6 +6,8 @@
  * and explicitly presses the AI button.
  */
 
+import { getSetting } from './storage.js';
+
 export interface AiProviderConfig {
   /** Base URL, e.g. https://api.openai.com/v1 or http://localhost:11434/v1 */
   url: string;
@@ -25,6 +27,34 @@ export const DEFAULT_AI_PROMPT =
   '- Reply with the commit message text ONLY, no code fences, no explanations.';
 
 export const DEFAULT_MAX_DIFF_SIZE = 131072; // 128 KiB, SmartGit default is conservative
+
+/**
+ * Default AI request timeout in seconds (5 min). User-configurable via
+ * Settings → AI → Request timeout. The value is read from the settings
+ * store on every request so changes take effect immediately.
+ */
+export const DEFAULT_AI_REQUEST_TIMEOUT_SEC = 300;
+
+/** Min/max bounds for the AI request timeout (seconds). */
+export const AI_REQUEST_TIMEOUT_MIN_SEC = 10;
+export const AI_REQUEST_TIMEOUT_MAX_SEC = 3600;
+
+/**
+ * Resolve the AI request timeout (in milliseconds) from the user's settings.
+ * Falls back to DEFAULT_AI_REQUEST_TIMEOUT_SEC when unset, clamped to
+ * [AI_REQUEST_TIMEOUT_MIN_SEC, AI_REQUEST_TIMEOUT_MAX_SEC]. A value of 0
+ * disables the timeout entirely (returned as undefined → no AbortController
+ * timer is set).
+ */
+export function getAiRequestTimeoutMs(): number | undefined {
+  const raw = getSetting<number>('aiRequestTimeoutSec');
+  if (raw === 0) return undefined; // user explicitly disabled
+  const clamped = Math.max(
+    AI_REQUEST_TIMEOUT_MIN_SEC,
+    Math.min(AI_REQUEST_TIMEOUT_MAX_SEC, typeof raw === 'number' ? raw : DEFAULT_AI_REQUEST_TIMEOUT_SEC),
+  );
+  return clamped * 1000;
+}
 
 function buildPromptBody(cfg: AiProviderConfig, diff: string, hint?: string): string {
   const template = cfg.prompt?.trim() ? cfg.prompt : DEFAULT_AI_PROMPT;
@@ -64,7 +94,10 @@ export async function generateCommitMessage(
   };
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
+  // Read the user-configured timeout (Settings → AI → Request timeout).
+  // Falls back to DEFAULT_AI_REQUEST_TIMEOUT_SEC (300 s) when unset.
+  const timeoutMs = getAiRequestTimeoutMs();
+  const timeout = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -89,6 +122,6 @@ export async function generateCommitMessage(
       .replace(/\n?```$/, '')
       .trim();
   } finally {
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
   }
 }

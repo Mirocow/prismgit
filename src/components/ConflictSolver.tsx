@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Check, AlertCircle, Loader, ChevronLeft, ChevronRight, ExternalLink } from './icons';
+import { X, Check, AlertCircle, Loader, ChevronLeft, ChevronRight, ExternalLink, GitMerge } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 type ConflictResolution = 'ours' | 'theirs' | 'base' | 'both-ours-first' | 'both-theirs-first' | 'manual';
@@ -23,6 +24,10 @@ interface ConflictHunk {
 interface ConflictSolverProps {
   filePath: string;
   onClose: () => void;
+  /** Called after a file is successfully resolved & staged. The parent can
+   *  use this to auto-open the NEXT conflicted file (platypusgit pattern) —
+   *  no manual re-invoke needed. */
+  onResolved?: (resolvedFile: string) => void;
 }
 
 function parseConflicts(content: string): ConflictHunk[] {
@@ -62,11 +67,12 @@ function parseConflicts(content: string): ConflictHunk[] {
   return hunks;
 }
 
-export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
+export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolverProps) {
   useEscapeKey(true, onClose);
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
   const [loading, setLoading] = useState(true);
   const [content, setContent] = useState<string>('');
   const [hunks, setHunks] = useState<ConflictHunk[]>([]);
@@ -86,7 +92,7 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
         api.git.raw(repo.path, ['show', `:1:${filePath}`]).catch(() => ''),
         api.git.raw(repo.path, ['show', `:2:${filePath}`]).catch(() => ''),
         api.git.raw(repo.path, ['show', `:3:${filePath}`]).catch(() => ''),
-        api.git.raw(repo.path, ['show', `:${filePath}`]).catch(() => ''),
+        api.git.raw(repo.path, ['show', `:0:${filePath}`]).catch(() => ''),
       ]);
 
       setBaseContent(base);
@@ -94,17 +100,14 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
       setTheirsContent(theirs);
 
       // Read working tree file
-      const fs = await import('fs');
-      const path = await import('path');
-      const fullPath = path.join(repo.path, filePath);
-      const fileContent = fs.existsSync(fullPath)
-        ? fs.readFileSync(fullPath, 'utf-8')
-        : worktree || '';
+      const fullPath = `${repo.path}/${filePath}`.replace(/\/\+/g, "/");
+      let fileContent = "";
+      try { fileContent = await api.fs.readFile(fullPath); } catch { fileContent = worktree || ""; }
       setContent(fileContent);
       const parsed = parseConflicts(fileContent);
       setHunks(parsed);
     } catch (e) {
-      toast.error('Failed to load conflict', String(e));
+      toast.error(t('changes.conflictLoadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -122,12 +125,22 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
       resolved = h.oursLines;
     } else if (resolution === 'theirs') {
       resolved = h.theirsLines;
+    } else if (resolution === 'base') {
+      // Use the base (common ancestor) version of this hunk's region.
+      // Without a full diff3 we approximate by slicing baseContent by the
+      // hunk's line range — this is best-effort but never silently uses
+      // ours (the previous fallthrough bug).
+      const baseAll = baseContent.split('\n');
+      resolved = baseAll.slice(h.startLine, Math.min(h.endLine, baseAll.length));
+      if (resolved.length === 0) resolved = h.oursLines;
     } else if (resolution === 'both-ours-first') {
       resolved = [...h.oursLines, '', ...h.theirsLines];
     } else if (resolution === 'both-theirs-first') {
       resolved = [...h.theirsLines, '', ...h.oursLines];
     } else {
-      resolved = h.oursLines;
+      // 'manual' — keep the original conflict block for hand-editing.
+      const allLines = content.split('\n');
+      resolved = allLines.slice(h.startLine, h.endLine);
     }
     next[idx] = { ...next[idx], resolution, resolvedContent: resolved };
     setHunks(next);
@@ -162,16 +175,17 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
     setSaving(true);
     try {
       const resolved = buildResolvedContent();
-      const fs = await import('fs');
-      const path = await import('path');
-      const fullPath = path.join(repo.path, filePath);
-      fs.writeFileSync(fullPath, resolved, 'utf-8');
-      await api.git.add(repo.path, [filePath]);
-      toast.success('Conflict resolved and staged');
-      await refreshStatus(repo.path);
-      onClose();
+      const fullPath = `${repo.path}/${filePath}`.replace(/\/\+/g, "/");
+      await api.fs.writeFile(fullPath, resolved);
+      // Auto-advance: notify parent so it can open the next conflicted file
+      // (platypusgit advance() pattern). If no onResolved callback, just close.
+      if (onResolved) {
+        onResolved(filePath);
+      } else {
+        onClose();
+      }
     } catch (e) {
-      toast.error('Failed to save', String(e));
+      toast.error(t('changes.saveFailed'), String(e));
     } finally {
       setSaving(false);
     }
@@ -180,25 +194,138 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
   const unresolvedCount = hunks.filter((h) => !h.resolution).length;
   const resolvedCount = hunks.length - unresolvedCount;
 
+  // Keyboard chords (platypusgit pattern): F7/Shift+F7 next/prev conflict,
+  // Mod+1/2/3 ours/theirs/both, Mod+Enter apply (Save & Stage).
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'F7') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          setCurrentHunk((h) => Math.max(0, h - 1));
+        } else {
+          setCurrentHunk((h) => Math.min(hunks.length - 1, h + 1));
+        }
+        return;
+      }
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      if (e.key === '1') {
+        e.preventDefault();
+        resolveHunk(currentHunk, 'ours');
+      } else if (e.key === '2') {
+        e.preventDefault();
+        resolveHunk(currentHunk, 'theirs');
+      } else if (e.key === '3') {
+        e.preventDefault();
+        resolveHunk(currentHunk, 'both-ours-first');
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (unresolvedCount === 0 && !saving) void handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKey, true);
+    return () => window.removeEventListener('keydown', handleKey, true);
+  }, [hunks, currentHunk, resolveHunk, unresolvedCount, saving, handleSave]);
+
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50">
         <div className="text-text-tertiary text-sm flex items-center gap-2">
           <Loader size={16} className="spin" />
-          Loading 3-way conflict...
+          {t('changes.loadingConflict')}
         </div>
       </div>
     );
   }
 
   if (hunks.length === 0) {
+    // Detect binary or delete/modify conflicts — these can't be resolved
+    // with the hunk-based editor. platypusgit's MergeWindow shows a chooser
+    // with "Take ours / Take theirs / Resolve as deleted" buttons.
+    const oursEmpty = oursContent.length === 0;
+    const theirsEmpty = theirsContent.length === 0;
+    const isBinary = !oursEmpty && !theirsEmpty && content.includes('\0');
+    const isDeleteModify = oursEmpty || theirsEmpty;
+
+    if (isBinary || isDeleteModify) {
+      return (
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={onClose}>
+          <div className="panel p-6 max-w-md" onClick={(e) => e.stopPropagation()}>
+            <AlertCircle size={28} className="mx-auto mb-3 text-status-modified" />
+            <div className="text-sm font-medium mb-1 text-center">
+              {isBinary ? 'Binary file conflict' : 'Delete / Modify conflict'}
+            </div>
+            <div className="text-xs text-text-tertiary mb-4 text-center">
+              {isBinary
+                ? 'This file is binary and cannot be merged with a text-based solver. Choose which version to keep.'
+                : oursEmpty
+                  ? 'The file was deleted on our side but modified on their side. Choose to keep theirs or delete.'
+                  : 'The file was deleted on their side but modified on our side. Choose to keep ours or delete.'}
+            </div>
+            <div className="flex items-center justify-center gap-2">
+              {!oursEmpty && (
+                <button
+                  className="btn btn-secondary text-xs"
+                  title="Keep our version (git checkout --ours)"
+                  onClick={async () => {
+                    try {
+                      await api.git.raw(repo.path, ['checkout', '--ours', '--', filePath]);
+                      await api.git.add(repo.path, [filePath]);
+                      toast.success(t('toast.conflict.takeOurs'));
+                      await refreshStatus(repo.path);
+                      onClose();
+                    } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
+                  }}
+                >
+                  {t('action.button.takeOurs')}
+                </button>
+              )}
+              {!theirsEmpty && (
+                <button
+                  className="btn btn-secondary text-xs"
+                  title="Keep their version (git checkout --theirs)"
+                  onClick={async () => {
+                    try {
+                      await api.git.raw(repo.path, ['checkout', '--theirs', '--', filePath]);
+                      await api.git.add(repo.path, [filePath]);
+                      toast.success(t('toast.conflict.takeTheirs'));
+                      await refreshStatus(repo.path);
+                      onClose();
+                    } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
+                  }}
+                >
+                  {t('action.button.takeTheirs')}
+                </button>
+              )}
+              {/* Resolve as deleted — git rm the file */}
+              <button
+                className="btn btn-danger text-xs"
+                title="Resolve as deleted (git rm)"
+                onClick={async () => {
+                  try {
+                    await api.git.raw(repo.path, ['rm', '--', filePath]);
+                    toast.success(t('toast.conflict.deleted'));
+                    await refreshStatus(repo.path);
+                    onClose();
+                  } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
+                }}
+              >
+                {t('action.button.resolveAsDeleted')}
+              </button>
+              <button className="btn btn-secondary text-xs" onClick={onClose}>{t('action.button.cancel')}</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
+      <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={onClose}>
         <div className="panel p-8 text-center" onClick={(e) => e.stopPropagation()}>
           <AlertCircle size={32} className="mx-auto mb-3 text-status-modified" />
-          <div className="text-sm font-medium mb-1">No conflict markers found</div>
-          <div className="text-xs text-text-tertiary mb-4">This file may have been resolved already or has no conflicts.</div>
-          <button className="btn btn-secondary" onClick={onClose}>Close</button>
+          <div className="text-sm font-medium mb-1">{t('changes.noConflictMarkers')}</div>
+          <div className="text-xs text-text-tertiary mb-4">{t('changes.noConflictHint')}</div>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.close')}</button>
         </div>
       </div>
     );
@@ -221,23 +348,23 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
         {content.length > 0 ? content.map((line, i) => (
           <div key={i} className="text-text-primary whitespace-pre">{line || ' '}</div>
         )) : (
-          <div className="text-text-tertiary italic text-2xs">(empty — no content at this stage)</div>
+          <div className="text-text-tertiary italic text-2xs">{t('changes.emptyStage')}</div>
         )}
       </div>
     </div>
   );
 
   return (
-    <div className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex flex-col z-50 animate-fade-in">
+    <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex flex-col z-50 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-bg-secondary border-b border-border-default flex-shrink-0">
         <div className="flex items-center gap-3">
           <AlertCircle size={16} className="text-status-conflict" />
-          <span className="text-sm font-medium">Conflict Solver</span>
+          <span className="text-sm font-medium">{t('changes.conflictSolverTitle')}</span>
           <code className="text-xs mono text-text-tertiary">{filePath}</code>
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-status-added">Resolved: {resolvedCount}</span>
-            <span className="text-status-conflict">Unresolved: {unresolvedCount}</span>
+            <span className="text-status-added">{t('changes.resolvedCount', { count: resolvedCount })}</span>
+            <span className="text-status-conflict">{t('changes.unresolvedCount', { count: unresolvedCount })}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -246,17 +373,17 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
             className="text-2xs bg-bg-tertiary border border-border-default rounded px-1 py-0.5"
             value={layout}
             onChange={(e) => setLayout(e.target.value as typeof layout)}
-            title="Layout"
+            title={t('changes.layoutTitle')}
           >
-            <option value="3-pane">3-Pane (Base | Ours | Theirs)</option>
-            <option value="merge-below">Merge Below</option>
-            <option value="left-merge">Left + Merge</option>
-            <option value="right-merge">Merge + Right</option>
+            <option value="3-pane">{t('changes.layout3Pane')}</option>
+            <option value="merge-below">{t('changes.layoutMergeBelow')}</option>
+            <option value="left-merge">{t('changes.layoutLeftMerge')}</option>
+            <option value="right-merge">{t('changes.layoutMergeRight')}</option>
           </select>
           <div className="w-px h-5 bg-border-default mx-1" />
           <button
             className="icon-btn"
-            title="Previous conflict"
+            title={t('changes.prevConflict')}
             onClick={() => setCurrentHunk(Math.max(0, currentHunk - 1))}
             disabled={currentHunk === 0}
           >
@@ -265,7 +392,7 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
           <span className="text-xs mono">{currentHunk + 1} / {hunks.length}</span>
           <button
             className="icon-btn"
-            title="Next conflict"
+            title={t('changes.nextConflict')}
             onClick={() => setCurrentHunk(Math.min(hunks.length - 1, currentHunk + 1))}
             disabled={currentHunk === hunks.length - 1}
           >
@@ -281,25 +408,25 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
       {layout === '3-pane' && (
         <div className="flex-1 overflow-hidden flex">
           {renderPane(
-            'Base (common ancestor)', 
+            t('changes.paneBase'),
             hunk.oursLines.length > 0 || hunk.theirsLines.length > 0 ? baseContent.split('\n').slice(0, Math.max(hunk.oursLines.length, hunk.theirsLines.length) + 2) : [],
             'text-text-tertiary',
             () => resolveHunk(currentHunk, 'base'),
-            'Use base'
+            t('changes.useBase')
           )}
           {renderPane(
-            'Ours (HEAD)', 
+            t('changes.paneOurs'),
             hunk.oursLines,
             'text-status-added',
             () => resolveHunk(currentHunk, 'ours'),
-            'Use ours'
+            t('changes.useOurs')
           )}
           {renderPane(
-            'Theirs (incoming)', 
+            t('changes.paneTheirs'),
             hunk.theirsLines,
             'text-status-deleted',
             () => resolveHunk(currentHunk, 'theirs'),
-            'Use theirs'
+            t('changes.useTheirs')
           )}
         </div>
       )}
@@ -308,13 +435,13 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
       {layout === 'merge-below' && (
         <div className="flex-1 overflow-hidden flex flex-col">
           <div className="flex-1 flex">
-            {renderPane('Ours (HEAD)', hunk.oursLines, 'text-status-added', () => resolveHunk(currentHunk, 'ours'), 'Use ours')}
-            {renderPane('Theirs (incoming)', hunk.theirsLines, 'text-status-deleted', () => resolveHunk(currentHunk, 'theirs'), 'Use theirs')}
+            {renderPane(t('changes.paneOurs'), hunk.oursLines, 'text-status-added', () => resolveHunk(currentHunk, 'ours'), t('changes.useOurs'))}
+            {renderPane(t('changes.paneTheirs'), hunk.theirsLines, 'text-status-deleted', () => resolveHunk(currentHunk, 'theirs'), t('changes.useTheirs'))}
           </div>
           <div className="h-1/3 flex border-t border-border-strong">
             <div className="flex-1 flex flex-col">
               <div className="px-3 py-1 bg-bg-tertiary border-b border-border-default text-xs font-medium text-text-secondary">
-                Working Tree (merged result)
+                {t('changes.workingTreeMerged')}
                 {hunk.resolution && <span className="ml-2 badge badge-added">{hunk.resolution}</span>}
               </div>
               <div className="flex-1 overflow-auto p-3 font-mono text-xs">
@@ -323,7 +450,7 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
                     <div key={i} className="text-text-primary whitespace-pre">{line || ' '}</div>
                   ))
                 ) : (
-                  <div className="text-text-tertiary italic">Select a resolution to populate</div>
+                  <div className="text-text-tertiary italic">{t('changes.selectResolutionPopulate')}</div>
                 )}
               </div>
             </div>
@@ -334,15 +461,15 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
       {/* Left + Merge layout */}
       {layout === 'left-merge' && (
         <div className="flex-1 overflow-hidden flex">
-          {renderPane('Ours (HEAD)', hunk.oursLines, 'text-status-added', () => resolveHunk(currentHunk, 'ours'), 'Use ours')}
+          {renderPane(t('changes.paneOurs'), hunk.oursLines, 'text-status-added', () => resolveHunk(currentHunk, 'ours'), t('changes.useOurs'))}
           <div className="flex-1 flex flex-col">
             <div className="px-3 py-1 bg-bg-tertiary border-b border-border-default text-xs font-medium text-text-secondary">
-              Working Tree {hunk.resolution && <span className="ml-2 badge badge-added">{hunk.resolution}</span>}
+              {t('changes.workingTree')} {hunk.resolution && <span className="ml-2 badge badge-added">{hunk.resolution}</span>}
             </div>
             <div className="flex-1 overflow-auto p-3 font-mono text-xs">
               {hunk.resolution ? hunk.resolvedContent?.map((line, i) => (
                 <div key={i} className="text-text-primary whitespace-pre">{line || ' '}</div>
-              )) : <div className="text-text-tertiary italic">Select a resolution</div>}
+              )) : <div className="text-text-tertiary italic">{t('changes.selectResolution')}</div>}
             </div>
           </div>
         </div>
@@ -353,15 +480,15 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
         <div className="flex-1 overflow-hidden flex">
           <div className="flex-1 flex flex-col">
             <div className="px-3 py-1 bg-bg-tertiary border-b border-border-default text-xs font-medium text-text-secondary">
-              Working Tree {hunk.resolution && <span className="ml-2 badge badge-added">{hunk.resolution}</span>}
+              {t('changes.workingTree')} {hunk.resolution && <span className="ml-2 badge badge-added">{hunk.resolution}</span>}
             </div>
             <div className="flex-1 overflow-auto p-3 font-mono text-xs">
               {hunk.resolution ? hunk.resolvedContent?.map((line, i) => (
                 <div key={i} className="text-text-primary whitespace-pre">{line || ' '}</div>
-              )) : <div className="text-text-tertiary italic">Select a resolution</div>}
+              )) : <div className="text-text-tertiary italic">{t('changes.selectResolution')}</div>}
             </div>
           </div>
-          {renderPane('Theirs (incoming)', hunk.theirsLines, 'text-status-deleted', () => resolveHunk(currentHunk, 'theirs'), 'Use theirs')}
+          {renderPane(t('changes.paneTheirs'), hunk.theirsLines, 'text-status-deleted', () => resolveHunk(currentHunk, 'theirs'), t('changes.useTheirs'))}
         </div>
       )}
 
@@ -371,16 +498,16 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
           <button
             className="btn btn-secondary text-xs"
             onClick={() => resolveHunk(currentHunk, 'both-ours-first')}
-            title="Concatenate ours + theirs"
+            title={t('changes.concatOursTheirs')}
           >
-            Both (ours first)
+            {t('changes.bothOursFirst')}
           </button>
           <button
             className="btn btn-secondary text-xs"
             onClick={() => resolveHunk(currentHunk, 'both-theirs-first')}
-            title="Concatenate theirs + ours"
+            title={t('changes.concatTheirsOurs')}
           >
-            Both (theirs first)
+            {t('changes.bothTheirsFirst')}
           </button>
           <button
             className="btn btn-secondary text-xs"
@@ -390,32 +517,52 @@ export function ConflictSolver({ filePath, onClose }: ConflictSolverProps) {
               setHunks(next);
             }}
           >
-            Reset
+            {t('changes.resetButton')}
           </button>
           <button
             className="btn btn-secondary text-xs"
-            title="Open in external editor"
+            title={t('changes.openExternalEditor')}
             onClick={() => {
               const fullPath = `${repo.path}/${filePath}`.replace(/\/+/g, '/');
               api.git.openFile(fullPath);
             }}
           >
             <ExternalLink size={11} />
-            External
+            {t('changes.external')}
+          </button>
+          {/* Use merge tool — runs `git mergetool -- <file>`. This invokes
+              the user's configured merge.tool (Settings → Merge Tool).
+              SmartGit/GitKraken both expose this as a one-click action. */}
+          <button
+            className="btn btn-secondary text-xs"
+            title="Run git mergetool (uses your configured merge.tool)"
+            onClick={async () => {
+              try {
+                await api.git.raw(repo.path, ['mergetool', '--', filePath]);
+                toast.success(t('toast.vscode.mergeToolCompleted'), 'Reloading file content…');
+                await loadFile();
+                await refreshStatus(repo.path);
+              } catch (e) {
+                toast.error(t('toast.vscode.mergeToolFailed'), String(e));
+              }
+            }}
+          >
+            <GitMerge size={11} />
+            Merge Tool
           </button>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn btn-secondary text-xs" onClick={onClose}>
-            Save & Close (keep markers)
+            {t('changes.saveCloseKeepMarkers')}
           </button>
           <button
             className="btn btn-primary text-xs"
             onClick={handleSave}
             disabled={saving || unresolvedCount > 0}
-            title={unresolvedCount > 0 ? 'Resolve all conflicts first' : 'Save resolved content and stage'}
+            title={unresolvedCount > 0 ? t('changes.resolveAllFirst') : t('changes.saveResolvedTitle')}
           >
             {saving ? <Loader size={12} className="spin" /> : <Check size={12} />}
-            Save & Stage
+            {t('changes.saveStage')}
           </button>
         </div>
       </div>

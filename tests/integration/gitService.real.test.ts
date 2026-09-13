@@ -5,7 +5,7 @@ import * as os from 'os';
 import { execSync } from 'child_process';
 import * as gitService from '../../electron/services/git';
 
-const TEST_REPO_DIR = '/home/z/my-project/repos/test-repo';
+const TEST_REPO_DIR = path.join(os.tmpdir(), 'prismgit-repos', 'test-repo');
 
 function shell(cmd: string, cwd = TEST_REPO_DIR) {
   return execSync(cmd, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
@@ -644,6 +644,36 @@ describe('git service — integration with real git repo', () => {
       expect(list.length).toBeGreaterThan(0);
       const hasName = list.some(c => c.key === 'user.name');
       expect(hasName).toBe(true);
+    });
+
+    it('configList (system) returns [] instead of throwing when the system config file is missing', async () => {
+      // Regression: `git config --list --system` exits 128 with
+      //   "fatal: unable to read config file '<path>': No such file or directory"
+      // when /etc/gitconfig (or the configured system file) does not exist —
+      // the norm on many macOS/Windows machines. The Settings → Git Config →
+      // System tab used to crash the IPC handler; it must show an empty list.
+      const prev = process.env.GIT_CONFIG_SYSTEM;
+      process.env.GIT_CONFIG_SYSTEM = path.join(os.tmpdir(), `definitely-missing-${Date.now()}-gitconfig`);
+      try {
+        const list = await gitService.configList(TEST_REPO_DIR, 'system');
+        expect(list).toEqual([]);
+      } finally {
+        if (prev === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+        else process.env.GIT_CONFIG_SYSTEM = prev;
+      }
+    });
+
+    it('configUnset (system) is a no-op when the system config file is missing', async () => {
+      const prev = process.env.GIT_CONFIG_SYSTEM;
+      process.env.GIT_CONFIG_SYSTEM = path.join(os.tmpdir(), `definitely-missing-${Date.now()}-gitconfig`);
+      try {
+        await expect(
+          gitService.configUnset(TEST_REPO_DIR, 'user.neverexisted', 'system')
+        ).resolves.toBeUndefined();
+      } finally {
+        if (prev === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+        else process.env.GIT_CONFIG_SYSTEM = prev;
+      }
     });
   });
 

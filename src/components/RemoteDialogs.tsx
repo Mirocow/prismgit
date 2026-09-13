@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Loader, Check } from './icons';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useI18n } from '../lib/i18n';
 
 /**
  * SmartGit-style modals shared by the Branches and Remotes pages:
@@ -25,7 +26,7 @@ function DialogShell({ title, subtitle, children, buttons, onClose }: {
 }) {
   return (
     <div
-      className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
       onClick={onClose}
     >
       <div className="panel w-[440px] p-4" onClick={(e) => e.stopPropagation()}>
@@ -53,6 +54,7 @@ export function RenameDialog({
   onSubmit: (newName: string) => void;
 }) {
   const [name, setName] = useState(oldName);
+  const { t } = useI18n();
   useEffect(() => setName(oldName), [oldName]);
   useEscapeKey(true, onClose);
 
@@ -63,25 +65,29 @@ export function RenameDialog({
 
   return (
     <DialogShell
-      title={kind === 'branch' ? 'Rename branch' : 'Rename remote'}
-      subtitle={`Enter the new name for the ${kind} '${oldName}'.`}
+      title={kind === 'branch' ? t('dialogs.renameBranch') : t('dialogs.renameRemote')}
+      subtitle={
+        kind === 'branch'
+          ? t('dialogs.renameBranchPrompt', { name: oldName })
+          : t('dialogs.renameRemotePrompt', { name: oldName })
+      }
       onClose={onClose}
       buttons={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button
             className="btn btn-primary"
             disabled={!canSubmit}
             onClick={() => canSubmit && onSubmit(trimmed)}
           >
             {busy ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}
-            Rename
+            {t('common.rename')}
           </button>
         </>
       }
     >
       <div className="flex items-center gap-2">
-        <label className="text-xs text-text-tertiary flex-shrink-0 w-11">Name:</label>
+        <label className="text-xs text-text-tertiary flex-shrink-0 w-11">{t('dialogs.nameLabel')}</label>
         <input
           type="text"
           className="flex-1 text-sm font-mono"
@@ -121,6 +127,7 @@ export function RemoteConfigDialog({
   const [fetchUrl, setFetchUrl] = useState(initialFetch ?? '');
   const [pushUrl, setPushUrl] = useState(initialPush ?? '');
   const [background, setBackground] = useState(initialBackground ?? false);
+  const { t } = useI18n();
   useEscapeKey(true, onClose);
 
   const trimmedName = name.trim();
@@ -134,23 +141,23 @@ export function RemoteConfigDialog({
 
   return (
     <DialogShell
-      title={mode === 'add' ? 'Add remote' : 'Configure remote properties'}
+      title={mode === 'add' ? t('dialogs.addRemote') : t('dialogs.configureRemote')}
       subtitle={
         mode === 'add'
-          ? 'Add a new remote repository to push to and pull from.'
-          : 'Change the URL and other properties for the remote.'
+          ? t('dialogs.addRemoteHint')
+          : t('dialogs.configureRemoteHint')
       }
       onClose={onClose}
       buttons={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button
             className="btn btn-primary"
             disabled={!canSubmit || !changed}
             onClick={() => canSubmit && onSubmit({ name: trimmedName, fetchUrl: trimmedFetch, pushUrl: pushUrl.trim(), background })}
           >
             {busy ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}
-            {mode === 'add' ? 'Add' : 'OK'}
+            {mode === 'add' ? t('common.add') : t('common.ok')}
           </button>
         </>
       }
@@ -158,7 +165,7 @@ export function RemoteConfigDialog({
       <div className="space-y-3">
         {mode === 'add' && (
           <div>
-            <label className="text-xs text-text-tertiary block mb-1">Name</label>
+            <label className="text-xs text-text-tertiary block mb-1">{t('dialogs.nameLabelShort')}</label>
             <input
               type="text"
               className="w-full text-sm"
@@ -171,7 +178,7 @@ export function RemoteConfigDialog({
           </div>
         )}
         <div>
-          <label className="text-xs text-text-tertiary block mb-1">URL or Path:</label>
+          <label className="text-xs text-text-tertiary block mb-1">{t('dialogs.urlOrPathLabel')}</label>
           <input
             type="text"
             className="w-full text-sm font-mono"
@@ -190,7 +197,7 @@ export function RemoteConfigDialog({
         {mode === 'configure' && (
           <div>
             <label className="text-xs text-text-tertiary block mb-1">
-              Push URL <span className="text-text-tertiary">(leave empty = same as fetch URL)</span>
+              {t('dialogs.pushUrlLabel')} <span className="text-text-tertiary">{t('dialogs.pushUrlHint')}</span>
             </label>
             <input
               type="text"
@@ -207,10 +214,10 @@ export function RemoteConfigDialog({
             checked={background}
             onChange={(e) => setBackground(e.target.checked)}
           />
-          Perform background Poll or Fetch
+          {t('dialogs.backgroundPoll')}
         </label>
         <div className="text-2xs text-text-tertiary">
-          When enabled, PrismGit quietly fetches this remote every 5 minutes while the repository is open.
+          {t('dialogs.backgroundPollHint')}
         </div>
       </div>
     </DialogShell>

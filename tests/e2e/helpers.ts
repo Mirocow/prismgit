@@ -16,28 +16,37 @@
  *     the known repos BEFORE launch, so the app opens it immediately.
  */
 
-import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 
-/** Path to the fixture repo created by tests/fixtures/setup-test-repo.sh */
-export const FIXTURE_REPO = '/home/z/my-project/repos/test-repo';
+/** Path to the fixture repo created by tests/fixtures/setup-test-repo.sh
+ * MUST stay in sync with the script: it uses
+ * `${PRISMGIT_TEST_REPOS:-${TMPDIR:-/tmp}/prismgit-repos}` as the base dir.
+ * (A previous version pointed at os.tmpdir()/prismgit-test-repo — a DIFFERENT
+ * path than the script creates, so seeded settings referenced a repo that
+ * did not exist and the app stayed on the WelcomeScreen: 02-branches failed.)
+ */
+export const FIXTURE_REPO = path.join(
+  process.env.PRISMGIT_TEST_REPOS || path.join(os.tmpdir(), 'prismgit-repos'),
+  'test-repo'
+);
 
 /** Per-test userData dir — fresh app state (no leftover repos/settings) */
 export function makeUserDataDir(prefix = 'prismgit-e2e-'): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-/** Write a smartgit-settings.json with the fixture repo pre-loaded */
+/** Write a prismgit-settings.json with the fixture repo pre-loaded */
 export function seedUserData(
   userDataDir: string,
   repos: Array<{ path: string; name: string }> = [{ path: FIXTURE_REPO, name: 'test-repo' }]
 ): void {
-  // The app uses a SINGLE SimpleStore file named `smartgit-settings.json`
+  // The app uses a SINGLE SimpleStore file named `prismgit-settings.json`
   // containing { settings, repositories, repoMetadata }. We pre-populate it
   // so the app opens the fixture repo immediately on launch.
-  const settingsFile = path.join(userDataDir, 'smartgit-settings.json');
+  const settingsFile = path.join(userDataDir, 'prismgit-settings.json');
   const reposData = repos.map((r, i) => ({
     path: r.path,
     name: r.name,
@@ -67,7 +76,7 @@ export function seedUserData(
 
   // Also write the window-state file so the window doesn't open maximized
   // (which can cause issues with screenshots)
-  const windowStateFile = path.join(userDataDir, 'smartgit-window-state.json');
+  const windowStateFile = path.join(userDataDir, 'prismgit-window-state.json');
   fs.writeFileSync(
     windowStateFile,
     JSON.stringify(
@@ -117,6 +126,9 @@ export async function launchApp(opts: {
       NODE_ENV: 'production',
       DISPLAY: process.env.DISPLAY || ':99',
       PRISMGIT_USER_DATA: userDataDir,
+      // Pin the UI locale to English for e2e: the app detects the OS language
+      // otherwise, and text assertions in the specs are English-based.
+      PRISMGIT_LOCALE: 'en',
     },
     timeout: 30000,
   });
@@ -166,6 +178,28 @@ export async function navigateTo(page: Page, label: string): Promise<void> {
 /** Wait for an element containing the given text to appear */
 export async function waitForText(page: Page, text: string, timeout = 10000): Promise<void> {
   await page.waitForSelector(`text="${text}"`, { timeout });
+}
+
+/**
+ * Enable an extra status filter in the Changes view via the quick-toggle chip.
+ *
+ * Since b92f54d the default filter set is MADS (Modified, Added, Deleted,
+ * Staged) — Untracked (U) and Unstaged (U2) are OFF by default, so e2e flows
+ * that create fresh (untracked) files must enable the chip first. Verified by
+ * the "Status: N filters" caption growing from 4 to 5.
+ */
+export async function enableStatusFilter(page: Page, label: 'Untracked' | 'Unstaged'): Promise<void> {
+  const title = label === 'Untracked' ? 'Show Untracked files' : 'Show Unstaged files';
+  const chip = page.locator(`button[title="${title}"]`).first();
+  await chip.waitFor({ state: 'visible', timeout: 10000 });
+  const statusButton = page.locator('button', { hasText: 'Status:' }).first();
+  // applyProjectPrefs may asynchronously apply the MADS default AFTER launch
+  // and overwrite an early toggle — retry the whole click until the caption
+  // confirms the filter stuck (MADS=4 -> 5).
+  await expect(async () => {
+    await chip.click();
+    await expect(statusButton).toContainText('5 filters');
+  }).toPass({ timeout: 15_000 });
 }
 
 /** Take a screenshot for debugging test failures */

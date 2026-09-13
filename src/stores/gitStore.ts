@@ -1,6 +1,8 @@
 import { create } from 'zustand';
-import { api, type StatusResult } from '../lib/api';
+import { api, type StatusResult, type PushResult } from '../lib/api';
+import { resolveDefaultRemote } from '../lib/remotes';
 import { useOperationLogStore } from './operationLogStore';
+import { useRepositoryStore } from './repositoryStore';
 
 interface GitState {
   status: StatusResult | null;
@@ -12,7 +14,7 @@ interface GitState {
   stageFiles: (repoPath: string, files: string[]) => Promise<void>;
   stageAll: (repoPath: string) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean) => Promise<string>;
-  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean) => Promise<void>;
+  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, targetBranch?: string) => Promise<PushResult>;
   pull: (repoPath: string, remote?: string, branch?: string) => Promise<void>;
   fetch: (repoPath: string, remote?: string, prune?: boolean) => Promise<void>;
 }
@@ -66,14 +68,27 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  push: async (repoPath, remote, branch, setUpstream) => {
+  push: async (repoPath, remote, branch, setUpstream, force, targetBranch) => {
     const log = useOperationLogStore.getState();
-    const cmd = `git push ${remote || 'origin'} ${branch || ''} ${setUpstream ? '-u' : ''}`.trim();
+    // Never hardcode 'origin' — resolve it (origin → first remote). Fails with
+    // a clear message when the repo has no remotes at all.
+    const resolved = remote ?? (await resolveDefaultRemote(repoPath));
+    if (!resolved) {
+      throw new Error('No remotes configured — add one on the Remotes page');
+    }
+    const refspec = targetBranch && targetBranch !== branch ? `${branch}:${targetBranch}` : (branch || '');
+    const cmd = `git push ${resolved} ${refspec} ${setUpstream ? '-u' : ''}${force ? ' --force-with-lease' : ''}`.trim();
     const opId = log.startOp('Push', repoPath, cmd);
     try {
-      await api.git.push(repoPath, remote, branch, setUpstream);
+      const result = await api.git.push(repoPath, resolved, branch, setUpstream, force, false, targetBranch);
       await get().refreshStatus(repoPath);
-      log.finishOp(opId, 'Pushed successfully');
+      // Refresh repository metadata (lastCommit, branchCount, etc.) in the sidebar
+      api.settings.refreshRepoStats(repoPath).then(() => {
+        useRepositoryStore.getState().loadMetadata();
+        useRepositoryStore.getState().checkRemotes?.([repoPath]);
+      }).catch(() => {});
+      log.finishOp(opId, result?.summary ?? 'Pushed successfully');
+      return result;
     } catch (e) {
       log.failOp(opId, String(e));
       throw e;
@@ -87,6 +102,11 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       await api.git.pull(repoPath, remote, branch);
       await get().refreshStatus(repoPath);
+      // Refresh repository metadata in the sidebar
+      api.settings.refreshRepoStats(repoPath).then(() => {
+        useRepositoryStore.getState().loadMetadata();
+        useRepositoryStore.getState().checkRemotes?.([repoPath]);
+      }).catch(() => {});
       log.finishOp(opId, 'Pulled successfully');
     } catch (e) {
       log.failOp(opId, String(e));
@@ -101,6 +121,11 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       await api.git.fetch(repoPath, remote, prune);
       await get().refreshStatus(repoPath);
+      // Refresh repository metadata in the sidebar
+      api.settings.refreshRepoStats(repoPath).then(() => {
+        useRepositoryStore.getState().loadMetadata();
+        useRepositoryStore.getState().checkRemotes?.([repoPath]);
+      }).catch(() => {});
       log.finishOp(opId, 'Fetched successfully');
     } catch (e) {
       log.failOp(opId, String(e));

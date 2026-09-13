@@ -1,75 +1,107 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Search, FileText, Loader, RefreshCw, GitCommit } from '../components/icons';
+import { Search, FileText, Loader, RefreshCw, GitCommit, History } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { CommitHashLink } from '../components/StatusBar';
 import { api, type BlameResult } from '../lib/api';
-import { cn, shortHash, formatDate } from '../lib/utils';
+import { shortHash } from '../lib/utils';
+import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
+import { useI18n } from '../lib/i18n';
 
 export function BlamePage() {
+  const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
-  const toast = useToastStore();
+  const toast = useToastActions();
+  const showContextMenu = useContextMenu();
   const [filePath, setFilePath] = useState('');
-  const [ref, setRef] = useState('HEAD');
+  const globalBranch = useSelectionStore((s) => s.selectedBranch);
+  const globalTag = useSelectionStore((s) => s.selectedTag);
+  const [ref, setRef] = useState(globalTag ?? globalBranch ?? 'HEAD');
+
+  useEffect(() => {
+    const newRef = globalTag ?? globalBranch ?? 'HEAD';
+    setRef(newRef);
+  }, [globalTag, globalBranch]);
+
   const [blame, setBlame] = useState<BlameResult | null>(null);
   const [loading, setLoading] = useState(false);
-  // Read global file selection — when user clicks "Blame this file" from Changes/History,
-  // the file path is pre-filled here AND we auto-trigger the blame.
   const globalFilePath = useSelectionStore((s) => s.selectedFilePath);
-  useEffect(() => {
-    if (globalFilePath) {
-      setFilePath(globalFilePath);
-      // Auto-trigger blame after setting the path
-      // Use a small delay to ensure state is updated
-      setTimeout(() => {
-        handleBlameRef.current?.(globalFilePath);
-      }, 50);
-    }
-  }, [globalFilePath]);
 
-  // Ref to avoid stale closure in handleBlame
-  const handleBlameRef = useRef<(path?: string) => void>();
-  handleBlameRef.current = (overridePath?: string) => {
+  const handleBlameRef = useRef<(path?: string, refOverride?: string) => void>();
+  handleBlameRef.current = (overridePath?: string, refOverride?: string) => {
     const path = overridePath || filePath;
+    const effectiveRef = refOverride || ref;
     if (!path.trim()) {
-      toast.warning('File path is required');
+      toast.warning(t('pages.filePathRequired'));
       return;
     }
     setLoading(true);
-    api.git.blame(repo.path, path, ref || undefined)
+    api.git.blame(repo.path, path, effectiveRef || undefined)
       .then((result) => {
         setBlame(result);
-        // The file being blamed becomes the global file selection — other
-        // tools (Changes file list, History file filter, Diff) follow it.
         if (path.trim()) useSelectionStore.getState().selectFile(path.trim());
       })
-      .catch((e) => { toast.error('Blame failed', String(e)); setBlame(null); })
+      .catch((e) => { toast.error(t('pages.blameFailed'), String(e)); setBlame(null); })
       .finally(() => setLoading(false));
   };
+
+  useEffect(() => {
+    if (globalFilePath) {
+      setFilePath(globalFilePath);
+      const timer = setTimeout(() => {
+        handleBlameRef.current?.(globalFilePath);
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [globalFilePath]);
 
   const handleBlame = useCallback(() => {
     handleBlameRef.current?.();
   }, []);
 
-  // Group blame lines by commit hash for color visualization
+  // Click a commit hash → navigate to History with that commit + file filter
+  const handleCommitClick = useCallback((hash: string) => {
+    useSelectionStore.getState().selectCommit(hash);
+    if (filePath.trim()) {
+      useSelectionStore.getState().setPathFilter(filePath.trim());
+    }
+    window.location.hash = '#/history';
+  }, [filePath]);
+
+  // VS Code: open this file AT this line (uses the line param of vscode.open)
+  const openInVsCodeAtLine = useCallback(async (line: number) => {
+    if (!filePath.trim()) return;
+    try {
+      const res = await api.vscode.open(repo.path, { file: filePath.trim(), line });
+      if (res.ok) toast.success(t('vscode.opened'));
+      else toast.error(t('vscode.openFailed'));
+    } catch (e) {
+      toast.error(t('vscode.openFailed'), String(e));
+    }
+  }, [repo, filePath, toast, t]);
+
+  const showLineContextMenu = useCallback((e: React.MouseEvent, lineNumber: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const items: ContextMenuItem[] = [
+      { label: t('vscode.openAtLine', { line: lineNumber }), clickId: 'open-vscode-line' },
+    ];
+    showContextMenu(items, (action) => {
+      if (action === 'open-vscode-line') void openInVsCodeAtLine(lineNumber);
+    });
+  }, [showContextMenu, openInVsCodeAtLine, t]);
+
   const colorMap = useMemo(() => {
     if (!blame) return new Map<string, string>();
     const uniqueHashes = Array.from(new Set(blame.lines.map((l) => l.hash)));
     const colors = [
-      'rgba(14, 99, 156, 0.15)',
-      'rgba(115, 201, 145, 0.15)',
-      'rgba(226, 192, 141, 0.15)',
-      'rgba(199, 78, 57, 0.15)',
-      'rgba(105, 164, 255, 0.15)',
-      'rgba(170, 102, 200, 0.15)',
-      'rgba(255, 167, 38, 0.15)',
-      'rgba(0, 188, 212, 0.15)',
+      'rgba(14, 99, 156, 0.15)', 'rgba(115, 201, 145, 0.15)',
+      'rgba(226, 192, 141, 0.15)', 'rgba(199, 78, 57, 0.15)',
+      'rgba(105, 164, 255, 0.15)', 'rgba(170, 102, 200, 0.15)',
+      'rgba(255, 167, 38, 0.15)', 'rgba(0, 188, 212, 0.15)',
     ];
     const map = new Map<string, string>();
-    uniqueHashes.forEach((h, i) => {
-      map.set(h, colors[i % colors.length]);
-    });
+    uniqueHashes.forEach((h, i) => { map.set(h, colors[i % colors.length]); });
     return map;
   }, [blame]);
 
@@ -77,7 +109,12 @@ export function BlamePage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border-default bg-bg-secondary">
         <FileText size={14} />
-        <span className="text-sm font-medium">Blame</span>
+        <span className="text-sm font-medium">{t('nav.blame')}</span>
+        {filePath && (
+          <span className="text-2xs text-text-tertiary ml-2 truncate">
+            {filePath} @ {ref || 'HEAD'}
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-2 p-3 border-b border-border-default bg-bg-tertiary">
@@ -102,7 +139,7 @@ export function BlamePage() {
           disabled={loading || !filePath.trim()}
         >
           {loading ? <Loader size={12} className="animate-spin" /> : <Search size={12} />}
-          Blame
+          {t('nav.blame')}
         </button>
       </div>
 
@@ -110,28 +147,40 @@ export function BlamePage() {
         {loading ? (
           <div className="p-8 text-center text-text-tertiary text-sm flex items-center justify-center gap-2">
             <Loader size={14} className="animate-spin" />
-            Loading blame information...
+            {t('pages.blameLoading')}
           </div>
         ) : !blame ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
             <FileText size={32} className="mb-2 opacity-50" />
-            <div className="text-sm">No blame information</div>
-            <div className="text-xs mt-1">Enter a file path and click Blame to see line-by-line authorship</div>
+            <div className="text-sm">{t('pages.blameEmpty')}</div>
+            <div className="text-xs mt-1">
+              {t('pages.blameEmptyHint')}
+            </div>
+            <div className="text-xs mt-1 text-text-tertiary">
+              {t('pages.blameEmptyHint2')}
+            </div>
           </div>
         ) : (
           <div className="font-mono text-xs">
             {blame.lines.map((line, idx) => (
               <div
                 key={idx}
-                className="flex items-start hover:bg-bg-hover border-b border-border-subtle"
+                className="flex items-start hover:bg-bg-hover border-b border-border-subtle group"
                 style={{ backgroundColor: colorMap.get(line.hash) || 'transparent' }}
+                onContextMenu={(e) => showLineContextMenu(e, line.finalLineNumber)}
               >
-                <div className="w-32 flex-shrink-0 px-2 py-1 border-r border-border-subtle text-text-tertiary truncate">
+                <div className="w-36 flex-shrink-0 px-2 py-1 border-r border-border-subtle text-text-tertiary truncate">
                   <div className="flex items-center gap-1">
                     <GitCommit size={9} />
-                    <CommitHashLink hash={line.hash} />
+                    <button
+                      className="text-accent hover:underline cursor-pointer font-mono"
+                      title={t('pages.blameViewCommitHint', { hash: shortHash(line.hash), file: filePath })}
+                      onClick={() => handleCommitClick(line.hash)}
+                    >
+                      {shortHash(line.hash)}
+                    </button>
                   </div>
-                  <div className="text-2xs mt-0.5">{line.author || 'unknown'}</div>
+                  <div className="text-2xs mt-0.5 truncate">{line.author || t('pages.authorUnknown')}</div>
                 </div>
                 <div className="w-12 flex-shrink-0 px-2 py-1 text-right text-text-tertiary border-r border-border-subtle">
                   {line.finalLineNumber}
@@ -142,6 +191,21 @@ export function BlamePage() {
                 >
                   {line.content || ' '}
                 </pre>
+                {/* Hover buttons: open at line in VS Code · jump to commit in History */}
+                <button
+                  className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0 m-1 transition-opacity"
+                  title={t('vscode.openAtLine', { line: line.finalLineNumber })}
+                  onClick={() => openInVsCodeAtLine(line.finalLineNumber)}
+                >
+                  <FileText size={10} />
+                </button>
+                <button
+                  className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0 m-1 transition-opacity"
+                  title={t('pages.blameViewCommitShort')}
+                  onClick={() => handleCommitClick(line.hash)}
+                >
+                  <History size={10} />
+                </button>
               </div>
             ))}
           </div>
@@ -150,7 +214,8 @@ export function BlamePage() {
 
       {blame && blame.lines.length > 0 && (
         <div className="border-t border-border-default bg-bg-secondary p-2 text-xs text-text-tertiary">
-          {blame.lines.length} lines · {new Set(blame.lines.map((l) => l.hash)).size} unique commits
+          {blame.lines.length} {t('pages.blameLines')} · {new Set(blame.lines.map((l) => l.hash)).size} {t('pages.blameUniqueCommits')}
+          {filePath && <span className="ml-2">· {t('pages.blameFileLabel')} <code className="mono">{filePath}</code></span>}
         </div>
       )}
     </div>

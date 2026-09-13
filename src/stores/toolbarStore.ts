@@ -18,7 +18,7 @@ export const DEFAULT_TOOLBAR_GROUPS = {
 export type ToolbarGroups = typeof DEFAULT_TOOLBAR_GROUPS;
 export type ToolbarGroupKey = keyof ToolbarGroups;
 
-const STORAGE_KEY = 'toolbar-groups';
+const STORAGE_KEY = 'prismgit-toolbar-groups';
 
 function loadToolbarGroups(): ToolbarGroups {
   try {

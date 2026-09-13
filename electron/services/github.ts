@@ -10,7 +10,7 @@ interface AuthState {
 }
 
 const store = new SimpleStore({
-  name: 'smartgit-github',
+  name: 'prismgit-github',
   defaults: {},
 });
 
@@ -212,4 +212,159 @@ export function getStoredAuthState(): { authenticated: boolean; user?: GithubUse
 
 export function getStoredToken(): string | undefined {
   return getAuthState().token;
+}
+
+// ============================================================
+// SmartGit Manual: PR management — comment, approve, merge, close
+// ============================================================
+
+/**
+ * Add a line comment to a PR — POST /repos/{owner}/{repo}/pulls/{n}/comments.
+ * SmartGit Manual: PR line-code commenting.
+ */
+export async function addPRLineComment(
+  owner: string,
+  repo: string,
+  prNumber: number,
+  data: {
+    body: string;
+    path: string;
+    line: number;
+    side?: 'LEFT' | 'RIGHT';
+    commit_id?: string;
+    in_reply_to?: number;
+  }
+): Promise<void> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  await httpsJson(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/comments`, {
+    method: 'POST',
+    token,
+    body: JSON.stringify({
+      body: data.body,
+      path: data.path,
+      line: data.line,
+      side: data.side || 'RIGHT',
+      commit_id: data.commit_id,
+    }),
+  });
+}
+
+/**
+ * Add a PR-level comment (not tied to a line) — POST /repos/{owner}/{repo}/issues/{n}/comments.
+ */
+export async function addPRComment(
+  owner: string,
+  repo: string,
+  prNumber: number,
+  body: string
+): Promise<void> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  await httpsJson(`https://api.github.com/repos/${owner}/${repo}/issues/${prNumber}/comments`, {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ body }),
+  });
+}
+
+/**
+ * Submit a PR review (APPROVE, REQUEST_CHANGES, or COMMENT).
+ * SmartGit Manual: PR approve/reject.
+ */
+export async function submitPRReview(
+  owner: string,
+  repo: string,
+  prNumber: number,
+  event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT',
+  body?: string
+): Promise<void> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  await httpsJson(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/reviews`, {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ event, body }),
+  });
+}
+
+/**
+ * Merge a PR — PUT /repos/{owner}/{repo}/pulls/{n}/merge.
+ * SmartGit Manual: Merge PR from log.
+ */
+export async function mergePR(
+  owner: string,
+  repo: string,
+  prNumber: number,
+  options: {
+    commit_title?: string;
+    merge_method?: 'merge' | 'squash' | 'rebase';
+    sha?: string;
+  } = {}
+): Promise<void> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  await httpsJson(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/merge`, {
+    method: 'PUT',
+    token,
+    body: JSON.stringify({
+      commit_title: options.commit_title,
+      merge_method: options.merge_method || 'merge',
+      sha: options.sha,
+    }),
+  });
+}
+
+/**
+ * Close a PR (without merging) — PATCH /repos/{owner}/{repo}/pulls/{n}.
+ */
+export async function closePR(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<void> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  await httpsJson(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`, {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify({ state: 'closed' }),
+  });
+}
+
+/**
+ * Reopen a closed PR.
+ */
+export async function reopenPR(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<void> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  await httpsJson(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`, {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify({ state: 'open' }),
+  });
+}
+
+/**
+ * List PR comments — for displaying existing review comments.
+ */
+export async function listPRComments(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<Array<{
+  id: number;
+  body: string;
+  path?: string;
+  line?: number;
+  user: { login: string };
+  created_at: string;
+}>> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  return httpsJson(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/comments?per_page=100`, { token });
 }

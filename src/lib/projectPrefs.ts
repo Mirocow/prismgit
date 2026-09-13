@@ -9,7 +9,7 @@
  *
  * Solution:
  *   A tiny localStorage-backed store keyed by the repository path:
- *     `smartgit-ui-prefs:<repoPath>`
+ *     `prismgit-ui-prefs:<repoPath>`
  *
  *   - `loadProjectPrefs(repoPath)` returns the saved prefs (or {}).
  *   - `saveProjectPrefs(repoPath, partial)` merges and persists.
@@ -24,7 +24,7 @@
  * break the layout.
  */
 
-const PREFIX = 'smartgit-ui-prefs:';
+const PREFIX = 'prismgit-ui-prefs:';
 
 export type FileSortKey = 'name' | 'state' | 'dir';
 
@@ -33,12 +33,10 @@ export interface ProjectPrefs {
   fileViewMode?: 'tree' | 'flat';
   commitViewMode?: 'tree' | 'flat';
   compressFilePaths?: boolean;
-  fileStatusFilter?: 'all' | 'modified' | 'added' | 'deleted' | 'untracked';
-  fileStatusFilterSet?: Array<'modified' | 'added' | 'deleted' | 'untracked' | 'staged' | 'unstaged' | 'renamed'>;
   fileSort?: { key: FileSortKey; dir: 1 | -1 };
   fileFilterRegex?: boolean;
   dirTreeVisible?: boolean;
-  colWidths?: { state: number; dir: number };
+  colWidths?: { state: number; dir: number; name: number };
 
   // --- Panel sizes ---
   /** Width of the Changes left panel (file list + journal + commit editor). */
@@ -51,6 +49,22 @@ export interface ProjectPrefs {
   commitHeight?: number;
   /** Width of the Diff page file-list sidebar. */
   diffFileListWidth?: number;
+
+  // --- Sidebar favorites ---
+  /** Navigation paths the user pinned to the Favorites section (e.g. ['/changes', '/history']). */
+  favoriteTools?: string[];
+
+  // --- Commit message history ---
+  /** Recent commit messages entered by the user, most-recent-first. */
+  commitMessageHistory?: string[];
+
+  // --- Sidebar collapsed groups ---
+  /**
+   * Sidebar section names the user has collapsed (e.g. ['Git Actions', 'Refs']).
+   * Persisted so a user who collapsed groups does not see them all re-open on
+   * next launch.
+   */
+  collapsedSidebarGroups?: string[];
 }
 
 export function loadProjectPrefs(repoPath: string): ProjectPrefs {

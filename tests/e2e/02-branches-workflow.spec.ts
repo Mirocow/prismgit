@@ -7,7 +7,7 @@
  *   - User can create a new branch via the New button
  *   - User can delete a branch via the row hover actions
  *   - User can rename via the row hover actions
- *   - User can checkout via clicking a row
+ *   - User can checkout via DOUBLE-clicking a row (single click = select only)
  */
 
 import { test, expect } from '@playwright/test';
@@ -71,20 +71,45 @@ test.describe('Branches workflow', () => {
     }
   });
 
-  test('checks out an existing branch by clicking its row', async () => {
+  test('single click selects a branch WITHOUT checking it out', async () => {
     const ctx = await launchApp();
     try {
       await navigateTo(ctx.page, 'Branches');
       await waitForText(ctx.page, 'Local Branches', 10000);
 
-      // Click on the develop branch row (not the hover actions)
+      // Single-click the develop branch row — must NOT switch branches.
       const developRow = ctx.page.locator('text=develop').first();
       await developRow.click();
+      await ctx.page.waitForTimeout(500);
+
+      await screenshot(ctx.page, 'branches-after-single-click-develop');
+
+      // The current-branch indicator (the ">" badge with bg-accent) should
+      // STILL be on main, not develop. Verify main has the HEAD badge.
+      const headBadge = ctx.page.locator('span:has-text("HEAD")').first();
+      await expect(headBadge).toBeVisible();
+    } finally {
+      try {
+        execSync('bash tests/fixtures/setup-test-repo.sh', { encoding: 'utf8', cwd: process.cwd(), stdio: 'ignore' });
+      } catch { /* ignore */ }
+      await ctx.close();
+    }
+  });
+
+  test('double-click checks out an existing branch', async () => {
+    const ctx = await launchApp();
+    try {
+      await navigateTo(ctx.page, 'Branches');
+      await waitForText(ctx.page, 'Local Branches', 10000);
+
+      // DOUBLE-click on the develop branch row (single click only selects now)
+      const developRow = ctx.page.locator('text=develop').first();
+      await developRow.dblclick();
       await ctx.page.waitForTimeout(1000);
 
       await screenshot(ctx.page, 'branches-after-checkout-develop');
 
-      // The current branch indicator (▶) should now be on develop
+      // The current branch indicator (>) should now be on develop
       // Verify via the status bar or the toolbar header
       const headIndicator = ctx.page.locator('text=develop').first();
       await expect(headIndicator).toBeVisible();

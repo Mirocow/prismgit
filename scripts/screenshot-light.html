@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="github-light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PrismGit — Light Theme</title>
+<style>
+  /* GitHub Light theme palette (from src/lib/themes.ts) */
+  :root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f6f8fa;
+    --bg-tertiary: #eaeef2;
+    --bg-hover: #f0f0f0;
+    --bg-elevated: #ffffff;
+    --bg-selected: #ddf4ff;
+    --text-primary: #1f2328;
+    --text-secondary: #656d76;
+    --text-tertiary: #8c959f;
+    --border-default: #d0d7de;
+    --border-subtle: #eaeef2;
+    --border-strong: #afb8c1;
+    --accent: #0969da;
+    --accent-muted: #ddf4ff;
+    --accent-purple: #8250df;
+    --status-added: #1a7f37;
+    --status-deleted: #cf222e;
+    --status-modified: #d1242f;
+    --status-info: #0969da;
+    --status-conflict: #bf8700;
+    --status-warning: #9a6700;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 13px;
+    overflow: hidden;
+    width: 1280px;
+    height: 800px;
+  }
+  .app { display: flex; flex-direction: column; height: 100vh; }
+  
+  /* Title bar */
+  .titlebar {
+    height: 32px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-default);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .titlebar-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .titlebar-dot.red { background: #ff5f57; }
+  .titlebar-dot.yellow { background: #febc2e; }
+  .titlebar-dot.green { background: #28c840; }
+  .titlebar-title { font-size: 12px; color: var(--text-secondary); margin-left: 8px; }
+  
+  /* Toolbar */
+  .toolbar {
+    height: 36px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-default);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .tb-btn {
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .tb-btn:hover { background: var(--bg-hover); }
+  .tb-btn.active { background: var(--accent-muted); color: var(--accent); border-color: var(--accent); }
+  .tb-icon { width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
+  .tb-divider { width: 1px; height: 18px; background: var(--border-default); margin: 0 4px; }
+  .tb-brand { font-weight: 600; font-size: 13px; color: var(--text-primary); margin-right: 8px; }
+  .tb-sync {
+    display: flex; align-items: center; gap: 2px;
+    padding: 2px 8px; border: 1px solid #1a7f37; border-radius: 4px;
+    background: rgba(26,127,55,0.1); color: #1a7f37;
+    font-size: 11px; font-weight: 500;
+  }
+  .tb-badge {
+    background: var(--status-modified); color: white;
+    border-radius: 10px; padding: 0 6px; min-width: 18px; height: 16px;
+    font-size: 10px; display: flex; align-items: center; justify-content: center;
+    font-weight: 600;
+  }
+  
+  /* Main layout */
+  .main { display: flex; flex: 1; overflow: hidden; }
+  
+  /* Sidebar */
+  .sidebar {
+    width: 240px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-default);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  .repo-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .repo-icon { color: var(--accent); font-size: 14px; }
+  .repo-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .repo-branch { font-size: 11px; color: var(--text-tertiary); }
+  
+  .nav-group { padding: 4px 0; }
+  .nav-group-title {
+    padding: 4px 12px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-tertiary);
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-left: 2px solid transparent;
+  }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .nav-item.active {
+    background: var(--accent-muted);
+    color: var(--accent);
+    font-weight: 500;
+    border-left-color: var(--accent);
+  }
+  .nav-icon { width: 14px; text-align: center; font-size: 13px; }
+  .nav-badge {
+    margin-left: auto;
+    background: var(--status-modified);
+    color: white;
+    border-radius: 10px;
+    padding: 0 5px;
+    min-width: 16px;
+    height: 14px;
+    font-size: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+  }
+  .nav-badge.green { background: var(--status-added); }
+  
+  /* Content area */
+  .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  
+  /* File list */
+  .file-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .file-header {
+    padding: 6px 12px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-default);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+  .file-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: pointer;
+  }
+  .file-row:hover { background: var(--bg-hover); }
+  .file-row.selected { background: var(--bg-selected); }
+  .file-status {
+    width: 16px; text-align: center; font-weight: 700; font-size: 11px;
+  }
+  .file-status.M { color: var(--status-modified); }
+  .file-status.A { color: var(--status-added); }
+  .file-status.D { color: var(--status-deleted); }
+  .file-name { flex: 1; color: var(--text-primary); font-family: 'SF Mono', Monaco, monospace; font-size: 11px; }
+  .file-stats { font-size: 10px; color: var(--text-tertiary); }
+  .file-add { color: var(--status-added); font-weight: 600; }
+  .file-del { color: var(--status-deleted); font-weight: 600; }
+  
+  /* Stage section */
+  .stage-header {
+    padding: 4px 12px;
+    background: rgba(26,127,55,0.06);
+    border-bottom: 1px solid rgba(26,127,55,0.15);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--status-added);
+    border-left: 2px solid rgba(26,127,55,0.4);
+  }
+  .unstaged-header {
+    padding: 4px 12px;
+    background: rgba(209,36,47,0.04);
+    border-bottom: 1px solid rgba(209,36,47,0.1);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--status-modified);
+    border-left: 2px solid rgba(209,36,47,0.3);
+  }
+  
+  /* Commit area */
+  .commit-area {
+    border-top: 1px solid var(--border-default);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  .commit-toolbar {
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-default);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .commit-input {
+    height: 60px;
+    padding: 8px;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 12px;
+    border: none;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    outline: none;
+    resize: none;
+  }
+  .commit-buttons {
+    padding: 4px 8px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-default);
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .btn {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn-secondary { background: var(--bg-tertiary); color: var(--text-secondary); border-color: var(--border-default); }
+  
+  /* Diff viewer */
+  .diff-panel {
+    flex: 1;
+    border-left: 1px solid var(--border-default);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-primary);
+  }
+  .diff-header {
+    padding: 6px 12px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-default);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .diff-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+  }
+  .diff-line { padding: 0 12px; white-space: pre; }
+  .diff-line.add { background: rgba(26,127,55,0.08); color: var(--status-added); }
+  .diff-line.del { background: rgba(207,34,46,0.08); color: var(--status-deleted); }
+  .diff-line.ctx { color: var(--text-secondary); }
+  .diff-line.hunk { color: var(--text-tertiary); padding: 4px 12px; }
+  
+  /* Status bar */
+  .statusbar {
+    height: 24px;
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border-default);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+  }
+  .sb-item { display: flex; align-items: center; gap: 3px; }
+  .sb-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .sb-dot.green { background: var(--status-added); }
+  .sb-dot.red { background: var(--status-deleted); }
+  .sb-dot.blue { background: var(--status-info); }
+  
+  /* AI Assistant floating panel */
+  .ai-panel {
+    position: fixed;
+    bottom: 36px;
+    right: 12px;
+    width: 420px;
+    height: 480px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
+  }
+  .ai-header {
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-default);
+    border-radius: 8px 8px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ai-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .ai-badge {
+    padding: 1px 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+    font-size: 10px;
+    color: var(--text-tertiary);
+    background: var(--bg-secondary);
+  }
+  .ai-badge.active { color: var(--accent); border-color: var(--accent); }
+  .ai-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .ai-msg-user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: white;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    max-width: 80%;
+  }
+  .ai-msg-assistant {
+    align-self: flex-start;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    max-width: 85%;
+    color: var(--text-primary);
+  }
+  .ai-msg-tool {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-family: 'SF Mono', Monaco, monospace;
+    color: var(--text-secondary);
+  }
+  .ai-tool-header {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 10px; color: var(--text-tertiary);
+  }
+  .ai-input-area {
+    border-top: 1px solid var(--border-default);
+    padding: 8px;
+    display: flex;
+    gap: 6px;
+    align-items: flex-end;
+  }
+  .ai-input {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 12px;
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    outline: none;
+    height: 32px;
+    resize: none;
+  }
+  .ai-send {
+    width: 32px; height: 32px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+  }
+  .ai-tokens {
+    padding: 2px 12px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-tertiary);
+    font-size: 10px;
+    color: var(--text-tertiary);
+    display: flex;
+    gap: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Title bar -->
+  <div class="titlebar">
+    <div class="titlebar-dot red"></div>
+    <div class="titlebar-dot yellow"></div>
+    <div class="titlebar-dot green"></div>
+    <div class="titlebar-title">PrismGit — prismgit</div>
+  </div>
+  
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <span class="tb-brand">🔷 PrismGit</span>
+    <div class="tb-divider"></div>
+    <div class="tb-btn"><span class="tb-icon">📋</span></div>
+    <div class="tb-btn"><span class="tb-icon">🔍</span></div>
+    <div class="tb-btn active"><span class="tb-icon">📝</span> Commit</div>
+    <div class="tb-btn"><span class="tb-icon">⬆️</span> Push</div>
+    <div class="tb-btn"><span class="tb-icon">⬇️</span> Pull</div>
+    <div class="tb-divider"></div>
+    <div class="tb-btn"><span class="tb-icon">🌿</span> Branch</div>
+    <div class="tb-btn"><span class="tb-icon">🔄</span></div>
+    <div class="tb-btn"><span class="tb-icon">⚡</span> AI</div>
+    <div style="flex:1"></div>
+    <div class="tb-sync">🔌 main → origin/main</div>
+    <div class="tb-divider"></div>
+    <div class="tb-btn"><span class="tb-icon">☀️</span></div>
+    <div class="tb-btn"><span class="tb-icon">⚙️</span></div>
+  </div>
+  
+  <!-- Main content -->
+  <div class="main">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="repo-header">
+        <span class="repo-icon">📁</span>
+        <div>
+          <div class="repo-name">prismgit</div>
+          <div class="repo-branch">main · 2↑ 0↓</div>
+        </div>
+      </div>
+      
+      <div class="nav-group">
+        <div class="nav-group-title">Working Tree</div>
+        <div class="nav-item active">
+          <span class="nav-icon">📝</span> Changes
+          <span class="nav-badge">3</span>
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">📊</span> History
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">📄</span> Diff
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">🔎</span> Search
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">📌</span> Blame
+        </div>
+      </div>
+      
+      <div class="nav-group">
+        <div class="nav-group-title">Workflows</div>
+        <div class="nav-item">
+          <span class="nav-icon">🌿</span> Git-Flow
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">⚙️</span> Bisect
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">🔀</span> Pull Requests
+        </div>
+      </div>
+      
+      <div class="nav-group">
+        <div class="nav-group-title">Refs</div>
+        <div class="nav-item">
+          <span class="nav-icon">🌿</span> Branches
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">🏷️</span> Tags
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">☁️</span> Remotes
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">↩️</span> Reflog
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">📦</span> Stashes
+        </div>
+      </div>
+      
+      <div class="nav-group">
+        <div class="nav-group-title">AI</div>
+        <div class="nav-item">
+          <span class="nav-icon">✨</span> AI Chat
+          <span class="nav-badge green">12</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Content: Changes page -->
+    <div class="content">
+      <div class="file-panel">
+        <div class="file-header">
+          <span style="width:16px"></span>
+          <span style="flex:1">Name</span>
+          <span style="width:74px">Changes</span>
+          <span style="width:50px">State</span>
+        </div>
+        
+        <div class="stage-header">Staged (2)</div>
+        <div class="file-row">
+          <span class="file-status A">A</span>
+          <span class="file-name">src/components/AiAssistant.tsx</span>
+          <span class="file-stats"><span class="file-add">+145</span> <span class="file-del">−3</span></span>
+          <span style="width:50px;font-size:10px;color:var(--status-added)">Staged</span>
+        </div>
+        <div class="file-row selected">
+          <span class="file-status M">M</span>
+          <span class="file-name">src/pages/SettingsPage.tsx</span>
+          <span class="file-stats"><span class="file-add">+89</span> <span class="file-del">−12</span></span>
+          <span style="width:50px;font-size:10px;color:var(--status-added)">Staged</span>
+        </div>
+        
+        <div class="unstaged-header">Unstaged (1)</div>
+        <div class="file-row">
+          <span class="file-status M">M</span>
+          <span class="file-name">src/lib/aiChat.ts</span>
+          <span class="file-stats"><span class="file-add">+67</span> <span class="file-del">−8</span></span>
+          <span style="width:50px;font-size:10px;color:var(--status-modified)">Modified</span>
+        </div>
+      </div>
+      
+      <!-- Commit area -->
+      <div class="commit-area">
+        <div class="commit-toolbar">
+          <span style="font-size:11px;color:var(--text-tertiary)">Commit message</span>
+          <div style="flex:1"></div>
+          <span style="font-size:10px;color:var(--accent);">✨ feat: cloud model picker + GET support</span>
+        </div>
+        <textarea class="commit-input" readonly>feat(ai): cloud model picker for all providers + proxyFetch GET support
+
+- CloudModelPicker fetches /models endpoint from any OpenAI-compatible provider
+- proxyFetch now supports GET method (was hardcoded to POST)
+- Auto-fetch on URL/API-key change with 1s debounce
+- Friendly error messages: 401 = bad API key, 0 = can't connect</textarea>
+        <div class="commit-buttons">
+          <button class="btn btn-primary">📝 Commit</button>
+          <button class="btn btn-secondary">🔀 Commit & Push</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Diff viewer -->
+    <div class="diff-panel" style="width:420px">
+      <div class="diff-header">📋 src/pages/SettingsPage.tsx — Staged changes</div>
+      <div class="diff-content">
+        <div class="diff-line hunk">@@ -1080,8 +1080,20 @@ export function SettingsPage() {</div>
+        <div class="diff-line ctx">                    value={settings.aiProvider || ''}</div>
+        <div class="diff-line ctx">                    onChange={(e) => {</div>
+        <div class="diff-line del">-                      const providerId = e.target.value;</div>
+        <div class="diff-line del">-                      setSetting('aiProvider', providerId);</div>
+        <div class="diff-line add">+                      const newProviderId = e.target.value;</div>
+        <div class="diff-line add">+                      const oldProviderId = settings.aiProvider || '';</div>
+        <div class="diff-line add">+                      // Save current provider's config before switching</div>
+        <div class="diff-line add">+                      if (oldProviderId) {</div>
+        <div class="diff-line add">+                        const configs = { ...(settings.aiProviderConfigs || {}) };</div>
+        <div class="diff-line add">+                        configs[oldProviderId] = {</div>
+        <div class="diff-line add">+                          url: settings.aiUrl,</div>
+        <div class="diff-line add">+                          apiKey: settings.aiApiKey,</div>
+        <div class="diff-line add">+                          model: settings.aiModel,</div>
+        <div class="diff-line add">+                        };</div>
+        <div class="diff-line ctx">                      }</div>
+        <div class="diff-line add">+                      setSetting('aiProvider', newProviderId);</div>
+        <div class="diff-line ctx">                    }}</div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- AI Assistant floating panel -->
+  <div class="ai-panel">
+    <div class="ai-header">
+      <span style="color:var(--accent)">✨</span>
+      <span class="ai-title">AI Assistant</span>
+      <span class="ai-badge active">prismgit</span>
+      <span class="ai-badge">Groq ▾</span>
+      <div style="flex:1"></div>
+      <span style="font-size:14px;color:var(--text-tertiary);cursor:pointer">⬇</span>
+      <span style="font-size:14px;color:var(--text-tertiary);cursor:pointer">🗑</span>
+      <span style="font-size:14px;color:var(--text-tertiary);cursor:pointer">✕</span>
+    </div>
+    <div class="ai-messages">
+      <div class="ai-msg-user">What changed since the last commit?</div>
+      <div class="ai-msg-tool">
+        <div class="ai-tool-header">🔧 get_status</div>
+        <div style="margin-top:2px;color:var(--text-tertiary)">▸ Current branch: main · 3 changed files</div>
+      </div>
+      <div class="ai-msg-assistant">You have <b>3 files</b> with changes since the last commit:<br><br>• <b>AiAssistant.tsx</b> — +145/−3 (staged)<br>• <b>SettingsPage.tsx</b> — +89/−12 (staged)<br>• <b>aiChat.ts</b> — +67/−8 (unstaged)<br><br>The main changes are in the AI Assistant — adding cloud model picker and GET method support.</div>
+    </div>
+    <div class="ai-tokens">
+      <span>↓ 1,234 in</span>
+      <span>↑ 567 out</span>
+      <span>∑ 1,234 ctx</span>
+    </div>
+    <div class="ai-input-area">
+      <input class="ai-input" placeholder="Ask about this repo..." />
+      <button class="ai-send">➤</button>
+    </div>
+  </div>
+  
+  <!-- Status bar -->
+  <div class="statusbar">
+    <div class="sb-item"><div class="sb-dot green"></div> main</div>
+    <div class="sb-item">→ origin/main</div>
+    <div class="sb-item"><div class="sb-dot blue"></div> 2↑</div>
+    <div class="sb-item">3 changed</div>
+    <div style="flex:1"></div>
+    <div class="sb-item">UTF-8</div>
+    <div class="sb-item">LF</div>
+    <div class="sb-item">TypeScript</div>
+    <div class="sb-item">v2.1.0</div>
+  </div>
+</div>
+</body>
+</html>

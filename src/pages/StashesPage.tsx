@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, RefreshCw, Plus, Trash, Download, Upload, Check, FileText, ChevronDown, ChevronRight, X, GitBranch } from '../components/icons';
+import { EmptyState } from '../components/EmptyState';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
-import { useToastStore } from '../stores/toastStore';
+import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type StashEntry, type DiffResult } from '../lib/api';
 import { formatDate, shortHash, copyToClipboard } from '../lib/utils';
@@ -13,10 +14,12 @@ import { cn } from '../lib/utils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useContextMenu } from '../lib/useContextMenu';
+import { useI18n } from '../lib/i18n';
 export function StashesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const toast = useToastStore();
+  const toast = useToastActions();
+  const { t } = useI18n();
   const showContextMenu = useContextMenu();
   const navigate = useNavigate();
   const [stashes, setStashes] = useState<StashEntry[]>([]);
@@ -35,7 +38,7 @@ export function StashesPage() {
       const result = await api.git.stashList(repo.path);
       setStashes(result);
     } catch (e) {
-      toast.error('Failed to load stashes', String(e));
+      toast.error(t('stashes.loadFailed'), String(e));
     } finally {
       setLoading(false);
     }
@@ -48,26 +51,26 @@ export function StashesPage() {
   const handleStashPush = async () => {
     try {
       await api.git.stashPush(repo.path, stashMessage || undefined, includeUntracked);
-      toast.success('Changes stashed');
+      toast.success(t('stashes.stashed'));
       setShowNewDialog(false);
       setStashMessage('');
       setIncludeUntracked(false);
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Stash failed', String(e));
+      toast.error(t('stashes.stashFailed'), String(e));
     }
   };
 
   const handlePop = async (stash: StashEntry) => {
     if (!(await confirmDialog({
-      title: `Pop stash@{${stash.index}}`,
-      message: `Apply the stashed changes to your working tree and remove the stash?\n\nStash message: "${stash.message}"`,
-      confirmLabel: 'Pop',
+      title: t('stashes.popStashAt', { index: stash.index }),
+      message: t('stashes.popConfirmMessage', { message: stash.message }),
+      confirmLabel: t('stashes.pop'),
     }))) return;
     try {
       await api.git.stashPop(repo.path, stash.index);
-      toast.success(`Stash@{${stash.index}} popped`);
+      toast.success(t('stashes.poppedStash', { index: stash.index }));
       // The popped stash no longer exists — clear the global selection if it pointed here
       if (useSelectionStore.getState().selectedStashIndex === stash.index) {
         useSelectionStore.getState().selectStash(null);
@@ -75,36 +78,36 @@ export function StashesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Stash pop failed', String(e));
+      toast.error(t('stashes.popFailed'), String(e));
     }
   };
 
   const handleApply = async (stash: StashEntry) => {
     try {
       await api.git.stashApply(repo.path, stash.index);
-      toast.success(`Stash@{${stash.index}} applied (stash kept)`);
+      toast.success(t('stashes.appliedKeptStash', { index: stash.index }));
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Stash apply failed', String(e));
+      toast.error(t('stashes.applyFailed'), String(e));
     }
   };
 
   const handleDrop = async (stash: StashEntry) => {
     if (!(await confirmDialog({
-      title: `Drop stash@{${stash.index}}`,
-      message: `This permanently deletes the stash.\n\nStash message: "${stash.message}"`,
-      confirmLabel: 'Drop',
+      title: t('stashes.dropStashAt', { index: stash.index }),
+      message: t('stashes.dropConfirmMessage', { message: stash.message }),
+      confirmLabel: t('stashes.drop'),
       danger: true,
     }))) return;
     try {
       await api.git.stashDrop(repo.path, stash.index);
-      toast.success(`Stash@{${stash.index}} dropped`);
+      toast.success(t('stashes.droppedStash', { index: stash.index }));
       if (useSelectionStore.getState().selectedStashIndex === stash.index) {
         useSelectionStore.getState().selectStash(null);
       }
       await load();
     } catch (e) {
-      toast.error('Stash drop failed', String(e));
+      toast.error(t('stashes.dropFailed'), String(e));
     }
   };
 
@@ -112,20 +115,20 @@ export function StashesPage() {
   // Useful when the stash no longer applies cleanly onto the current branch.
   const handleStashBranch = async (stash: StashEntry) => {
     const branchName = await promptDialog({
-      title: `Create branch from stash@{${stash.index}}`,
-      message: `A new branch is created from the stash's base commit and the stash is applied there.\n\nStash message: "${stash.message}"`,
-      confirmLabel: 'Create branch',
-      input: { placeholder: 'branch name' },
-      validate: (v) => (!v ? 'Enter the branch name' : /\s/.test(v) ? 'Branch name cannot contain spaces' : null),
+      title: t('stashes.branchTitle', { index: stash.index }),
+      message: t('stashes.branchMessage', { message: stash.message }),
+      confirmLabel: t('stashes.createBranchButton'),
+      input: { placeholder: t('stashes.branchNamePlaceholder') },
+      validate: (v) => (!v ? t('stashes.branchNameRequired') : /\s/.test(v) ? t('stashes.branchNameNoSpaces') : null),
     });
     if (!branchName || !branchName.trim()) return;
     try {
       await api.git.stashBranch(repo.path, branchName.trim(), stash.index);
-      toast.success(`Branch '${branchName.trim()}' created from stash@{${stash.index}} and stash applied`);
+      toast.success(t('stashes.branchCreated', { name: branchName.trim(), index: stash.index }));
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Stash branch failed', String(e));
+      toast.error(t('stashes.branchFailed'), String(e));
     }
   };
 
@@ -161,11 +164,11 @@ export function StashesPage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Stashes</span>
-          <span className="text-2xs text-text-tertiary">{stashes.length} entries</span>
+          <span className="text-sm font-medium">{t('stashes.title')}</span>
+          <span className="text-2xs text-text-tertiary">{t('stashes.entriesCount', { count: stashes.length })}</span>
         </div>
         <div className="flex items-center gap-2">
-          <button className="icon-btn" title="Refresh" onClick={load}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={load}>
             <RefreshCw size={13} />
           </button>
           <button
@@ -173,7 +176,7 @@ export function StashesPage() {
             onClick={() => setShowNewDialog(true)}
           >
             <Plus size={12} />
-            Stash Changes
+            {t('changes.stashChanges')}
           </button>
         </div>
       </div>
@@ -182,17 +185,14 @@ export function StashesPage() {
         {loading ? (
           <div className="empty-state">
             <div className="spinner mb-3" />
-            <div className="empty-state-title">Loading stashes...</div>
+            <div className="empty-state-title">{t('stashes.loading')}</div>
           </div>
         ) : stashes.length === 0 ? (
-          <div className="empty-state">
-            <Package size={48} className="empty-state-icon" />
-            <div className="empty-state-title">No stashes yet</div>
-            <div className="empty-state-desc">
-              Stashes save your uncommitted changes temporarily so you can switch
-              branches or pull updates without losing work. Click "Stash Changes" above.
-            </div>
-          </div>
+          <EmptyState
+            icon={Package}
+            title={t('stashes.empty')}
+            description={t('stashes.emptyDesc')}
+          />
         ) : (
           stashes.map((s) => (
             <div key={s.index} className={selectedStashIndex === s.index ? 'bg-accent/10 border-l-2 border-l-accent' : ''}>
@@ -202,20 +202,20 @@ export function StashesPage() {
                   // Select globally, then open in Diff
                   handleViewStash(s);
                 }}
-                title="Click to select and open in Diff tool"
+                title={t('stashes.rowTooltip')}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   showContextMenu([
-                    { label: 'View Stash (Diff tool)', clickId: 'view' },
+                    { label: t('stashes.viewMenu'), clickId: 'view' },
                     { type: 'separator' },
-                    { label: `Apply stash@{${s.index}}`, clickId: 'apply' },
-                    { label: `Pop stash@{${s.index}}...`, clickId: 'pop' },
-                    { label: 'Branch from Stash...', clickId: 'branch' },
+                    { label: t('stashes.applyItem', { index: s.index }), clickId: 'apply' },
+                    { label: t('stashes.popStashAtMenu', { index: s.index }), clickId: 'pop' },
+                    { label: t('stashes.branchMenu'), clickId: 'branch' },
                     { type: 'separator' },
-                    { label: `Drop stash@{${s.index}}...`, clickId: 'drop' },
+                    { label: t('stashes.dropStashAtMenu', { index: s.index }), clickId: 'drop' },
                     { type: 'separator' },
-                    { label: 'Copy Message', clickId: 'copy-msg' },
-                    { label: 'Copy Hash', clickId: 'copy-hash' },
+                    { label: t('stashes.copyMessage'), clickId: 'copy-msg' },
+                    { label: t('stashes.copyHash'), clickId: 'copy-hash' },
                   ], (action) => {
                     switch (action) {
                       case 'view': handleViewStash(s); break;
@@ -226,8 +226,8 @@ export function StashesPage() {
                       case 'pop': handlePop(s); break;
                       case 'branch': handleStashBranch(s); break;
                       case 'drop': handleDrop(s); break;
-                      case 'copy-msg': copyToClipboard(s.message); toast.success('Copied'); break;
-                      case 'copy-hash': copyToClipboard(s.hash); toast.success('Copied'); break;
+                      case 'copy-msg': copyToClipboard(s.message); toast.success(t('stashes.copied')); break;
+                      case 'copy-hash': copyToClipboard(s.hash); toast.success(t('stashes.copied')); break;
                     }
                   });
                 }}
@@ -245,35 +245,35 @@ export function StashesPage() {
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
                   <button
                     className="icon-btn !w-6 !h-6"
-                    title="Open in Diff tool"
+                    title={t('stashes.openInDiffTooltip')}
                     onClick={() => handleViewStash(s)}
                   >
                     <FileText size={12} />
                   </button>
                   <button
                     className="icon-btn !w-6 !h-6"
-                    title="Apply (keep stash)"
+                    title={t('stashes.applyKeptTooltip')}
                     onClick={() => handleApply(s)}
                   >
                     <Check size={12} />
                   </button>
                   <button
                     className="icon-btn !w-6 !h-6"
-                    title="Pop (apply + drop)"
+                    title={t('stashes.popTooltip')}
                     onClick={() => handlePop(s)}
                   >
                     <Upload size={12} />
                   </button>
                   <button
                     className="icon-btn !w-6 !h-6"
-                    title="Create branch from stash and apply it there (git stash branch)"
+                    title={t('stashes.branchTooltip')}
                     onClick={() => handleStashBranch(s)}
                   >
                     <GitBranch size={12} />
                   </button>
                   <button
                     className="icon-btn !w-6 !h-6 hover:!text-status-deleted"
-                    title="Drop (delete)"
+                    title={t('stashes.dropTooltip')}
                     onClick={() => handleDrop(s)}
                   >
                     <Trash size={12} />
@@ -287,18 +287,18 @@ export function StashesPage() {
 
       {showNewDialog && (
         <div
-          className="fixed inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
           onClick={() => setShowNewDialog(false)}
         >
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-medium mb-4">Stash Changes</h3>
+            <h3 className="text-base font-medium mb-4">{t('changes.stashChanges')}</h3>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Message (optional)</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('stashes.messageOptional')}</label>
                 <input
                   type="text"
                   className="w-full text-sm"
-                  placeholder="WIP: feature X"
+                  placeholder={t('stashes.messagePlaceholder')}
                   value={stashMessage}
                   autoFocus
                   onChange={(e) => setStashMessage(e.target.value)}
@@ -311,16 +311,16 @@ export function StashesPage() {
                   checked={includeUntracked}
                   onChange={(e) => setIncludeUntracked(e.target.checked)}
                 />
-                Include untracked files
+                {t('stashes.includeUntracked')}
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowNewDialog(false)}>
-                Cancel
+                {t('common.cancel')}
               </button>
               <button className="btn btn-primary" onClick={handleStashPush}>
                 <Download size={13} />
-                Stash
+                {t('toolbar.stash')}
               </button>
             </div>
           </div>

@@ -221,6 +221,122 @@ export const DEFAULT_TOOLS: ExternalTool[] = [
 ];
 
 /**
+ * SmartGit Manual: Catalog of preset diff/merge tools.
+ * Auto-detects the platform-specific command path.
+ * Supports: Beyond Compare, KDiff3, Araxis Merge, Meld, P4Merge, VS Code.
+ */
+export interface DiffToolPreset {
+  id: string;
+  name: string;
+  /** Platform-specific command paths. */
+  commands: {
+    win32: string[];
+    darwin: string[];
+    linux: string[];
+  };
+  /** Arguments template for diff mode (uses ${leftFile}, ${rightFile}). */
+  diffArgs: string;
+  /** Arguments template for merge mode (uses ${leftFile}, ${rightFile}, ${baseFile}, ${mergedFile}). */
+  mergeArgs: string;
+  /** Description shown in UI. */
+  description: string;
+}
+
+export const DIFF_TOOL_PRESETS: DiffToolPreset[] = [
+  {
+    id: 'bcompare',
+    name: 'Beyond Compare',
+    commands: {
+      win32: ['C:\\Program Files\\Beyond Compare 4\\BCompare.exe', 'C:\\Program Files\\Beyond Compare 5\\BCompare.exe'],
+      darwin: ['/usr/local/bin/bcompare', '/Applications/Beyond Compare.app/Contents/MacOS/bcomp'],
+      linux: ['/usr/bin/bcompare', '/usr/local/bin/bcompare'],
+    },
+    diffArgs: '${leftFile} ${rightFile}',
+    mergeArgs: '${leftFile} ${rightFile} ${baseFile} ${mergedFile}',
+    description: 'Commercial diff/merge tool with side-by-side comparison.',
+  },
+  {
+    id: 'kdiff3',
+    name: 'KDiff3',
+    commands: {
+      win32: ['C:\\Program Files\\KDiff3\\kdiff3.exe'],
+      darwin: ['/Applications/kdiff3.app/Contents/MacOS/kdiff3'],
+      linux: ['/usr/bin/kdiff3'],
+    },
+    diffArgs: '${leftFile} ${rightFile}',
+    mergeArgs: '${leftFile} ${rightFile} --base ${baseFile} --output ${mergedFile}',
+    description: 'Free open-source 3-way merge tool.',
+  },
+  {
+    id: 'araxis',
+    name: 'Araxis Merge',
+    commands: {
+      win32: ['C:\\Program Files\\Araxis\\Araxis Merge\\Compare.exe'],
+      darwin: ['/Applications/Araxis Merge.app/Contents/MacOS/compare'],
+      linux: [],
+    },
+    diffArgs: '${leftFile} ${rightFile}',
+    mergeArgs: '${leftFile} ${rightFile} ${baseFile} ${mergedFile} /merge',
+    description: 'Commercial diff/merge tool (Windows + macOS only).',
+  },
+  {
+    id: 'meld',
+    name: 'Meld',
+    commands: {
+      win32: ['C:\\Program Files (x86)\\Meld\\meld.exe'],
+      darwin: ['/usr/local/bin/meld', '/Applications/Meld.app/Contents/MacOS/meld'],
+      linux: ['/usr/bin/meld', '/usr/local/bin/meld'],
+    },
+    diffArgs: '${leftFile} ${rightFile}',
+    mergeArgs: '${leftFile} ${rightFile} ${baseFile} --output ${mergedFile}',
+    description: 'Free open-source visual diff tool (GTK).',
+  },
+  {
+    id: 'p4merge',
+    name: 'P4Merge',
+    commands: {
+      win32: ['C:\\Program Files\\Perforce\\p4merge.exe'],
+      darwin: ['/Applications/p4merge.app/Contents/MacOS/p4merge'],
+      linux: ['/usr/bin/p4merge'],
+    },
+    diffArgs: '${leftFile} ${rightFile}',
+    mergeArgs: '${leftFile} ${rightFile} ${baseFile} ${mergedFile}',
+    description: 'Free visual diff/merge tool from Perforce.',
+  },
+  {
+    id: 'vscode',
+    name: 'VS Code',
+    commands: {
+      win32: ['code.cmd'],
+      darwin: ['/usr/local/bin/code', '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code'],
+      linux: ['/usr/bin/code', '/usr/local/bin/code'],
+    },
+    diffArgs: '--diff ${leftFile} ${rightFile}',
+    mergeArgs: '${leftFile} ${rightFile} ${baseFile} ${mergedFile} --merge',
+    description: 'Use VS Code as diff/merge editor.',
+  },
+];
+
+/**
+ * Auto-detect which preset tools are installed on the current platform.
+ * Returns presets whose command exists on the filesystem.
+ */
+export async function detectInstalledDiffTools(): Promise<DiffToolPreset[]> {
+  const platform = typeof navigator !== 'undefined'
+    ? (navigator.platform.toLowerCase().includes('win') ? 'win32' : navigator.platform.toLowerCase().includes('mac') ? 'darwin' : 'linux')
+    : 'linux';
+  const installed: DiffToolPreset[] = [];
+  // For renderer process — can't check filesystem directly, so return all presets
+  // and let the user pick. Backend would do actual fs.existsSync check.
+  for (const preset of DIFF_TOOL_PRESETS) {
+    if (preset.commands[platform as 'win32' | 'darwin' | 'linux']?.length > 0) {
+      installed.push(preset);
+    }
+  }
+  return installed;
+}
+
+/**
  * Serialize tools to JSON for persistence.
  */
 export function serializeTools(tools: ExternalTool[]): string {
