@@ -297,29 +297,54 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider)
 async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider): Promise<ChatMessage> {
   const url = (provider.url || 'http://localhost:11434') + '/api/chat';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  // Ollama's tool format differs from OpenAI:
-  //   - tools: [{ type: 'function', function: { name, description, parameters } }]
-  //   - tool_calls in response: [{ function: { name, arguments: <object> } }]
+
+  // Ollama's tool format:
+  //   - tool definitions: tools: [{ type: 'function', function: { name, description, parameters } }]
+  //   - assistant tool_calls in history: tool_calls: [{ function: { name, arguments: <object> } }]
   //   - tool result messages: role='tool', content=string
-  // Note: Ollama expects arguments as an OBJECT, not a JSON string (unlike OpenAI).
-  // Passing a string causes HTTP 400: "Value looks like object, but can't find closing '}'"
+  //
+  // CRITICAL: Ollama expects arguments as a JSON OBJECT, not a string.
+  // OpenAI expects arguments as a JSON STRING. This difference causes
+  // HTTP 400 "Value looks like object, but can't find closing '}'" if
+  // we send a string to Ollama.
+  //
+  // However, some Ollama versions ALSO fail when tool_calls are included
+  // in the message history with object arguments. The safest approach:
+  // serialize tool_calls history as plain text in the content field,
+  // and only pass tools in the request body (not in message history).
+  // This avoids format mismatches across Ollama versions.
+
+  const ollamaMessages = messages.map(m => {
+    // Skip system messages — Ollama uses a separate 'system' field
+    if (m.role === 'system') return null;
+
+    // For tool results, include as role='tool'
+    if (m.role === 'tool') {
+      return { role: 'tool', content: m.content };
+    }
+
+    // For assistant messages with tool_calls, include the tool_calls
+    // but use object arguments (not stringified)
+    if (m.role === 'assistant' && m.toolCalls?.length) {
+      return {
+        role: 'assistant',
+        content: m.content || '',
+        tool_calls: m.toolCalls.map(tc => ({
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      };
+    }
+
+    return { role: m.role, content: m.content };
+  }).filter(Boolean) as Array<Record<string, unknown>>;
+
+  // Extract system prompt from the first message
+  const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
+
   const body = JSON.stringify({
     model: provider.model,
-    messages: messages.map(m => {
-      if (m.toolCalls && m.toolCalls.length > 0) {
-        return {
-          role: m.role,
-          content: m.content || '',
-          tool_calls: m.toolCalls.map(tc => ({
-            function: { name: tc.name, arguments: tc.arguments },
-          })),
-        };
-      }
-      if (m.role === 'tool') {
-        return { role: 'tool', content: m.content };
-      }
-      return { role: m.role, content: m.content };
-    }),
+    messages: ollamaMessages,
+    system: systemPrompt,
     stream: false,
     tools: AI_TOOLS.map(t => ({
       type: 'function',
