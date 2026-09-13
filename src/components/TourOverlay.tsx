@@ -13,7 +13,8 @@ import { TOUR_STEPS, markTourCompleted, type TourStep } from '../lib/tour';
  *    don't cover the spotlight with a single overlay's box-shadow trick).
  *  - Render a popover next to the rect (top/bottom/left/right/auto).
  *  - "Next" advances to the next step; "Skip tour" completes immediately.
- *  - On last step, "Done" marks the tour as completed in localStorage.
+ *  - On last step, "Done" marks the tour as completed in localStorage
+ *    AND the settings store (the latter survives localStorage wipes).
  *
  * The tour auto-cancels if the target element isn't found for a step
  * (e.g. on a page where it isn't mounted) — we log a warning and skip
@@ -142,21 +143,16 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
   };
 
   // When the checkbox is toggled ON, immediately:
-  // 1. Write 'prismgit-tour-completed' = '1' to localStorage
-  // 2. Close the overlay
-  // 3. Log for debugging
+  // 1. Mark the tour as completed via `markTourCompleted()` — this writes
+  //    to BOTH localStorage (sync, instant) AND the settings store (async,
+  //    survives localStorage wipes — which was the bug fix; previously
+  //    only localStorage was written, so Tauri webview partition resets
+  //    and "Clear site data" caused the tour to re-show on every launch).
+  // 2. Close the overlay.
   const handleDontShowChange = (checked: boolean) => {
     setDontShowAgain(checked);
     if (checked) {
-      try {
-        localStorage.setItem('prismgit-tour-completed', '1');
-        console.log('[Tour] markTourCompleted — localStorage set to "1"');
-        // Verify it was written
-        const verify = localStorage.getItem('prismgit-tour-completed');
-        console.log('[Tour] verify localStorage:', verify);
-      } catch (e) {
-        console.error('[Tour] Failed to set localStorage:', e);
-      }
+      markTourCompleted();
       onClose();
     }
   };

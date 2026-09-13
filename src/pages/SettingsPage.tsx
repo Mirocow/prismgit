@@ -1203,6 +1203,37 @@ smartgit.refresh.inspectEol=true
                 {t('settings.aiChatHistoryHint') || 'Conversation history is saved per-project in localStorage. Older messages beyond this limit are automatically dropped.'}
               </div>
             </div>
+
+            {/* Request Timeout — aborts the LLM call after N seconds.
+                Applies to BOTH commit-message generation and AI Assistant
+                chat. Default 300 (5 min) — slow local Ollama models on CPU
+                can take 2-4 min for a single response, so 300 keeps them
+                working while still bounding cloud API requests. */}
+            <div className="pt-3 border-t border-border-subtle">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                {t('settings.aiTimeoutSection') || 'Request Timeout'}
+              </div>
+              <label className="flex items-center gap-2 text-xs">
+                <span className="text-text-tertiary">{t('settings.aiRequestTimeoutLabel') || 'Response timeout (seconds)'}</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={3600}
+                  step={10}
+                  className="w-20 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                  value={settings.aiRequestTimeoutSec ?? 300}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    // Allow 0 (disable) — but NaN falls back to default 300.
+                    setSetting('aiRequestTimeoutSec', Number.isFinite(v) ? v : 300);
+                  }}
+                />
+                <span className="text-2xs text-text-tertiary">sec</span>
+              </label>
+              <div className="text-2xs text-text-tertiary mt-1">
+                {t('settings.aiRequestTimeoutHint') || 'How long to wait for the model to respond before aborting. Applies to commit-message generation and the AI Assistant chat. Increase for slow local models (Ollama on CPU), decrease for fast cloud APIs. Set 0 to disable (not recommended — hangs forever if the server stops responding).'}
+              </div>
+            </div>
           </div>
         </section>
         )}

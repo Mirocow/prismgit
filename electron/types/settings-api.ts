@@ -156,6 +156,15 @@ export interface AppSettings {
   aiCustomPrompt?: string;
   /** Max AI Assistant chat messages to persist per-project (default: 100). */
   aiChatHistoryLimit?: number;
+  /**
+   * AI request timeout in seconds. Applied to:
+   *   - commit-message generation (ai:generateCommitMessage IPC)
+   *   - AI Assistant chat (ai:chat IPC proxy)
+   * Default 300 (5 min). Increase for slow local models (Ollama with large
+   * models running on CPU), decrease for fast cloud APIs (OpenAI/Anthropic).
+   * Min 10, max 3600. Value of 0 disables the timeout (not recommended).
+   */
+  aiRequestTimeoutSec?: number;
   // === SmartGit Manual v25/26: Force Push policies ===
   /** Force-push policy: 'deny' | 'feature-only' | 'allow'. */
   forcePushPolicy?: 'deny' | 'feature-only' | 'allow';
@@ -184,6 +193,15 @@ export interface AppSettings {
    * now" in the sidebar still works. Default: true.
    */
   autoRefresh?: boolean;
+  /**
+   * Tour completion flag. When true, the first-run Tour overlay is NOT
+   * auto-shown on next app launch. Persisted in the settings store (in
+   * ADDITION to localStorage) so it survives localStorage wipes —
+   * e.g. Tauri webview partition resets, browser devtools "Clear site data",
+   * or any cache-cleaning flow that targets the renderer origin.
+   * User can still re-trigger the tour via Help → Restart Tour.
+   */
+  tourCompleted?: boolean;
   /**
    * How often (in seconds) to poll every repository in the list: fetch all
    * remotes and compute incoming/outgoing counters. Default 120, min 30.

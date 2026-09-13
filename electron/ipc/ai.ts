@@ -39,6 +39,11 @@ export function registerAiIpc(): void {
   // The renderer's aiChat.ts used fetch() directly, which is blocked by CORS
   // for Ollama (and any provider that doesn't send Access-Control-Allow-Origin).
   // This handler accepts the full request config and returns the response body.
+  //
+  // The request timeout is configurable via Settings → AI → Request timeout
+  // (default 300 s = 5 min, to accommodate slow local Ollama models). It is
+  // read from the settings store on every request so changes take effect
+  // immediately — no app restart needed.
   ipcMain.handle(
     'ai:chat',
     async (_e, config: {
@@ -48,7 +53,8 @@ export function registerAiIpc(): void {
       method?: string;
     }) => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120_000);
+      const timeoutMs = ai.getAiRequestTimeoutMs();
+      const timeout = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
       try {
         const res = await fetch(config.url, {
           method: config.method || 'POST',
@@ -65,7 +71,7 @@ export function registerAiIpc(): void {
           : msg;
         return { ok: false, status: 0, statusText: friendly, body: '' };
       } finally {
-        clearTimeout(timeout);
+        if (timeout) clearTimeout(timeout);
       }
     }
   );

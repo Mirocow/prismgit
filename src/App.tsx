@@ -149,22 +149,60 @@ export default function App() {
   const [showApplyPatch, setShowApplyPatch] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   // ONB-1 — first-run tour state. Auto-starts on first launch (when
-  // localStorage 'prismgit-tour-completed' is not set), can be re-triggered
+  // `tourCompleted` is not set in the settings store — also mirrored to
+  // localStorage for the fast synchronous check below), can be re-triggered
   // via Help menu (Help → Restart Tour — wired in electron/menu.ts via IPC).
   const [showTour, setShowTour] = useState(false);
   useEffect(() => {
-    // Auto-start tour on first launch.
-    // Check localStorage directly — the key 'prismgit-tour-completed' must
-    // be exactly '1' for the tour to be skipped.
+    // Auto-start tour on first launch — but ONLY after we've confirmed
+    // via BOTH the sync localStorage check (instant) AND the async
+    // settings store check (authoritative). The sync check prevents the
+    // tour from briefly flashing on screen before the async check
+    // completes. The async check is the source of truth — it survives
+    // localStorage wipes (Tauri webview partition resets, "Clear site
+    // data", cache cleaning) which had been causing the tour to re-show
+    // on every launch despite the user checking "Don't show again".
+    let cancelled = false;
+    const cleanupTimers: Array<() => void> = [];
     try {
-      const done = localStorage.getItem('prismgit-tour-completed');
-      if (done !== '1') {
+      // Fast sync check — if localStorage says '1', skip the tour
+      // immediately without waiting for the async settings store call.
+      // This is just an optimization; the async call below is still
+      // the authoritative check (we don't return early here, we just
+      // avoid the 800ms delay if we already know the tour is completed).
+      const localDone = localStorage.getItem('prismgit-tour-completed') === '1';
+
+      void (async () => {
+        if (cancelled) return;
+        // Authoritative check via settings store. Also handles legacy
+        // migration: if localStorage says done but settings store doesn't,
+        // we write it back so future launches aren't dependent on
+        // localStorage survival.
+        let done = localDone;
+        try {
+          const stored = await api.settings.get<boolean>('tourCompleted');
+          if (stored === true) {
+            done = true;
+          } else if (localDone) {
+            // Legacy migration — promote localStorage flag to settings store.
+            try { await api.settings.set('tourCompleted', true); } catch { /* ignore */ }
+          }
+        } catch { /* settings store unavailable — fall back to localDone */ }
+
+        if (cancelled || done) return;
         // Defer until the rest of the UI has mounted so the spotlight
         // targets exist in the DOM.
-        const t = setTimeout(() => setShowTour(true), 800);
-        return () => clearTimeout(t);
-      }
+        const t = setTimeout(() => {
+          if (!cancelled) setShowTour(true);
+        }, 800);
+        cleanupTimers.push(() => clearTimeout(t));
+      })();
     } catch { /* SSR / test env */ }
+
+    return () => {
+      cancelled = true;
+      cleanupTimers.forEach(fn => fn());
+    };
   }, []);
   // Bug fix: safety timeout — if the tour overlay ever gets stuck (e.g.
   // an error prevents the user from dismissing it, or all spotlight
@@ -175,6 +213,7 @@ export default function App() {
     const t = setTimeout(() => {
       setShowTour(false);
       try { localStorage.setItem('prismgit-tour-completed', '1'); } catch {}
+      try { void api.settings.set('tourCompleted', true); } catch { /* ignore */ }
     }, 5 * 60_000);
     return () => clearTimeout(t);
   }, [showTour]);
