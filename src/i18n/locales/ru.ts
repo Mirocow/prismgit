@@ -9,6 +9,7 @@ export const ru: Record<string, string> = {
   'common.delete': 'Удалить',
   'common.checkout': 'Переключиться',
   'common.remove': 'Убрать',
+  'common.skip': 'Пропустить',
   'common.add': 'Добавить',
   'common.create': 'Создать',
   'common.edit': 'Изменить',
@@ -47,6 +48,15 @@ export const ru: Record<string, string> = {
   'nav.submodules': 'Подмодули',
   'nav.subtrees': 'Поддеревья',
   'nav.lfs': 'Git LFS',
+
+  // LFS health check
+  'lfs.healthCheckTitle': 'Git LFS настроен, но не установлен',
+  'lfs.healthCheckMessage': 'Этот репозиторий использует Git LFS (в .gitattributes есть LFS-фильтры), но git-lfs не установлен в системе.\n\nЭто может вызывать ошибки при checkout, restore и других git-операциях. Выберите вариант:\n\n• Удалить LFS-фильтр — удаляет строки filter=lfs из .gitattributes (закоммитьте изменение, чтобы сделать его постоянным)\n• Пропустить — продолжить с отключённым LFS (файлы под LFS показывают pointer-контент)',
+  'lfs.removeFilter': 'Удалить LFS-фильтр',
+  'lfs.skip': 'Пропустить',
+  'lfs.filterRemoved': 'Удалено {count} строк(и) LFS-фильтра из .gitattributes. Закоммитьте изменение, чтобы сделать его постоянным.',
+  'lfs.noFilterFound': 'LFS-фильтры не найдены в .gitattributes.',
+  'lfs.skipHint': 'LFS пропущен. Установите git-lfs с https://git-lfs.com для полной поддержки LFS.',
   'nav.notes': 'Заметки',
   'nav.settings': 'Настройки',
   'nav.favorites': 'Избранное',

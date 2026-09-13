@@ -503,6 +503,10 @@ export interface GitApi {
   lfsPush: (repoPath: string) => Promise<void>;
   lfsFetch: (repoPath: string) => Promise<void>;
   lfsInstall: (repoPath: string) => Promise<void>;
+  /** Detect if .gitattributes has LFS filter rules (filter=lfs / diff=lfs / merge=lfs). */
+  detectLfsConfigured: (repoPath: string) => Promise<boolean>;
+  /** Remove LFS filter lines from .gitattributes. Returns number of lines removed. */
+  removeLfsFilter: (repoPath: string) => Promise<number>;
   lfsTrack: (repoPath: string, patterns: string[]) => Promise<void>;
   lfsList: (repoPath: string) => Promise<string[]>;
 

@@ -4055,6 +4055,68 @@ export async function lfsInstall(repoPath: string): Promise<void> {
   await git.raw(['lfs', 'install']);
 }
 
+/**
+ * Detect whether the repo has LFS filter rules configured in .gitattributes.
+ *
+ * Returns true if `.gitattributes` contains lines like:
+ *   *.mp4 filter=lfs diff=lfs merge=lfs -text
+ *   *.zip filter=lfs diff=lfs merge=lfs -text
+ *
+ * This is used by the LFS health check on repo open — if LFS is configured
+ * but git-lfs is NOT installed, the user is prompted to either:
+ *   1. Install git-lfs (open https://git-lfs.com in browser)
+ *   2. Remove the LFS filter rules from .gitattributes (clean up)
+ *   3. Skip (continue with GIT_LFS_SKIP_SMUDGE=1 — current default)
+ */
+export async function detectLfsConfigured(repoPath: string): Promise<boolean> {
+  const attrsPath = path.join(repoPath, '.gitattributes');
+  try {
+    if (!fs.existsSync(attrsPath)) return false;
+    const content = fs.readFileSync(attrsPath, 'utf8');
+    // Match LFS filter lines: "filter=lfs" or "diff=lfs" or "merge=lfs"
+    return /filter\s*=\s*lfs|diff\s*=\s*lfs|merge\s*=\s*lfs/i.test(content);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Remove LFS filter rules from .gitattributes.
+ *
+ * Removes ALL lines containing "filter=lfs", "diff=lfs", or "merge=lfs"
+ * from the repo's .gitattributes file. Non-LFS rules (e.g. "text=auto",
+ * "eol=lf") are preserved.
+ *
+ * After removal, the LFS-tracked files will be treated as regular files
+ * — no filter applied. The user can commit the .gitattributes change to
+ * permanently disable LFS for this repo.
+ *
+ * Returns the number of lines removed.
+ */
+export async function removeLfsFilter(repoPath: string): Promise<number> {
+  const attrsPath = path.join(repoPath, '.gitattributes');
+  try {
+    if (!fs.existsSync(attrsPath)) return 0;
+    const content = fs.readFileSync(attrsPath, 'utf8');
+    const lines = content.split('\n');
+    const kept: string[] = [];
+    let removed = 0;
+    for (const line of lines) {
+      if (/filter\s*=\s*lfs|diff\s*=\s*lfs|merge\s*=\s*lfs/i.test(line)) {
+        removed++;
+      } else {
+        kept.push(line);
+      }
+    }
+    if (removed > 0) {
+      fs.writeFileSync(attrsPath, kept.join('\n'), 'utf8');
+    }
+    return removed;
+  } catch {
+    return 0;
+  }
+}
+
 export async function lfsTrack(repoPath: string, patterns: string[]): Promise<void> {
   const git = getGit(repoPath);
   for (const p of patterns) {

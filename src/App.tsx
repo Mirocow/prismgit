@@ -1310,11 +1310,60 @@ export default function App() {
       // Default landing page is Changes (per user request). Even if the user
       // was on Settings or another page, opening a repo should show it first.
       navigate(pendingPage || '/changes');
+      // LFS health check — detect if the repo has LFS filter rules in
+      // .gitattributes but git-lfs is NOT installed. If so, offer the user
+      // a choice: install git-lfs, remove the LFS filter, or skip.
+      void checkLfsHealth(currentRepo.path);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRepo?.path]);
 
   const handleFind = useCallback(() => setShowFind(true), []);
+
+  /**
+   * LFS health check — runs when a repository is opened.
+   *
+   * Detects: .gitattributes has LFS filter rules + git-lfs is NOT installed.
+   * If so, shows a dialog offering 3 choices:
+   *   1. "Open git-lfs.com" — opens the download page in the browser
+   *   2. "Remove LFS filter" — removes all filter=lfs/diff=lfs/merge=lfs
+   *      lines from .gitattributes (user should commit the change)
+   *   3. "Skip" — continues silently (GIT_LFS_SKIP_SMUDGE=1 is already set
+   *      globally, so LFS-tracked files show pointer content)
+   *
+   * The check runs ONCE per repo open — not on every status refresh.
+   */
+  const checkLfsHealth = useCallback(async (repoPath: string) => {
+    try {
+      const [configured, installed] = await Promise.all([
+        api.git.detectLfsConfigured(repoPath),
+        api.git.isLfsInstalled(repoPath),
+      ]);
+      if (!configured || installed) return; // no problem
+      // LFS configured but not installed → ask the user
+      const action = await confirmDialog({
+        title: i18nT('lfs.healthCheckTitle'),
+        message: i18nT('lfs.healthCheckMessage'),
+        confirmLabel: i18nT('lfs.removeFilter'),
+        cancelLabel: i18nT('lfs.skip'),
+      });
+      if (action) {
+        const removed = await api.git.removeLfsFilter(repoPath);
+        if (removed > 0) {
+          toast.success(i18nT('lfs.filterRemoved', { count: removed }));
+          await refreshStatus(repoPath);
+        } else {
+          toast.info(i18nT('lfs.noFilterFound'));
+        }
+      } else {
+        // User chose "Skip" — open the download page anyway as a hint.
+        toast.info(i18nT('lfs.skipHint'), i18nT('toast.git.lfsNotInstalled'));
+      }
+    } catch {
+      // LFS check failed — not critical, continue silently.
+      // GIT_LFS_SKIP_SMUDGE=1 is already set, so the app won't crash.
+    }
+  }, [toast, refreshStatus]);
 
   // ===== Deep links (View → Go to / Copy Deep Link, Command Palette) =====
   const handleCopyDeepLink = useCallback(() => {

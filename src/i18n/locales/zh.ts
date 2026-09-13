@@ -9,6 +9,7 @@ export const zh: Record<string, string> = {
   'common.delete': '删除',
   'common.checkout': '检出',
   'common.remove': '移除',
+  'common.skip': '跳过',
   'common.add': '添加',
   'common.create': '创建',
   'common.edit': '编辑',
@@ -47,6 +48,15 @@ export const zh: Record<string, string> = {
   'nav.submodules': '子模块',
   'nav.subtrees': '子树',
   'nav.lfs': 'Git LFS',
+
+  // LFS health check
+  'lfs.healthCheckTitle': 'Git LFS 已配置但未安装',
+  'lfs.healthCheckMessage': '此仓库使用 Git LFS（.gitattributes 中有 LFS 过滤器规则），但系统中未安装 git-lfs。\n\n这可能导致 checkout、restore 和其他 git 操作出错。选择一个选项：\n\n• 移除 LFS 过滤器 — 从 .gitattributes 中删除 filter=lfs 行（提交更改以使其永久生效）\n• 跳过 — 继续使用 LFS 已禁用（LFS 跟踪的文件显示指针内容）',
+  'lfs.removeFilter': '移除 LFS 过滤器',
+  'lfs.skip': '跳过',
+  'lfs.filterRemoved': '从 .gitattributes 中移除了 {count} 行 LFS 过滤器规则。提交更改以使其永久生效。',
+  'lfs.noFilterFound': '在 .gitattributes 中未找到 LFS 过滤器规则。',
+  'lfs.skipHint': 'LFS 已跳过。从 https://git-lfs.com 安装 git-lfs 以获得完整 LFS 支持。',
   'nav.notes': '备注',
   'nav.settings': '设置',
   'nav.favorites': '收藏夹',

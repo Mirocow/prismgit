@@ -328,6 +328,8 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:lfsPush', (_e, p: string) => wrap(gitService.lfsPush)(p));
   ipcMain.handle('git:lfsFetch', (_e, p: string) => wrap(gitService.lfsFetch)(p));
   ipcMain.handle('git:lfsInstall', (_e, p: string) => wrap(gitService.lfsInstall)(p));
+  ipcMain.handle('git:detectLfsConfigured', (_e, p: string) => wrap(gitService.detectLfsConfigured)(p));
+  ipcMain.handle('git:removeLfsFilter', (_e, p: string) => wrap(gitService.removeLfsFilter)(p));
   ipcMain.handle('git:lfsTrack', (_e, p: string, patterns: string[]) => wrap(gitService.lfsTrack)(p, patterns));
   ipcMain.handle('git:lfsList', (_e, p: string) => wrap(gitService.lfsList)(p));
 

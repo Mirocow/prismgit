@@ -9,6 +9,7 @@ export const de: Record<string, string> = {
   'common.delete': 'Löschen',
   'common.checkout': 'Auschecken',
   'common.remove': 'Entfernen',
+  'common.skip': 'Überspringen',
   'common.add': 'Hinzufügen',
   'common.create': 'Erstellen',
   'common.edit': 'Bearbeiten',
@@ -47,6 +48,15 @@ export const de: Record<string, string> = {
   'nav.submodules': 'Submodule',
   'nav.subtrees': 'Subtrees',
   'nav.lfs': 'Git LFS',
+
+  // LFS health check
+  'lfs.healthCheckTitle': 'Git LFS ist konfiguriert, aber nicht installiert',
+  'lfs.healthCheckMessage': 'Dieses Repository verwendet Git LFS (.gitattributes hat LFS-Filterregeln), aber git-lfs ist nicht installiert.\n\nDies kann Fehler bei Checkout, Restore und anderen Git-Operationen verursachen. Wählen Sie eine Option:\n\n• LFS-Filter entfernen — entfernt filter=lfs-Zeilen aus .gitattributes (committen Sie die Änderung, um sie dauerhaft zu machen)\n• Überspringen — mit deaktiviertem LFS fortfahren (LFS-verfolgte Dateien zeigen Pointer-Inhalt)',
+  'lfs.removeFilter': 'LFS-Filter entfernen',
+  'lfs.skip': 'Überspringen',
+  'lfs.filterRemoved': '{count} LFS-Filter-Zeile(n) aus .gitattributes entfernt. Committen Sie die Änderung, um sie dauerhaft zu machen.',
+  'lfs.noFilterFound': 'Keine LFS-Filterregeln in .gitattributes gefunden.',
+  'lfs.skipHint': 'LFS übersprungen. Installieren Sie git-lfs von https://git-lfs.com für vollständige LFS-Unterstützung.',
   'nav.notes': 'Notizen',
   'nav.settings': 'Einstellungen',
   'nav.favorites': 'Favoriten',

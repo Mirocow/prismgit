@@ -204,6 +204,8 @@ const api = {
     lfsPush: (repoPath: string) => ipcRenderer.invoke('git:lfsPush', repoPath),
     lfsFetch: (repoPath: string) => ipcRenderer.invoke('git:lfsFetch', repoPath),
     lfsInstall: (repoPath: string) => ipcRenderer.invoke('git:lfsInstall', repoPath),
+    detectLfsConfigured: (repoPath: string) => ipcRenderer.invoke('git:detectLfsConfigured', repoPath),
+    removeLfsFilter: (repoPath: string) => ipcRenderer.invoke('git:removeLfsFilter', repoPath),
     lfsTrack: (repoPath: string, patterns: string[]) => ipcRenderer.invoke('git:lfsTrack', repoPath, patterns),
     lfsList: (repoPath: string) => ipcRenderer.invoke('git:lfsList', repoPath),
 

@@ -9,6 +9,7 @@ export const en: Record<string, string> = {
   'common.delete': 'Delete',
   'common.checkout': 'Checkout',
   'common.remove': 'Remove',
+  'common.skip': 'Skip',
   'common.add': 'Add',
   'common.create': 'Create',
   'common.edit': 'Edit',
@@ -47,6 +48,15 @@ export const en: Record<string, string> = {
   'nav.submodules': 'Submodules',
   'nav.subtrees': 'Subtrees',
   'nav.lfs': 'Git LFS',
+
+  // LFS health check
+  'lfs.healthCheckTitle': 'Git LFS is configured but not installed',
+  'lfs.healthCheckMessage': 'This repository uses Git LFS (.gitattributes has LFS filter rules), but git-lfs is not installed on your system.\n\nThis can cause errors with checkout, restore, and other git operations. Choose an option:\n\n• Remove LFS filter — removes filter=lfs lines from .gitattributes (commit the change to make it permanent)\n• Skip — continue with LFS disabled (LFS-tracked files show pointer content)',
+  'lfs.removeFilter': 'Remove LFS filter',
+  'lfs.skip': 'Skip',
+  'lfs.filterRemoved': 'Removed {count} LFS filter line(s) from .gitattributes. Commit the change to make it permanent.',
+  'lfs.noFilterFound': 'No LFS filter rules found in .gitattributes.',
+  'lfs.skipHint': 'LFS skipped. Install git-lfs from https://git-lfs.com for full LFS support.',
   'nav.notes': 'Notes',
   'nav.settings': 'Settings',
   'nav.favorites': 'Favorites',
