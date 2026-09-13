@@ -6,6 +6,33 @@ import { getSetting } from './storage.js';
 import type { RemoteCredential } from '../types/settings-api.js';
 import type { PushRefStatus, PushResult, PushVerification } from '../types/git-api.js';
 import { BrowserWindow } from 'electron';
+
+/**
+ * Global LFS skip — prevents git from invoking the git-lfs filter-process
+ * for ANY operation. This is set on EVERY simple-git instance via the
+ * `env` option.
+ *
+ * WHY: When a repo has `.gitattributes` with LFS filter rules but git-lfs
+ * is NOT installed on the user's machine, every git command that touches
+ * LFS-tracked files (status, restore, checkout, diff, add, commit) crashes
+ * with:
+ *   "git-lfs filter-process: git-lfs: command not found"
+ *   "fatal: the remote end hung up unexpectedly"
+ *
+ * Setting GIT_LFS_SKIP_SMUDGE=1 tells git to skip the LFS smudge/clean
+ * filter entirely. LFS-tracked files show their POINTER content (not the
+ * real binary), which is perfectly fine for:
+ *   - status (shows M/A/D correctly)
+ *   - diff (shows the pointer text diff)
+ *   - restore/checkout (restores the pointer content, not the binary)
+ *   - add/commit (stages the pointer, not the binary)
+ *
+ * The user can install git-lfs separately if they need actual LFS file
+ * operations (git lfs pull, git lfs push, etc.) — those go through the
+ * lfsPull/lfsPush functions which DON'T use this env var (they explicitly
+ * need git-lfs).
+ */
+const GIT_ENV_LFS_SKIP = { GIT_LFS_SKIP_SMUDGE: '1' };
 import type {
   StatusResult,
   LogEntry,
@@ -130,7 +157,7 @@ function getGit(repoPath: string): SimpleGit {
       binary: 'git',
       maxConcurrentProcesses: 2,
       trimmed: false,
-    });
+    }).env(GIT_ENV_LFS_SKIP);
     gitCache.set(repoPath, git);
   }
   return git;
@@ -217,7 +244,7 @@ async function detectRepoState(repoPath: string, git?: SimpleGit) {
 
 export async function isRepo(targetPath: string): Promise<boolean> {
   try {
-    const git = simpleGit({ baseDir: targetPath });
+    const git = simpleGit({ baseDir: targetPath }).env(GIT_ENV_LFS_SKIP);
     return await git.checkIsRepo();
   } catch {
     return false;
@@ -1915,7 +1942,7 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
   if (summary.hasRemote) {
     const checked = getBackgroundFetchRemotes(repoPath).filter((n) => summary.remotes.includes(n));
     if (checked.length > 0) {
-      const fetchGit = simpleGit({ baseDir: repoPath, binary: 'git' })
+      const fetchGit = simpleGit({ baseDir: repoPath, binary: 'git' }).env(GIT_ENV_LFS_SKIP)
         .env({ GIT_TERMINAL_PROMPT: '0' });
       const perRemote = async (name: string): Promise<void> => {
         const authArgs = await remoteNetworkArgs(repoPath, name);
@@ -3004,7 +3031,7 @@ export async function submodules(repoPath: string): Promise<SubmoduleInfo[]> {
     let currentCommit = '';
     let trackedCommit = '';
     try {
-      const subGit = simpleGit({ baseDir: absSubPath });
+      const subGit = simpleGit({ baseDir: absSubPath }).env(GIT_ENV_LFS_SKIP);
       const subStatus = await subGit.status();
       upToDate = subStatus.isClean();
       currentCommit = await subGit.revparse(['HEAD']);
@@ -3088,7 +3115,7 @@ export async function clone(
   targetPath: string,
   options: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean } = {}
 ): Promise<string> {
-  const git = simpleGit();
+  const git = simpleGit().env(GIT_ENV_LFS_SKIP);
   const args: string[] = ['clone'];
   if (options.depth) args.push('--depth', String(options.depth));
   if (options.branch) args.push('--branch', options.branch);
@@ -3101,7 +3128,7 @@ export async function clone(
 }
 
 export async function init(targetPath: string, bare = false): Promise<void> {
-  const git = simpleGit({ baseDir: targetPath });
+  const git = simpleGit({ baseDir: targetPath }).env(GIT_ENV_LFS_SKIP);
   await git.init(bare);
   invalidateCache();
 }
@@ -3674,7 +3701,7 @@ export async function editCommitMessage(
       // simple-git blocks `-c core.editor` on the default instance — the
       // non-HEAD reword path silently always failed. An unsafe instance is
       // required for interactive-rebase automation.
-      const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } });
+      const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
       // Rewording the ROOT commit: rebase needs --root there (same parent-
       // counting probe as squashCommits — rev-parse --quiet never throws).
       let rootCase = false;
@@ -4048,7 +4075,7 @@ export async function splitCommit(repoPath: string, hash: string): Promise<{ sta
   // Dedicated instance with unsafe.allowUnsafeEditor: simple-git blocks
   // `-c sequence.editor=...` on the default instance, which made splitCommit
   // fail silently (always {started:false}) despite valid git commands.
-  const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } });
+  const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
   // Start an interactive rebase with "edit" for the target commit
   // This will stop at the commit, allowing the user to split it
   try {
@@ -4464,7 +4491,7 @@ export async function showBuffer(repoPath: string, args: string[]): Promise<Buff
  * Returns when the clone is complete.
  */
 export async function mirror(remoteUrl: string, targetPath: string): Promise<void> {
-  const git = simpleGit();
+  const git = simpleGit().env(GIT_ENV_LFS_SKIP);
   await git.mirror(remoteUrl, targetPath);
 }
 
@@ -5449,7 +5476,7 @@ export async function clonePartial(
   if (options?.depth) args.push('--depth=' + options.depth);
   if (options?.branch) args.push('--branch=' + options.branch, '--single-branch');
   if (options?.recursive) args.push('--recursive');
-  const git = simpleGit();
+  const git = simpleGit().env(GIT_ENV_LFS_SKIP);
   const result = await git.raw(args);
   invalidateCache();
   return result || targetPath;
@@ -5461,7 +5488,7 @@ export async function setupCredentialHelper(repoPath: string): Promise<void> {
   // ("Configuring credential.helper is not permitted without enabling
   // allowUnsafeCredentialHelper") — the old code swallowed that error, so this
   // function silently did nothing. Use an unsafe instance and actually set it.
-  const git = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeCredentialHelper: true } });
+  const git = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeCredentialHelper: true } }).env(GIT_ENV_LFS_SKIP);
   try {
     await git.addConfig('credential.helper', 'store', false /* replace-all */, 'local');
   } catch {
@@ -5659,7 +5686,7 @@ export async function squashCommits(
     // pitfall splitCommit documents) — an unsafe instance is MANDATORY here,
     // otherwise the rebase always fails with "Configuring core.editor is not
     // permitted without enabling allowUnsafeEditor".
-    const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } });
+    const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
     // fromHash may be the ROOT commit — rebase needs --root there. NOTE: a
     // `rev-parse --verify --quiet <hash>^` probe does NOT work: it exits 1
     // with EMPTY output and simple-git resolves that (no stderr → no throw).
