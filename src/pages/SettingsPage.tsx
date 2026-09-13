@@ -1083,40 +1083,42 @@ smartgit.refresh.inspectEol=true
                   <select
                     className="w-full text-sm bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
                     value={settings.aiProvider || ''}
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const newProviderId = e.target.value;
                       const oldProviderId = settings.aiProvider || '';
-                      // ── Save the CURRENT provider's config before switching ──
-                      // Only save non-empty values — don't overwrite a previously
-                      // saved config with empty values if the user hasn't set them.
+                      // ── 1. Save current provider's config ──
+                      // Read current flat values and merge into configs.
+                      const currentUrl = settings.aiUrl || '';
+                      const currentApiKey = settings.aiApiKey || '';
+                      const currentModel = settings.aiModel || '';
+                      const existingConfigs = settings.aiProviderConfigs || {};
+                      const updatedConfigs = { ...existingConfigs };
                       if (oldProviderId) {
-                        const configs = { ...(settings.aiProviderConfigs || {}) };
-                        const existing = configs[oldProviderId] || {};
-                        configs[oldProviderId] = {
-                          url: settings.aiUrl || existing.url || undefined,
-                          apiKey: settings.aiApiKey || existing.apiKey || undefined,
-                          model: settings.aiModel || existing.model || undefined,
+                        const existing = updatedConfigs[oldProviderId] || {};
+                        updatedConfigs[oldProviderId] = {
+                          url: currentUrl || existing.url,
+                          apiKey: currentApiKey || existing.apiKey,
+                          model: currentModel || existing.model,
                         };
-                        setSetting('aiProviderConfigs', configs);
                       }
-                      // ── Switch to the new provider ──
-                      setSetting('aiProvider', newProviderId);
+                      // ── 2. Get new provider's saved config or defaults ──
                       if (newProviderId) {
                         const preset = getProviderPreset(newProviderId);
-                        const savedConfig = settings.aiProviderConfigs?.[newProviderId];
-                        // Restore saved config OR use preset defaults.
-                        // DON'T overwrite with empty string if there's no saved
-                        // API key — leave the field as-is so the user can type it.
-                        setSetting('aiUrl', savedConfig?.url ?? preset.defaultUrl);
-                        setSetting('aiModel', savedConfig?.model ?? preset.defaultModel);
-                        // Only set API key if we have a SAVED one — don't clear
-                        // the field if the user hasn't saved one yet.
-                        if (savedConfig?.apiKey) {
-                          setSetting('aiApiKey', savedConfig.apiKey);
-                        }
-                        // If switching to a provider that has NO saved config,
-                        // don't clear the API key — it might be the same key
-                        // (e.g. OpenRouter and Z.ai could share a key).
+                        const savedConfig = updatedConfigs[newProviderId];
+                        const newUrl = savedConfig?.url || preset.defaultUrl;
+                        const newModel = savedConfig?.model || preset.defaultModel;
+                        const newApiKey = savedConfig?.apiKey || '';
+                        // ── 3. Apply ALL settings atomically ──
+                        await Promise.all([
+                          setSetting('aiProviderConfigs', updatedConfigs),
+                          setSetting('aiProvider', newProviderId),
+                          setSetting('aiUrl', newUrl),
+                          setSetting('aiModel', newModel),
+                          setSetting('aiApiKey', newApiKey),
+                        ]);
+                      } else {
+                        // Provider set to empty (disabled)
+                        await setSetting('aiProvider', '');
                       }
                     }}
                   >

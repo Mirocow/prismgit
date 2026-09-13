@@ -431,31 +431,46 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   // Per-provider configs (URL + API key + model) are saved/restored from
   // aiProviderConfigs so the user doesn't re-enter credentials on each switch.
   const [showProviderMenu, setShowProviderMenu] = useState(false);
-  const switchProvider = useCallback((newProviderId: string) => {
+  const switchProvider = useCallback(async (newProviderId: string) => {
     const oldProviderId = settings?.aiProvider || '';
-    // Save current provider's config — only non-empty values, don't
-    // overwrite previously saved config with empty values.
-    if (oldProviderId && setSetting) {
-      const configs = { ...(settings.aiProviderConfigs || {}) };
-      const existing = configs[oldProviderId] || {};
-      configs[oldProviderId] = {
-        url: settings.aiUrl || existing.url || undefined,
-        apiKey: settings.aiApiKey || existing.apiKey || undefined,
-        model: settings.aiModel || existing.model || undefined,
+    // ── 1. Save current provider's config to aiProviderConfigs ──
+    // Read the CURRENT flat values (aiUrl, aiApiKey, aiModel) and merge
+    // them into the configs store. We use functional updates to avoid
+    // stale-closure issues — settings in this closure may be outdated
+    // by the time the async setSetting calls complete.
+    const currentUrl = settings?.aiUrl || '';
+    const currentApiKey = settings?.aiApiKey || '';
+    const currentModel = settings?.aiModel || '';
+
+    // Build the updated configs map — merge old + new.
+    const existingConfigs = settings?.aiProviderConfigs || {};
+    const updatedConfigs = { ...existingConfigs };
+    if (oldProviderId) {
+      const existing = updatedConfigs[oldProviderId] || {};
+      updatedConfigs[oldProviderId] = {
+        url: currentUrl || existing.url,
+        apiKey: currentApiKey || existing.apiKey,
+        model: currentModel || existing.model,
       };
-      setSetting('aiProviderConfigs', configs);
     }
-    // Switch to new provider — restore saved config or use preset defaults.
-    setSetting('aiProvider', newProviderId);
+
+    // ── 2. Get the new provider's saved config or defaults ──
     const preset = getProviderPreset(newProviderId);
-    const savedConfig = settings?.aiProviderConfigs?.[newProviderId];
-    setSetting('aiUrl', savedConfig?.url ?? preset.defaultUrl);
-    setSetting('aiModel', savedConfig?.model ?? preset.defaultModel);
-    // Only set API key if we have a SAVED one — don't clear the field
-    // if the user hasn't saved one for this provider yet.
-    if (savedConfig?.apiKey) {
-      setSetting('aiApiKey', savedConfig.apiKey);
-    }
+    const savedConfig = updatedConfigs[newProviderId];
+    const newUrl = savedConfig?.url || preset.defaultUrl;
+    const newModel = savedConfig?.model || preset.defaultModel;
+    const newApiKey = savedConfig?.apiKey || '';
+
+    // ── 3. Apply ALL settings in one batch ──
+    // We set them all together so the UI updates atomically — no flicker
+    // of half-switched state (old URL with new model, etc.).
+    await Promise.all([
+      setSetting('aiProviderConfigs', updatedConfigs),
+      setSetting('aiProvider', newProviderId),
+      setSetting('aiUrl', newUrl),
+      setSetting('aiModel', newModel),
+      setSetting('aiApiKey', newApiKey),
+    ]);
     setShowProviderMenu(false);
   }, [settings, setSetting]);
 
