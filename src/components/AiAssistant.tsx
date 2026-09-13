@@ -330,7 +330,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     return { id, name: id, type, url, apiKey: settings.aiApiKey, model };
   }, [settings]);
 
-  const handleSend = useCallback(async (overrideInput?: string) => {
+  const handleSend = useCallback(async (overrideInput?: string, isRegenerate = false) => {
     const userMsg = (overrideInput ?? input).trim();
     if (!userMsg) return;
     if (sessionRepoPath === undefined) return;
@@ -339,24 +339,24 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
       toast.info(t('changes.aiNoProvider'), t('changes.aiSetProviderHint'));
       return;
     }
-    setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    if (!isRegenerate) {
+      setInput('');
+      setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    }
     setBusy(true);
-    // Create a fresh AbortController for this request. Stored in a ref so
-    // handleStop() can call .abort() on it.
     const controller = new AbortController();
     abortRef.current = controller;
     try {
+      // For regenerate: pass messages WITHOUT the last assistant response
+      // so the AI generates a fresh answer. The user message is already
+      // in the history, so we DON'T add a duplicate.
+      const historyForContext = isRegenerate
+        ? messages.slice(0, messages.length - 1) // drop last assistant msg
+        : messages;
       await runWithTools(userMsg, provider, sessionRepoPath ?? undefined, {
         signal: controller.signal,
-        // ── Pass prior conversation history so the AI remembers context ──
-        priorHistory: messages,
-        // ── Context compression threshold (user-configurable via Settings).
-        //  When total character count of prior history exceeds this, old
-        //  messages are compressed into a text summary.
+        priorHistory: historyForContext,
         contextMaxChars: settings?.aiContextMaxChars ?? 20_000,
-        // ── Token usage callback — updates the UI with input/output token
-        // counts and context size after each LLM response.
         onTokenUsage: (usage) => {
           setTokenUsage({
             input: usage.inputTokens,
@@ -671,7 +671,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
               return (
                 <button
                   className="flex items-center gap-1 text-2xs text-text-tertiary hover:text-accent transition-colors mt-1"
-                  onClick={() => void handleSend(lastUserMsg.content)}
+                  onClick={() => void handleSend(lastUserMsg.content, true)}
                   title="Regenerate the last response with a fresh attempt"
                 >
                   <RefreshCw size={9} />
