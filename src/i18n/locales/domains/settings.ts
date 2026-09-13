@@ -253,6 +253,8 @@ export const en: Record<string, string> = {
 };
 
 export const ru: Record<string, string> = {
+  'settings.integrations': 'Интеграции',
+
   // Toasts & handlers
   'settings.failedToLoadGitConfig': 'Не удалось загрузить git config',
   'settings.configSetToast': 'Задано {key} ({scope})',
@@ -501,6 +503,8 @@ export const ru: Record<string, string> = {
 };
 
 export const zh: Record<string, string> = {
+  'settings.integrations': '集成',
+
   // Toasts & handlers
   'settings.failedToLoadGitConfig': '加载 git 配置失败',
   'settings.configSetToast': '已设置 {key}（{scope}）',
@@ -749,6 +753,8 @@ export const zh: Record<string, string> = {
 };
 
 export const de: Record<string, string> = {
+  'settings.integrations': 'Integrationen',
+
   // Toasts & handlers
   'settings.failedToLoadGitConfig': 'git config konnte nicht geladen werden',
   'settings.configSetToast': '{key} gesetzt ({scope})',

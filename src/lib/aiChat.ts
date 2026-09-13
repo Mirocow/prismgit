@@ -34,9 +34,12 @@ import { api } from './api';
  * The caller parses JSON from body as needed.
  */
 async function proxyFetch(url: string, headers: Record<string, string>, body: string): Promise<{ ok: boolean; status: number; statusText: string; body: string }> {
-  // Check if we're in Electron (window.smartgit exists with ai.chat)
-  if (typeof window !== 'undefined' && (window as { smartgit?: { ai?: { chat?: unknown } } }).smartgit?.ai?.chat) {
-    return api.ai.chat({ url, headers, body, method: 'POST' }) as Promise<{ ok: boolean; status: number; statusText: string; body: string }>;
+  // Try IPC proxy first (Electron main process — no CORS restriction)
+  try {
+    const result = await api.ai?.chat?.({ url, headers, body, method: 'POST' });
+    if (result) return result;
+  } catch {
+    // IPC not available (test env, or api.ai.chat not wired) — fall through to direct fetch
   }
   // Fallback: direct fetch (works in Tauri and browser contexts without CORS)
   const res = await fetch(url, { method: 'POST', headers, body });

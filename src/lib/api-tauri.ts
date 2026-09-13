@@ -191,7 +191,7 @@ interface RawLogEntry {
   committerName: string;
   committerEmail: string;
   committerDate: string;
-  refs: string;
+  refs: string[];
 }
 
 interface RawReflogEntry {
@@ -258,8 +258,14 @@ export const tauriApi = {
 
     log: async (repoPath: string, opts?: { maxCount?: number }): Promise<RawLogEntry[]> => {
       const out = await callGit('git_log', repoPath, [opts?.maxCount]);
-      return out.split('\n').filter(Boolean).map(line => {
-        const [hash, hashAbbrev, subject, an, ae, ad, cn, ce, cd, refs] = line.split('\x00');
+      // The Rust git_log format is: %H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%b%x00%D
+      // That's 11 fields (0-10). The body (%b) is field 9, refs (%D) is field 10.
+      // Split by record separator \x1e first (handles bodies with newlines), then by \x00.
+      const commits = out.split('\x1e').filter(c => c.trim());
+      return commits.map(c => {
+        const cleaned = c.replace(/^\n+/, '').replace(/\n+$/, '');
+        const parts = cleaned.split('\x00');
+        const [hash, hashAbbrev, subject, an, ae, ad, cn, ce, cd, body, refsStr] = parts;
         return {
           hash,
           hashAbbrev,
@@ -270,7 +276,7 @@ export const tauriApi = {
           committerName: cn,
           committerEmail: ce,
           committerDate: cd,
-          refs,
+          refs: refsStr ? refsStr.split(',').map((r: string) => r.trim()).filter(Boolean) : [],
         };
       });
     },

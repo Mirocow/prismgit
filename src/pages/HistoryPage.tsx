@@ -1479,7 +1479,7 @@ export function HistoryPage() {
             <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
           ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-text-tertiary text-sm">
-              {search ? 'No commits match' : 'No commits yet'}
+              {taggedActive ? 'No tagged commits found — tags point at commits outside the loaded window. Try scrolling down or increase the commit limit.' : search ? 'No commits match' : 'No commits yet'}
             </div>
           ) : (
             <div style={{ position: 'relative' }}>

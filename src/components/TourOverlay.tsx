@@ -24,6 +24,7 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
   const [stepIdx, setStepIdx] = useState(0);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
+  const [dontShowAgain, setDontShowAgain] = useState(false);
 
   const step: TourStep | undefined = TOUR_STEPS[stepIdx];
 
@@ -128,7 +129,7 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
     if (stepIdx < TOUR_STEPS.length - 1) {
       setStepIdx(stepIdx + 1);
     } else {
-      markTourCompleted();
+      if (dontShowAgain) markTourCompleted();
       onClose();
     }
   };
@@ -136,7 +137,7 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
     if (stepIdx > 0) setStepIdx(stepIdx - 1);
   };
   const handleSkip = () => {
-    markTourCompleted();
+    if (dontShowAgain) markTourCompleted();
     onClose();
   };
 
@@ -228,6 +229,17 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
             </button>
           </div>
           <div className="text-xs text-text-secondary leading-relaxed mb-4">{t(step.descKey)}</div>
+          {/* Don't show again checkbox — appears on every step so the user
+              can dismiss the tour at any point, not just on the last step. */}
+          <label className="flex items-center gap-2 mb-3 cursor-pointer text-2xs text-text-tertiary">
+            <input
+              type="checkbox"
+              checked={dontShowAgain}
+              onChange={(e) => setDontShowAgain(e.target.checked)}
+              className="w-3 h-3"
+            />
+            {t('tour.dontShowAgain')}
+          </label>
           <div className="flex items-center justify-between">
             <span className="text-2xs text-text-tertiary">
               {t('tour.stepIndicator', { current: stepIdx + 1, total: TOUR_STEPS.length })}

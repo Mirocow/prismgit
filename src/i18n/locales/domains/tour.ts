@@ -7,6 +7,7 @@
 export const en: Record<string, string> = {
   'tour.ariaLabel': 'First-run tour',
   'tour.skip': 'Skip tour',
+  'tour.dontShowAgain': "Don't show again",
   'tour.back': 'Back',
   'tour.next': 'Next',
   'tour.done': 'Done',
@@ -26,6 +27,7 @@ export const en: Record<string, string> = {
 export const ru: Record<string, string> = {
   'tour.ariaLabel': 'Тур по приложению',
   'tour.skip': 'Пропустить тур',
+  'tour.dontShowAgain': 'Больше не показывать',
   'tour.back': 'Назад',
   'tour.next': 'Далее',
   'tour.done': 'Готово',
@@ -45,6 +47,7 @@ export const ru: Record<string, string> = {
 export const zh: Record<string, string> = {
   'tour.ariaLabel': '入门导览',
   'tour.skip': '跳过导览',
+  'tour.dontShowAgain': '不再显示',
   'tour.back': '上一步',
   'tour.next': '下一步',
   'tour.done': '完成',
@@ -64,6 +67,7 @@ export const zh: Record<string, string> = {
 export const de: Record<string, string> = {
   'tour.ariaLabel': 'Erste-Schritte-Tour',
   'tour.skip': 'Tour überspringen',
+  'tour.dontShowAgain': 'Nicht mehr anzeigen',
   'tour.back': 'Zurück',
   'tour.next': 'Weiter',
   'tour.done': 'Fertig',

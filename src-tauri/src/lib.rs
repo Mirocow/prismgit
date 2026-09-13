@@ -104,7 +104,9 @@ mod commands {
     #[tauri::command]
     pub fn git_log(repo_path: String, max_count: Option<u32>) -> Result<GitCommandResult, String> {
         let n = max_count.unwrap_or(500);
-        let format = "%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%b%x00%D";
+        // Use %x1e as record separator (same as Electron) so bodies with
+        // newlines don't break parsing. %D gives decorations (tags, branches).
+        let format = "%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%b%x00%D%x1e";
         git_raw_impl(repo_path, vec![
             "log".into(),
             format!("-{}", n),
