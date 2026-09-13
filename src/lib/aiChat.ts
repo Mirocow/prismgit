@@ -75,18 +75,20 @@ export function buildToolSystemPrompt(tools: AITool[] = AI_TOOLS): string {
   const toolDocs = tools.map(t => `- ${t.name}: ${t.description}\n  Parameters: ${JSON.stringify(t.parameters)}`).join('\n');
   return `You are PrismGit's AI assistant — you help the user manage their Git repository.
 
-You have access to the following tools. When the user asks a question or requests an action, decide which tools you need to call, then call them. After receiving tool results, give a concise natural-language answer.
+You have access to the following tools. When the user asks a question or requests an action, you MUST call the appropriate tool to get real data — NEVER make up or hallucinate results.
 
 Available tools:
 ${toolDocs}
 
-Rules:
-1. For read-only questions (status, log, diff, branches, stashes, tags), call the appropriate get_* tool.
-2. For write actions (stage, unstage, commit, push, pull, fetch, checkout, merge, tag, stash), call the appropriate tool directly — the user sees the full transcript and can undo if needed.
-3. After tools return, summarize the result in 1-3 sentences.
-4. If a tool fails, report the error and suggest what the user should do.
-5. For commit messages, use imperative mood: "Add feature X", "Fix bug Y", "Update docs Z".
-6. You can chain multiple tool calls: e.g. get_status → stage_files → commit → push.
+CRITICAL RULES:
+1. NEVER fabricate data. If you need repository info, CALL the tool — do not guess.
+2. For read-only questions (status, log, diff, branches, stashes, tags), call the appropriate get_* tool FIRST, then answer based on the real results.
+3. For write actions (stage, unstage, commit, push, pull, fetch, checkout, merge, tag, stash), call the tool directly.
+4. After tools return, summarize the result in 1-3 sentences based on ACTUAL data.
+5. If a tool fails, report the error and suggest what the user should do.
+6. For commit messages, use imperative mood: "Add feature X", "Fix bug Y".
+7. You can chain multiple tool calls: e.g. get_status → stage_files → commit → push.
+8. If you don't have enough information to answer, say so — don't make things up.
 `;
 }
 
@@ -295,19 +297,70 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider)
 async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider): Promise<ChatMessage> {
   const url = (provider.url || 'http://localhost:11434') + '/api/chat';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // Ollama 0.3.0+ supports native tool calling via the 'tools' parameter.
+  // Pass the tool definitions so the LLM can call them properly instead of
+  // hallucinating results in plain text.
   const body = JSON.stringify({
     model: provider.model,
-    messages: messages.map(m => ({ role: m.role, content: m.content })),
+    messages: messages.map(m => {
+      // Include tool_calls in assistant messages so the LLM sees the
+      // conversation history with tool results.
+      if (m.toolCalls && m.toolCalls.length > 0) {
+        return {
+          role: m.role,
+          content: m.content || '',
+          tool_calls: m.toolCalls.map(tc => ({
+            function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+          })),
+        };
+      }
+      // Tool result messages
+      if (m.role === 'tool') {
+        return {
+          role: 'tool',
+          content: m.content,
+        };
+      }
+      return { role: m.role, content: m.content };
+    }),
     stream: false,
+    tools: AI_TOOLS.map(t => ({
+      type: 'function',
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+      },
+    })),
   });
   const res = await proxyFetch(url, headers, body);
   if (!res.ok) {
     throw new Error(`Ollama chat error ${res.status}: ${res.body}`);
   }
   const data = JSON.parse(res.body);
-  // Ollama doesn't natively support tool calls — best-effort regex parse.
   const content: string = data.message?.content ?? '';
-  const toolCalls = parseOllamaToolCalls(content);
+  // Ollama returns tool_calls natively when the model supports it.
+  const rawToolCalls = data.message?.tool_calls;
+  let toolCalls: ToolCall[] | undefined;
+  if (Array.isArray(rawToolCalls) && rawToolCalls.length > 0) {
+    toolCalls = rawToolCalls.map((tc: { function: { name: string; arguments: string | Record<string, unknown> } }) => {
+      let parsed: Record<string, unknown> = {};
+      const args = tc.function?.arguments;
+      if (typeof args === 'string') {
+        try { parsed = JSON.parse(args); } catch { /* leave empty */ }
+      } else if (args && typeof args === 'object') {
+        parsed = args as Record<string, unknown>;
+      }
+      return {
+        name: tc.function?.name || '',
+        arguments: parsed,
+      };
+    });
+  }
+  // Fallback: if no native tool_calls, try regex parse (for older Ollama)
+  if (!toolCalls) {
+    toolCalls = parseOllamaToolCalls(content);
+  }
   return {
     role: 'assistant',
     content: toolCalls?.length ? content.replace(/<tool>[\s\S]*?<\/tool>/g, '').trim() : content,
