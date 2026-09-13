@@ -432,6 +432,7 @@ export async function callLLMChatWithUsage(
     case 'cerebras':
     case 'gemini':
     case 'huggingface':
+    case 'zai':
       return callOpenAIChat(messages, provider, signal);
     case 'anthropic':
       return callAnthropicChat(messages, provider, signal);

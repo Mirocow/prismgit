@@ -38,7 +38,8 @@ export interface LLMProvider {
    * correct base URL and show provider-specific hints.
    */
   type: 'openai' | 'anthropic' | 'github' | 'ollama' | 'mistral' | 'custom'
-      | 'openrouter' | 'groq' | 'cerebras' | 'gemini' | 'huggingface';
+      | 'openrouter' | 'groq' | 'cerebras' | 'gemini' | 'huggingface'
+      | 'zai';
   url: string;
   apiKey?: string;
   model: string;
@@ -164,6 +165,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     freeTier: true,
   },
   {
+    id: 'zai',
+    label: 'Z.ai (GLM models)',
+    defaultUrl: 'https://api.z.ai/api/paas/v4/chat/completions',
+    defaultModel: 'glm-4-flash',
+    description: 'Z.ai API — GLM-4-Flash (free), GLM-4-Plus, GLM-4V (vision). OpenAI-compatible endpoint. Free tier available.',
+    apiKeyHint: 'https://z.ai/manage/apikey',
+    freeTier: true,
+  },
+  {
     id: 'custom',
     label: 'Custom (OpenAI-compatible)',
     defaultUrl: '',
@@ -245,6 +255,7 @@ export async function generateCommitMessage(params: GenerateMessageParams): Prom
     case 'cerebras':
     case 'gemini':
     case 'huggingface':
+    case 'zai':
       return callOpenAICompatible(provider, systemPrompt, userPrompt, maxTokens);
     case 'anthropic':
       return callAnthropic(provider, systemPrompt, userPrompt, maxTokens);
@@ -588,6 +599,7 @@ async function callProvider(
     case 'cerebras':
     case 'gemini':
     case 'huggingface':
+    case 'zai':
       return callOpenAICompatible(provider, systemPrompt, userPrompt, maxTokens);
     case 'anthropic':
       return callAnthropic(provider, systemPrompt, userPrompt, maxTokens);
@@ -789,6 +801,7 @@ export async function* callLLMStream(
     case 'cerebras':
     case 'gemini':
     case 'huggingface':
+    case 'zai':
       yield* streamOpenAICompatible();
       break;
     case 'anthropic':
