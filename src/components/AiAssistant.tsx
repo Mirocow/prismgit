@@ -632,12 +632,21 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   }
   if (msg.role === 'assistant' && msg.toolCalls?.length) {
     // "Calling tool: get_status" — kept VERY compact (single line, no bubble,
-    // muted text). The user asked for these to be minimal — the real content
-    // is in the tool result block below (which is collapsed by default).
+    // muted text). The real content is in the tool result block below
+    // (which is collapsed by default).
+    //
+    // HIDE empty-content messages entirely — some LLMs (especially Ollama
+    // with tool-use) send an assistant message with tool_calls but EMPTY
+    // content. Showing an empty "Calling tool: " line is confusing — the
+    // tool name is already in the toolCalls array, and the user sees the
+    // collapsed tool-result block below with the real tool name. So we
+    // render nothing for empty-content tool-call messages.
+    const content = msg.content?.trim();
+    if (!content) return null;
     return (
       <div className="flex items-center gap-1 pl-1 text-2xs text-text-tertiary italic opacity-70">
         <ArrowRight size={9} />
-        <span>{msg.content}</span>
+        <span>{content}</span>
       </div>
     );
   }

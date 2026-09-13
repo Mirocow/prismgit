@@ -22,21 +22,84 @@ export interface AITool {
 
 // ============= READ-ONLY TOOLS =============
 
-/** Get the current git status (porcelain + branch info). */
+/** Get the current git status (porcelain + branch info).
+ *
+ *  DEFAULT mode is "summary" — returns counts by category (modified/staged/
+ *  untracked/deleted/conflicted) + the first 10 file paths. This keeps
+ *  the tool output short: the user's request "what changed?" doesn't
+ *  need a 1000-line file list. The AI can call get_diff for specific
+ *  files if it needs more detail.
+ *
+ *  Pass `verbose: true` to get the full file list (one line per file).
+ */
 export const gitStatusTool: AITool = {
   name: 'get_status',
-  description: 'Get the current git status of the repository — list of modified/staged/untracked files, current branch, ahead/behind counters.',
-  parameters: { type: 'object', properties: {}, additionalProperties: false },
-  async execute(_params, repoPath) {
+  description: 'Get the current git status of the repository. By default returns a SUMMARY (branch, ahead/behind, file counts by category: modified/staged/untracked/deleted/conflicted, and the first 10 file paths). Pass verbose=true for the full file list (one line per file — can be 1000+ lines on large repos).',
+  parameters: {
+    type: 'object',
+    properties: {
+      verbose: { type: 'boolean', description: 'If true, return the full file list (one line per file). If false (default), return a summary with counts + first 10 files.', default: false },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    const verbose = (params as { verbose?: boolean })?.verbose ?? false;
     const status = await api.git.status(repoPath);
     const lines: string[] = [];
     lines.push(`Current branch: ${status.current ?? 'detached HEAD'}`);
-    if (status.ahead > 0) lines.push(`Ahead: ${status.ahead}`);
-    if (status.behind > 0) lines.push(`Behind: ${status.behind}`);
+    if (status.ahead > 0) lines.push(`Ahead: ${status.ahead} commit(s) not yet pushed`);
+    if (status.behind > 0) lines.push(`Behind: ${status.behind} commit(s) not yet pulled`);
+    if (status.tracking) lines.push(`Tracking: ${status.tracking}`);
+
     if (status.files.length === 0) {
       lines.push('Working tree clean.');
+      return lines.join('\n');
+    }
+
+    // Categorise files for the summary.
+    let stagedCount = 0;
+    let modifiedCount = 0;
+    let untrackedCount = 0;
+    let deletedCount = 0;
+    let conflictedCount = 0;
+    for (const f of status.files) {
+      const idx = f.index as string;
+      const wd = f.working_dir as string;
+      if (idx === '?' && wd === '?') untrackedCount++;
+      else if (idx === 'U' || wd === 'U' || (idx === 'A' && wd === 'A') || (idx === 'D' && wd === 'D')) conflictedCount++;
+      else {
+        if (idx !== ' ' && idx !== '?') stagedCount++;
+        if (wd !== ' ' && wd !== '?') modifiedCount++;
+        if (idx === 'D' || wd === 'D') deletedCount++;
+      }
+    }
+
+    if (!verbose) {
+      // ── Summary mode ────────────────────────────────────────────────────
+      lines.push('');
+      lines.push(`Total changed files: ${status.files.length}`);
+      const cats: string[] = [];
+      if (stagedCount > 0) cats.push(`staged: ${stagedCount}`);
+      if (modifiedCount > 0) cats.push(`modified: ${modifiedCount}`);
+      if (untrackedCount > 0) cats.push(`untracked: ${untrackedCount}`);
+      if (deletedCount > 0) cats.push(`deleted: ${deletedCount}`);
+      if (conflictedCount > 0) cats.push(`conflicted: ${conflictedCount}`);
+      if (cats.length > 0) lines.push(`By category: ${cats.join(', ')}`);
+      lines.push('');
+      // Show the first 10 file paths so the AI has concrete examples to
+      // reference. The user can ask for verbose=true if they need the rest.
+      const preview = status.files.slice(0, 10);
+      lines.push(`First ${preview.length} file(s):`);
+      for (const f of preview) {
+        lines.push(`  ${f.index}${f.working_dir} ${f.path}`);
+      }
+      if (status.files.length > 10) {
+        lines.push(`… and ${status.files.length - 10} more. Call get_status with verbose=true to see all.`);
+      }
     } else {
-      lines.push('Files:');
+      // ── Verbose mode — full file list ───────────────────────────────────
+      lines.push('');
+      lines.push('Files (full list):');
       for (const f of status.files) {
         lines.push(`  ${f.index}${f.working_dir} ${f.path}`);
       }
@@ -111,23 +174,60 @@ export const gitLogTool: AITool = {
   },
 };
 
-/** Get the diff of staged, unstaged, or specific commit. */
+/** Get the diff of staged, unstaged, or specific file.
+ *
+ *  DEFAULT mode is "stat" — returns just the file stats (file paths +
+ *  insertions/deletions counts, no actual diff content). This is what
+ *  the user wants 90% of the time: "what changed?" → file names + line
+ *  counts. The actual diff content can be 1000+ lines for a single file
+ *  and floods the chat — the AI should only fetch full diffs when the
+ *  user explicitly asks for the diff CONTENT of a specific file.
+ *
+ *  Pass `full: true` to get the actual diff lines (use sparingly —
+ *  large diffs will flood the chat and the AI will struggle to summarise).
+ *  Pass `file: "path/to/file"` to limit the diff to a single file.
+ */
 export const gitDiffTool: AITool = {
   name: 'get_diff',
-  description: 'Get the diff of staged or unstaged changes (default: unstaged).',
+  description: 'Get the diff of staged or unstaged changes. DEFAULT mode returns --stat (file paths + insertion/deletion counts, no content — compact and readable). Pass full=true to get the actual diff lines (can be 1000+ lines, use sparingly). Pass file="path" to limit to one file.',
   parameters: {
     type: 'object',
     properties: {
-      staged: { type: 'boolean', description: 'If true, return staged changes; otherwise unstaged', default: false },
+      staged: { type: 'boolean', description: 'If true, return staged changes; otherwise unstaged (default: false)', default: false },
+      full: { type: 'boolean', description: 'If true, return the actual diff CONTENT (not just stats). Can be very large — prefer the default stat mode and only use full=true for a single file. Default: false.', default: false },
+      file: { type: 'string', description: 'Limit the diff to a specific file path. Recommended when full=true — avoids returning the entire repo diff.' },
     },
     additionalProperties: false,
   },
   async execute(params, repoPath) {
-    const staged = (params as { staged?: boolean })?.staged ?? false;
+    const p = params as { staged?: boolean; full?: boolean; file?: string };
+    const staged = p.staged ?? false;
+    const full = p.full ?? false;
+    const file = p.file;
     try {
-      const args = staged ? ['diff', '--cached', '--stat'] : ['diff', '--stat'];
+      // Build the git diff args.
+      const args: string[] = ['diff'];
+      if (staged) args.push('--cached');
+      if (!full) args.push('--stat'); // compact mode — just file stats
+      if (file) {
+        args.push('--', file);
+      } else if (!full) {
+        // In stat mode without a file, limit to a summary so we don't
+        // dump 1000+ file paths. Cap at 50 files in the stat output.
+        args.push('--');
+      }
       const out = await api.git.raw(repoPath, args);
-      return out || 'No changes.';
+      if (!out || !out.trim()) return 'No changes.';
+      // In stat mode, cap the output to the first 50 lines so a repo
+      // with 500 changed files doesn't flood the chat.
+      if (!full) {
+        const statLines = out.split('\n');
+        if (statLines.length > 55) {
+          return statLines.slice(0, 50).join('\n') +
+            `\n… and ${statLines.length - 52} more files. Call get_diff with file="<path>" and full=true for a specific file's diff.`;
+        }
+      }
+      return out;
     } catch (e) {
       return `Failed to get diff: ${String(e)}`;
     }
