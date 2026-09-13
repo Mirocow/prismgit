@@ -13,11 +13,14 @@ import { api } from './api';
 import { useSettingsStore } from '../stores/settingsStore';
 
 // ── Configurable limits (read from AppSettings at runtime) ──────────────
-// Defaults are used when settings aren't loaded yet or the value is unset.
 const DEFAULT_MAX_LOG_COUNT = 50;
 const DEFAULT_MAX_STATUS_PREVIEW = 10;
 const DEFAULT_MAX_DIFF_FILES = 50;
 const DEFAULT_LOG_SUMMARY_COUNT = 5;
+const DEFAULT_MAX_DIFF_SIZE = 131072; // 128 KiB
+const DEFAULT_MAX_TOKENS_CHAT = 1024;
+const DEFAULT_MAX_ITERATIONS = 5;
+const DEFAULT_DIFF_TRUNCATE_CHARS = 48000;
 
 /** Read the current AI tool limits from the settings store. */
 function getToolLimits() {
@@ -27,7 +30,24 @@ function getToolLimits() {
     maxStatusPreview: s.aiMaxStatusPreview ?? DEFAULT_MAX_STATUS_PREVIEW,
     maxDiffFiles: s.aiMaxDiffFiles ?? DEFAULT_MAX_DIFF_FILES,
     logSummaryCount: s.aiLogSummaryCount ?? DEFAULT_LOG_SUMMARY_COUNT,
+    maxDiffSize: s.aiMaxDiffSizeBytes ?? DEFAULT_MAX_DIFF_SIZE,
+    maxTokensChat: s.aiMaxTokensChat ?? DEFAULT_MAX_TOKENS_CHAT,
+    maxIterations: s.aiMaxToolIterations ?? DEFAULT_MAX_ITERATIONS,
+    diffTruncateChars: s.aiDiffTruncateChars ?? DEFAULT_DIFF_TRUNCATE_CHARS,
   };
+}
+
+/** AI Guard — check if a destructive action is allowed.
+ *  Returns null if allowed, or an error message string if denied. */
+function checkGuard(action: 'discard' | 'syncWithRemote' | 'forcePush' | 'amend' | 'clean' | 'stashDrop'): string | null {
+  const s = useSettingsStore.getState().settings;
+  const guard = s.aiGuard;
+  if (!guard) return null; // no guard configured → allow all
+  const setting = guard[action] ?? 'allow';
+  if (setting === 'deny') {
+    return `This action (${action}) is blocked by the AI Guard setting. The user must perform this action manually.`;
+  }
+  return null; // 'allow' or 'confirm' → let the tool proceed (confirm is handled by the tool's own confirmDialog)
 }
 
 export interface AITool {
@@ -362,6 +382,10 @@ export const gitCommitTool: AITool = {
   async execute(params, repoPath) {
     const p = params as { message: string; amend?: boolean };
     if (!p.message?.trim()) return 'Error: commit message is required.';
+    if (p.amend) {
+      const guardError = checkGuard('amend');
+      if (guardError) return guardError;
+    }
     const hash = await api.git.commit(repoPath, p.message.trim(), p.amend ?? false);
     return `Commit created: ${hash.substring(0, 7)}`;
   },
@@ -383,6 +407,10 @@ export const gitPushTool: AITool = {
   },
   async execute(params, repoPath) {
     const p = params as { remote?: string; branch?: string; set_upstream?: boolean; force?: boolean };
+    if (p.force) {
+      const guardError = checkGuard('forcePush');
+      if (guardError) return guardError;
+    }
     await api.git.push(repoPath, p.remote || 'origin', p.branch, p.set_upstream, p.force);
     return `Pushed to ${p.remote || 'origin'}${p.branch ? '/' + p.branch : ''}.`;
   },
@@ -616,6 +644,8 @@ export const gitDiscardChangesTool: AITool = {
     additionalProperties: false,
   },
   async execute(params, repoPath) {
+    const guardError = checkGuard('discard');
+    if (guardError) return guardError;
     const p = params as { include_ignored?: boolean };
     const includeIgnored = p.include_ignored ?? false;
 
@@ -692,6 +722,8 @@ export const gitSyncWithRemoteTool: AITool = {
     additionalProperties: false,
   },
   async execute(params, repoPath) {
+    const guardError = checkGuard('syncWithRemote');
+    if (guardError) return guardError;
     const p = params as { remote?: string; branch?: string; keep_local_changes?: boolean };
     const remote = p.remote || 'origin';
     const keepLocalChanges = p.keep_local_changes ?? true;

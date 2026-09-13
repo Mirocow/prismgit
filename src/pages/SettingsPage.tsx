@@ -1392,6 +1392,42 @@ smartgit.refresh.inspectEol=true
               </div>
             </div>
 
+            {/* AI Guard — control which destructive actions the AI can perform. */}
+            <div className="pt-3 border-t border-border-subtle">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                AI Guard
+              </div>
+              <div className="text-2xs text-text-tertiary mb-2">
+                Control which destructive git actions the AI Assistant is allowed to perform. "Deny" blocks the action entirely — the AI will tell the user to do it manually.
+              </div>
+              <div className="space-y-1.5">
+                {([
+                  ['discard', 'Discard changes (reset --hard + clean)'],
+                  ['syncWithRemote', 'Sync with remote (reset --hard origin)'],
+                  ['forcePush', 'Force push (--force)'],
+                  ['amend', 'Commit --amend'],
+                  ['clean', 'Clean (delete untracked files)'],
+                  ['stashDrop', 'Stash drop'],
+                ] as const).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-xs">
+                    <span className="text-text-tertiary w-64 truncate">{label}</span>
+                    <select
+                      className="text-xs bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                      value={settings.aiGuard?.[key] ?? 'allow'}
+                      onChange={(e) => {
+                        const current = settings.aiGuard || {};
+                        setSetting('aiGuard', { ...current, [key]: e.target.value as 'allow' | 'confirm' | 'deny' });
+                      }}
+                    >
+                      <option value="allow">Allow</option>
+                      <option value="confirm">Confirm</option>
+                      <option value="deny">Deny</option>
+                    </select>
+                  </label>
+                ))}
+              </div>
+            </div>
+
             {/* Request Timeout — aborts the LLM call after N seconds.
                 Applies to BOTH commit-message generation and AI Assistant
                 chat. Default 300 (5 min) — slow local Ollama models on CPU
