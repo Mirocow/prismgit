@@ -1344,6 +1344,54 @@ smartgit.refresh.inspectEol=true
               </div>
             </div>
 
+            {/* Tool Limits — control how much data AI tools return. */}
+            <div className="pt-3 border-t border-border-subtle">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                Tool Limits
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2 text-xs">
+                  <span className="text-text-tertiary">Max log commits</span>
+                  <input
+                    type="number" min={5} max={500} step={5}
+                    className="w-16 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                    value={settings.aiMaxLogCount ?? 50}
+                    onChange={(e) => setSetting('aiMaxLogCount', parseInt(e.target.value) || 50)}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs">
+                  <span className="text-text-tertiary">Log summary count</span>
+                  <input
+                    type="number" min={1} max={20} step={1}
+                    className="w-16 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                    value={settings.aiLogSummaryCount ?? 5}
+                    onChange={(e) => setSetting('aiLogSummaryCount', parseInt(e.target.value) || 5)}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs">
+                  <span className="text-text-tertiary">Status file preview</span>
+                  <input
+                    type="number" min={1} max={100} step={1}
+                    className="w-16 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                    value={settings.aiMaxStatusPreview ?? 10}
+                    onChange={(e) => setSetting('aiMaxStatusPreview', parseInt(e.target.value) || 10)}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs">
+                  <span className="text-text-tertiary">Max diff files</span>
+                  <input
+                    type="number" min={10} max={500} step={10}
+                    className="w-16 text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1"
+                    value={settings.aiMaxDiffFiles ?? 50}
+                    onChange={(e) => setSetting('aiMaxDiffFiles', parseInt(e.target.value) || 50)}
+                  />
+                </label>
+              </div>
+              <div className="text-2xs text-text-tertiary mt-1">
+                Controls how much data the AI tools return. Higher = more detail but uses more context. Lower = faster and cheaper. Changes apply immediately.
+              </div>
+            </div>
+
             {/* Request Timeout — aborts the LLM call after N seconds.
                 Applies to BOTH commit-message generation and AI Assistant
                 chat. Default 300 (5 min) — slow local Ollama models on CPU

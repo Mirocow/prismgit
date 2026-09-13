@@ -10,6 +10,25 @@
  */
 
 import { api } from './api';
+import { useSettingsStore } from '../stores/settingsStore';
+
+// ── Configurable limits (read from AppSettings at runtime) ──────────────
+// Defaults are used when settings aren't loaded yet or the value is unset.
+const DEFAULT_MAX_LOG_COUNT = 50;
+const DEFAULT_MAX_STATUS_PREVIEW = 10;
+const DEFAULT_MAX_DIFF_FILES = 50;
+const DEFAULT_LOG_SUMMARY_COUNT = 5;
+
+/** Read the current AI tool limits from the settings store. */
+function getToolLimits() {
+  const s = useSettingsStore.getState().settings;
+  return {
+    maxLogCount: s.aiMaxLogCount ?? DEFAULT_MAX_LOG_COUNT,
+    maxStatusPreview: s.aiMaxStatusPreview ?? DEFAULT_MAX_STATUS_PREVIEW,
+    maxDiffFiles: s.aiMaxDiffFiles ?? DEFAULT_MAX_DIFF_FILES,
+    logSummaryCount: s.aiLogSummaryCount ?? DEFAULT_LOG_SUMMARY_COUNT,
+  };
+}
 
 export interface AITool {
   name: string;
@@ -88,13 +107,14 @@ export const gitStatusTool: AITool = {
       lines.push('');
       // Show the first 10 file paths so the AI has concrete examples to
       // reference. The user can ask for verbose=true if they need the rest.
-      const preview = status.files.slice(0, 10);
+      const limits = getToolLimits();
+      const preview = status.files.slice(0, limits.maxStatusPreview);
       lines.push(`First ${preview.length} file(s):`);
       for (const f of preview) {
         lines.push(`  ${f.index}${f.working_dir} ${f.path}`);
       }
-      if (status.files.length > 10) {
-        lines.push(`… and ${status.files.length - 10} more. Call get_status with verbose=true to see all.`);
+      if (status.files.length > limits.maxStatusPreview) {
+        lines.push(`… and ${status.files.length - limits.maxStatusPreview} more. Call get_status with verbose=true to see all.`);
       }
     } else {
       // ── Verbose mode — full file list ───────────────────────────────────

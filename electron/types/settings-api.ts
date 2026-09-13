@@ -181,6 +181,21 @@ export interface AppSettings {
    */
   aiContextMaxChars?: number;
   /**
+   * AI tool limits — control how much data the AI tools return, keeping
+   * the conversation context manageable. All configurable via Settings → AI.
+   *
+   * Default values are tuned for a balance between usefulness and context
+   * size. Increase for deep analysis, decrease for speed.
+   */
+  /** Max commits returned by get_log verbose mode (default: 50). */
+  aiMaxLogCount?: number;
+  /** Max files shown in get_status summary preview (default: 10). */
+  aiMaxStatusPreview?: number;
+  /** Max files shown in get_diff --stat output (default: 50). */
+  aiMaxDiffFiles?: number;
+  /** Max commits shown in get_log collapsed mode summary (default: 5). */
+  aiLogSummaryCount?: number;
+  /**
    * AI request timeout in seconds. Applied to:
    *   - commit-message generation (ai:generateCommitMessage IPC)
    *   - AI Assistant chat (ai:chat IPC proxy)
