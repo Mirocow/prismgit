@@ -136,19 +136,30 @@ export function registerAiIpc(): void {
       const controller = new AbortController();
       const timeoutMs = ai.getAiRequestTimeoutMs();
       const timeout = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+      const httpMethod = config.method || 'POST';
       try {
-        const res = await fetch(config.url, {
-          method: config.method || 'POST',
+        // For GET/HEAD requests, DON'T send a body — the HTTP spec
+        // forbids it, and some servers (Z.ai, Groq) reject requests
+        // with a body on GET endpoints (returning 400 or connection
+        // errors).
+        const fetchOpts: RequestInit = {
+          method: httpMethod,
           headers: config.headers,
-          body: config.body,
           signal: controller.signal,
-        });
+        };
+        if (httpMethod !== 'GET' && httpMethod !== 'HEAD' && config.body) {
+          fetchOpts.body = config.body;
+        }
+        const res = await fetch(config.url, fetchOpts);
         const text = await res.text();
         return { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
       } catch (e) {
         const msg = String(e);
+        // Include the actual error message for debugging — the old code
+        // only showed a generic "Failed to connect" which made it
+        // impossible to diagnose DNS errors, SSL issues, etc.
         const friendly = msg.includes('fetch') || msg.includes('abort')
-          ? `Failed to connect to ${config.url}. Check if the server is running and the URL is correct.`
+          ? `Failed to connect to ${config.url}. Error: ${msg}. Check the URL, your internet connection, and that the server is running.`
           : msg;
         return { ok: false, status: 0, statusText: friendly, body: '' };
       } finally {
