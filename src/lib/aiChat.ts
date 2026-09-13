@@ -180,6 +180,25 @@ export interface ToolCall {
 }
 
 /**
+ * Token usage info returned by the LLM provider. Used to show the user
+ * how many tokens were consumed (input + output) and the total context
+ * size. Most OpenAI-compatible APIs return this in `usage` field of the
+ * response JSON.
+ */
+export interface TokenUsage {
+  /** Input tokens (prompt) — how many tokens were sent TO the model. */
+  inputTokens: number;
+  /** Output tokens (completion) — how many tokens the model generated. */
+  outputTokens: number;
+  /** Total tokens (input + output) for this request. */
+  totalTokens: number;
+  /** Estimated context size — the total tokens of the ENTIRE conversation
+   *  history sent to the model (system prompt + all prior messages +
+   *  tool definitions). This is `inputTokens` for the current request. */
+  contextSize: number;
+}
+
+/**
  * Build the system prompt that describes available tools.
  * Sent to the LLM as the first system message.
  *
@@ -263,6 +282,9 @@ Rules:
  *     IPC doesn't support cancellation), but the loop checks `signal.aborted`
  *     before each iteration and bails out cleanly.
  */
+const COMPRESS_THRESHOLD = 20;
+const COMPRESS_KEEP_RECENT = 6;
+
 export async function runWithTools(
   userMessage: string,
   provider: LLMProvider,
@@ -272,25 +294,61 @@ export async function runWithTools(
     onToolCall?: (name: string, args: Record<string, unknown>) => void;
     onToolResult?: (name: string, result: string) => void;
     maxIterations?: number;
-    /** Abort signal — when aborted, the loop bails out and the in-flight
-     *  fetch is cancelled. Used by the AI Assistant "Stop" button. */
     signal?: AbortSignal;
+    /** Prior conversation history (without system prompt). When provided,
+     *  the AI remembers what was said/done before in this chat session. */
+    priorHistory?: ChatMessage[];
+    /** Called after each LLM response with token usage stats. */
+    onTokenUsage?: (usage: TokenUsage) => void;
   },
 ): Promise<{ finalMessage: string; history: ChatMessage[] }> {
+  const systemPrompt = buildToolSystemPrompt(AI_TOOLS, repoPath);
+  const priorMessages = options?.priorHistory ?? [];
+
+  // ── Context compression ────────────────────────────────────────────
+  // When history exceeds COMPRESS_THRESHOLD messages, compress old ones
+  // into a text summary to keep the context window manageable.
+  let compressedPrior: ChatMessage[];
+  if (priorMessages.length > COMPRESS_THRESHOLD) {
+    const toCompress = priorMessages.slice(0, priorMessages.length - COMPRESS_KEEP_RECENT);
+    const toKeep = priorMessages.slice(-COMPRESS_KEEP_RECENT);
+    const summaryLines: string[] = ['[Previous conversation summary — compressed to save context]:'];
+    for (const m of toCompress) {
+      if (m.role === 'system') continue;
+      const firstLine = (m.content || '').split('\n')[0].slice(0, 120);
+      if (m.role === 'tool') {
+        summaryLines.push(`  [tool:${m.toolName}] ${firstLine}`);
+      } else if (m.role === 'assistant' && m.toolCalls?.length) {
+        summaryLines.push(`  [assistant->tool:${m.toolCalls[0].name}] ${firstLine}`);
+      } else {
+        summaryLines.push(`  [${m.role}] ${firstLine}`);
+      }
+    }
+    summaryLines.push(`(${toCompress.length} messages compressed — ${toKeep.length} recent kept)`);
+    compressedPrior = [
+      { role: 'system' as const, content: summaryLines.join('\n') },
+      ...toKeep,
+    ];
+  } else {
+    compressedPrior = priorMessages.filter(m => m.role !== 'system');
+  }
+
   const history: ChatMessage[] = [
-    { role: 'system', content: buildToolSystemPrompt(AI_TOOLS, repoPath) },
+    { role: 'system', content: systemPrompt },
+    ...compressedPrior,
     { role: 'user', content: userMessage },
   ];
   const maxIterations = options?.maxIterations ?? 5;
   const signal = options?.signal;
   for (let i = 0; i < maxIterations; i++) {
-    // Check abort BEFORE each LLM call — if the user pressed Stop during
-    // a tool execution, we don't want to start another expensive LLM call.
     if (signal?.aborted) {
       throw new DOMException('Aborted', 'AbortError');
     }
     // Call the LLM with the current history.
-    const assistantMessage = await callLLMChat(history, provider, signal);
+    const { message: assistantMessage, usage } = await callLLMChatWithUsage(history, provider, signal);
+    if (usage && options?.onTokenUsage) {
+      options.onTokenUsage(usage);
+    }
     options?.onAssistantMessage?.(assistantMessage);
     history.push(assistantMessage);
     // If no tool calls, we're done — return the final message.
@@ -349,6 +407,20 @@ export async function callLLMChat(
   provider: LLMProvider,
   signal?: AbortSignal,
 ): Promise<ChatMessage> {
+  const { message } = await callLLMChatWithUsage(messages, provider, signal);
+  return message;
+}
+
+/**
+ * Same as callLLMChat but also returns token usage stats from the LLM
+ * response. Most OpenAI-compatible APIs include a `usage` object with
+ * `prompt_tokens`, `completion_tokens`, `total_tokens`.
+ */
+export async function callLLMChatWithUsage(
+  messages: ChatMessage[],
+  provider: LLMProvider,
+  signal?: AbortSignal,
+): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
   // Dispatch by provider type.
   switch (provider.type) {
     case 'openai':
@@ -370,7 +442,7 @@ export async function callLLMChat(
   }
 }
 
-async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<ChatMessage> {
+async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
   const url = provider.url || 'https://api.openai.com/v1/chat/completions';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
@@ -406,6 +478,15 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, si
   }
   const data = JSON.parse(res.body);
   const msg = data.choices?.[0]?.message ?? {};
+  // Parse token usage from the response — most OpenAI-compatible APIs
+  // (OpenAI, Groq, Cerebras, OpenRouter, Mistral, etc.) return this.
+  const rawUsage = data.usage;
+  const usage: TokenUsage | undefined = rawUsage ? {
+    inputTokens: rawUsage.prompt_tokens ?? 0,
+    outputTokens: rawUsage.completion_tokens ?? 0,
+    totalTokens: rawUsage.total_tokens ?? 0,
+    contextSize: rawUsage.prompt_tokens ?? 0,
+  } : undefined;
   const toolCalls: ToolCall[] | undefined = msg.tool_calls?.map((tc: { id: string; function: { name: string; arguments: string } }) => {
     let parsed: Record<string, unknown> = {};
     try { parsed = JSON.parse(tc.function.arguments || '{}'); } catch { /* leave empty */ }
@@ -417,13 +498,16 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, si
     };
   });
   return {
-    role: 'assistant',
-    content: msg.content ?? '',
-    toolCalls,
+    message: {
+      role: 'assistant',
+      content: msg.content ?? '',
+      toolCalls,
+    },
+    usage,
   };
 }
 
-async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<ChatMessage> {
+async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
   const url = provider.url || 'https://api.anthropic.com/v1/messages';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -478,13 +562,16 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider,
       id: b.id,
     }));
   return {
-    role: 'assistant',
-    content: textParts,
-    toolCalls: toolUses?.length ? toolUses : undefined,
+    message: {
+      role: 'assistant',
+      content: textParts,
+      toolCalls: toolUses?.length ? toolUses : undefined,
+    },
+    usage: undefined, // Anthropic returns usage in a different format
   };
 }
 
-async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<ChatMessage> {
+async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
   const url = (provider.url || 'http://localhost:11434') + '/api/chat';
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
@@ -574,9 +661,12 @@ async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, si
     toolCalls = parseOllamaToolCalls(content);
   }
   return {
-    role: 'assistant',
-    content: toolCalls?.length ? content.replace(/<tool>[\s\S]*?<\/tool>/g, '').trim() : content,
-    toolCalls,
+    message: {
+      role: 'assistant',
+      content: toolCalls?.length ? content.replace(/<tool>[\s\S]*?<\/tool>/g, '').trim() : content,
+      toolCalls,
+    },
+    usage: undefined, // Ollama doesn't return usage stats in /api/chat
   };
 }
 
