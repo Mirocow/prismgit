@@ -3216,7 +3216,20 @@ export async function currentBranch(repoPath: string): Promise<string | null> {
 
 export async function revParse(repoPath: string, ref: string): Promise<string> {
   const git = getGit(repoPath);
-  return (await git.revparse([ref])).trim();
+  try {
+    return (await git.revparse([ref])).trim();
+  } catch (e) {
+    // On a fresh repo with NO commits, `git rev-parse HEAD` fails with:
+    //   "fatal: ambiguous argument 'HEAD': unknown revision or path not
+    //    in the working tree."
+    // This is expected — return empty string instead of throwing, so the
+    // caller can handle the "no HEAD yet" case gracefully.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/ambiguous argument|unknown revision|not in the working tree/i.test(msg)) {
+      return '';
+    }
+    throw e;
+  }
 }
 
 export async function raw(repoPath: string, args: string[]): Promise<string> {
@@ -3691,7 +3704,7 @@ export async function editCommitMessage(
   message: string
 ): Promise<void> {
   const git = getGit(repoPath);
-  const headHash = (await git.raw(['rev-parse', 'HEAD'])).trim();
+  const headHash = await revParse(repoPath, 'HEAD');
 
   if (hash === 'HEAD' || hash === headHash) {
     // Amending HEAD is safe and simple — no rebase needed.
@@ -6243,30 +6256,43 @@ export async function batchOperation(
   operation: 'fetch' | 'pull' | 'push' | 'status',
   options: { remote?: string; branch?: string; force?: boolean } = {}
 ): Promise<{ repo: string; success: boolean; error?: string }[]> {
+  // BATCH: run all repos in PARALLEL with bounded concurrency (4 at a time).
+  // Previously this was a sequential for-loop — for 10 repos × ~2s per fetch
+  // that was 20s. Now it's ~5s (ceil(10/4) × 2s).
+  const CONCURRENCY = 4;
   const results: { repo: string; success: boolean; error?: string }[] = [];
-  for (const repo of repos) {
-    try {
-      const git = getGit(repo);
-      const r = options.remote || 'origin';
-      const isPush = operation === 'push';
-      const netArgs = await remoteNetworkArgs(repo, r, isPush);
-      switch (operation) {
-        case 'fetch':
-          await git.raw([...netArgs, 'fetch', r, '--prune']);
-          break;
-        case 'pull':
-          await git.raw([...netArgs, 'pull', r, options.branch || '']);
-          break;
-        case 'push':
-          await git.raw([...netArgs, '-c', 'http.version=HTTP/1.1', 'push', r, ...(options.force ? ['--force-with-lease'] : [])]);
-          break;
-        case 'status':
-          await git.status();
-          break;
-      }
-      results.push({ repo, success: true });
-    } catch (e) {
-      results.push({ repo, success: false, error: String(e) });
+  for (let i = 0; i < repos.length; i += CONCURRENCY) {
+    const batch = repos.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (repo) => {
+        try {
+          const git = getGit(repo);
+          const r = options.remote || 'origin';
+          const isPush = operation === 'push';
+          const netArgs = await remoteNetworkArgs(repo, r, isPush);
+          switch (operation) {
+            case 'fetch':
+              await git.raw([...netArgs, 'fetch', r, '--prune']);
+              break;
+            case 'pull':
+              await git.raw([...netArgs, 'pull', r, options.branch || '']);
+              break;
+            case 'push':
+              await git.raw([...netArgs, '-c', 'http.version=HTTP/1.1', 'push', r, ...(options.force ? ['--force-with-lease'] : [])]);
+              break;
+            case 'status':
+              await git.status();
+              break;
+          }
+          return { repo, success: true };
+        } catch (e) {
+          return { repo, success: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      })
+    );
+    for (const r of batchResults) {
+      if (r.status === 'fulfilled') results.push(r.value);
+      else results.push({ repo: '?', success: false, error: String(r.reason) });
     }
   }
   return results;
