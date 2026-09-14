@@ -70,6 +70,24 @@ export interface CredentialsStatus {
   secretCount: number;
 }
 
+/** One vault entry as seen by the secrets manager — NEVER carries a value. */
+export interface SecretEntryMeta {
+  /** Namespace: 'tokens' | 'ai' | 'remoteAuth' | 'github' | 'ssh' | … */
+  ns: string;
+  /** Key inside the namespace (remote name, provider id, scalar key…). */
+  key: string;
+  /** true — OS keychain encryption; false — 0600-file fallback. */
+  encrypted: boolean;
+}
+
 export interface CredentialsApi {
   status: () => Promise<CredentialsStatus>;
+  /** List every stored secret (metadata only — values are never bulk-exposed). */
+  list: () => Promise<SecretEntryMeta[]>;
+  /** Create or replace one secret. Empty value deletes the entry. */
+  set: (ns: string, key: string, value: string) => Promise<void>;
+  /** Remove one secret. */
+  delete: (ns: string, key: string) => Promise<void>;
+  /** Reveal one secret value — used by the explicit "copy" action. */
+  reveal: (ns: string, key: string) => Promise<string | undefined>;
 }

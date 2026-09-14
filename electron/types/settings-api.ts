@@ -100,6 +100,14 @@ export interface AppSettings {
    */
   contrast: number;
   defaultCloneDir: string;
+  /**
+   * Default commit author (Settings → Git → "Default commit author").
+   * Written into a NEW repository's local user.name/user.email config
+   * right after git init / git clone, and used as a -c fallback when a
+   * commit fails with "Please tell me who you are". Empty → not applied.
+   */
+  gitUserName?: string;
+  gitUserEmail?: string;
   showReflogInHistory: boolean;
   maxHistoryLoad: number;
   enableTelemetry: boolean;

@@ -5,6 +5,31 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — Secrets manager (Settings → Security)
+- **Stored secrets section** — every entry of the encrypted vault is listed (metadata only: namespace, name, encrypted flag) grouped by category: access tokens, repository/remote passwords, AI provider keys, GitHub, SSH passphrases
+- **Copy / Replace / Delete per entry** — values are never rendered; "copy" reveals a single value straight to the clipboard, "replace" stores a new value, "delete" removes the entry (with confirmation)
+- **Add secret** — manually register a secret (token, remote password for a repo path + remote name, etc.) that is stored encrypted from the first byte
+- New IPC: `credentials:list` / `credentials:set` / `credentials:delete` / `credentials:reveal`
+
+### Added — Default commit author (Settings → Git)
+- **"Default commit author"** (gitUserName / gitUserEmail) in Settings → Project → Git, with "Apply to current repository" button
+- New repositories created or cloned with PrismGit automatically get the identity written into their local `user.name` / `user.email` — no more "Please tell me who you are" on the first commit
+- `commit()` retries once with the default identity as `-c` overrides when git refuses the commit because no identity is configured anywhere; the error otherwise explains where to set it
+
+### Fixed — "Failed to save settings" (gpg.program)
+- Repository Settings → Signing could not be saved: simple-git blocks `git config gpg.program` (and other "unsafe" keys) unless `allowUnsafeGpgProgram` is enabled. `configSet` / `configUnset` now detect the plugin rejection and retry the write on an instance with config-write flags enabled — explicit user edits in a GUI client are intent
+- The Signing tab no longer writes `gpg.program` unconditionally: empty fields are UNSET from `.git/config` instead of written (also fixes un-cleareable user.signingkey and the dangerous `user.name=""` write that would break every commit with "empty ident name not allowed")
+
+### Changed — Performance: slow git operations after LFS problems
+- Network commands (fetch / pull / push / ls-remote) no longer run on the shared per-repo simple-git instance (`maxConcurrentProcesses: 2`) that every local operation uses — a slow or hung network command (unreachable LFS-enabled server, credential dialog waiting for input, huge fetch) used to occupy the 2 queue slots and stall ALL git operations of the repository
+- All network commands run with `GIT_TERMINAL_PROMPT=0` — an unanswered credential prompt fails fast with a clear error instead of hanging invisibly (matches the push path)
+
+### Tests
+- `tests/integration/gitService.identityConfig.test.ts` — gpg.program set/unset, identity on init, commit fallback, no-identity error message (global/system git config neutralized via `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`)
+- `scripts/secrets-smoke.cjs` extended with secrets-manager round-trip checks (list metadata-only, set+reveal, delete)
+
 ## [2.1.0] - 2026-09-13
 
 ### Added — AI Assistant overhaul

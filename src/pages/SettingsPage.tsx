@@ -562,6 +562,51 @@ export function SettingsPage() {
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.git')}</div>
           <div className="p-5 space-y-5">
+            {/* Default commit author — written to new repos on init/clone,
+                used as a commit-time fallback. Fixes "Please tell me who
+                you are" on repositories created via PrismGit. */}
+            <div>
+              <div className="text-sm font-medium">{t('settings.authorIdentity')}</div>
+              <div className="text-xs text-text-tertiary mb-2">
+                {t('settings.authorIdentityHint')}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl">
+                <BlurSaveInput
+                  className="text-sm"
+                  placeholder={t('settings.authorNamePlaceholder')}
+                  value={settings.gitUserName ?? ''}
+                  onSave={(v) => setSetting('gitUserName', v.trim())}
+                />
+                <BlurSaveInput
+                  className="text-sm"
+                  placeholder={t('settings.authorEmailPlaceholder')}
+                  value={settings.gitUserEmail ?? ''}
+                  onSave={(v) => setSetting('gitUserEmail', v.trim())}
+                />
+              </div>
+              {currentRepo && (
+                <button
+                  className="btn btn-secondary text-xs mt-2"
+                  onClick={async () => {
+                    try {
+                      const name = (settings.gitUserName ?? '').trim();
+                      const email = (settings.gitUserEmail ?? '').trim();
+                      if (name) await api.git.configSet(currentRepo.path, 'user.name', name);
+                      if (email) await api.git.configSet(currentRepo.path, 'user.email', email);
+                      if (!name && !email) {
+                        toast.warning(t('settings.authorIdentity'), t('settings.authorIdentityHint'));
+                        return;
+                      }
+                      toast.success(t('settings.authorApplyRepoDone'));
+                    } catch (e) {
+                      toast.error(t('common.error'), String(e));
+                    }
+                  }}
+                >
+                  {t('settings.authorApplyRepo')}
+                </button>
+              )}
+            </div>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium">{t('settings.defaultCloneDir')}</div>

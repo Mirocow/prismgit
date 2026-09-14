@@ -32,7 +32,10 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
   const [pushSubmodules, setPushSubmodules] = useState('check'); // check|ignore|on-demand → push.recurseSubmodules
   const [signCommits, setSignCommits] = useState('false');
   const [signingKey, setSigningKey] = useState('');
-  const [gpgProgram, setGpgProgram] = useState('gpg');
+  // Empty means "use git's default (gpg)" — stored as UNSET, never as a
+  // written value, so saving the dialog doesn't force gpg.program into
+  // .git/config (simple-git blocks that key without allowUnsafeGpgProgram).
+  const [gpgProgram, setGpgProgram] = useState('');
   const [encoding, setEncoding] = useState('UTF-8');
   const [tagGroupPattern, setTagGroupPattern] = useState('');
   const [tagGroupOrder, setTagGroupOrder] = useState('');
@@ -47,7 +50,7 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
         get('pull.rebase', 'false'), get('fetch.prune', 'false'),
         get('fetch.recurseSubmodules', 'on-demand'),
         get('push.recurseSubmodules', 'check'),
-        get('commit.gpgsign', 'false'), get('user.signingkey'), get('gpg.program', 'gpg'),
+        get('commit.gpgsign', 'false'), get('user.signingkey'), get('gpg.program'),
         get('gui.encoding', 'UTF-8'),
         get('smartgit.tag-grouping.pattern'), get('smartgit.tag-grouping.order'),
       ]);
@@ -72,17 +75,25 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
   const save = async () => {
     setSaving(true);
     const p = repo.path;
+    // set-or-unset: empty fields are REMOVED from .git/config instead of
+    // written as empty values. Writing user.name="" breaks every future
+    // commit with "empty ident name not allowed"; writing gpg.program=""
+    // is what tripped simple-git's allowUnsafeGpgProgram block before.
+    const setOrUnset = async (k: string, v: string) => {
+      if (v.trim()) await api.git.configSet(p, k, v.trim());
+      else await api.git.configUnset(p, k).catch(() => {});
+    };
+    const set = (k: string, v: string) => api.git.configSet(p, k, v);
     try {
-      const set = (k: string, v: string) => api.git.configSet(p, k, v);
-      await set('user.name', userName);
-      await set('user.email', userEmail);
+      await setOrUnset('user.name', userName);
+      await setOrUnset('user.email', userEmail);
       await set('pull.rebase', pullRebase);
       await set('fetch.prune', fetchPrune);
       await set('fetch.recurseSubmodules', fetchRecurseSubmodules);
       await set('push.recurseSubmodules', pushSubmodules);
       await set('commit.gpgsign', signCommits);
-      if (signingKey.trim()) await set('user.signingkey', signingKey.trim());
-      await set('gpg.program', gpgProgram);
+      await setOrUnset('user.signingkey', signingKey);
+      await setOrUnset('gpg.program', gpgProgram);
       await set('gui.encoding', encoding);
       if (tagGroupPattern.trim()) {
         await set('smartgit.tag-grouping.pattern', tagGroupPattern.trim());
@@ -205,7 +216,7 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
                 <input value={signingKey} onChange={(e) => setSigningKey(e.target.value)} className={inputCls} placeholder="GPG key id / fingerprint" />
               </label>
               <label className="flex flex-col gap-1 text-text-secondary">GPG program
-                <input value={gpgProgram} onChange={(e) => setGpgProgram(e.target.value)} className={inputCls} placeholder="gpg" />
+                <input value={gpgProgram} onChange={(e) => setGpgProgram(e.target.value)} className={inputCls} placeholder="gpg (default — leave empty to unset)" />
               </label>
             </div>
           )}

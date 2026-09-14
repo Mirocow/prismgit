@@ -54,6 +54,31 @@ const APP = '/home/z/my-project/gitclient';
     const pat = await win.evaluate(() => window.smartgit.settings.get('githubPAT'));
     check('githubPAT round-trip', pat === 'ghp_TOKEN-XYZ', String(pat));
 
+    // 4b. secrets manager: list (metadata only) / set / reveal / delete
+    const listed = await win.evaluate(() => window.smartgit.credentials.list());
+    const remoteEntry = listed.find((e) => e.ns === 'remoteAuth' && e.key === '/tmp/fake-repo|origin');
+    const patEntry = listed.find((e) => e.ns === 'tokens' && e.key === 'githubPAT');
+    check(
+      'credentials:list shows vault entries (metadata only, no values)',
+      !!remoteEntry && !!patEntry && !('v' in remoteEntry) && !('value' in remoteEntry) && !('password' in remoteEntry),
+      JSON.stringify(listed).slice(0, 200)
+    );
+    check(
+      'credentials:list reports encrypted flag',
+      typeof remoteEntry.encrypted === 'boolean',
+      String(remoteEntry && remoteEntry.encrypted)
+    );
+    await win.evaluate(() => window.smartgit.credentials.set('other', 'smoke-secret', 'MANAGER-VALUE-42'));
+    const revealed = await win.evaluate(() => window.smartgit.credentials.reveal('other', 'smoke-secret'));
+    check('credentials:set + reveal round-trip', revealed === 'MANAGER-VALUE-42', String(revealed));
+    await win.evaluate(() => window.smartgit.credentials.delete('other', 'smoke-secret'));
+    const afterDelete = await win.evaluate(() => window.smartgit.credentials.list());
+    check(
+      'credentials:delete removes entry',
+      !afterDelete.some((e) => e.ns === 'other' && e.key === 'smoke-secret'),
+      `entries left=${afterDelete.length}`
+    );
+
     // 5. ssh list/generate
     const keys = await win.evaluate(() => window.smartgit.ssh.list());
     check('ssh.list returns array', Array.isArray(keys), String(keys.length));

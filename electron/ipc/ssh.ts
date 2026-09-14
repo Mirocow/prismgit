@@ -40,4 +40,24 @@ export function registerSshIpc(): void {
     backend: secrets.secretsBackend(),
     secretCount: secrets.secretCount(),
   }));
+
+  // ── Secrets manager (Settings → Security → Stored secrets) ────────────────
+  // Values are never listed in bulk; the renderer gets { ns, key, encrypted }
+  // metadata and must explicitly reveal/copy a single value.
+  ipcMain.handle('credentials:list', () => secrets.listSecretEntries());
+
+  ipcMain.handle('credentials:set', (_e, ns: string, key: string, value: string) => {
+    if (typeof ns !== 'string' || !ns.trim() || typeof key !== 'string' || !key.trim()) {
+      throw new Error('credentials:set requires a namespace and a key');
+    }
+    secrets.setSecret(ns.trim(), key.trim(), typeof value === 'string' ? value : '');
+  });
+
+  ipcMain.handle('credentials:delete', (_e, ns: string, key: string) => {
+    secrets.deleteSecret(ns, key);
+  });
+
+  ipcMain.handle('credentials:reveal', (_e, ns: string, key: string) =>
+    secrets.getSecret(ns, key)
+  );
 }

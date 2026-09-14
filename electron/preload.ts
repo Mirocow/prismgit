@@ -426,9 +426,13 @@ const api = {
     listSystemKeys: () => ipcRenderer.invoke('ssh:listSystemKeys'),
   } as SshApi,
 
-  // Credential storage status (Settings → Security)
+  // Credential storage status + secrets manager (Settings → Security)
   credentials: {
     status: () => ipcRenderer.invoke('credentials:status'),
+    list: () => ipcRenderer.invoke('credentials:list'),
+    set: (ns: string, key: string, value: string) => ipcRenderer.invoke('credentials:set', ns, key, value),
+    delete: (ns: string, key: string) => ipcRenderer.invoke('credentials:delete', ns, key),
+    reveal: (ns: string, key: string) => ipcRenderer.invoke('credentials:reveal', ns, key),
   } as CredentialsApi,
 
   // Window controls

@@ -121,6 +121,37 @@ export function listSecretKeys(ns: string): string[] {
     .map((id) => id.slice(prefix.length));
 }
 
+/** Metadata of one stored secret — safe to expose to the renderer (no value). */
+export interface SecretEntryMeta {
+  /** Namespace: 'tokens' | 'ai' | 'remoteAuth' | 'github' | 'ssh' | … */
+  ns: string;
+  /** Key inside the namespace (remote name, provider id, scalar key…). */
+  key: string;
+  /** true — encrypted with the OS keychain; false — 0600-file fallback. */
+  encrypted: boolean;
+}
+
+/**
+ * Every secret in the vault as { ns, key, encrypted } — NO values.
+ * Backs the Settings → Security secrets manager (list / copy / replace /
+ * delete entries the app has accumulated over its lifetime).
+ */
+export function listSecretEntries(): SecretEntryMeta[] {
+  const d = data();
+  return Object.entries(d)
+    .map(([id, entry]) => {
+      const idx = id.indexOf(SEP);
+      if (idx <= 0 || idx === id.length - 1) return null;
+      return {
+        ns: id.slice(0, idx),
+        key: id.slice(idx + 1),
+        encrypted: !!entry?.enc,
+      } as SecretEntryMeta;
+    })
+    .filter((e): e is SecretEntryMeta => e !== null)
+    .sort((a, b) => a.ns.localeCompare(b.ns) || a.key.localeCompare(b.key));
+}
+
 /** Remove every secret under a namespace. */
 export function deleteNamespace(ns: string): void {
   const d = data();

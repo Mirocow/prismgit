@@ -513,7 +513,35 @@ export async function commit(
   if (signoff) args.push('--signoff');
   if (noVerify) args.push('--no-verify');
   removeStaleIndexLock(repoPath);
-  const output = await git.raw(args);
+  let output: string;
+  try {
+    output = await git.raw(args);
+  } catch (e) {
+    // "Please tell me who you are" / "empty ident name not allowed" — neither
+    // repo-local nor global user.name/user.email exist (fresh machine, repo
+    // created without an identity). Retry ONCE with the app default identity
+    // (Settings → Git → Default commit author) passed as -c overrides, so the
+    // commit succeeds without silently picking up an unintended identity.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/tell me who you are|empty ident/i.test(msg)) {
+      const name = String(getSetting('gitUserName') ?? '').trim();
+      const email = String(getSetting('gitUserEmail') ?? '').trim();
+      if (name || email) {
+        removeStaleIndexLock(repoPath);
+        const cArgs = [
+          ...(name ? ['-c', `user.name=${name}`] : []),
+          ...(email ? ['-c', `user.email=${email}`] : []),
+        ];
+        output = await git.raw([...cArgs, ...args]);
+      } else {
+        throw new Error(
+          `${msg}\n\nPrismGit: no commit identity found. Set "Default commit author" in Settings → Git, or configure user.name/user.email.`
+        );
+      }
+    } else {
+      throw e;
+    }
+  }
   // Bust the diff cache — HEAD has moved, every cached diff is now stale.
   invalidateDiffCache(repoPath);
   // Extract commit hash from output: "[main abc1234] message"
@@ -1351,17 +1379,30 @@ async function networkGit(
   try {
     const url = await remoteUrlOf(repoPath, remoteName, pushUrl);
     const ssh = buildSshEnv(url, repoPath);
-    if (Object.keys(ssh.env).length === 0) {
-      ssh.cleanup();
-      return { git: getGit(repoPath), cleanup: () => {} };
-    }
+    const env: Record<string, string> = { ...GIT_ENV_LFS_SKIP, ...ssh.env };
+    // A network command NEVER runs on the shared cached getGit() instance:
+    // the cached instance is created with maxConcurrentProcesses: 2 and is
+    // used by EVERY local operation (status refreshes, diffs, log, commit…).
+    // A slow or hung network command (unreachable LFS-enabled server,
+    // credential-manager dialog waiting for input, huge fetch after the
+    // LFS troubleshooting) used to occupy those 2 queue slots and stall
+    // ALL git operations of the repository — the reported
+    // "git operations became slow after the LFS problems". A dedicated
+    // short-lived instance keeps slow downloads out of the local queue.
     const git = simpleGit({
       baseDir: repoPath,
       binary: 'git',
-      maxConcurrentProcesses: 2,
+      maxConcurrentProcesses: 4,
       trimmed: false,
       ...GIT_SSH_UNSAFE_OPTIONS,
-    }).env({ ...GIT_ENV_LFS_SKIP, ...ssh.env });
+    }).env({
+      ...env,
+      // Never let git block on a terminal credential prompt — PrismGit is a
+      // GUI: HTTP(S) auth is injected via remoteNetworkArgs (-c overrides),
+      // SSH auth via GIT_SSH_COMMAND / SSH_ASKPASS. An unanswered prompt can
+      // otherwise hang the command invisibly (matches the push path).
+      GIT_TERMINAL_PROMPT: '0',
+    });
     return { git, cleanup: ssh.cleanup };
   } catch {
     return { git: getGit(repoPath), cleanup: () => {} };
@@ -3446,6 +3487,7 @@ export async function clone(
     ssh.cleanup();
   }
   invalidateCache();
+  await applyGitIdentity(targetPath);
   return targetPath;
 }
 
@@ -3453,6 +3495,37 @@ export async function init(targetPath: string, bare = false): Promise<void> {
   const git = simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS });
   await git.init(bare);
   invalidateCache();
+  if (!bare) await applyGitIdentity(targetPath);
+}
+
+/**
+ * Write the default commit identity (Settings → Git → "Default commit
+ * author" — gitUserName / gitUserEmail app settings) into a repository's
+ * LOCAL config.
+ *
+ * Called right after `git init` and `git clone` so a new repository is
+ * immediately usable: git refuses the first commit with
+ * "Please tell me who you are" when neither repo-local nor global
+ * user.name/user.email are configured — exactly what users saw when they
+ * created a repository from PrismGit and then tried to commit.
+ *
+ * Non-fatal by design: when no defaults are configured (or the config write
+ * fails), the repo behaves like a plain git clone.
+ */
+export async function applyGitIdentity(repoPath: string): Promise<boolean> {
+  const name = String(getSetting('gitUserName') ?? '').trim();
+  const email = String(getSetting('gitUserEmail') ?? '').trim();
+  if (!name && !email) return false;
+  try {
+    const git = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS });
+    if (name) await git.raw(['config', 'user.name', name]);
+    if (email) await git.raw(['config', 'user.email', email]);
+    return true;
+  } catch {
+    // A repo without a local identity still falls back to global config /
+    // the commit-time -c retry — never block repo creation on this.
+    return false;
+  }
 }
 
 export async function addRemote(
@@ -4090,19 +4163,79 @@ export async function configGet(
   }
 }
 
+/**
+ * simple-git's blockUnsafeOperationsPlugin rejects `git config <key> <value>`
+ * writes for a set of "unsafe" config keys (gpg.program, core.sshCommand,
+ * credential.helper, …) unless the matching `unsafe.allowUnsafe*` option is
+ * enabled. PrismGit is a desktop Git client with an explicit config editor —
+ * when the user edits one of these keys in a settings dialog it IS the
+ * intent, so a rejected write is retried on a dedicated instance with the
+ * allow-flags enabled. Detection is message-based (not a hand-maintained key
+ * list), so new entries in simple-git's blocklist are handled automatically.
+ */
+const UNSAFE_CONFIG_ERROR_RE = /is not permitted without enabling (allowUnsafe\w+)/;
+
+function isUnsafeConfigError(err: unknown): boolean {
+  return UNSAFE_CONFIG_ERROR_RE.test(err instanceof Error ? err.message : String(err));
+}
+
+/**
+ * All `unsafe.allowUnsafe*` flags that un-block config WRITES. Only used for
+ * explicit, user-initiated config edits (configSet / configUnset) — the
+ * shared getGit() instance keeps the conservative defaults.
+ */
+const CONFIG_WRITE_UNSAFE_FLAGS = {
+  allowUnsafeAlias: true as const,
+  allowUnsafeAskPass: true as const,
+  allowUnsafeCredentialHelper: true as const,
+  allowUnsafeDiffExternal: true as const,
+  allowUnsafeDiffTextConv: true as const,
+  allowUnsafeFilter: true as const,
+  allowUnsafeFsMonitor: true as const,
+  allowUnsafeGitProxy: true as const,
+  allowUnsafeGpgProgram: true as const,
+  allowUnsafeMergeDriver: true as const,
+  allowUnsafePack: true as const,
+  allowUnsafePager: true as const,
+  allowUnsafeProtocolOverride: true as const,
+  allowUnsafeTemplateDir: true as const,
+};
+
+function gitWithUnsafeConfigWrites(repoPath: string): SimpleGit {
+  return simpleGit({
+    baseDir: repoPath,
+    binary: 'git',
+    maxConcurrentProcesses: 2,
+    trimmed: false,
+    ...GIT_UNSAFE_OPTIONS,
+    unsafe: {
+      ...GIT_UNSAFE_OPTIONS.unsafe,
+      ...CONFIG_WRITE_UNSAFE_FLAGS,
+    },
+  });
+}
+
 export async function configSet(
   repoPath: string,
   key: string,
   value: string,
   scope?: 'system' | 'global' | 'local'
 ): Promise<void> {
-  const git = getGit(repoPath);
   const args = ['config'];
   if (scope === 'system') args.push('--system');
   else if (scope === 'global') args.push('--global');
   else if (scope === 'local') args.push('--local');
   args.push(key, value);
-  await git.raw(args);
+  const git = getGit(repoPath);
+  try {
+    await git.raw(args);
+  } catch (e) {
+    if (!isUnsafeConfigError(e)) throw e;
+    // Explicit user edit of a simple-git "unsafe" key (e.g. gpg.program in
+    // Repository Settings → Signing) — retry with the write allowed. Failure
+    // of the retry is a real git error and propagates.
+    await gitWithUnsafeConfigWrites(repoPath).raw(args);
+  }
 }
 
 /**
@@ -4164,7 +4297,16 @@ export async function configUnset(
     // Unsetting from a missing config file is a no-op — there is nothing to unset.
     const msg = err instanceof Error ? err.message : String(err);
     if (MISSING_CONFIG_FILE_RE.test(msg)) return;
-    throw err;
+    if (!isUnsafeConfigError(err)) throw err;
+    // Explicit user edit of a simple-git "unsafe" key (e.g. clearing
+    // gpg.program) — retry with the write allowed (see configSet).
+    try {
+      await gitWithUnsafeConfigWrites(repoPath).raw(args);
+    } catch (retryErr) {
+      const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+      if (MISSING_CONFIG_FILE_RE.test(retryMsg)) return;
+      throw retryErr;
+    }
   }
 }
 
