@@ -25,6 +25,10 @@ export const en: Record<string, string> = {
 
   // Appearance
   'settings.themeDescription': 'Switch between dark and light appearance',
+  // 4.2 — automatic light/dark
+  'settings.themeAuto': 'Automatically select light/dark',
+  'settings.themeAutoHint': 'Follows the OS color-scheme and switches to the light/dark pair of the chosen theme family.',
+
   'settings.lightMode': 'Light',
   'settings.darkMode': 'Dark',
   // Themes tab
@@ -311,6 +315,10 @@ export const ru: Record<string, string> = {
 
   // Appearance
   'settings.themeDescription': 'Переключение между тёмным и светлым оформлением',
+  // 4.2 — автоматический свет/тьма
+  'settings.themeAuto': 'Автоматически выбирать светлую/тёмную тему',
+  'settings.themeAutoHint': 'Следует за системной цветовой схемой и переключает пару светлой/тёмной темы выбранного семейства.',
+
   'settings.lightMode': 'Светлая',
   'settings.darkMode': 'Тёмная',
   // Themes tab
@@ -596,6 +604,10 @@ export const zh: Record<string, string> = {
 
   // Appearance
   'settings.themeDescription': '在深色和浅色外观之间切换',
+  // 4.2 — 自动亮/暗
+  'settings.themeAuto': '自动选择浅色/深色主题',
+  'settings.themeAutoHint': '跟随系统配色方案，并切换到所选主题系列的浅色/深色配对。',
+
   'settings.lightMode': '浅色',
   'settings.darkMode': '深色',
   // Themes tab
@@ -881,6 +893,10 @@ export const de: Record<string, string> = {
 
   // Appearance
   'settings.themeDescription': 'Zwischen dunkler und heller Darstellung wechseln',
+  // 4.2 — automatisch hell/dunkel
+  'settings.themeAuto': 'Hell/Dunkel automatisch wählen',
+  'settings.themeAutoHint': 'Folgt dem Farbschema des Betriebssystems und wechselt zum Hell/Dunkel-Paar der gewählten Themenfamilie.',
+
   'settings.lightMode': 'Hell',
   'settings.darkMode': 'Dunkel',
   // Themes tab

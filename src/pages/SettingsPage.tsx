@@ -15,7 +15,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 
 export function SettingsPage() {
-  const { settings, theme, setSetting, toggleTheme, setTheme } = useSettingsStore();
+  const { settings, theme, themeMode, setSetting, toggleTheme, setTheme, setThemeMode } = useSettingsStore();
   const { user, authenticated, loginWithPAT, logout, loadAuthState } = useAuthStore();
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastActions();
@@ -283,6 +283,22 @@ export function SettingsPage() {
                 {theme === 'dark' ? t('settings.lightMode') : t('settings.darkMode')}
               </button>
             </div>
+            {/* 4.2 — SmartGit "Automatically select light/dark": follow the
+                OS preference; resolves the light/dark pair of the chosen
+                theme family (e.g. github-light ↔ github-dark). */}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={themeMode === 'auto'}
+                onChange={(e) => void setThemeMode(e.target.checked ? 'auto' : 'manual')}
+              />
+              <div className="flex-1">
+                <div>{t('settings.themeAuto')}</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  {t('settings.themeAutoHint')}
+                </div>
+              </div>
+            </label>
             {/* Language selector */}
             <div className="flex items-center justify-between">
               <div>

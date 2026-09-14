@@ -58,6 +58,14 @@ export interface AppSettings {
    * 'catppuccin-mocha', 'one-dark', 'gruvbox-dark'.
    */
   theme: string;
+  /**
+   * 4.2 — SmartGit "Automatically select light/dark". When 'auto', the
+   * effective theme follows the OS `prefers-color-scheme`: the light/dark
+   * PAIR of the saved `theme` family is picked on system changes (fallback
+   * DEFAULT_THEME / 'dark' for families without a pair). 'manual' keeps
+   * the explicit `theme`. Default: 'manual'.
+   */
+  themeMode?: 'manual' | 'auto';
   fontSize: number;          // Global base font size
   fontSizeTree: number;      // File tree / directory tree font size
   fontSizeList: number;      // Commit lists, branch lists, tag lists

@@ -10,10 +10,29 @@
 //      The settingsStore.loadSettings() call will apply it.
 try {
   var theme = localStorage.getItem('prismgit-theme') || 'light';
+  var knownDarkThemes = ['dark', 'github-dark', 'dracula', 'monokai', 'solarized-dark', 'nord', 'tokyo-night', 'catppuccin-mocha', 'one-dark', 'gruvbox-dark'];
+  // 4.2 — "Automatically select light/dark": before React mounts we can't
+  // compute the exact theme pair, but we can avoid a light flash when the
+  // OS is dark. If the saved theme is light and the system prefers dark,
+  // fall back to the generic dark theme; settingsStore resolves the proper
+  // family pair once it loads.
+  try {
+    if (
+      localStorage.getItem('prismgit-theme-mode') === 'auto' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+    ) {
+      var knownLightPrefixes = ['light', 'github-light', 'solarized-light'];
+      var isKnownDark = knownDarkThemes.indexOf(theme) >= 0;
+      if (!isKnownDark && knownLightPrefixes.some(function (p) { return theme.indexOf(p) === 0; })) {
+        theme = 'dark';
+      }
+    }
+  } catch (e2) { /* ignore */
+  }
   // Apply both the legacy .dark class (for backward compat with code that
   // checks classList.contains('dark')) AND the data-theme attribute (the
   // actual theme selector used by globals.css to override CSS variables).
-  var knownDarkThemes = ['dark', 'github-dark', 'dracula', 'monokai', 'solarized-dark', 'nord', 'tokyo-night', 'catppuccin-mocha', 'one-dark', 'gruvbox-dark'];
   if (knownDarkThemes.indexOf(theme) >= 0) {
     document.documentElement.classList.add('dark');
   }

@@ -7,13 +7,80 @@ export type Theme = ThemeId;
 interface SettingsState {
   settings: Partial<AppSettings>;
   theme: Theme;
+  /** 4.2 — 'auto' follows the OS light/dark preference (see resolveAutoTheme). */
+  themeMode: 'manual' | 'auto';
   loading: boolean;
 
   loadSettings: () => Promise<void>;
   setSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
   toggleTheme: () => Promise<void>;
+  /** 4.2 — switch between manual (saved theme) and system-following mode. */
+  setThemeMode: (mode: 'manual' | 'auto') => Promise<void>;
   applyTheme: () => void;
+}
+
+// ── 4.2 — system light/dark auto mode ────────────────────────────────────
+
+/** Read the OS color-scheme preference (false when unavailable). */
+export function systemPrefersDark(): boolean {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 4.2 — resolve the theme to use in auto mode: stay on `saved` when its
+ * darkness already matches the system preference, otherwise switch to the
+ * light/dark PAIR of the same family (github-light ↔ github-dark). Families
+ * without a pair fall back to DEFAULT_THEME (light) / 'dark' — mirroring
+ * toggleTheme's pairing rules.
+ */
+export function resolveAutoTheme(saved: string, systemDark: boolean): Theme {
+  const meta = getThemeMeta(saved as Theme);
+  if (!meta) return systemDark ? ('dark' as Theme) : DEFAULT_THEME;
+  if (meta.isDark === systemDark) return saved as Theme;
+  const family = saved.split('-')[0];
+  const pair = THEMES.find((t) => t.isDark === systemDark && t.id.startsWith(family));
+  return pair ? pair.id : (systemDark ? ('dark' as Theme) : DEFAULT_THEME);
+}
+
+// Module-level matchMedia listener — one per app, (re)started when auto
+// mode turns on and removed when it turns off.
+let systemThemeMql: MediaQueryList | null = null;
+let systemThemeHandler: ((e: MediaQueryListEvent) => void) | null = null;
+
+function applyAutoThemeNow(): void {
+  const { settings } = useSettingsStore.getState();
+  const resolved = resolveAutoTheme(settings.theme ?? DEFAULT_THEME, systemPrefersDark());
+  useSettingsStore.setState({ theme: resolved });
+  useSettingsStore.getState().applyTheme();
+}
+
+function startSystemThemeSync(): void {
+  stopSystemThemeSync();
+  try {
+    systemThemeMql = window.matchMedia('(prefers-color-scheme: dark)');
+    systemThemeHandler = () => applyAutoThemeNow();
+    systemThemeMql.addEventListener('change', systemThemeHandler);
+  } catch {
+    systemThemeMql = null;
+    systemThemeHandler = null;
+  }
+}
+
+function stopSystemThemeSync(): void {
+  try {
+    if (systemThemeMql && systemThemeHandler) {
+      systemThemeMql.removeEventListener('change', systemThemeHandler);
+    }
+  } catch {
+    /* ignore */
+  }
+  systemThemeMql = null;
+  systemThemeHandler = null;
 }
 
 function applyThemeToDOM(theme: Theme) {
@@ -166,6 +233,7 @@ try {
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: {},
   theme: 'light',
+  themeMode: 'manual',
   loading: false,
 
   loadSettings: async () => {
@@ -177,7 +245,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const stored = settings.theme as string | undefined;
       const validIds = THEMES.map((t) => t.id);
       const theme: Theme = stored && validIds.includes(stored as Theme) ? (stored as Theme) : DEFAULT_THEME;
-      set({ settings, theme, loading: false });
+      // 4.2 — resolve the effective theme under auto mode and (re)arm the
+      // system listener. The manual base stays in settings.theme.
+      const themeMode = settings.themeMode ?? 'manual';
+      let effective: Theme = theme;
+      if (themeMode === 'auto') {
+        effective = resolveAutoTheme(theme, systemPrefersDark());
+        startSystemThemeSync();
+      } else {
+        stopSystemThemeSync();
+      }
+      set({ settings, themeMode, theme: effective, loading: false });
       get().applyTheme();
       // Apply all font sizes on load
       if (settings.fontSize) {
@@ -249,6 +327,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setTheme: async (theme) => {
     await get().setSetting('theme', theme);
+    // Keep the resolved state consistent when auto mode rewrites it.
+    set({ theme });
+  },
+
+  // 4.2 — SmartGit "Automatically select light/dark": 'auto' follows the
+  // OS preference (light/dark pair of the saved theme family), 'manual'
+  // returns to the explicitly chosen theme.
+  setThemeMode: async (mode) => {
+    await get().setSetting('themeMode', mode);
+    set({ themeMode: mode });
+    try { localStorage.setItem('prismgit-theme-mode', mode); } catch { /* ignore */ }
+    if (mode === 'auto') {
+      startSystemThemeSync();
+      applyAutoThemeNow();
+    } else {
+      stopSystemThemeSync();
+      const base = (get().settings.theme as Theme | undefined) ?? DEFAULT_THEME;
+      set({ theme: base });
+      get().applyTheme();
+    }
   },
 
   toggleTheme: async () => {
