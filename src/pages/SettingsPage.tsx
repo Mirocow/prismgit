@@ -15,6 +15,39 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 
+/**
+ * Controlled input that saves on blur but STAYS IN SYNC with the store:
+ * when `value` changes from outside (e.g. the provider switch handler
+ * rewriting aiUrl/aiModel/aiApiKey), the displayed draft is updated too.
+ *
+ * The previous uncontrolled `defaultValue` inputs kept showing the old
+ * provider's values and wrote the STALE draft back to the store on blur —
+ * which made the provider switch mechanism appear completely broken.
+ */
+function BlurSaveInput({
+  value,
+  onSave,
+  ...rest
+}: {
+  value: string;
+  onSave: (v: string) => void;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'onBlur' | 'defaultValue'>) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+  return (
+    <input
+      {...rest}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft !== value) onSave(draft);
+      }}
+    />
+  );
+}
+
 export function SettingsPage() {
   const { settings, theme, themeMode, setSetting, toggleTheme, setTheme, setThemeMode } = useSettingsStore();
   const { user, authenticated, loginWithPAT, logout, loadAuthState } = useAuthStore();
@@ -22,6 +55,28 @@ export function SettingsPage() {
   const toast = useToastActions();
   const { repos, removeRepo, loadRepos } = useRepositoryStore();
   const { t, locale, setLocale } = useI18n();
+
+  /**
+   * Save one AI connection field (aiUrl / aiApiKey / aiModel) AND mirror it
+   * into the active provider's saved config. Previously the values landed
+   * ONLY in the flat settings — switching providers and coming back lost
+   * every edit (the per-provider map stayed stale).
+   */
+  const saveAiConnectionField = useCallback(async (field: 'aiUrl' | 'aiApiKey' | 'aiModel', value: string) => {
+    await setSetting(field, value as never);
+    const provider = useSettingsStore.getState().settings.aiProvider;
+    if (!provider) return;
+    const current = useSettingsStore.getState().settings;
+    const configs = { ...(current.aiProviderConfigs ?? {}) };
+    const cur = configs[provider] ?? {};
+    configs[provider] = {
+      ...cur,
+      url: field === 'aiUrl' ? value : (cur.url ?? '' ),
+      apiKey: field === 'aiApiKey' ? value : (cur.apiKey ?? ''),
+      model: field === 'aiModel' ? value : (cur.model ?? ''),
+    };
+    await setSetting('aiProviderConfigs', configs);
+  }, [setSetting]);
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
   // Top-level tab: Application Settings vs Project Settings vs Themes
@@ -1312,12 +1367,12 @@ smartgit.refresh.inspectEol=true
                       title="Model is chosen via the picker below"
                     />
                   ) : (
-                    <input
+                    <BlurSaveInput
                       type="text"
                       className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
                       placeholder="gpt-4o-mini"
-                      defaultValue={settings.aiModel || ''}
-                      onBlur={(e) => setSetting('aiModel', e.target.value)}
+                      value={settings.aiModel || ''}
+                      onSave={(v) => void saveAiConnectionField('aiModel', v)}
                     />
                   )}
                 </div>
@@ -1365,22 +1420,28 @@ smartgit.refresh.inspectEol=true
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiUrl')}</label>
-                  <input
+                  {/* Controlled + blur-save: MUST re-render when the provider
+                      switch rewrites aiUrl/aiModel/aiApiKey. The old
+                      defaultValue version kept showing the previous
+                      provider's URL and wrote the STALE value back on blur,
+                      which made provider switching appear broken. */}
+                  <BlurSaveInput
                     type="text"
                     className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
                     placeholder="https://api.openai.com/v1/chat/completions"
-                    defaultValue={settings.aiUrl || ''}
-                    onBlur={(e) => setSetting('aiUrl', e.target.value)}
+                    value={settings.aiUrl || ''}
+                    onSave={(v) => void saveAiConnectionField('aiUrl', v)}
                   />
                 </div>
                 <div>
                   <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiKey')}</label>
-                  <input
+                  <BlurSaveInput
                     type="password"
+                    autoComplete="new-password"
                     className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
                     placeholder="sk-..."
-                    defaultValue={settings.aiApiKey || ''}
-                    onBlur={(e) => setSetting('aiApiKey', e.target.value)}
+                    value={settings.aiApiKey || ''}
+                    onSave={(v) => void saveAiConnectionField('aiApiKey', v)}
                   />
                 </div>
               </div>

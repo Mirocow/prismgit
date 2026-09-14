@@ -57,8 +57,18 @@ export function getAiRequestTimeoutMs(): number | undefined {
 }
 
 function buildPromptBody(cfg: AiProviderConfig, diff: string, hint?: string): string {
-  const template = cfg.prompt?.trim() ? cfg.prompt : DEFAULT_AI_PROMPT;
-  let body = template.replace(/\{\{\s*gitDiff\s*\}\}/g, diff);
+  const userTemplate = cfg.prompt?.trim() ?? '';
+  const hasPlaceholder = /\{\{\s*gitDiff\s*\}\}/.test(userTemplate) || /\{\{\s*diff\s*\}\}/.test(userTemplate);
+  const template = userTemplate || DEFAULT_AI_PROMPT;
+  let body = template.replace(/\{\{\s*(?:gitDiff|diff)\s*\}\}/g, diff);
+  // CRITICAL: when the template never references the diff, APPEND it —
+  // otherwise the model receives instructions only ("write a commit
+  // message for the following diff") WITHOUT the actual diff and can only
+  // invent a generic message. This was the reason AI commit messages were
+  // useless with the default prompt.
+  if (!hasPlaceholder) {
+    body += `\n\nGit diff:\n${diff}`;
+  }
   if (hint) body += `\n\nAdditional instruction from the user: ${hint}`;
   return body;
 }
