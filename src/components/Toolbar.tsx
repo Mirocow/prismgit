@@ -257,7 +257,6 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
             <span data-tour="toolbar-global-search" style={{ display: 'inline-flex' }}>
               <IconButton icon={Search} onClick={() => onGlobalSearch && onGlobalSearch()} title={t('search.toolbarButtonTitle')} />
             </span>
-            <IconButton icon={FileText} onClick={() => onFind && onFind()} disabled={disabled} title={t('shell.findObject')} />
             <IconButton icon={ExternalLink} onClick={handleOpenInBrowser} disabled={disabled} title={t('shell.openInBrowser')} />
             <IconButton icon={Folder} onClick={handleRevealInFileManager} disabled={disabled} title={t('shell.revealInFileManager')} />
             <Divider />

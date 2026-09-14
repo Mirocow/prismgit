@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
+import { CloudModelPicker } from '../components/CloudModelPicker';
 import { confirmDialog } from '../components/ConfirmDialog';
 import { Folder, Github, Loader, Lock, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
 import { OllamaModelPicker } from '../components/OllamaModelPicker';
-import { CloudModelPicker } from '../components/CloudModelPicker';
+import { SecuritySettings } from '../components/settings/SecuritySettings';
+import { getProviderPreset, PROVIDER_PRESETS } from '../lib/aiCommitMessages';
 import { api, type GitConfigEntry } from '../lib/api';
-import { PROVIDER_PRESETS, getProviderPreset } from '../lib/aiCommitMessages';
-import { LOCALES, useI18n } from '../lib/i18n';
 import { restoreAllConfirmations } from '../lib/confirmations';
+import { LOCALES, useI18n } from '../lib/i18n';
 import { getThemeMeta, THEMES } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
-import { SecuritySettings } from '../components/settings/SecuritySettings';
 
 export function SettingsPage() {
   const { settings, theme, themeMode, setSetting, toggleTheme, setTheme, setThemeMode } = useSettingsStore();
@@ -246,18 +246,6 @@ export function SettingsPage() {
           <button
             className={cn(
               'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
-              showAi
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
-            )}
-            onClick={() => setActiveTab('ai')}
-          >
-            <Sparkles size={14} />
-            {t('settings.ai')}
-          </button>
-          <button
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
               showSecurity
                 ? 'border-accent text-accent'
                 : 'border-transparent text-text-secondary hover:text-text-primary'
@@ -266,6 +254,18 @@ export function SettingsPage() {
           >
             <Lock size={14} />
             {t('settings.security')}
+          </button>
+          <button
+            className={cn(
+              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              showAi
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            )}
+            onClick={() => setActiveTab('ai')}
+          >
+            <Sparkles size={14} />
+            {t('settings.ai')}
           </button>
         </div>
 

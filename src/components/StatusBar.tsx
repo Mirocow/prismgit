@@ -1,18 +1,17 @@
-import { useRepositoryStore } from '../stores/repositoryStore';
+import { memo, useCallback, useEffect, useState } from 'react';
+import { api } from '../lib/api';
+import { buildHashMenu, runHashMenuAction } from '../lib/commitMenu';
+import { useI18n } from '../lib/i18n';
+import { useContextMenu } from '../lib/useContextMenu';
+import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
+import { useOperationLogStore } from '../stores/operationLogStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
-import { useOperationLogStore } from '../stores/operationLogStore';
-import { api } from '../lib/api';
-import { cn } from '../lib/utils';
-import { memo, useEffect, useState, useCallback } from 'react';
-import { ArrowUp, ArrowDown, Loader, ChevronUp, ChevronDown } from './icons';
+import { useToastActions } from '../stores/toastStore';
 import { FooterCounters } from './FooterCounters';
-import { useContextMenu } from '../lib/useContextMenu';
-import { buildHashMenu, runHashMenuAction } from '../lib/commitMenu';
-import { describePushResult } from '../lib/pushResult';
-import { useI18n } from '../lib/i18n';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Loader } from './icons';
 
 /**
  * Clickable commit hash — clicking jumps to History and focuses that commit.
@@ -227,7 +226,7 @@ export function StatusBar({
         {vis('aheadBehind') && status?.ahead ? (
           <button
             className="text-status-added flex items-center gap-0.5 font-medium hover:bg-bg-hover rounded px-1 py-0.5 transition-colors cursor-pointer"
-            onClick={() => {
+            /*onClick={() => {
               if (!currentRepo) return;
               useGitStore.getState().push(currentRepo.path)
                 .then((res) => {
@@ -237,7 +236,7 @@ export function StatusBar({
                   else toast.success(result.title, result.detail);
                 })
                 .catch((e) => toast.error(t('shell.pushFailed'), String(e)));
-            }}
+            }}*/
             title={t('shell.aheadTooltip', { count: status.ahead })}
           >
             <ArrowUp size={9} />{status.ahead}
@@ -246,12 +245,12 @@ export function StatusBar({
         {vis('aheadBehind') && status?.behind ? (
           <button
             className="text-status-modified flex items-center gap-0.5 font-medium hover:bg-bg-hover rounded px-1 py-0.5 transition-colors cursor-pointer"
-            onClick={() => {
+            /*onClick={() => {
               if (!currentRepo) return;
               useGitStore.getState().pull(currentRepo.path)
                 .then(() => toast.success(t('status.pulledSuccessfully')))
                 .catch((e) => toast.error(t('shell.pullFailed'), String(e)));
-            }}
+            }}*/
             title={t('shell.behindTooltip', { count: status.behind })}
           >
             <ArrowDown size={9} />{status.behind}

@@ -1,18 +1,33 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useI18n } from '../lib/i18n';
+import { cn } from '../lib/utils';
+import { useGitStore } from '../stores/gitStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { useToastActions } from '../stores/toastStore';
 import {
-  RefreshCw, Upload, Download, CloudDownload, GitCommit, Search, Sun, Moon,
-  Settings as SettingsIcon, FolderPlus, FolderGit, X, GitMerge, Plus, FileText,
-  CheckCircle, BookOpen, ExternalLink,
+  BookOpen,
+  CheckCircle,
+  CloudDownload,
+  Download,
+  ExternalLink,
+  FileText,
+  FolderGit,
+  FolderPlus,
+  GitCommit,
+  GitMerge,
+  Moon,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings as SettingsIcon,
+  Sun,
+  Upload,
+  X,
 } from './icons';
 import { NAV_ITEMS, NAV_SHORTCUTS } from './navItems';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
-import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
-import { useEscapeKey } from '../hooks/useEscapeKey';
-import { cn } from '../lib/utils';
-import { useI18n } from '../lib/i18n';
 
 /** Minimal icon contract shared with ./icons */
 type IconType = typeof GitCommit;
