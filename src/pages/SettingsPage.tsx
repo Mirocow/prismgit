@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { Folder, Github, Loader, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
+import { Folder, Github, Loader, Lock, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
 import { OllamaModelPicker } from '../components/OllamaModelPicker';
 import { CloudModelPicker } from '../components/CloudModelPicker';
 import { api, type GitConfigEntry } from '../lib/api';
@@ -13,6 +13,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
+import { SecuritySettings } from '../components/settings/SecuritySettings';
 
 export function SettingsPage() {
   const { settings, theme, themeMode, setSetting, toggleTheme, setTheme, setThemeMode } = useSettingsStore();
@@ -24,11 +25,12 @@ export function SettingsPage() {
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
   // Top-level tab: Application Settings vs Project Settings vs Themes
-  const [activeTab, setActiveTab] = useState<'application' | 'project' | 'themes' | 'ai' | 'show-integrations'>('application');
+  const [activeTab, setActiveTab] = useState<'application' | 'project' | 'themes' | 'ai' | 'security' | 'show-integrations'>('application');
   const showApp = activeTab === 'application';
   const showProject = activeTab === 'project' && !!currentRepo;
   const showThemes = activeTab === 'themes';
   const showAi = activeTab === 'ai';
+  const showSecurity = activeTab === 'security';
   const showIntegrations = activeTab === 'show-integrations';
 
   // === Git Config section state ===
@@ -253,6 +255,18 @@ export function SettingsPage() {
             <Sparkles size={14} />
             {t('settings.ai')}
           </button>
+          <button
+            className={cn(
+              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              showSecurity
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            )}
+            onClick={() => setActiveTab('security')}
+          >
+            <Lock size={14} />
+            {t('settings.security')}
+          </button>
         </div>
 
         {/* No repo open for Project Settings tab */}
@@ -262,6 +276,9 @@ export function SettingsPage() {
             <div className="text-sm">{t('settings.openRepoForProject')}</div>
           </div>
         )}
+
+        {/* Security & SSH */}
+        {showSecurity && <SecuritySettings />}
 
         {/* Appearance — Application Settings */}
         {showApp && (

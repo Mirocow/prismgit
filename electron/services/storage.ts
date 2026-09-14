@@ -3,6 +3,15 @@ import { randomUUID } from 'crypto';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../types/settings-api.js';
 import simpleGit from 'simple-git';
 import { SimpleStore } from './simpleStore.js';
+import {
+  splitSettingSecrets,
+  rehydrateSettingSecrets,
+  NS_TOKENS,
+  NS_AI,
+  NS_REMOTE_AUTH,
+  remoteAuthVaultKey,
+} from './credentialKeys.js';
+import { setSecret, deleteSecret, getSecret } from './secrets.js';
 
 interface StoreSchema {
   settings: Partial<AppSettings>;
@@ -31,19 +40,141 @@ const store = new SimpleStore({
 
 // ============= Settings =============
 
+/** Write one split secret (vaultKey → value) into the vault; undefined deletes. */
+function applySplitSecrets(secrets: Record<string, string | undefined>): void {
+  for (const [vk, value] of Object.entries(secrets)) {
+    if (value === undefined) deleteSecretByVaultKey(vk);
+    else setSecretByVaultKey(vk, value);
+  }
+}
+
+/**
+ * Route a composite vaultKey (as produced by splitSettingSecrets) to the
+ * right vault namespace. Vault keys for scalars are the setting name
+ * (e.g. "githubPAT" → tokens), remoteAuth keys are "<repo>|<remote>",
+ * AI provider keys are "provider:<id>".
+ */
+function setSecretByVaultKey(vk: string, value: string): void {
+  if (vk.startsWith('provider:')) {
+    setSecret(NS_AI, vk, value);
+  } else if (vk.includes('|')) {
+    setSecret(NS_REMOTE_AUTH, vk, value);
+  } else {
+    setSecret(NS_TOKENS, vk, value);
+  }
+}
+
+function deleteSecretByVaultKey(vk: string): void {
+  if (vk.startsWith('provider:')) {
+    deleteSecret(NS_AI, vk);
+  } else if (vk.includes('|')) {
+    deleteSecret(NS_REMOTE_AUTH, vk);
+  } else {
+    deleteSecret(NS_TOKENS, vk);
+  }
+}
+
+/** Vault lookup for rehydration (storage key → original value). */
+function lookupSecret(key: string, vk: string): string | undefined {
+  if (vk.startsWith('provider:')) return getSecret(NS_AI, vk);
+  if (vk.includes('|')) return getSecret(NS_REMOTE_AUTH, vk);
+  if (key === 'remoteAuth') return getSecret(NS_REMOTE_AUTH, vk);
+  return getSecret(NS_TOKENS, vk);
+}
+
 export function getSetting<T = unknown>(key: string): T | undefined {
   const settings = store.get('settings') as Partial<AppSettings> | undefined;
-  return settings ? settings[key as keyof AppSettings] as T : undefined;
+  if (!settings) return undefined;
+  const raw = settings[key as keyof AppSettings] as T;
+  // Secrets never live in the JSON — rehydrate from the vault so every
+  // reader (git.ts, AI services, renderer) sees the original shape.
+  return rehydrateSettingSecrets(key, raw, (vk) => lookupSecret(key, vk)) as T | undefined;
 }
 
 export function setSetting(key: string, value: unknown): void {
   const settings = (store.get('settings') || {}) as Partial<AppSettings>;
-  (settings as Record<string, unknown>)[key] = value;
+  const split = splitSettingSecrets(key, value);
+  if (split) {
+    // Secrets → encrypted vault; sanitized structure → settings JSON.
+    applySplitSecrets(split.secrets);
+    (settings as Record<string, unknown>)[key] = split.sanitized;
+  } else {
+    (settings as Record<string, unknown>)[key] = value;
+  }
   store.set('settings', settings);
 }
 
 export function getAllSettings(): Partial<AppSettings> {
-  return (store.get('settings') || {}) as Partial<AppSettings>;
+  const settings = (store.get('settings') || {}) as Partial<AppSettings>;
+  const out: Record<string, unknown> = { ...settings };
+  for (const key of Object.keys(out)) {
+    out[key] = rehydrateSettingSecrets(key, out[key], (vk) => lookupSecret(key, vk));
+  }
+  return out as Partial<AppSettings>;
+}
+
+// ============= Legacy secret migration =============
+
+/**
+ * One-time migration: move plaintext secrets from old installs out of
+ * prismgit-settings.json into the encrypted vault. Idempotent — after the
+ * first run the JSON contains only placeholders, so this is a no-op.
+ * Called from main.ts after app ready, BEFORE any IPC handler can read
+ * settings.
+ */
+export function migratePlaintextSecrets(): void {
+  const settings = (store.get('settings') || {}) as Record<string, unknown>;
+  let changed = false;
+
+  // 1. Scalar tokens (githubPAT, aiApiKey, jenkins/teamcity/gitlab tokens)
+  for (const key of ['githubPAT', 'aiApiKey', 'jenkinsToken', 'teamcityToken', 'gitlabToken']) {
+    const v = settings[key];
+    if (typeof v === 'string' && v && v !== '') {
+      setSecret(NS_TOKENS, key, v);
+      settings[key] = '';
+      changed = true;
+    }
+  }
+
+  // 2. remoteAuth passwords
+  const remoteAuth = settings['remoteAuth'] as
+    | Record<string, Record<string, { username?: string; password?: string }>>
+    | undefined;
+  if (remoteAuth && typeof remoteAuth === 'object') {
+    for (const [repoPath, remotes] of Object.entries(remoteAuth)) {
+      if (!remotes || typeof remotes !== 'object') continue;
+      for (const [remoteName, cred] of Object.entries(remotes)) {
+        const password = cred?.password;
+        if (typeof password === 'string' && password) {
+          setSecret(NS_REMOTE_AUTH, remoteAuthVaultKey(repoPath, remoteName), password);
+          const username = cred?.username?.trim() || undefined;
+          remotes[remoteName] = username ? { username, password: '' } : { password: '' };
+          changed = true;
+        }
+      }
+    }
+  }
+
+  // 3. aiProviderConfigs apiKeys
+  const providerConfigs = settings['aiProviderConfigs'] as
+    | Record<string, { url?: string; apiKey?: string; model?: string }>
+    | undefined;
+  if (providerConfigs && typeof providerConfigs === 'object') {
+    for (const [providerId, cfg] of Object.entries(providerConfigs)) {
+      const apiKey = cfg?.apiKey;
+      if (typeof apiKey === 'string' && apiKey) {
+        setSecret(NS_AI, `provider:${providerId}`, apiKey);
+        providerConfigs[providerId] = {
+          ...(cfg.url ? { url: cfg.url } : {}),
+          ...(cfg.model ? { model: cfg.model } : {}),
+          apiKey: '',
+        };
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) store.set('settings', settings);
 }
 
 // ============= Repositories =============

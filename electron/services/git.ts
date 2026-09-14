@@ -4,6 +4,8 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { getSetting } from './storage.js';
 import type { RemoteCredential } from '../types/settings-api.js';
+import { buildSshEnv } from './ssh.js';
+import type { SshEnvResult } from '../types/ssh-api.js';
 import type { PushRefStatus, PushResult, PushVerification } from '../types/git-api.js';
 import { BrowserWindow } from 'electron';
 
@@ -69,6 +71,20 @@ const GIT_UNSAFE_OPTIONS = {
   unsafe: {
     allowUnsafeConfigEnvCount: true as const,
     allowUnsafeHooksPath: true as const,
+  },
+};
+
+/**
+ * GIT_UNSAFE_OPTIONS + permission to set GIT_SSH_COMMAND through .env() —
+ * required for every SSH-transport network command (simple-git blocks
+ * GIT_SSH_COMMAND without allowUnsafeSshCommand).
+ */
+const GIT_SSH_UNSAFE_OPTIONS = {
+  ...GIT_UNSAFE_OPTIONS,
+  unsafe: {
+    allowUnsafeConfigEnvCount: true as const,
+    allowUnsafeHooksPath: true as const,
+    allowUnsafeSshCommand: true as const,
   },
 };
 import type {
@@ -552,10 +568,17 @@ export function parsePushOutput(output: string): { refs: PushRefStatus[]; upToDa
 /** Spawn a git command and capture both streams (unlike simple-git's raw()). */
 function spawnGitCapture(
   repoPath: string,
-  args: string[]
+  args: string[],
+  extraEnv?: Record<string, string>
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, { cwd: repoPath, windowsHide: true });
+    const child = spawn('git', args, {
+      cwd: repoPath,
+      windowsHide: true,
+      // extraEnv carries the SSH transport env (GIT_SSH_COMMAND,
+      // SSH_ASKPASS...) — merged over the inherited environment.
+      env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
@@ -1074,14 +1097,19 @@ async function lsRemoteBranch(
   branch: string
 ): Promise<string | null> {
   const auth = await remoteNetworkArgs(repoPath, remote, true);
-  const { code, stdout } = await spawnGitCapture(repoPath, [
-    ...auth, 'ls-remote', remote, `refs/heads/${branch}`,
-  ]);
-  if (code !== 0) return null;
-  const line = stdout.split(/\r?\n/).find((l) => l.trim().length > 0);
-  if (!line) return null;
-  const hash = line.split(/\t|\s+/)[0];
-  return /^[0-9a-f]{40}$/i.test(hash) ? hash : null;
+  const ssh = await networkSshEnv(repoPath, remote, true);
+  try {
+    const { code, stdout } = await spawnGitCapture(repoPath, [
+      ...auth, 'ls-remote', remote, `refs/heads/${branch}`,
+    ], ssh.env);
+    if (code !== 0) return null;
+    const line = stdout.split(/\r?\n/).find((l) => l.trim().length > 0);
+    if (!line) return null;
+    const hash = line.split(/\t|\s+/)[0];
+    return /^[0-9a-f]{40}$/i.test(hash) ? hash : null;
+  } finally {
+    ssh.cleanup();
+  }
 }
 
 export async function push(
@@ -1168,9 +1196,12 @@ export async function push(
 
   // Capture BOTH streams: git prints ref status on stderr and exits 0 even
   // when nothing was pushed ("Everything up-to-date").
-  const run = await spawnGitCapture(repoPath, args).catch((e) => {
+  const ssh = await networkSshEnv(repoPath, remote, true);
+  const run = await spawnGitCapture(repoPath, args, ssh.env).catch((e) => {
+    ssh.cleanup();
     throw describeNetworkError(e, 'push');
   });
+  ssh.cleanup();
   if (run.code !== 0) {
     const err = new Error(run.stderr.trim() || run.stdout.trim() || 'git push failed');
     throw describeNetworkError(err, 'push');
@@ -1297,6 +1328,60 @@ async function remoteNetworkArgs(repoPath: string, remoteName: string, pushUrl =
     return buildHttpAuthArgs(url, getStoredCredential(repoPath, remoteName));
   } catch {
     return [];
+  }
+}
+
+/**
+ * Resolve the simple-git instance (plus SSH env/cleanup) for ONE network
+ * command. When the remote is SSH and the user picked a PrismGit-managed
+ * key, a SHORT-LIVED simple-git instance is created with the
+ * GIT_SSH_COMMAND/SSH_ASKPASS environment — the cached getGit() instance is
+ * deliberately NOT polluted with per-remote env. Otherwise the shared
+ * cached instance is returned and cleanup is a no-op.
+ *
+ * Usage:
+ *   const { git, cleanup } = await networkGit(repoPath, remote);
+ *   try { ... } finally { cleanup(); }
+ */
+async function networkGit(
+  repoPath: string,
+  remoteName: string,
+  pushUrl = false
+): Promise<{ git: SimpleGit; cleanup: () => void }> {
+  try {
+    const url = await remoteUrlOf(repoPath, remoteName, pushUrl);
+    const ssh = buildSshEnv(url, repoPath);
+    if (Object.keys(ssh.env).length === 0) {
+      ssh.cleanup();
+      return { git: getGit(repoPath), cleanup: () => {} };
+    }
+    const git = simpleGit({
+      baseDir: repoPath,
+      binary: 'git',
+      maxConcurrentProcesses: 2,
+      trimmed: false,
+      ...GIT_SSH_UNSAFE_OPTIONS,
+    }).env({ ...GIT_ENV_LFS_SKIP, ...ssh.env });
+    return { git, cleanup: ssh.cleanup };
+  } catch {
+    return { git: getGit(repoPath), cleanup: () => {} };
+  }
+}
+
+/**
+ * SSH env for the pull/fetch/push environment of one network command,
+ * plus the cleanup callback. Empty env + noop cleanup when not applicable.
+ */
+async function networkSshEnv(
+  repoPath: string,
+  remoteName: string,
+  pushUrl = false
+): Promise<SshEnvResult> {
+  try {
+    const url = await remoteUrlOf(repoPath, remoteName, pushUrl);
+    return buildSshEnv(url, repoPath);
+  } catch {
+    return { env: {}, cleanup: () => {} };
   }
 }
 
@@ -1444,46 +1529,50 @@ export async function pull(
   rebase = false,
   noFF = false
 ): Promise<AutoStashResult> {
-  const git = getGit(repoPath);
+  const { git, cleanup } = await networkGit(repoPath, remote);
   const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'pull'];
   if (rebase) args.push('--rebase');
   if (noFF) args.push('--no-ff');
   args.push(remote);
   if (branch) args.push(branch);
-  const stashInfo = await autoStashIfNeeded(repoPath, 'pull');
-  const result: AutoStashResult = { autoStashed: stashInfo.autoStashed, popFailed: false };
   try {
+    const stashInfo = await autoStashIfNeeded(repoPath, 'pull');
+    const result: AutoStashResult = { autoStashed: stashInfo.autoStashed, popFailed: false };
     try {
-      await git.raw(args);
-    } catch (e) {
-      // ── Auto-recover from "untracked working tree files would be
-      //    overwritten" — the user has local untracked files that
-      //    conflict with incoming files from the remote. Auto-clean
-      //    those files and retry the pull. This is safe because
-      //    the files are UNTRACKED — they're not in git history.
-      if (isUntrackedOverwriteError(e)) {
-        const files = extractUntrackedFiles(e);
-        if (files.length > 0) {
-          await cleanConflictingUntracked(repoPath, files);
-          // Retry the pull after cleaning.
-          try {
-            await git.raw(args);
-            return result;
-          } catch (e2) {
-            throw describeNetworkError(e2, 'pull');
+      try {
+        await git.raw(args);
+      } catch (e) {
+        // ── Auto-recover from "untracked working tree files would be
+        //    overwritten" — the user has local untracked files that
+        //    conflict with incoming files from the remote. Auto-clean
+        //    those files and retry the pull. This is safe because
+        //    the files are UNTRACKED — they're not in git history.
+        if (isUntrackedOverwriteError(e)) {
+          const files = extractUntrackedFiles(e);
+          if (files.length > 0) {
+            await cleanConflictingUntracked(repoPath, files);
+            // Retry the pull after cleaning.
+            try {
+              await git.raw(args);
+              return result;
+            } catch (e2) {
+              throw describeNetworkError(e2, 'pull');
+            }
           }
         }
+        throw describeNetworkError(e, 'pull');
       }
-      throw describeNetworkError(e, 'pull');
+    } finally {
+      // Pop the auto-stash even when the pull failed — the user's local
+      // changes must come back to the working tree either way.
+      if (stashInfo.autoStashed) {
+        result.popFailed = !(await autoStashPop(repoPath));
+      }
     }
+    return result;
   } finally {
-    // Pop the auto-stash even when the pull failed — the user's local
-    // changes must come back to the working tree either way.
-    if (stashInfo.autoStashed) {
-      result.popFailed = !(await autoStashPop(repoPath));
-    }
+    cleanup();
   }
-  return result;
 }
 
 // ── Fetch deduplication — one download per repo at a time ──────────────────
@@ -1512,7 +1601,7 @@ export function fetch(
   tags = false
 ): Promise<void> {
   return runExclusiveFetch(repoPath, async () => {
-    const git = getGit(repoPath);
+    const { git, cleanup } = await networkGit(repoPath, remote);
     const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'fetch'];
     if (prune) args.push('--prune');
     if (tags) args.push('--tags');
@@ -1521,6 +1610,8 @@ export function fetch(
       await git.raw(args);
     } catch (e) {
       throw describeNetworkError(e, 'fetch');
+    } finally {
+      cleanup();
     }
   });
 }
@@ -1535,40 +1626,48 @@ export function fetchAll(repoPath: string, prune = false): Promise<void> {
     const remotes = ((await git.getRemotes(true)) as Array<{ name: string }>).map((r) => r.name);
     const hasCreds = remotes.some((r) => !!getStoredCredential(repoPath, r));
     if (!hasCreds) {
+      // No per-remote HTTP credentials — one plain fetch --all. SSH remotes
+      // still need their key env: build it from the first remote.
+      const { git: netGit, cleanup } = await networkGit(repoPath, remotes[0] ?? 'origin');
       const args: string[] = ['fetch', '--all', '--tags'];
       if (shouldPrune) args.push('--prune');
       try {
-        await git.raw(args);
-      } catch (e) {
-        // If the error is "cannot lock ref" (stale remote-tracking branch),
-        // try with --force to overwrite the stale ref
-        const errMsg = String(e);
-        if (errMsg.includes('cannot lock ref') || errMsg.includes('unable to update local ref')) {
-          try {
-            await git.raw(['fetch', '--all', '--tags', '--prune', '--force']);
-            return;
-          } catch {
-            // Still failing — fall through to original error
+        try {
+          await netGit.raw(args);
+        } catch (e) {
+          // If the error is "cannot lock ref" (stale remote-tracking branch),
+          // try with --force to overwrite the stale ref
+          const errMsg = String(e);
+          if (errMsg.includes('cannot lock ref') || errMsg.includes('unable to update local ref')) {
+            try {
+              await netGit.raw(['fetch', '--all', '--tags', '--prune', '--force']);
+              return;
+            } catch {
+              // Still failing — fall through to original error
+            }
           }
+          throw describeNetworkError(e, 'fetch');
         }
-        throw describeNetworkError(e, 'fetch');
+      } finally {
+        cleanup();
       }
       return;
     }
     const failures: string[] = [];
     for (const r of remotes) {
+      const { git: netGit, cleanup } = await networkGit(repoPath, r);
       try {
         const args: string[] = [...(await remoteNetworkArgs(repoPath, r)), 'fetch', '--tags'];
         if (shouldPrune) args.push('--prune');
         args.push(r);
-        await git.raw(args);
+        await netGit.raw(args);
       } catch (e) {
         const errMsg = String(e);
         if (errMsg.includes('cannot lock ref') || errMsg.includes('unable to update local ref')) {
           // Retry with --force to overwrite stale remote-tracking ref
           try {
             const args: string[] = [...(await remoteNetworkArgs(repoPath, r)), 'fetch', '--tags', '--prune', '--force', r];
-            await git.raw(args);
+            await netGit.raw(args);
             continue;
           } catch (e2) {
             failures.push(`${r}: ${describeNetworkError(e2, 'fetch').message}`);
@@ -1576,6 +1675,8 @@ export function fetchAll(repoPath: string, prune = false): Promise<void> {
           }
         }
         failures.push(`${r}: ${describeNetworkError(e, 'fetch').message}`);
+      } finally {
+        cleanup();
       }
     }
     if (failures.length === remotes.length && failures.length > 0) {
@@ -1925,7 +2026,12 @@ export async function deleteBranch(
 ): Promise<void> {
   const git = getGit(repoPath);
   if (remote) {
-    await git.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', name]);
+    const { git: netGit, cleanup } = await networkGit(repoPath, 'origin', true);
+    try {
+      await netGit.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', name]);
+    } finally {
+      cleanup();
+    }
   } else {
     await git.deleteLocalBranch(name, force);
   }
@@ -2120,8 +2226,12 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
   if (summary.hasRemote) {
     const checked = getBackgroundFetchRemotes(repoPath).filter((n) => summary.remotes.includes(n));
     if (checked.length > 0) {
-      const fetchGit = simpleGit({ baseDir: repoPath, binary: 'git', ...GIT_UNSAFE_OPTIONS })
-        .env({ GIT_TERMINAL_PROMPT: '0' });
+      // SSH env (GIT_SSH_COMMAND / askpass) resolved once from the first
+      // checked remote — key selection is per-repo, so the env is identical
+      // for every remote of this repository.
+      const ssh = await networkSshEnv(repoPath, checked[0]);
+      const fetchGit = simpleGit({ baseDir: repoPath, binary: 'git', ...GIT_SSH_UNSAFE_OPTIONS })
+        .env({ ...GIT_ENV_LFS_SKIP, ...ssh.env, GIT_TERMINAL_PROMPT: '0' });
       const perRemote = async (name: string): Promise<void> => {
         const authArgs = await remoteNetworkArgs(repoPath, name);
         await Promise.race([
@@ -2136,18 +2246,22 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
           }),
         ]);
       };
-      const results = await Promise.allSettled(checked.map(perRemote));
-      const errors = results
-        .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-        .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
-      if (errors.length === 0) {
-        summary.fetched = true;
-      } else if (errors.length === checked.length) {
-        summary.error = errors.join('; ');
-      } else {
-        // At least one remote refreshed the refs; surface partial failures.
-        summary.fetched = true;
-        summary.error = errors.join('; ');
+      try {
+        const results = await Promise.allSettled(checked.map(perRemote));
+        const errors = results
+          .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+          .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
+        if (errors.length === 0) {
+          summary.fetched = true;
+        } else if (errors.length === checked.length) {
+          summary.error = errors.join('; ');
+        } else {
+          // At least one remote refreshed the refs; surface partial failures.
+          summary.fetched = true;
+          summary.error = errors.join('; ');
+        }
+      } finally {
+        ssh.cleanup();
       }
     }
   }
@@ -3003,11 +3117,15 @@ export async function renameStash(repoPath: string, index: number, newMessage: s
  * On a complete repository this is a cheap no-op fetch.
  */
 export async function fetchDeepen(repoPath: string, remote = 'origin', commits = 100): Promise<void> {
-  const git = getGit(repoPath);
-  await git.raw([
-    ...(await remoteNetworkArgs(repoPath, remote)),
-    'fetch', remote, '--deepen', String(Math.max(1, commits)),
-  ]);
+  const { git, cleanup } = await networkGit(repoPath, remote);
+  try {
+    await git.raw([
+      ...(await remoteNetworkArgs(repoPath, remote)),
+      'fetch', remote, '--deepen', String(Math.max(1, commits)),
+    ]);
+  } finally {
+    cleanup();
+  }
   invalidateCache(repoPath);
 }
 
@@ -3016,12 +3134,16 @@ export async function fetchDeepen(repoPath: string, remote = 'origin', commits =
  * (git fetch --depth=N). depth <= 0 means unshallow (download full history).
  */
 export async function setFetchDepth(repoPath: string, remote = 'origin', depth: number): Promise<void> {
-  const git = getGit(repoPath);
-  const authArgs = await remoteNetworkArgs(repoPath, remote);
-  if (depth > 0) {
-    await git.raw([...authArgs, 'fetch', remote, '--depth', String(depth)]);
-  } else {
-    await git.raw([...authArgs, 'fetch', '--unshallow', remote]);
+  const { git, cleanup } = await networkGit(repoPath, remote);
+  try {
+    const authArgs = await remoteNetworkArgs(repoPath, remote);
+    if (depth > 0) {
+      await git.raw([...authArgs, 'fetch', remote, '--depth', String(depth)]);
+    } else {
+      await git.raw([...authArgs, 'fetch', '--unshallow', remote]);
+    }
+  } finally {
+    cleanup();
   }
   invalidateCache(repoPath);
 }
@@ -3175,20 +3297,29 @@ export async function createTag(
 export async function deleteTag(repoPath: string, name: string, remote = false): Promise<void> {
   const git = getGit(repoPath);
   if (remote) {
-    await git.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', name]);
+    const { git: netGit, cleanup } = await networkGit(repoPath, 'origin', true);
+    try {
+      await netGit.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', name]);
+    } finally {
+      cleanup();
+    }
   } else {
     await git.tag(['-d', name]);
   }
 }
 
 export async function pushTag(repoPath: string, name: string, remote = 'origin'): Promise<void> {
-  const git = getGit(repoPath);
-  await git.raw([
-    ...(await remoteNetworkArgs(repoPath, remote, true)),
-    '-c', 'http.version=HTTP/1.1',
-    '-c', 'http.postBuffer=524288000',
-    'push', remote, name,
-  ]);
+  const { git, cleanup } = await networkGit(repoPath, remote, true);
+  try {
+    await git.raw([
+      ...(await remoteNetworkArgs(repoPath, remote, true)),
+      '-c', 'http.version=HTTP/1.1',
+      '-c', 'http.postBuffer=524288000',
+      'push', remote, name,
+    ]);
+  } finally {
+    cleanup();
+  }
 }
 
 export async function submodules(repoPath: string): Promise<SubmoduleInfo[]> {
@@ -3299,14 +3430,21 @@ export async function clone(
   targetPath: string,
   options: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean } = {}
 ): Promise<string> {
-  const git = simpleGit(GIT_UNSAFE_OPTIONS);
+  // SSH URL → use the default managed key when the user configured one
+  // (repoPath '' resolves sshDefaultKeyId; without a key git uses system ssh).
+  const ssh = buildSshEnv(url, '');
+  const git = simpleGit(GIT_SSH_UNSAFE_OPTIONS).env({ ...GIT_ENV_LFS_SKIP, ...ssh.env });
   const args: string[] = ['clone'];
   if (options.depth) args.push('--depth', String(options.depth));
   if (options.branch) args.push('--branch', options.branch);
   if (options.recursive) args.push('--recursive');
   if (options.shallowSubmodules) args.push('--shallow-submodules');
   args.push(url, targetPath);
-  await git.raw(args);
+  try {
+    await git.raw(args);
+  } finally {
+    ssh.cleanup();
+  }
   invalidateCache();
   return targetPath;
 }
@@ -4898,7 +5036,7 @@ export async function updateServerInfo(repoPath: string): Promise<string> {
  * checking what branches/tags exist before deciding to clone.
  */
 export async function listRemote(repoPath: string, remote: string = 'origin'): Promise<string> {
-  const git = getGit(repoPath);
+  const { git, cleanup } = await networkGit(repoPath, remote);
   try {
     // Per-remote auth (http.extraHeader) — private servers reject anonymous
     // ls-remote, and the Remotes tool preview must use the same stored
@@ -4906,6 +5044,8 @@ export async function listRemote(repoPath: string, remote: string = 'origin'): P
     return await git.raw([...(await remoteNetworkArgs(repoPath, remote)), 'ls-remote', remote]);
   } catch (e) {
     throw describeNetworkError(e, 'fetch');
+  } finally {
+    cleanup();
   }
 }
 
@@ -5782,8 +5922,13 @@ export async function pushToGerrit(
     for (const r of options.reviewers) gerritOpts.push(`r=${r}`);
   }
   if (gerritOpts.length) refspec += '%' + gerritOpts.join(',');
-  const args = [...(await remoteNetworkArgs(repoPath, remote, true)), 'push', remote, refspec];
-  return git.raw(args);
+  const { git: netGit, cleanup } = await networkGit(repoPath, remote, true);
+  try {
+    const args = [...(await remoteNetworkArgs(repoPath, remote, true)), 'push', remote, refspec];
+    return await netGit.raw(args);
+  } finally {
+    cleanup();
+  }
 }
 
 /** Clone with partial clone filter (--filter=blob:none etc.) */
@@ -5797,10 +5942,15 @@ export async function clonePartial(
   if (options?.depth) args.push('--depth=' + options.depth);
   if (options?.branch) args.push('--branch=' + options.branch, '--single-branch');
   if (options?.recursive) args.push('--recursive');
-  const git = simpleGit(GIT_UNSAFE_OPTIONS);
-  const result = await git.raw(args);
-  invalidateCache();
-  return result || targetPath;
+  const ssh = buildSshEnv(url, '');
+  const git = simpleGit(GIT_SSH_UNSAFE_OPTIONS).env({ ...GIT_ENV_LFS_SKIP, ...ssh.env });
+  try {
+    const result = await git.raw(args);
+    invalidateCache();
+    return result || targetPath;
+  } finally {
+    ssh.cleanup();
+  }
 }
 
 /** Set up PrismGit as credential helper for the cloned repo */
@@ -6382,23 +6532,27 @@ export async function batchOperation(
     const batchResults = await Promise.allSettled(
       batch.map(async (repo) => {
         try {
-          const git = getGit(repo);
           const r = options.remote || 'origin';
           const isPush = operation === 'push';
+          const { git, cleanup } = await networkGit(repo, r, isPush);
           const netArgs = await remoteNetworkArgs(repo, r, isPush);
-          switch (operation) {
-            case 'fetch':
-              await git.raw([...netArgs, 'fetch', r, '--prune']);
-              break;
-            case 'pull':
-              await git.raw([...netArgs, 'pull', r, options.branch || '']);
-              break;
-            case 'push':
-              await git.raw([...netArgs, '-c', 'http.version=HTTP/1.1', 'push', r, ...(options.force ? ['--force-with-lease'] : [])]);
-              break;
-            case 'status':
-              await git.status();
-              break;
+          try {
+            switch (operation) {
+              case 'fetch':
+                await git.raw([...netArgs, 'fetch', r, '--prune']);
+                break;
+              case 'pull':
+                await git.raw([...netArgs, 'pull', r, options.branch || '']);
+                break;
+              case 'push':
+                await git.raw([...netArgs, '-c', 'http.version=HTTP/1.1', 'push', r, ...(options.force ? ['--force-with-lease'] : [])]);
+                break;
+              case 'status':
+                await git.status();
+                break;
+            }
+          } finally {
+            cleanup();
           }
           return { repo, success: true };
         } catch (e) {

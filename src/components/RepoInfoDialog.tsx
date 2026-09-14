@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, Check, Trash, Plus, Star, RefreshCw, Loader, ExternalLink, GitBranch, Tag as TagIcon, FileText, Eye, EyeOff, KeyRound, Settings as SettingsIcon } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
-import { api, type RepositoryMetadata, type RemoteInfo } from '../lib/api';
+import { useSettingsStore } from '../stores/settingsStore';
+import { api, type RepositoryMetadata, type RemoteInfo, type SshKeyMeta } from '../lib/api';
 import { cn, formatDate, shortHash } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -36,6 +37,17 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
   const [authDraft, setAuthDraft] = useState<Record<string, { username: string; password: string }>>({});
   const [bgDraft, setBgDraft] = useState<Record<string, boolean>>({});
   const [showPasswords, setShowPasswords] = useState(false);
+  // Per-repo SSH key (Settings → Security manages the registry)
+  const { settings, setSetting } = useSettingsStore();
+  const [sshKeys, setSshKeys] = useState<SshKeyMeta[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    Promise.resolve(api.ssh?.list?.())
+      .then((ks) => { if (!cancelled) setSshKeys((ks as SshKeyMeta[]) ?? []); })
+      .catch(() => { if (!cancelled) setSshKeys([]); });
+    return () => { cancelled = true; };
+  }, [open]);
 
   const load = useCallback(() => {
     if (currentMetadata) {
@@ -314,6 +326,31 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
             <p className="text-2xs text-text-tertiary mb-2">
               {t('dialogs.authHint')}
             </p>
+            {/* Per-repo SSH key override (when any managed keys exist) */}
+            {sshKeys.length > 0 && (
+              <div className="flex items-center gap-2 mb-2">
+                <KeyRound size={12} className="text-text-tertiary flex-shrink-0" />
+                <span className="text-2xs text-text-tertiary whitespace-nowrap">SSH</span>
+                <select
+                  className="flex-1 bg-bg-primary border border-border-default rounded-md px-2 py-1 text-2xs focus:outline-none focus:border-accent"
+                  value={settings.sshRepoKeys?.[currentRepo?.path ?? ''] ?? ''}
+                  onChange={(e) => {
+                    if (!currentRepo) return;
+                    const repoKeys = { ...(settings.sshRepoKeys ?? {}) };
+                    if (e.target.value) repoKeys[currentRepo.path] = e.target.value;
+                    else delete repoKeys[currentRepo.path];
+                    void setSetting('sshRepoKeys', repoKeys);
+                  }}
+                >
+                  <option value="">{t('dialogs.sshKeyAuto')}</option>
+                  {sshKeys.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.label}{k.fingerprint ? ` (${k.fingerprint.split(' ')[1]?.slice(0, 20) || k.type})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             {remotesLoading ? (
               <div className="flex justify-center py-3"><Loader size={14} className="animate-spin text-text-tertiary" /></div>
             ) : remotes.length === 0 ? (

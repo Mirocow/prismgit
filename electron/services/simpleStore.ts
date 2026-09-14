@@ -15,8 +15,16 @@ export class SimpleStore {
   private filePath: string;
   private data: StoreData;
   private writeTimer: NodeJS.Timeout | null = null;
+  /**
+   * Secure mode — the file holds (or may hold) sensitive material:
+   * chmod 0600 after every write (POSIX). Windows ACLs already restrict
+   * the file to the current user inside %APPDATA%, so chmod is a no-op
+   * there (fs.chmodSync ignores the mode bits on win32).
+   */
+  private secure: boolean;
 
-  constructor(options: { name: string; defaults?: StoreData } = { name: 'config' }) {
+  constructor(options: { name: string; defaults?: StoreData; secure?: boolean } = { name: 'config' }) {
+    this.secure = !!options.secure;
     // Get userData directory.
     //
     // Priority:
@@ -72,6 +80,13 @@ export class SimpleStore {
       const tmpPath = this.filePath + '.tmp';
       fs.writeFileSync(tmpPath, JSON.stringify(this.data, null, 2), 'utf8');
       fs.renameSync(tmpPath, this.filePath);
+      if (this.secure && process.platform !== 'win32') {
+        try {
+          fs.chmodSync(this.filePath, 0o600);
+        } catch {
+          /* best effort */
+        }
+      }
     } catch {
       // Ignore write errors (e.g., disk full)
     }

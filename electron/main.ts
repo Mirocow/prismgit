@@ -8,10 +8,14 @@ import { registerWindowIpc } from './ipc/window.js';
 import { registerSettingsIpc } from './ipc/settings.js';
 import { registerCommandLogIpc } from './ipc/commandLog.js';
 import { registerVscodeIpc } from './ipc/vscode.js';
+import { registerSshIpc } from './ipc/ssh.js';
 import { cleanupTempCopies } from './services/vscode.js';
 import { installGitCommandLogger } from './services/commandLog.js';
 import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
 import { SimpleStore } from './services/simpleStore.js';
+import { migratePlaintextSecrets } from './services/storage.js';
+import { migrateLegacyGithubToken } from './services/github.js';
+import { flushSecrets } from './services/secrets.js';
 import { buildAppMenu } from './menu.js';
 import { setMenuLocale, normalizeMenuLocale } from './i18n-menu.js';
 import { resolveResourceIcon } from './appIcons.js';
@@ -256,6 +260,13 @@ app.whenReady().then(() => {
   });
 
   // Register IPC handlers
+  // Legacy secret migration FIRST — before any IPC handler can read or
+  // write settings: plaintext tokens/passwords from old installs move into
+  // the encrypted vault (OS keychain via safeStorage) and are stripped
+  // from the JSON files. Both calls are idempotent.
+  migratePlaintextSecrets();
+  migrateLegacyGithubToken();
+
   registerGitIpc();
   registerFsIpc();
   registerGithubIpc();
@@ -266,6 +277,7 @@ app.whenReady().then(() => {
   registerWatcherIpc();
   registerContextMenuIpc();
   registerVscodeIpc();
+  registerSshIpc();
   // Stale VS Code temp copies (HEAD/stage snapshots for --diff/--merge) from
   // previous sessions — new ones are written on demand.
   cleanupTempCopies();
@@ -386,6 +398,9 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   saveWindowState();
   stopAllWatchers();
+  // Flush the debounced secret vault (and settings) write — otherwise a
+  // quit within 100ms of a secret write could lose it.
+  flushSecrets();
 });
 
 // Expose dialog for renderer

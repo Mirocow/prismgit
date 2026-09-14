@@ -5,6 +5,7 @@ import type { FsApi } from './types/fs-api.js';
 import type { SettingsApi } from './types/settings-api.js';
 import type { CommandLogEntry } from './types/command-log-api.js';
 import type { VsCodeApi } from './types/vscode-api.js';
+import type { SshApi, CredentialsApi } from './types/ssh-api.js';
 
 const api = {
   // Git operations
@@ -413,6 +414,22 @@ const api = {
     setRepoGroup: (path: string, groupId: string | null) =>
       ipcRenderer.invoke('settings:setRepoGroup', path, groupId),
   } as SettingsApi,
+
+  // SSH key management (Settings → Security → SSH keys)
+  ssh: {
+    list: () => ipcRenderer.invoke('ssh:list'),
+    generate: (options) => ipcRenderer.invoke('ssh:generate', options),
+    importKey: (options) => ipcRenderer.invoke('ssh:importKey', options),
+    remove: (id: string) => ipcRenderer.invoke('ssh:remove', id),
+    copyPublicKey: (id: string) => ipcRenderer.invoke('ssh:copyPublicKey', id),
+    test: (id: string, opts?: { host?: string; user?: string }) => ipcRenderer.invoke('ssh:test', id, opts),
+    listSystemKeys: () => ipcRenderer.invoke('ssh:listSystemKeys'),
+  } as SshApi,
+
+  // Credential storage status (Settings → Security)
+  credentials: {
+    status: () => ipcRenderer.invoke('credentials:status'),
+  } as CredentialsApi,
 
   // Window controls
   window: {

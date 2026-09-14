@@ -2,6 +2,8 @@ import * as https from 'https';
 import * as http from 'http';
 import { URL } from 'url';
 import { SimpleStore } from './simpleStore.js';
+import { setSecret, getSecret, deleteSecret } from './secrets.js';
+import { NS_GITHUB } from './credentialKeys.js';
 import type { GithubUser, GithubRepository, GithubPullRequest } from '../types/github-api.js';
 
 interface AuthState {
@@ -15,11 +17,30 @@ const store = new SimpleStore({
 });
 
 function getAuthState(): AuthState {
-  return (store.get('github') || {}) as AuthState;
+  const raw = (store.get('github') || {}) as AuthState;
+  // The PAT never rests in the JSON file — it lives in the encrypted vault.
+  const token = getSecret(NS_GITHUB, 'pat');
+  return { ...raw, token };
 }
 
 function setAuthState(state: AuthState): void {
-  store.set('github', state);
+  // Token → vault (or delete when empty); profile stays in the JSON file.
+  if (state.token) setSecret(NS_GITHUB, 'pat', state.token);
+  else deleteSecret(NS_GITHUB, 'pat');
+  store.set('github', { user: state.user });
+}
+
+/**
+ * One-time migration: older builds stored the GitHub PAT as plaintext in
+ * prismgit-github.json. Move it into the encrypted vault and strip the file.
+ * Idempotent; called from main.ts after app ready.
+ */
+export function migrateLegacyGithubToken(): void {
+  const raw = (store.get('github') || {}) as AuthState;
+  if (typeof raw.token === 'string' && raw.token) {
+    setSecret(NS_GITHUB, 'pat', raw.token);
+    store.set('github', { user: raw.user });
+  }
 }
 
 async function httpsJson<T>(url: string, options: https.RequestOptions & { token?: string; body?: string } = {}): Promise<T> {

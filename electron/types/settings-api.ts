@@ -331,11 +331,24 @@ export interface AppSettings {
   /**
    * HTTP(S) credentials used for push/pull/fetch per remote.
    * Key 1 = absolute repo path, key 2 = remote name.
-   * Stored in the app settings file (userData) — same store for the
-   * Repository Settings dialog and the Remotes tool. Never written to
-   * .git/config or the remote URL; applied per-command via http.extraHeader.
+   * SECURITY: passwords/tokens are stored in the ENCRYPTED vault
+   * (secrets.ts / OS keychain via Electron safeStorage) — this JSON only
+   * keeps usernames. Read paths rehydrate from the vault transparently.
    */
   remoteAuth?: Record<string, Record<string, RemoteCredential>>;
+  // === SSH support (Settings → Security → SSH keys) ===
+  /** Managed SSH keys — METADATA only; passphrases live in the encrypted vault. */
+  sshKeys?: import('./ssh-api.js').SshKeyMeta[];
+  /** Key used when a repo has no per-repo override. undefined → system ssh config. */
+  sshDefaultKeyId?: string;
+  /** Per-repository SSH key override: absolute repo path → SshKeyMeta.id. */
+  sshRepoKeys?: Record<string, string>;
+  /**
+   * Strict host key checking for SSH remotes. false (default) →
+   * StrictHostKeyChecking=accept-new (first connect trusts, mismatches fail);
+   * true → StrictHostKeyChecking=yes (unknown hosts are rejected outright).
+   */
+  sshStrictHostKeyChecking?: boolean;
 }
 
 /** Credentials for one remote of one repository (HTTP(S) basic auth). */
