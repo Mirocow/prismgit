@@ -83,6 +83,9 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:checkout', (_e, p: string, b: string, o?: { newBranch?: boolean; force?: boolean; track?: boolean }) =>
     wrap(gitService.checkout)(p, b, o)
   );
+  ipcMain.handle('git:hasSubmoduleConfigChanges', (_e, p: string, target: string) =>
+    wrap(gitService.hasSubmoduleConfigChanges)(p, target)
+  );
   ipcMain.handle('git:checkoutFile', (_e, p: string, f: string, ref?: string) => wrap(gitService.checkoutFile)(p, f, ref));
   ipcMain.handle('git:checkoutFiles', (_e, p: string, files: string[], ref?: string) => wrap(gitService.checkoutFiles)(p, files, ref));
   // Working-tree file operations (file context menu)
@@ -134,8 +137,8 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:stashPush', (_e, p: string, m?: string, iu?: boolean, ki?: boolean, f?: string[]) =>
     wrap(gitService.stashPush)(p, m, iu, ki, f)
   );
-  ipcMain.handle('git:stashPop', (_e, p: string, i?: number) => wrap(gitService.stashPop)(p, i));
-  ipcMain.handle('git:stashApply', (_e, p: string, i?: number) => wrap(gitService.stashApply)(p, i));
+  ipcMain.handle('git:stashPop', (_e, p: string, i?: number, ki?: boolean) => wrap(gitService.stashPop)(p, i, ki));
+  ipcMain.handle('git:stashApply', (_e, p: string, i?: number, ki?: boolean) => wrap(gitService.stashApply)(p, i, ki));
   ipcMain.handle('git:stashFiles', (_e, p: string, h: string) => wrap(gitService.stashFiles)(p, h));
   ipcMain.handle('git:stashFileRawDiff', (_e, p: string, h: string, f: string) => wrap(gitService.stashFileRawDiff)(p, h, f));
   ipcMain.handle('git:stashDrop', (_e, p: string, i?: number) => wrap(gitService.stashDrop)(p, i));

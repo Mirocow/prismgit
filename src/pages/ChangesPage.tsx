@@ -30,7 +30,13 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { confirmWithRemember, CONFIRMATION_IDS } from '../lib/confirmations';
+import { getLowLevelNumber } from '../lib/lowLevelProps';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+
+// 2.2 — module-level throttle: the slow-rename hint appears at most once
+// per app session (reset by reloading the window).
+let slowRenameToastShown = false;
 
 /** Build an LLMProvider from settings, or null if not configured. */
 function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvider | null {
@@ -645,7 +651,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   };
 
   const handleRestoreFile = async (file: string) => {
-    if (!(await confirmDialog({
+    // 4.5 — supports persistent "Don't ask again" (confirmations registry).
+    if (!(await confirmWithRemember(CONFIRMATION_IDS.discardChanges, {
       title: t('changes.restoreFileTitle'),
       message: t('changes.restoreFileConfirm', { file }),
       confirmLabel: t('changes.restore'),
@@ -1414,8 +1421,21 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
+        // 2.2 — SmartGit: warn (once per session) when rename detection is
+        // slow. Threshold — low-level `renames.warnMs` (default 3000 ms);
+        // hint can be disabled with warnSlowRenameDetection.
+        const renameStarted = performance.now();
         const result = await api.git.detectWorkingTreeRenames(repo.path, deletedFiles, untrackedFiles);
         if (!cancelled) {
+          const elapsedMs = performance.now() - renameStarted;
+          if (
+            !slowRenameToastShown &&
+            settings?.warnSlowRenameDetection !== false &&
+            elapsedMs >= getLowLevelNumber(settings, 'renames.warnMs')
+          ) {
+            slowRenameToastShown = true;
+            toast.info(t('changes.slowRenameWarning', { seconds: (elapsedMs / 1000).toFixed(1) }));
+          }
           // Only update state if the result actually changed. Returning the
           // previous reference skips the re-render entirely when the detected
           // renames are the same as before (common case on auto-refresh).

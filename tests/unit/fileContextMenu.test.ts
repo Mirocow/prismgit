@@ -47,6 +47,9 @@ let confirmAnswer = true;
 let promptAnswer: string | null = null;
 vi.mock('../../src/components/ConfirmDialog', () => ({
   confirmDialog: vi.fn(() => Promise.resolve(confirmAnswer)),
+  // 4.5 — discard now flows through confirmWithRemember → confirmDialogEx;
+  // checked: false keeps the unit tests free of settings persistence.
+  confirmDialogEx: vi.fn(() => Promise.resolve({ ok: confirmAnswer, checked: false })),
   promptDialog: vi.fn(() => Promise.resolve(promptAnswer)),
 }));
 

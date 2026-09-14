@@ -99,6 +99,9 @@ export const en: Record<string, string> = {
   'changes.stageFailed': 'Failed to stage',
   'changes.stageFileFailed': 'Failed to stage file',
   'changes.unstageFailed': 'Failed to unstage',
+  // 2.2 — slow rename detection hint
+  'changes.slowRenameWarning': 'Rename detection took {seconds}s — consider disabling Detect renames in Preferences → Commands',
+
   'changes.restoreFileTitle': 'Restore file',
   'changes.restoreFileConfirm': "Restore '{file}' to the last commit?\nLocal changes will be lost.",
   'changes.restore': 'Restore',
@@ -470,6 +473,9 @@ export const ru: Record<string, string> = {
   'changes.allChangesStaged': 'Все изменения проиндексированы',
   'changes.stageFileFailed': 'Не удалось индексировать файл',
   'changes.unstageFailed': 'Не удалось снять индексацию',
+  // 2.2 — подсказка о медленном определении переименований
+  'changes.slowRenameWarning': 'Определение переименований заняло {seconds} с — рассмотрите отключение «Определять переименования» в Настройки → Commands',
+
   'changes.restoreFileTitle': 'Восстановить файл',
   'changes.restoreFileConfirm': "Восстановить '{file}' к последнему коммиту?\nЛокальные изменения будут потеряны.",
   'changes.restore': 'Восстановить',
@@ -839,6 +845,9 @@ export const zh: Record<string, string> = {
   'changes.allChangesStaged': '所有更改已暂存',
   'changes.stageFileFailed': '暂存文件失败',
   'changes.unstageFailed': '取消暂存失败',
+  // 2.2 — 重命名检测缓慢提示
+  'changes.slowRenameWarning': '重命名检测耗时 {seconds} 秒——考虑在 设置 → Commands 中关闭「检测重命名」',
+
   'changes.restoreFileTitle': '还原文件',
   'changes.restoreFileConfirm': "将 '{file}' 还原到最后一次提交？\n本地更改将丢失。",
   'changes.restore': '还原',
@@ -1208,6 +1217,9 @@ export const de: Record<string, string> = {
   'changes.allChangesStaged': 'Alle Änderungen indexiert',
   'changes.stageFileFailed': 'Datei konnte nicht indexiert werden',
   'changes.unstageFailed': 'Deindexieren fehlgeschlagen',
+  // 2.2 — Hinweis bei langsamer Umbenennungs-Erkennung
+  'changes.slowRenameWarning': 'Die Umbenennungs-Erkennung dauerte {seconds}s — erwägen Sie, „Umbenennungen erkennen“ in Einstellungen → Commands zu deaktivieren',
+
   'changes.restoreFileTitle': 'Datei wiederherstellen',
   'changes.restoreFileConfirm': "'{file}' auf den letzten Commit wiederherstellen?\nLokale Änderungen gehen verloren.",
   'changes.restore': 'Wiederherstellen',

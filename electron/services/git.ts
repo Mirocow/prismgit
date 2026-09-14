@@ -1805,6 +1805,31 @@ export async function remotes(repoPath: string): Promise<RemoteInfo[]> {
   }));
 }
 
+/**
+ * Would checking out `target` change .gitmodules? (phase 2.1 — SmartGit
+ * "Warn when checkout changes submodule configuration".)
+ *
+ * Compares HEAD..target restricted to the .gitmodules path; a non-empty
+ * diff means the submodule URL/path set differs between the current HEAD
+ * and the checkout target. `target` may be a local branch or a
+ * remote-tracking ref (origin/foo) — both are valid diff endpoints.
+ *
+ * Errors (unborn HEAD, missing .gitmodules on either side, corrupt repo)
+ * resolve to false — this is a courtesy warning, never a hard blocker.
+ */
+export async function hasSubmoduleConfigChanges(
+  repoPath: string,
+  target: string
+): Promise<boolean> {
+  const git = getGit(repoPath);
+  try {
+    const out = await git.raw(['diff', `HEAD..${target}`, '--', '.gitmodules']);
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function checkout(
   repoPath: string,
   branch: string,
@@ -2884,15 +2909,21 @@ export async function stashPush(
   return out.trim();
 }
 
-export async function stashPop(repoPath: string, index = 0): Promise<void> {
+export async function stashPop(repoPath: string, index = 0, keepIndex = false): Promise<void> {
   const git = getGit(repoPath);
-  await git.raw(['stash', 'pop', `stash@{${index}}`]);
+  // --index restores the staged/unstaged split recorded in the stash
+  // (SmartGit "Keep index"): without it everything lands as unstaged.
+  await git.raw(keepIndex
+    ? ['stash', 'pop', '--index', `stash@{${index}}`]
+    : ['stash', 'pop', `stash@{${index}}`]);
   invalidateDiffCache(repoPath);
 }
 
-export async function stashApply(repoPath: string, index = 0): Promise<void> {
+export async function stashApply(repoPath: string, index = 0, keepIndex = false): Promise<void> {
   const git = getGit(repoPath);
-  await git.raw(['stash', 'apply', `stash@{${index}}`]);
+  await git.raw(keepIndex
+    ? ['stash', 'apply', '--index', `stash@{${index}}`]
+    : ['stash', 'apply', `stash@{${index}}`]);
   invalidateDiffCache(repoPath);
 }
 

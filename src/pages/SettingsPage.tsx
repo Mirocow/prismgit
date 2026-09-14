@@ -6,6 +6,7 @@ import { CloudModelPicker } from '../components/CloudModelPicker';
 import { api, type GitConfigEntry } from '../lib/api';
 import { PROVIDER_PRESETS, getProviderPreset } from '../lib/aiCommitMessages';
 import { LOCALES, useI18n } from '../lib/i18n';
+import { restoreAllConfirmations } from '../lib/confirmations';
 import { getThemeMeta, THEMES } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
@@ -301,6 +302,25 @@ export function SettingsPage() {
                   </option>
                 ))}
               </select>
+            </div>
+            {/* 4.5 — SmartGit "Restore all confirmation dialogs": clear the
+                persisted confirmations registry so every dialog asks again. */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">{t('settings.restoreConfirmations')}</div>
+                <div className="text-xs text-text-tertiary">
+                  {t('settings.restoreConfirmationsHint')}
+                </div>
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={async () => {
+                  await restoreAllConfirmations();
+                  toast.success(t('settings.restoreConfirmationsDone'));
+                }}
+              >
+                {t('settings.restoreConfirmations')}
+              </button>
             </div>
             {/* UI Contrast slider — applies CSS `filter: contrast(N%)` on #root */}
             <div>
@@ -988,6 +1008,34 @@ export function SettingsPage() {
                 <div>{t('settings.includeUntrackedStash')}</div>
                 <div className="text-2xs text-text-tertiary mt-0.5">
                   {t('settings.includeUntrackedStashHint')}
+                </div>
+              </div>
+            </label>
+            {/* 2.1 — Warn when checkout changes .gitmodules */}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.warnSubmoduleChangesOnCheckout ?? true}
+                onChange={(e) => setSetting('warnSubmoduleChangesOnCheckout', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>{t('settings.warnSubmoduleCheckout')}</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  {t('settings.warnSubmoduleCheckoutHint')}
+                </div>
+              </div>
+            </label>
+            {/* 2.2 — Hint when rename detection is slow */}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.warnSlowRenameDetection ?? true}
+                onChange={(e) => setSetting('warnSlowRenameDetection', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>{t('settings.warnSlowRenames')}</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  {t('settings.warnSlowRenamesHint')}
                 </div>
               </div>
             </label>

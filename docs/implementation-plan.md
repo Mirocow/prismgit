@@ -408,13 +408,16 @@
 
 | Фаза | Содержание | Приоритет | Оценка | Зависимости |
 |---|---|---|---|---|
-| **0** | Оживление мёртвых настроек + 2 бага (0.1–0.7) | **P0** | **2–3.5 дн** | нет |
-| **1** | Commit: commentChar, nothing-staged, suggestions, guides (1.1–1.4) | **P0** | **4–6 дн** | нет |
-| **2** | Checkout .gitmodules warning, slow renames, keep-index (2.1–2.3) | P0–P1 | 2–3 дн | 4.5 (для «don't ask») |
-| **4** | UI-настройки: Low-level таблица, theme auto, double-click, welcome, confirmations, даты, case (4.1–4.7) | P1 | 5–8 дн | частично 0.x |
+| **0** ✅ | Оживление мёртвых настроек + 2 бага (0.1–0.7) | **P0** | **2–3.5 дн** | нет |
+| **1** ✅ | Commit: commentChar, nothing-staged, suggestions, guides (1.1–1.4) | **P0** | **4–6 дн** | нет |
+| **2** ✅ | Checkout .gitmodules warning, slow renames, keep-index (2.1–2.3) | P0–P1 | 2–3 дн | 4.5 (для «don't ask») |
+| **4.5** ✅ | Реестр подтверждений + Restore all (+ модель low-level ключей для 4.1) | P1 | 2–3 дн | — |
+| **4** ⏳ | UI-настройки: Low-level таблица, theme auto, double-click, welcome, даты, case (4.1–4.4, 4.6–4.7) | P1 | 5–8 дн | частично 0.x |
 | **3** | Background: периодический GC, fetch closed favorites (3.1–3.2) | P2 | 3–4 дн | 4.1 (low-level ключи) |
 | **5** | Git executable + версии, secrets/safeStorage, SSH (5.1–5.3) | P2 | 10–16 дн | 0.5 |
 | **6** | Шрифты, цвета, spell checker (6.1–6.3) | P3 | 5–8 дн | 4.1 |
+
+> Статус: ✅ фазы 0, 1, 2 и 4.5 реализованы (см. коммиты `8132d74` и текущий; детали — раздел 7 `docs/dead-code-report.md`). Следующие по порядку: 4.1/4.2 (Low-level таблица, тема Auto) → 3 → 5 → 6.
 
 **Суммарно: ~31–48 рабочих дней** одного разработчика. Рекомендуемый порядок: **0 → 1 → 2 → 4.1/4.2/4.5 → 3 → 5 → 6** (фаза 5.2 — secrets — стоит поднять в приоритете, если приложение распространяется наружу).
 

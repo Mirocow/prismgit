@@ -150,6 +150,28 @@ export interface AppSettings {
   commitSuggestRemoveMissing?: boolean;
   /** Commit-message line length guides (SmartGit 50/72). Default 'none'. */
   commitLineGuides?: 'none' | '50' | '72' | '50+72';
+  // === SmartGit Manual: Preferences → Commands (phase 2) ===
+  /**
+   * Warn before checkout when the target branch changes .gitmodules
+   * (submodule URLs/paths differ). Default true (SmartGit behavior).
+   */
+  warnSubmoduleChangesOnCheckout?: boolean;
+  /**
+   * Show a one-time toast when working-tree rename detection is slow
+   * (threshold: low-level `renames.warnMs`, default 3000). Suggests
+   * disabling "Detect renames". Default true.
+   */
+  warnSlowRenameDetection?: boolean;
+  // === SmartGit Manual: Preferences → User Interface → Confirmation dialogs (4.5) ===
+  /**
+   * Confirmation registry — per dialog id: 'ask' | 'always' | 'never'.
+   * When the user checks "Don't ask again" in a confirmation:
+   *   Confirm  → 'always' (the dialog never shows again, auto-confirm)
+   *   Cancel   → 'never'  (the action is silently skipped)
+   * Settings → Appearance → "Restore all confirmation dialogs" clears the
+   * map so every dialog asks again. Ids live in src/lib/confirmations.ts.
+   */
+  confirmations?: Record<string, 'ask' | 'always' | 'never'>;
   // === SmartGit Manual: External Tools ===
   /** git config diff.tool value (e.g., "vscode-diff"). */
   diffTool?: string;

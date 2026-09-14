@@ -13,6 +13,7 @@ import { cn } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { confirmWithRemember, CONFIRMATION_IDS } from '../lib/confirmations';
 import { useContextMenu } from '../lib/useContextMenu';
 import { useI18n } from '../lib/i18n';
 import { useDateFormatter } from '../lib/formatDate';
@@ -31,6 +32,9 @@ export function StashesPage() {
   useEscapeKey(showNewDialog, () => setShowNewDialog(false));
   const [stashMessage, setStashMessage] = useState('');
   const [includeUntracked, setIncludeUntracked] = useState(false);
+  // 2.3 — SmartGit "Keep index": stash push --keep-index leaves the staged
+  // changes in the index/working tree while still stashing everything.
+  const [keepIndex, setKeepIndex] = useState(false);
   // Global stash selection — shared with Branches stash section and the Toolbar
   // chip: clicking a stash here marks it everywhere (SmartGit behavior).
   const selectedStashIndex = useSelectionStore((s) => s.selectedStashIndex);
@@ -53,11 +57,12 @@ export function StashesPage() {
 
   const handleStashPush = async () => {
     try {
-      await api.git.stashPush(repo.path, stashMessage || undefined, includeUntracked);
+      await api.git.stashPush(repo.path, stashMessage || undefined, includeUntracked, keepIndex);
       toast.success(t('stashes.stashed'));
       setShowNewDialog(false);
       setStashMessage('');
       setIncludeUntracked(false);
+      setKeepIndex(false);
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
@@ -65,15 +70,19 @@ export function StashesPage() {
     }
   };
 
-  const handlePop = async (stash: StashEntry) => {
+  const handlePop = async (stash: StashEntry, opts?: { keepIndex?: boolean }) => {
     if (!(await confirmDialog({
       title: t('stashes.popStashAt', { index: stash.index }),
       message: t('stashes.popConfirmMessage', { message: stash.message }),
       confirmLabel: t('stashes.pop'),
     }))) return;
     try {
-      await api.git.stashPop(repo.path, stash.index);
-      toast.success(t('stashes.poppedStash', { index: stash.index }));
+      await api.git.stashPop(repo.path, stash.index, opts?.keepIndex);
+      toast.success(
+        opts?.keepIndex
+          ? t('stashes.poppedKeepIndex', { index: stash.index })
+          : t('stashes.poppedStash', { index: stash.index })
+      );
       // The popped stash no longer exists — clear the global selection if it pointed here
       if (useSelectionStore.getState().selectedStashIndex === stash.index) {
         useSelectionStore.getState().selectStash(null);
@@ -85,10 +94,14 @@ export function StashesPage() {
     }
   };
 
-  const handleApply = async (stash: StashEntry) => {
+  const handleApply = async (stash: StashEntry, opts?: { keepIndex?: boolean }) => {
     try {
-      await api.git.stashApply(repo.path, stash.index);
-      toast.success(t('stashes.appliedKeptStash', { index: stash.index }));
+      await api.git.stashApply(repo.path, stash.index, opts?.keepIndex);
+      toast.success(
+        opts?.keepIndex
+          ? t('stashes.appliedKeepIndex', { index: stash.index })
+          : t('stashes.appliedKeptStash', { index: stash.index })
+      );
       await refreshStatus(repo.path);
     } catch (e) {
       toast.error(t('stashes.applyFailed'), String(e));
@@ -96,7 +109,8 @@ export function StashesPage() {
   };
 
   const handleDrop = async (stash: StashEntry) => {
-    if (!(await confirmDialog({
+    // 4.5 — supports persistent "Don't ask again" (confirmations registry).
+    if (!(await confirmWithRemember(CONFIRMATION_IDS.stashDrop, {
       title: t('stashes.dropStashAt', { index: stash.index }),
       message: t('stashes.dropConfirmMessage', { message: stash.message }),
       confirmLabel: t('stashes.drop'),
@@ -212,7 +226,9 @@ export function StashesPage() {
                     { label: t('stashes.viewMenu'), clickId: 'view' },
                     { type: 'separator' },
                     { label: t('stashes.applyItem', { index: s.index }), clickId: 'apply' },
+                    { label: t('stashes.applyKeepIndexMenu', { index: s.index }), clickId: 'apply-keep-index' },
                     { label: t('stashes.popStashAtMenu', { index: s.index }), clickId: 'pop' },
+                    { label: t('stashes.popKeepIndexMenu', { index: s.index }), clickId: 'pop-keep-index' },
                     { label: t('stashes.branchMenu'), clickId: 'branch' },
                     { type: 'separator' },
                     { label: t('stashes.dropStashAtMenu', { index: s.index }), clickId: 'drop' },
@@ -226,7 +242,12 @@ export function StashesPage() {
                         useSelectionStore.getState().selectStash(s.index, s.hash);
                         handleApply(s);
                         break;
+                      case 'apply-keep-index':
+                        useSelectionStore.getState().selectStash(s.index, s.hash);
+                        handleApply(s, { keepIndex: true }); // 2.3 — restore staged/unstaged split
+                        break;
                       case 'pop': handlePop(s); break;
+                      case 'pop-keep-index': handlePop(s, { keepIndex: true }); break; // 2.3
                       case 'branch': handleStashBranch(s); break;
                       case 'drop': handleDrop(s); break;
                       case 'copy-msg': copyToClipboard(s.message); toast.success(t('stashes.copied')); break;
@@ -315,6 +336,17 @@ export function StashesPage() {
                   onChange={(e) => setIncludeUntracked(e.target.checked)}
                 />
                 {t('stashes.includeUntracked')}
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={keepIndex}
+                  onChange={(e) => setKeepIndex(e.target.checked)}
+                />
+                <span>
+                  {t('stashes.keepIndexPush')}
+                  <span className="block text-2xs text-text-tertiary">{t('stashes.keepIndexPushHint')}</span>
+                </span>
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-4">

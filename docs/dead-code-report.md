@@ -13,7 +13,7 @@
 |---|---|---|---|
 | Мёртвые IPC/сервисные функции | 5 | **4** (isForcePushAllowed, isCommitPushed, isEolOnlyChange, stageAllTracked*) | 1 (`git:detectRenames`, threshold-вариант) |
 | Мёртвые настройки (UI есть, потребителя нет) | 7 | **5** (forcePushPolicy, protectedBranches, autoStashOnCommonCommands, includeUntrackedInStash, distinguishEolChanges, detectRenames, dateFormat) | 2 (maxHistoryLoad, showReflogInHistory) + 1 без UI и без потребителя (enableTelemetry) |
-| Мёртвые параметры IPC | 1 (`stashPush.keepIndex`) | 0 | 1 |
+| Мёртвые параметры IPC | 1 (`stashPush.keepIndex`) | **1** (фаза 2.3: чекбокс «Keep index» + `--index` для apply/pop) | 0 |
 | Мёртвые секции UI | 1 (Low-level textarea) | 0 | 1 (фаза 4.1) |
 | Найденные баги | 2 | **2 исправлены** (About-версия, aiChatStore) | 0 |
 | Удалённый мёртвый код | — | `autoStash()` (6355-строчный сервис, ноль вызовов) удалён | — |
@@ -103,7 +103,7 @@
 | 2 | Настройка `maxHistoryLoad` | дефолт `storage.ts:23`, UI `SettingsPage.tsx:486-487` | UI пишет, `git.log()` дефолтит maxCount иначе — ключ не читается | Потреблять в `log()` (`options.maxCount ?? settings.maxHistoryLoad`) — XS. Фаза 0-остаток |
 | 3 | Настройка `showReflogInHistory` | `storage.ts:22`, UI `SettingsPage.tsx:493-501` | UI есть, HistoryPage ключ не читает | Подключить флагом отображения reflog-вкладки — S. Де-скоп допустим |
 | 4 | Настройка `enableTelemetry` | `storage.ts:24` | Ни UI, ни потребителя — полностью мёртвый ключ | Удалить или реализовать (рекомендуется удалить — телеметрия не входит в v1) — XS |
-| 5 | Параметр `keepIndex` у `stashPush` | `git.ts` (stash push), `preload.ts:73` | Бэкенд принимает `keepIndex`, UI всегда передаёт `false` | Чекбокс «Keep index» в StashesPage — XS. Фаза 2.3 |
+| 5 | ~~Параметр `keepIndex` у `stashPush`~~ — ✅ ЗАКРЫТ (фаза 2.3) | `git.ts` (stash push), `preload.ts:73` | Бэкенд принимал `keepIndex`, UI всегда передавал `false` | Реализовано: чекбокс «Keep index» в диалоге StashesPage + «apply/pop (keep index)» в контекст-меню (`--index` восстанавливает staged/unstaged). Интеграционные тесты `gitService.phase2.test.ts` |
 | 6 | Секция «Low-Level Properties» (textarea) | `SettingsPage.tsx:1109-1147` | Текст парсится в настройку, но **не читается ни одной подсистемой** — фикция «настроек» | Заменить таблицей key/value с реестром известных ключей — фаза 4.1 (M, 2–3 дн) |
 | 7 | `ForcePushPolicy`-обёртка в api-tauri | `src/lib/api-tauri.ts` | Tauri-адаптер не реализует новые/некоторый старые методы (isForcePushAllowed и др.) — вызовы деградируют через try/catch | Опционально: добить адаптер, если Tauri-сборка актуальна — S |
 | 8 | Секреты в plaintext (`remoteAuth`, `githubPAT`, `aiApiKey`, CI-токены) + `credential.helper=store` при клоне | `settings-api.ts:281-289`, `git.ts:5677+` (до правок) | Не «мёртвый код», но критичная дыра из аудита (Б3/Б4) | safeStorage-хранилище `prismgit-secrets.bin` + Security-вкладка — фаза 5.2 (L, 5–8 дн). **Рекомендуется поднять приоритет**, если приложение распространяется наружу |
@@ -149,3 +149,38 @@ tests/{setup.ts, integration/gitService.remaining.test.ts} — моки + акт
 ## 6. Что осталось из плана (напоминание)
 
 Фазы 2–6 `docs/implementation-plan.md`: предупреждение `.gitmodules` при checkout (2.1), фоновый GC (3.1), Low-level таблица (4.1), тема Auto (4.2), реестр подтверждений (4.5), git executable + **safeStorage-секреты** (5.1–5.2, самые важные), шрифты/цвета/spell checker (6.1–6.3). Ориентир — раздел 4 настоящего отчёта и раздел 5 плана.
+
+---
+
+## 7. Обновление — фаза 2 + 4.5 (текущий коммит)
+
+Продолжение реализации плана (рекомендованный порядок 0 → 1 → **2 → 4.5**). Из отчёта полностью закрыт пункт #4 раздела «Оставшийся мёртвый код» (#5 keepIndex — см. таблицу выше).
+
+### Реализовано (фаза 2 — Git-операции)
+
+| Задача | Что сделано | Файлы |
+|---|---|---|
+| 2.1 Warn on .gitmodules change | `hasSubmoduleConfigChanges()` (`git diff HEAD..<target> -- .gitmodules`, ошибки → false) + IPC `git:hasSubmoduleConfigChanges` + guard `guardSubmoduleCheckout()` во **всех 4** checkout-потоках BranchesPage (local checkout, context-menu checkout-remote, double-click remote, row-button remote). Настройка `warnSubmoduleChangesOnCheckout` (default true) | `electron/services/git.ts`, `ipc/git.ts`, `preload.ts`, `types/git-api.ts`, `settings-api.ts`, `BranchesPage.tsx` |
+| 2.2 Slow renames hint | Замер времени вокруг `detectWorkingTreeRenames`; одноразовый тост (модульный троттлинг) при превышении порога low-level `renames.warnMs` (default 3000). Настройка `warnSlowRenameDetection` (default true) | `ChangesPage.tsx` |
+| 2.3 Stash keep-index | `stashPush(keepIndex)` подключён к UI (чекбокс в диалоге StashesPage); `stashApply/stashPop` получили `keepIndex` → `--index` (восстановление staged/unstaged split) + пункты контекст-меню | `git.ts`, `types/git-api.ts`, `ipc/git.ts`, `preload.ts`, `StashesPage.tsx` |
+
+### Реализовано (фаза 4.5 — реестр подтверждений)
+
+- **`src/lib/confirmations.ts`** — реестр id (`stash.drop`, `changes.discard`, `branch.delete`, `branch.forceDelete`, `checkout.submoduleChange`, `commit.pushedModify`), `confirmWithRemember(id, opts)`, `restoreAllConfirmations()`. Persist: `settings.confirmations: Record<id, 'ask'\|'always'\|'never'>`.
+- **ConfirmDialog**: опция `checkbox` + новый `confirmDialogEx()` → `{ ok, checked }` (backdrop/escape/Cancel учитывают состояние чекбокса).
+- **Мигрированы диалоги**: stash drop (StashesPage), branch delete + force-delete (BranchesPage), discard/restore-file (fileContextMenu.ts + ChangesPage), новый checkout-submodule warning.
+- **Settings → Appearance**: кнопка «Restore all confirmation dialogs» (сброс реестра + тост).
+- **Основа 4.1**: `src/lib/lowLevelProps.ts` — реестр известных low-level ключей (`renames.warnMs`, `renames.similarityThreshold`, `dates.verboseDays`, `backgroundFetch.intervalMin`, `avatar.size`, `annotate.maxTooltipWidth`) + парсер legacy-textarea + типизированные геттеры (уже используются фазой 2.2).
+
+### Верификация (текущий коммит)
+
+| Проверка | Результат |
+|---|---|
+| `npm run typecheck` | ✅ 0 ошибок |
+| `tests/unit/confirmations.test.ts` (NEW, 8 тестов) | ✅ |
+| `tests/unit/lowLevelProps.test.ts` (NEW, 11 тестов) | ✅ |
+| `tests/integration/gitService.phase2.test.ts` (NEW, 5 тестов: submodule-probe ×3, keep-index ×2) | ✅ |
+| Полный unit-набор | ✅ 1216 passed; 5 failed — 4 в `fileContextMenu` устранены (мок `confirmDialogEx`), остаются 2 **pre-existing** (`repositoryStore` offline, `accessibility` e2e — падают и на чистом HEAD, проверено через `git stash`) |
+| i18n-паритет (20 новых ключей × en/ru/zh/de) | ✅ |
+| `npm run build` | ✅ |
+

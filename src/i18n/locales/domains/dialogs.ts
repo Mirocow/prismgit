@@ -7,6 +7,9 @@
  * IndexEditorDialog, RepoSettingsDialog, RefActionDialog, RemoteDialogs.
  */
 export const en: Record<string, string> = {
+  // 4.5 — confirmations registry
+  'confirmations.dontAskAgain': "Don't ask again",
+
   // CloneModal
   'dialogs.loadReposFailed': 'Failed to load repositories',
   'dialogs.urlRequired': 'Repository URL is required',
@@ -225,6 +228,9 @@ export const en: Record<string, string> = {
 };
 
 export const ru: Record<string, string> = {
+  // 4.5 — реестр подтверждений
+  'confirmations.dontAskAgain': 'Больше не спрашивать',
+
   // CloneModal
   'dialogs.loadReposFailed': 'Не удалось загрузить репозитории',
   'dialogs.urlRequired': 'Укажите URL репозитория',
@@ -443,6 +449,9 @@ export const ru: Record<string, string> = {
 };
 
 export const zh: Record<string, string> = {
+  // 4.5 — 确认注册表
+  'confirmations.dontAskAgain': '不再询问',
+
   // CloneModal
   'dialogs.loadReposFailed': '加载仓库列表失败',
   'dialogs.urlRequired': '请填写仓库 URL',
@@ -661,6 +670,9 @@ export const zh: Record<string, string> = {
 };
 
 export const de: Record<string, string> = {
+  // 4.5 — Bestätigungs-Registrierung
+  'confirmations.dontAskAgain': 'Nicht mehr fragen',
+
   // CloneModal
   'dialogs.loadReposFailed': 'Repositories konnten nicht geladen werden',
   'dialogs.urlRequired': 'Repository-URL ist erforderlich',

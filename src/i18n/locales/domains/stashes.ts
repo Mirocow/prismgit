@@ -63,6 +63,14 @@ export const en: Record<string, string> = {
   'stashes.viewMenu': 'View Stash (Diff tool)',
   'stashes.branchMenu': 'Branch from Stash...',
   'stashes.applyItem': 'Apply stash@{{index}}',
+  // 2.3 — keep index (restore staged/unstaged split)
+  'stashes.applyKeepIndexMenu': 'stash@{{index}} apply (keep index)',
+  'stashes.popKeepIndexMenu': 'stash@{{index}} pop (keep index)',
+  'stashes.keepIndexPush': 'Keep index',
+  'stashes.keepIndexPushHint': 'Stash everything, but leave staged changes in the index (--keep-index).',
+  'stashes.poppedKeepIndex': 'stash@{{{index}}} popped — staged state restored',
+  'stashes.appliedKeepIndex': 'stash@{{{index}}} applied — staged state restored',
+
   // Page chrome
   'stashes.entriesCount': '{count} entries',
   'stashes.loading': 'Loading stashes...',
@@ -142,6 +150,14 @@ export const ru: Record<string, string> = {
   'stashes.viewMenu': 'Просмотреть Stash (в Diff)',
   'stashes.branchMenu': 'Ветка из Stash...',
   'stashes.applyItem': 'Применить stash@{{index}}',
+  // 2.3 — сохранение индекса (восстановление staged/unstaged)
+  'stashes.applyKeepIndexMenu': 'stash@{{index}} применить (сохранить индекс)',
+  'stashes.popKeepIndexMenu': 'stash@{{index}} извлечь (сохранить индекс)',
+  'stashes.keepIndexPush': 'Сохранить индекс',
+  'stashes.keepIndexPushHint': 'Спрятать всё, но оставить проиндексированные изменения в индексе (--keep-index).',
+  'stashes.poppedKeepIndex': 'stash@{{{index}}} извлечён — состояние индекса восстановлено',
+  'stashes.appliedKeepIndex': 'stash@{{{index}}} применён — состояние индекса восстановлено',
+
   // Page chrome
   'stashes.entriesCount': 'Записей: {count}',
   'stashes.loading': 'Загрузка stash...',
@@ -221,6 +237,14 @@ export const zh: Record<string, string> = {
   'stashes.viewMenu': '查看贮藏（Diff 工具）',
   'stashes.branchMenu': '从贮藏创建分支...',
   'stashes.applyItem': '应用 stash@{{index}}',
+  // 2.3 — 保留索引（恢复 staged/unstaged 划分）
+  'stashes.applyKeepIndexMenu': '应用 stash@{{index}}（保留索引）',
+  'stashes.popKeepIndexMenu': '弹出 stash@{{index}}（保留索引）',
+  'stashes.keepIndexPush': '保留索引',
+  'stashes.keepIndexPushHint': '贮藏所有更改，但已暂存的更改保留在索引中（--keep-index）。',
+  'stashes.poppedKeepIndex': '已弹出 stash@{{{index}}}——已恢复暂存状态',
+  'stashes.appliedKeepIndex': '已应用 stash@{{{index}}}——已恢复暂存状态',
+
   // Page chrome
   'stashes.entriesCount': '{count} 条记录',
   'stashes.loading': '正在加载贮藏...',
@@ -300,6 +324,14 @@ export const de: Record<string, string> = {
   'stashes.viewMenu': 'Stash anzeigen (Diff-Tool)',
   'stashes.branchMenu': 'Branch aus Stash...',
   'stashes.applyItem': 'stash@{{index}} anwenden',
+  // 2.3 — Index behalten (staged/unstaged-Aufteilung wiederherstellen)
+  'stashes.applyKeepIndexMenu': 'stash@{{index}} anwenden (Index behalten)',
+  'stashes.popKeepIndexMenu': 'stash@{{index}} auspacken (Index behalten)',
+  'stashes.keepIndexPush': 'Index behalten',
+  'stashes.keepIndexPushHint': 'Stasht alles, lässt aber Änderungen in der Staging-Area im Index (--keep-index).',
+  'stashes.poppedKeepIndex': 'stash@{{{index}}} ausgepackt — Staging-Zustand wiederhergestellt',
+  'stashes.appliedKeepIndex': 'stash@{{{index}}} angewendet — Staging-Zustand wiederhergestellt',
+
   // Page chrome
   'stashes.entriesCount': '{count} Einträge',
   'stashes.loading': 'Stashes werden geladen...',

@@ -31,6 +31,7 @@ import { describePushResult } from '../lib/pushResult';
 import { getRepoInProgressState } from '../lib/repoState';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { confirmWithRemember, CONFIRMATION_IDS } from '../lib/confirmations';
 import { useI18n } from '../lib/i18n';
 import { useDateFormatter } from '../lib/formatDate';
 
@@ -183,9 +184,32 @@ export function BranchesPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // 2.1 — SmartGit "Warn when checkout changes submodule configuration".
+  // Resolves true when checkout may proceed: the setting is off, the target
+  // ships the same .gitmodules, or the user confirmed the change. Errors
+  // from the diff probe never block checkout (best-effort warning).
+  const guardSubmoduleCheckout = useCallback(async (target: string): Promise<boolean> => {
+    if (settings?.warnSubmoduleChangesOnCheckout === false) return true;
+    try {
+      const changed = await api.git.hasSubmoduleConfigChanges(repo.path, target);
+      if (!changed) return true;
+      return await confirmWithRemember(CONFIRMATION_IDS.checkoutSubmoduleChange, {
+        title: t('branches.submoduleWarnTitle'),
+        message: t('branches.submoduleWarnMessage', { branch: target }),
+        confirmLabel: t('branches.checkout'),
+        danger: true,
+      });
+    } catch {
+      return true;
+    }
+  }, [repo.path, settings?.warnSubmoduleChangesOnCheckout, t]);
+
   const handleCheckout = async (branch: BranchInfo, opts?: { autoStash?: boolean }) => {
     if (branch.current) return;
     if (blockedByCherryPick()) return;
+    // 2.1 — SmartGit "Warn when checkout changes submodule configuration":
+    // if the target branch ships a different .gitmodules, confirm first.
+    if (!(await guardSubmoduleCheckout(branch.name))) return;
     const autoStash = opts?.autoStash ?? false;
     try {
       await useOperationLogStore.getState().logOperation(
@@ -308,7 +332,8 @@ export function BranchesPage() {
   const handleDelete = async (branch: BranchInfo) => {
     // First attempt: non-force. If git refuses (not fully merged), offer force
     // — but warn that unmerged commits become Recyclable (recoverable 90 days).
-    if (!(await confirmDialog({
+    // 4.5 — supports persistent "Don't ask again" (confirmations registry).
+    if (!(await confirmWithRemember(CONFIRMATION_IDS.branchDelete, {
       title: t('branches.deleteConfirmTitle', { name: branch.name }),
       message: t('branches.deleteConfirmMessage'),
       confirmLabel: t('common.delete'),
@@ -321,7 +346,7 @@ export function BranchesPage() {
     } catch (e) {
       const msg = String(e);
       if (/not fully merged|branch.*not merged/i.test(msg)) {
-        const ok = await confirmDialog({
+        const ok = await confirmWithRemember(CONFIRMATION_IDS.branchForceDelete, {
           title: t('branches.forceDeleteTitle', { name: branch.name }),
           message: t('branches.forceDeleteMessage'),
           confirmLabel: t('branches.forceDelete'),
@@ -1110,6 +1135,7 @@ export function BranchesPage() {
             message: t('branches.checkoutRemoteMessage', { local: localName, remote: b.name }),
             confirmLabel: t('branches.checkout'),
           }))) return;
+          if (!(await guardSubmoduleCheckout(b.name))) return; // 2.1 — .gitmodules diff warning
           api.git.checkout(repo.path, b.name, { track: true }).then(() => {
             toast.success(t('branches.checkedOutTracking', { local: localName, remote: b.name }));
             load(); refreshStatus(repo.path);
@@ -1350,8 +1376,9 @@ export function BranchesPage() {
               title: `Checkout remote branch '${b.name}'`,
               message: `This creates a local branch '${localName}' tracking '${b.name}' and switches to it.`,
               confirmLabel: 'Checkout',
-            }).then((ok) => {
+            }).then(async (ok) => {
               if (!ok) return;
+              if (!(await guardSubmoduleCheckout(b.name))) return; // 2.1 — .gitmodules diff warning
               api.git.checkout(repo.path, b.name, { track: true })
                 .then(() => { toast.success(t('toast.git.checkoutSuccess', { ref: localName })); load(); refreshStatus(repo.path); })
                 .catch((err) => toast.error(t('toast.git.checkoutFailed'), String(err)));
@@ -1500,8 +1527,9 @@ export function BranchesPage() {
                     title: t('branches.checkoutRemoteTitle', { name: b.name }),
                     message: t('branches.checkoutRemoteMessage', { local: localName, remote: b.name }),
                     confirmLabel: t('branches.checkout'),
-                  }).then((ok) => {
+                  }).then(async (ok) => {
                     if (!ok) return;
+                    if (!(await guardSubmoduleCheckout(b.name))) return; // 2.1 — .gitmodules diff warning
                     api.git.checkout(repo.path, b.name, { track: true })
                       .then(() => { toast.success(t('branches.checkedOut', { name: localName })); load(); refreshStatus(repo.path); })
                       .catch((err) => toast.error(t('branches.checkoutFailed'), String(err)));

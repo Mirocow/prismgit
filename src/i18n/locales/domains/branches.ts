@@ -31,6 +31,10 @@ export const en: Record<string, string> = {
   'branches.checkoutRemoteRowHint': 'Check out as new local branch  (or double-click the row)',
   'branches.checkoutRemoteTitle': "Checkout remote branch '{name}'",
   'branches.checkoutRemoteMessage': "This creates a local branch '{local}' tracking '{remote}' and switches to it.",
+  // 2.1 — checkout that changes .gitmodules
+  'branches.submoduleWarnTitle': 'Submodule configuration will change',
+  "branches.submoduleWarnMessage": "Checking out '{branch}' changes .gitmodules — submodule URLs/paths differ. Continue?",
+
   'branches.deletedRemote': "Deleted remote '{name}'",
   'branches.renamedTo': "Branch renamed to '{name}'",
   'branches.remoteRenamedTo': "Remote renamed to '{name}'",
@@ -254,6 +258,10 @@ export const ru: Record<string, string> = {
   'branches.checkoutRemoteRowHint': 'Создать локальную ветку с отслеживанием (или двойной клик по строке)',
   'branches.checkoutRemoteTitle': "Переключиться на удалённую ветку '{name}'",
   'branches.checkoutRemoteMessage': "Будет создана локальная ветка '{local}', отслеживающая '{remote}', и выполнено переключение на неё.",
+  // 2.1 — checkout, меняющий .gitmodules
+  'branches.submoduleWarnTitle': 'Конфигурация подмодулей изменится',
+  "branches.submoduleWarnMessage": "Переключение на '{branch}' изменит .gitmodules — отличаются URL/пути подмодулей. Продолжить?",
+
   'branches.deletedRemote': "Удалена удалённая ветка '{name}'",
   'branches.renamedTo': "Ветка переименована в '{name}'",
   'branches.remoteRenamedTo': "Репозиторий переименован в '{name}'",
@@ -476,6 +484,10 @@ export const zh: Record<string, string> = {
   'branches.checkoutRemoteRowHint': '检出为新的本地分支（或双击该行）',
   'branches.checkoutRemoteTitle': "检出远程分支 '{name}'",
   'branches.checkoutRemoteMessage': "将创建跟踪 '{remote}' 的本地分支 '{local}' 并切换到它。",
+  // 2.1 — checkout 将改变 .gitmodules
+  'branches.submoduleWarnTitle': '子模块配置将发生变化',
+  "branches.submoduleWarnMessage": "检出 '{branch}' 会更改 .gitmodules——子模块 URL/路径不同。是否继续？",
+
   'branches.deletedRemote': "已删除远程分支 '{name}'",
   'branches.renamedTo': "分支已重命名为 '{name}'",
   'branches.remoteRenamedTo': "远程已重命名为 '{name}'",
@@ -698,6 +710,10 @@ export const de: Record<string, string> = {
   'branches.checkoutRemoteRowHint': 'Als neuen lokalen Branch auschecken (oder Zeile doppelklicken)',
   'branches.checkoutRemoteTitle': "Remote-Branch '{name}' auschecken",
   'branches.checkoutRemoteMessage': "Erstellt einen lokalen Branch '{local}', der '{remote}' trackt, und wechselt zu ihm.",
+  // 2.1 — Checkout, der .gitmodules ändert
+  'branches.submoduleWarnTitle': 'Submodul-Konfiguration wird sich ändern',
+  "branches.submoduleWarnMessage": "Das Auschecken von '{branch}' ändert .gitmodules — Submodul-URLs/Pfade weichen ab. Fortfahren?",
+
   'branches.deletedRemote': "Remote-Branch '{name}' gelöscht",
   'branches.renamedTo': "Branch umbenannt in '{name}'",
   'branches.remoteRenamedTo': "Remote umbenannt in '{name}'",

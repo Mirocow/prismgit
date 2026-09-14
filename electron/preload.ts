@@ -49,6 +49,8 @@ const api = {
     remotes: (repoPath: string) => ipcRenderer.invoke('git:remotes', repoPath),
     checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) =>
       ipcRenderer.invoke('git:checkout', repoPath, branch, options),
+    hasSubmoduleConfigChanges: (repoPath: string, target: string) =>
+      ipcRenderer.invoke('git:hasSubmoduleConfigChanges', repoPath, target),
     checkoutFile: (repoPath: string, file: string, ref?: string) => ipcRenderer.invoke('git:checkoutFile', repoPath, file, ref),
     checkoutFiles: (repoPath: string, files: string[], ref?: string) => ipcRenderer.invoke('git:checkoutFiles', repoPath, files, ref),
     createBranch: (repoPath: string, name: string, startPoint?: string, force?: boolean, track?: boolean) =>
@@ -74,8 +76,8 @@ const api = {
     stashList: (repoPath: string) => ipcRenderer.invoke('git:stashList', repoPath),
     stashPush: (repoPath: string, message?: string, includeUntracked?: boolean, keepIndex?: boolean, files?: string[]) =>
       ipcRenderer.invoke('git:stashPush', repoPath, message, includeUntracked, keepIndex, files),
-    stashPop: (repoPath: string, index?: number) => ipcRenderer.invoke('git:stashPop', repoPath, index),
-    stashApply: (repoPath: string, index?: number) => ipcRenderer.invoke('git:stashApply', repoPath, index),
+    stashPop: (repoPath: string, index?: number, keepIndex?: boolean) => ipcRenderer.invoke('git:stashPop', repoPath, index, keepIndex),
+    stashApply: (repoPath: string, index?: number, keepIndex?: boolean) => ipcRenderer.invoke('git:stashApply', repoPath, index, keepIndex),
     stashFiles: (repoPath: string, hash: string) => ipcRenderer.invoke('git:stashFiles', repoPath, hash),
     stashFileRawDiff: (repoPath: string, hash: string, file: string) =>
       ipcRenderer.invoke('git:stashFileRawDiff', repoPath, hash, file),

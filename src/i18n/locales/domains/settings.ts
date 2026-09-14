@@ -172,6 +172,16 @@ export const en: Record<string, string> = {
   'settings.autoStashHint': 'Stash local changes before merge/rebase/pull, then pop after.',
   'settings.includeUntrackedStash': 'Include untracked files in stash',
   'settings.includeUntrackedStashHint': 'Passes -u to git stash push — also stashes untracked files.',
+  // 2.1 / 2.2 — checkout submodule warning + slow renames hint
+  'settings.warnSubmoduleCheckout': 'Warn when checkout changes submodule configuration',
+  'settings.warnSubmoduleCheckoutHint': 'Shows a confirmation before checking out a branch whose .gitmodules differs.',
+  'settings.warnSlowRenames': 'Hint when rename detection is slow',
+  'settings.warnSlowRenamesHint': 'One-time toast when working-tree rename detection exceeds the low-level renames.warnMs threshold.',
+  // 4.5 — confirmation dialog registry
+  'settings.restoreConfirmations': 'Restore all confirmation dialogs',
+  'settings.restoreConfirmationsHint': 'Clears saved "Don\'t ask again" answers so every confirmation asks again.',
+  'settings.restoreConfirmationsDone': 'All confirmation dialogs will ask again',
+
   // Commit message handling (SmartGit Commands page)
   'settings.commitCommentsMode': 'Commit comments handling',
   'settings.commitCommentsAsIs': 'Use message as-is',
@@ -447,6 +457,16 @@ export const ru: Record<string, string> = {
   'settings.autoStashHint': 'Прячет локальные изменения перед merge/rebase/pull и восстанавливает после.',
   'settings.includeUntrackedStash': 'Включать неотслеживаемые файлы в stash',
   'settings.includeUntrackedStashHint': 'Передаёт -u в git stash push — неотслеживаемые файлы тоже прячутся.',
+  // 2.1 / 2.2 — предупреждение о подмодулях + медленные переименования
+  'settings.warnSubmoduleCheckout': 'Предупреждать при изменении конфигурации подмодулей при checkout',
+  'settings.warnSubmoduleCheckoutHint': 'Показывает подтверждение перед переключением на ветку с другим .gitmodules.',
+  'settings.warnSlowRenames': 'Подсказывать при медленном определении переименований',
+  'settings.warnSlowRenamesHint': 'Одноразовый тост, когда определение переименований превышает порог renames.warnMs (low-level).',
+  // 4.5 — реестр подтверждений
+  'settings.restoreConfirmations': 'Восстановить все диалоги подтверждения',
+  'settings.restoreConfirmationsHint': 'Очищает сохранённые ответы «Больше не спрашивать» — все подтверждения будут спрашиваться снова.',
+  'settings.restoreConfirmationsDone': 'Все диалоги подтверждения будут спрашиваться снова',
+
   // Commit message handling (SmartGit Commands page)
   'settings.commitCommentsMode': 'Обработка комментариев в сообщении коммита',
   'settings.commitCommentsAsIs': 'Использовать сообщение как есть',
@@ -722,6 +742,16 @@ export const zh: Record<string, string> = {
   'settings.autoStashHint': '在 merge/rebase/pull 前贮藏本地更改，之后恢复。',
   'settings.includeUntrackedStash': 'stash 包含未跟踪文件',
   'settings.includeUntrackedStashHint': '向 git stash push 传递 -u——未跟踪文件也会被贮藏。',
+  // 2.1 / 2.2 — 子模块 checkout 警告 + 重命名检测缓慢提示
+  'settings.warnSubmoduleCheckout': '检出更改子模块配置时警告',
+  'settings.warnSubmoduleCheckoutHint': '在检出 .gitmodules 不同的分支前显示确认。',
+  'settings.warnSlowRenames': '重命名检测缓慢时提示',
+  'settings.warnSlowRenamesHint': '当工作树重命名检测超过 low-level renames.warnMs 阈值时显示一次性提示。',
+  // 4.5 — 确认对话框注册表
+  'settings.restoreConfirmations': '恢复所有确认对话框',
+  'settings.restoreConfirmationsHint': '清除已保存的「不再询问」答案——所有确认将重新询问。',
+  'settings.restoreConfirmationsDone': '所有确认对话框将重新询问',
+
   // Commit message handling (SmartGit Commands page)
   'settings.commitCommentsMode': '提交信息中注释的处理方式',
   'settings.commitCommentsAsIs': '按原样使用信息',
@@ -997,6 +1027,16 @@ export const de: Record<string, string> = {
   'settings.autoStashHint': 'Stasht lokale Änderungen vor Merge/Rebase/Pull und holt sie danach zurück.',
   'settings.includeUntrackedStash': 'Untracked-Dateien in den Stash aufnehmen',
   'settings.includeUntrackedStashHint': 'Übergibt -u an git stash push — stasht auch untracked Dateien.',
+  // 2.1 / 2.2 — Submodul-Checkout-Warnung + Hinweis bei langsamen Umbenennungen
+  'settings.warnSubmoduleCheckout': 'Warnen, wenn Checkout die Submodul-Konfiguration ändert',
+  'settings.warnSubmoduleCheckoutHint': 'Zeigt vor dem Auschecken eines Branches mit anderem .gitmodules eine Bestätigung.',
+  'settings.warnSlowRenames': 'Hinweis bei langsamer Umbenennungs-Erkennung',
+  'settings.warnSlowRenamesHint': 'Einmaliger Toast, wenn die Working-Tree-Umbenennungs-Erkennung den Low-level-Grenzwert renames.warnMs überschreitet.',
+  // 4.5 — Registrierung der Bestätigungsdialoge
+  'settings.restoreConfirmations': 'Alle Bestätigungsdialoge wiederherstellen',
+  'settings.restoreConfirmationsHint': 'Löscht gespeicherte „Nicht mehr fragen“-Antworten — alle Bestätigungen werden wieder gestellt.',
+  'settings.restoreConfirmationsDone': 'Alle Bestätigungsdialoge werden wieder gestellt',
+
   // Commit message handling (SmartGit Commands page)
   'settings.commitCommentsMode': 'Behandlung von Kommentarzeilen in Commit-Nachrichten',
   'settings.commitCommentsAsIs': 'Nachricht unverändert verwenden',

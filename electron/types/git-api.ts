@@ -337,6 +337,14 @@ export interface GitApi {
   branches: (repoPath: string) => Promise<BranchInfo[]>;
   remotes: (repoPath: string) => Promise<RemoteInfo[]>;
   checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) => Promise<AutoStashResult>;
+  /**
+   * Would checking out `target` change .gitmodules? Compares HEAD..target
+   * for the .gitmodules path. Used to warn before checkout (SmartGit:
+   * "Warn when checkout changes submodule configuration"). Accepts local
+   * branch names and remote-tracking refs (origin/foo). Returns false on
+   * any error (missing .gitmodules, unborn HEAD) — never blocks checkout.
+   */
+  hasSubmoduleConfigChanges: (repoPath: string, target: string) => Promise<boolean>;
   checkoutFile: (repoPath: string, file: string, ref?: string) => Promise<void>;
   checkoutFiles: (repoPath: string, files: string[], ref?: string) => Promise<void>;
   createBranch: (repoPath: string, name: string, startPoint?: string, force?: boolean, track?: boolean) => Promise<void>;
@@ -377,8 +385,10 @@ export interface GitApi {
   commitExists: (repoPath: string, hash: string) => Promise<boolean>;
   stashList: (repoPath: string) => Promise<StashEntry[]>;
   stashPush: (repoPath: string, message?: string, includeUntracked?: boolean, keepIndex?: boolean, files?: string[]) => Promise<string>;
-  stashPop: (repoPath: string, index?: number) => Promise<void>;
-  stashApply: (repoPath: string, index?: number) => Promise<void>;
+  /** keepIndex — restore the staged/unstaged split (`git stash pop --index`). */
+  stashPop: (repoPath: string, index?: number, keepIndex?: boolean) => Promise<void>;
+  /** keepIndex — restore the staged/unstaged split (`git stash apply --index`). */
+  stashApply: (repoPath: string, index?: number, keepIndex?: boolean) => Promise<void>;
   /** All files in a stash: tracked changes + untracked files (stash parent[2]). */
   stashFiles: (repoPath: string, hash: string) => Promise<CommitFile[]>;
   /** Raw unified diff of ONE file inside a stash (tracked or untracked part). */

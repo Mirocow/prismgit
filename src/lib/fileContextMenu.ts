@@ -22,6 +22,7 @@
  *   Select Directory / Root  → scopes the Changes dir tree
  */
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { confirmWithRemember, CONFIRMATION_IDS } from './confirmations';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from './api';
@@ -459,7 +460,8 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
         targets.length > 1
           ? `${targets.length} selected files`
           : `'${ctx.path}'`;
-      const ok = await confirmDialog({
+      // 4.5 — supports persistent "Don't ask again" (confirmations registry).
+      const ok = await confirmWithRemember(CONFIRMATION_IDS.discardChanges, {
         title: ctx.isStaged ? 'Discard staged changes' : 'Discard changes',
         message: ctx.isStaged
           ? `Discard staged changes for ${what}?\nThis will unstage AND restore the files to HEAD.`
