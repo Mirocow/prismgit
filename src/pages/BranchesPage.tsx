@@ -32,6 +32,7 @@ import { getRepoInProgressState } from '../lib/repoState';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useI18n } from '../lib/i18n';
+import { useDateFormatter } from '../lib/formatDate';
 
 /**
  * MED-3 — Build an LLMProvider from AppSettings, or null if AI is not
@@ -59,6 +60,8 @@ export function BranchesPage() {
   const isInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
   const toast = useToastActions();
   const { t } = useI18n();
+  // 0.7 — honors settings.dateFormat (relative / absolute / both)
+  const fmtDate = useDateFormatter();
 
   // SmartGit: while a sequencer state (cherry-pick / revert / merge / rebase /
   // bisect) is in progress the branch is effectively "detached from its remote"
@@ -1438,7 +1441,7 @@ export function BranchesPage() {
           <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 flex-shrink-0">
             <code className="font-mono">{shortHash(b.lastCommit.hash)}</code>
             <span className="hidden lg:inline truncate" style={{ maxWidth: 150 }}>{b.lastCommit.message}</span>
-            <span>· {formatDate(b.lastCommit.date)}</span>
+            <span>· {fmtDate(b.lastCommit.date)}</span>
           </div>
         )}
         {/* Hover actions — always faintly visible, brighten on hover.
@@ -1758,14 +1761,14 @@ export function BranchesPage() {
       </div>
       <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 flex-shrink-0">
         <code className="font-mono">{tag.hashAbbrev}</code>
-        {tag.date && <span>· {formatDate(tag.date)}</span>}
+        {tag.date && <span>· {fmtDate(tag.date)}</span>}
       </div>
     </div>
   );
 
   /** Fork-style stash row: "07/25/2025 02:55 PM: WIP on remove-sync: ..." */
   const renderStashRow = (s: StashEntry) => {
-    const dateLabel = s.date ? formatDate(s.date) : '';
+    const dateLabel = s.date ? fmtDate(s.date) : '';
     return (
       <div
         key={`stash-${s.index}`}

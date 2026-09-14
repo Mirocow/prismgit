@@ -5,6 +5,7 @@ import { ArrowRight, ChevronDown, ChevronRight, History, RefreshCw } from '../co
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type CommitFile, type ReflogEntry } from '../lib/api';
 import { useI18n } from '../lib/i18n';
+import { useDateFormatter } from '../lib/formatDate';
 import { useContextMenu } from '../lib/useContextMenu';
 import { cn, copyToClipboard, formatDate, shortHash } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
@@ -34,6 +35,8 @@ const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
  */
 export function ReflogPage() {
   const { t } = useI18n();
+  // 0.7 — honors settings.dateFormat (relative / absolute / both)
+  const fmtDate = useDateFormatter();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const status = useGitStore((s) => s.status);
   const toast = useToastActions();
@@ -261,7 +264,7 @@ export function ReflogPage() {
                   </span>
                   {/* Relative time */}
                   <span className="text-text-tertiary text-2xs flex-shrink-0">
-                    {formatDate(entry.date)}
+                    {fmtDate(entry.date)}
                   </span>
                 </div>
               );

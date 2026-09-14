@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import { api, type StatusResult, type PushResult } from '../lib/api';
+import { t as i18nT } from '../lib/i18n';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { useOperationLogStore } from './operationLogStore';
 import { useRepositoryStore } from './repositoryStore';
+import { useToastStore } from './toastStore';
 
 interface GitState {
   status: StatusResult | null;
@@ -100,7 +102,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     const cmd = `git pull ${remote || 'origin'} ${branch || ''}`.trim();
     const opId = log.startOp('Pull (Merge)', repoPath, cmd);
     try {
-      await api.git.pull(repoPath, remote, branch);
+      const res = await api.git.pull(repoPath, remote, branch);
       await get().refreshStatus(repoPath);
       // Refresh repository metadata in the sidebar
       api.settings.refreshRepoStats(repoPath).then(() => {
@@ -108,6 +110,15 @@ export const useGitStore = create<GitState>((set, get) => ({
         useRepositoryStore.getState().checkRemotes?.([repoPath]);
       }).catch(() => {});
       log.finishOp(opId, 'Pulled successfully');
+      // 0.2 — surface the auto-stash cycle (autoStashOnCommonCommands setting)
+      if (res?.autoStashed) {
+        const toastApi = useToastStore.getState();
+        if (res.popFailed) {
+          toastApi.warning(i18nT('changes.autoStashPopFailed'), i18nT('changes.autoStashHintShort'));
+        } else {
+          toastApi.success(i18nT('changes.autoStashRestored'));
+        }
+      }
     } catch (e) {
       log.failOp(opId, String(e));
       throw e;

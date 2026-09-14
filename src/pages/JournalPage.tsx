@@ -8,11 +8,14 @@ import { CommitHashLink } from '../components/StatusBar';
 import { api, type ReflogEntry } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
+import { useDateFormatter } from '../lib/formatDate';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useContextMenu } from '../lib/useContextMenu';
 
 export function JournalPage() {
   const { t } = useI18n();
+  // 0.7 — honors settings.dateFormat (relative / absolute / both)
+  const fmtDate = useDateFormatter();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastActions();
@@ -185,7 +188,7 @@ export function JournalPage() {
                   <span>·</span>
                   <span>{entry.author.name}</span>
                   <span>·</span>
-                  <span>{formatDate(entry.date)}</span>
+                  <span>{fmtDate(entry.date)}</span>
                 </div>
               </div>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">

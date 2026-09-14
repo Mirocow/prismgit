@@ -131,6 +131,25 @@ export interface AppSettings {
   autoStashOnCommonCommands?: boolean;
   /** Include untracked files when stashing (-u flag). */
   includeUntrackedInStash?: boolean;
+  // === SmartGit Manual: Preferences → Commands → Commit message handling ===
+  /**
+   * How to handle lines that look like comments (start with core.commentChar)
+   * in the commit message. 'as-is' — commit untouched; 'ask' — confirm before
+   * stripping; 'strip' — always remove such lines. Default 'ask' (SmartGit).
+   */
+  commitCommentsMode?: 'as-is' | 'ask' | 'strip';
+  /**
+   * What to commit when NOTHING is staged but the working tree has changes:
+   * 'ask' — show the 3-button dialog; 'all-except-untracked' — git add -u;
+   * 'all-including-untracked' — git add -A. Default 'ask' (SmartGit).
+   */
+  commitNothingStaged?: 'ask' | 'all-except-untracked' | 'all-including-untracked';
+  /** Suggest "Add untracked files" banner in the commit panel (default false). */
+  commitSuggestAddUntracked?: boolean;
+  /** Suggest "Stage deletions of missing files" banner (default true). */
+  commitSuggestRemoveMissing?: boolean;
+  /** Commit-message line length guides (SmartGit 50/72). Default 'none'. */
+  commitLineGuides?: 'none' | '50' | '72' | '50+72';
   // === SmartGit Manual: External Tools ===
   /** git config diff.tool value (e.g., "vscode-diff"). */
   diffTool?: string;

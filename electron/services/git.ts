@@ -440,6 +440,19 @@ export async function addAll(repoPath: string): Promise<void> {
   invalidateDiffCache(repoPath);
 }
 
+/**
+ * Stage only modifications to ALREADY-TRACKED files (git add -u).
+ * SmartGit "If nothing is staged → Commit all except untracked" behavior:
+ * modified/deleted tracked files are staged, new untracked files stay
+ * untracked. Pairs with stageAll() (= git add -A) which includes untracked.
+ */
+export async function stageAllTracked(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  await git.raw(['add', '-u']);
+  invalidateDiffCache(repoPath);
+}
+
 export async function restore(repoPath: string, files: string[], staged = false): Promise<void> {
   const git = getGit(repoPath);
   removeStaleIndexLock(repoPath);
@@ -1104,6 +1117,32 @@ export async function push(
   // Explicit remote-side target ("Push To..." lets the user publish a local
   // branch under a DIFFERENT name on the remote): refspec `src:target`.
   const target = targetBranch?.trim() || undefined;
+
+  // ── Force-push policy (SmartGit Manual: Preferences → Commands) ──────────
+  // The forcePushPolicy / protectedBranches settings existed in the UI but
+  // push() never consulted them (dead setting — see docs/implementation-plan
+  // 0.1). Enforce at the SERVICE level so every force push goes through the
+  // policy: toolbar dropdown, Push To… dialog, AI tools, batch operations.
+  // The REMOTE-side branch is what gets protected: `git push --force-with-
+  // lease origin HEAD:main` must be checked against 'main'.
+  if (force) {
+    const policy = getSetting<ForcePushPolicy | undefined>('forcePushPolicy') ?? 'feature-only';
+    const protectedBranches = getSetting<string[]>('protectedBranches');
+    // Remote-side branch: explicit target wins; a `HEAD:main` refspec (toolbar
+    // "push to remote branch") contributes its remote side ('main').
+    let remoteSideBranch: string | undefined = target || refspec || undefined;
+    if (remoteSideBranch && remoteSideBranch.includes(':')) {
+      remoteSideBranch = remoteSideBranch.split(':').pop() || undefined;
+    }
+    const verdict = isForcePushAllowed(remoteSideBranch, policy, protectedBranches);
+    if (!verdict.allowed) {
+      throw new Error(
+        `fatal: force-push denied by PrismGit policy — ${verdict.reason}` +
+        ` (Preferences → Commands → Force Push Policy)`
+      );
+    }
+  }
+
   const args: string[] = [
     ...(await remoteNetworkArgs(repoPath, remote, true)),
     // Hardening for servers/proxies that reject chunked uploads or HTTP/2
@@ -1345,42 +1384,106 @@ async function cleanConflictingUntracked(repoPath: string, files: string[]): Pro
   }
 }
 
+// ── Auto-stash on common commands (SmartGit: Preferences → Commands) ───────
+// The generic autoStash() helper further below was DEAD CODE — nothing called
+// it, and the autoStashOnCommonCommands setting had no consumer. These two
+// helpers wire the setting into pull() and checkout(): stash the dirty tree
+// BEFORE the operation, pop it back AFTER (also on failure).
+
+/** Result of a pull()/checkout() that may have auto-stashed. */
+export interface AutoStashResult {
+  /** A stash was created before the operation (working tree was dirty). */
+  autoStashed: boolean;
+  /** The stash could NOT be popped back — it is kept; see Stashes view. */
+  popFailed: boolean;
+}
+
+const NO_AUTO_STASH: AutoStashResult = { autoStashed: false, popFailed: false };
+
+async function autoStashIfNeeded(repoPath: string, op: 'pull' | 'checkout'): Promise<AutoStashResult> {
+  const enabled = getSetting<boolean | undefined>('autoStashOnCommonCommands') ?? false;
+  if (!enabled) return NO_AUTO_STASH;
+  const git = getGit(repoPath);
+  let dirty = false;
+  try {
+    dirty = !(await git.status()).isClean();
+  } catch {
+    return NO_AUTO_STASH;
+  }
+  if (!dirty) return NO_AUTO_STASH;
+  const includeUntracked = getSetting<boolean | undefined>('includeUntrackedInStash') ?? false;
+  const stashArgs = ['push', '-m', `prismgit-autostash-${op}`];
+  if (includeUntracked) stashArgs.push('-u');
+  try {
+    await git.stash(stashArgs);
+    return { autoStashed: true, popFailed: false };
+  } catch {
+    // Could not stash (index.lock etc.) — let the operation fail naturally
+    // with git's own "local changes would be overwritten" message.
+    return NO_AUTO_STASH;
+  }
+}
+
+/** Pop the auto-stash created by autoStashIfNeeded(). Best-effort. */
+async function autoStashPop(repoPath: string): Promise<boolean> {
+  try {
+    const git = getGit(repoPath);
+    removeStaleIndexLock(repoPath);
+    await git.stash(['pop']);
+    return true;
+  } catch {
+    // Conflicts — the stash entry is kept; user resolves via the Stashes view.
+    return false;
+  }
+}
+
 export async function pull(
   repoPath: string,
   remote = 'origin',
   branch?: string,
   rebase = false,
   noFF = false
-): Promise<void> {
+): Promise<AutoStashResult> {
   const git = getGit(repoPath);
   const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'pull'];
   if (rebase) args.push('--rebase');
   if (noFF) args.push('--no-ff');
   args.push(remote);
   if (branch) args.push(branch);
+  const stashInfo = await autoStashIfNeeded(repoPath, 'pull');
+  const result: AutoStashResult = { autoStashed: stashInfo.autoStashed, popFailed: false };
   try {
-    await git.raw(args);
-  } catch (e) {
-    // ── Auto-recover from "untracked working tree files would be
-    //    overwritten" — the user has local untracked files that
-    //    conflict with incoming files from the remote. Auto-clean
-    //    those files and retry the pull. This is safe because
-    //    the files are UNTRACKED — they're not in git history.
-    if (isUntrackedOverwriteError(e)) {
-      const files = extractUntrackedFiles(e);
-      if (files.length > 0) {
-        await cleanConflictingUntracked(repoPath, files);
-        // Retry the pull after cleaning.
-        try {
-          await git.raw(args);
-          return;
-        } catch (e2) {
-          throw describeNetworkError(e2, 'pull');
+    try {
+      await git.raw(args);
+    } catch (e) {
+      // ── Auto-recover from "untracked working tree files would be
+      //    overwritten" — the user has local untracked files that
+      //    conflict with incoming files from the remote. Auto-clean
+      //    those files and retry the pull. This is safe because
+      //    the files are UNTRACKED — they're not in git history.
+      if (isUntrackedOverwriteError(e)) {
+        const files = extractUntrackedFiles(e);
+        if (files.length > 0) {
+          await cleanConflictingUntracked(repoPath, files);
+          // Retry the pull after cleaning.
+          try {
+            await git.raw(args);
+            return result;
+          } catch (e2) {
+            throw describeNetworkError(e2, 'pull');
+          }
         }
       }
+      throw describeNetworkError(e, 'pull');
     }
-    throw describeNetworkError(e, 'pull');
+  } finally {
+    // Pop the auto-stash even when the pull failed — the user's local
+    // changes must come back to the working tree either way.
+    if (stashInfo.autoStashed) {
+      result.popFailed = !(await autoStashPop(repoPath));
+    }
   }
+  return result;
 }
 
 // ── Fetch deduplication — one download per repo at a time ──────────────────
@@ -1706,41 +1809,52 @@ export async function checkout(
   repoPath: string,
   branch: string,
   options: { newBranch?: boolean; force?: boolean; track?: boolean } = {}
-): Promise<void> {
+): Promise<AutoStashResult> {
   const args: string[] = ['checkout'];
   if (options.newBranch) args.push('-b');
   if (options.force) args.push('--force');
   if (options.track) args.push('--track');
   args.push(branch);
   const cmd = `git ${args.join(' ')}`;
-  await withOperationLog(options.newBranch ? 'Create & Checkout Branch' : 'Checkout', repoPath, cmd, async () => {
+  return withOperationLog(options.newBranch ? 'Create & Checkout Branch' : 'Checkout', repoPath, cmd, async () => {
     const git = getGit(repoPath);
+    // Auto-stash (Preferences → Commands → autoStashOnCommonCommands): a dirty
+    // working tree no longer blocks checkout; changes come back after.
+    const stashInfo = await autoStashIfNeeded(repoPath, 'checkout');
+    const result: AutoStashResult = { autoStashed: stashInfo.autoStashed, popFailed: false };
     try {
-      await git.raw(args);
-    } catch (e) {
-      // ── Auto-recover from "untracked working tree files would be
-      //    overwritten by checkout" — same as pull.
-      if (isUntrackedOverwriteError(e)) {
-        const files = extractUntrackedFiles(e);
-        if (files.length > 0) {
-          await cleanConflictingUntracked(repoPath, files);
-          // Retry checkout after cleaning.
-          try {
-            await git.raw(args);
-            return;
-          } catch (e2) {
-            const err2 = e2 as { stderr?: string; message?: string };
-            const msg2 = err2?.stderr || err2?.message || String(e2);
-            const lines2 = msg2.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
-            throw new Error(lines2.length > 0 ? lines2.join('\n') : msg2);
+      try {
+        await git.raw(args);
+      } catch (e) {
+        // ── Auto-recover from "untracked working tree files would be
+        //    overwritten by checkout" — same as pull.
+        if (isUntrackedOverwriteError(e)) {
+          const files = extractUntrackedFiles(e);
+          if (files.length > 0) {
+            await cleanConflictingUntracked(repoPath, files);
+            // Retry checkout after cleaning.
+            try {
+              await git.raw(args);
+              return result;
+            } catch (e2) {
+              const err2 = e2 as { stderr?: string; message?: string };
+              const msg2 = err2?.stderr || err2?.message || String(e2);
+              const lines2 = msg2.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
+              throw new Error(lines2.length > 0 ? lines2.join('\n') : msg2);
+            }
           }
         }
+        const err = e as { stderr?: string; message?: string };
+        const msg = err?.stderr || err?.message || String(e);
+        const lines = msg.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
+        throw new Error(lines.length > 0 ? lines.join('\n') : msg);
       }
-      const err = e as { stderr?: string; message?: string };
-      const msg = err?.stderr || err?.message || String(e);
-      const lines = msg.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
-      throw new Error(lines.length > 0 ? lines.join('\n') : msg);
+    } finally {
+      if (stashInfo.autoStashed) {
+        result.popFailed = !(await autoStashPop(repoPath));
+      }
     }
+    return result;
   });
 }
 
@@ -5490,35 +5604,6 @@ export async function showFile(repoPath: string, ref: string, file: string): Pro
 // ============================================================
 // SmartGit Manual features — extended backend
 // ============================================================
-
-/**
- * Auto-stash: stash local changes before an operation, then pop after.
- * Used by merge/rebase/pull to enable --autostash-like behavior.
- */
-export async function autoStash<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
-  const git = getGit(repoPath);
-  const s = await git.status();
-  const dirty = !s.isClean();
-  let stashHash: string | null = null;
-  if (dirty) {
-    try {
-      stashHash = await git.stash(['push', '-u', '-m', 'prismgit-autostash']);
-    } catch {
-      /* ignore — proceed without stash */
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    if (stashHash) {
-      try {
-        await git.stash(['pop']);
-      } catch {
-        /* swallow pop errors; user can recover via stashes view */
-      }
-    }
-  }
-}
 
 /**
  * Recyclable commits — unreachable reflog commits eligible for GC (see types/git-api).

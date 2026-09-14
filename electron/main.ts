@@ -423,4 +423,11 @@ ipcMain.handle('clipboard:writeText', (_e, text: string) => {
 });
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
+// Full version info for the About panel (Settings → About) — replaces the
+// previously hardcoded "2.0.1" string that drifted from package.json.
+ipcMain.handle('app:versions', () => ({
+  app: app.getVersion(),
+  electron: process.versions.electron || '',
+  node: process.versions.node || '',
+}));
 ipcMain.handle('app:getPlatform', () => process.platform);

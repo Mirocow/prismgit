@@ -820,19 +820,82 @@ describe('octopusMerge', () => {
   });
 });
 
-describe('autoStash', () => {
-  it('temporarily cleans the tree, runs fn, restores dirty state and return value', async () => {
-    const repo = await mkRepo('autostash');
-    write(repo, 'a.txt', 'dirty work\n');
-    let cleanDuringFn = false;
-    const ret = await gitService.autoStash(repo, async () => {
-      cleanDuringFn = (await gitService.status(repo)).isClean;
-      return 42;
-    });
-    expect(ret).toBe(42);
-    expect(cleanDuringFn).toBe(true);
-    expect((await gitService.status(repo)).isClean).toBe(false);
-    expect(read(repo, 'a.txt')).toBe('dirty work\n');
+// The old autoStash(fn) callback helper was removed — it had ZERO callers in
+// the app (dead code). The setting-driven behavior now lives inside pull() /
+// checkout() via autoStashIfNeeded(). These tests cover it end-to-end.
+describe('auto-stash on pull (autoStashOnCommonCommands setting)', () => {
+  let storage: typeof import('../../electron/services/storage');
+
+  function setupRemoteAndClone(name: string): { bare: string; clone: string; origin: string } {
+    // origin work repo with a 2-file seed commit
+    const origin = path.join(ROOT, `${name}-origin`);
+    fs.mkdirSync(origin, { recursive: true });
+    shGit('init -q -b main .', origin);
+    write(origin, 'a.txt', 'v1\n');
+    write(origin, 'b.txt', 'seed b\n');
+    shGit('add -A .', origin);
+    shGit('commit -qm seed', origin);
+    // bare remote
+    const bare = path.join(ROOT, `${name}-bare.git`);
+    fs.mkdirSync(bare, { recursive: true });
+    shGit('init --bare -q -b main .', bare);
+    shGit(`push -q "${bare}" main`, origin);
+    // clone of the bare remote
+    const clone = path.join(ROOT, `${name}-clone`);
+    shGit(`clone -q "${bare}" "${clone}"`);
+    shGit('config user.name T', clone);
+    shGit('config user.email t@t.com', clone);
+    return { bare, clone, origin };
+  }
+
+  /** Advance the remote: commit a.txt=v2 in origin and push to bare. */
+  function advanceRemote(origin: string, bare: string): void {
+    write(origin, 'a.txt', 'v2\n');
+    shGit('add a.txt', origin);
+    shGit('commit -qm "remote v2"', origin);
+    shGit(`push -q "${bare}" main`, origin);
+  }
+
+  beforeAll(async () => {
+    storage = await import('../../electron/services/storage');
+  });
+
+  afterAll(() => {
+    // Reset for any other tests sharing the settings singleton
+    storage.setSetting('autoStashOnCommonCommands', false);
+    storage.setSetting('includeUntrackedInStash', false);
+  });
+
+  it('setting OFF (default): dirty tree + pull --rebase is rejected, no stash cycle', async () => {
+    storage.setSetting('autoStashOnCommonCommands', false);
+    const { origin, clone, bare } = setupRemoteAndClone('as-off');
+    advanceRemote(origin, bare);
+    write(clone, 'b.txt', 'local edit\n');
+    await expect(gitService.pull(clone, 'origin', 'main', true)).rejects.toThrow();
+    // local change untouched, remote commit NOT merged
+    expect(read(clone, 'b.txt')).toBe('local edit\n');
+    expect(read(clone, 'a.txt')).toBe('v1\n');
+  });
+
+  it('setting ON: dirty tree is stashed, pull --rebase succeeds, stash popped back', async () => {
+    storage.setSetting('autoStashOnCommonCommands', true);
+    storage.setSetting('includeUntrackedInStash', true);
+    const { origin, clone, bare } = setupRemoteAndClone('as-on');
+    advanceRemote(origin, bare);
+    // dirty tracked file + untracked file
+    write(clone, 'b.txt', 'local edit\n');
+    write(clone, 'untracked.txt', 'keep me\n');
+    const res = await gitService.pull(clone, 'origin', 'main', true);
+    expect(res.autoStashed).toBe(true);
+    expect(res.popFailed).toBe(false);
+    // remote commit merged
+    expect(read(clone, 'a.txt')).toBe('v2\n');
+    // local changes restored
+    expect(read(clone, 'b.txt')).toBe('local edit\n');
+    expect(read(clone, 'untracked.txt')).toBe('keep me\n');
+    // no leftover autostash entries
+    const stashes = await gitService.stashList(clone);
+    expect(stashes.filter(s => s.message?.includes('prismgit-autostash'))).toHaveLength(0);
   });
 });
 
@@ -1171,6 +1234,47 @@ describe('push with targetBranch (Push To... refspec `local:target`)', () => {
     const localHash = (await gitService.raw(src, ['rev-parse', 'feature/auth'])).trim();
     const ls = await gitService.raw(src, ['ls-remote', 'origin', 'refs/heads/main']);
     expect(ls.split(/\s+/)[0]).toBe(localHash);
+  });
+
+  // ── 0.1 — force-push policy enforcement in push() ───────────────────────
+  // The forcePushPolicy / protectedBranches settings previously had UI but
+  // push() never consulted them (dead setting). These tests pin the behavior.
+  it('force-push policy "deny" rejects force push with a clear error', async () => {
+    const storage = await import('../../electron/services/storage');
+    const src = await mkRepo('policy-deny');
+    const bare = bareRemote('policy-deny-origin.git');
+    await gitService.addRemote(src, 'origin', bare);
+    storage.setSetting('forcePushPolicy', 'deny');
+    try {
+      await expect(gitService.push(src, 'origin', 'main', false, true)).rejects
+        .toThrow(/force-push denied by PrismGit policy/);
+    } finally {
+      storage.setSetting('forcePushPolicy', undefined);
+    }
+  });
+
+  it('force-push policy "feature-only" rejects protected branches, allows feature branches', async () => {
+    const storage = await import('../../electron/services/storage');
+    const src = await mkRepo('policy-feature');
+    const bare = bareRemote('policy-feature-origin.git');
+    await gitService.addRemote(src, 'origin', bare);
+    await gitService.raw(src, ['checkout', '-b', 'release/1.0']);
+    storage.setSetting('forcePushPolicy', 'feature-only');
+    storage.setSetting('protectedBranches', ['main', 'master', 'develop', 'release/*']);
+    try {
+      await expect(gitService.push(src, 'origin', 'release/1.0', true, true)).rejects
+        .toThrow(/protected/i);
+      // Non-protected branch → allowed
+      await gitService.raw(src, ['checkout', '-b', 'feature/ok']);
+      write(src, 'ok.txt', '1\n');
+      await gitService.addAll(src);
+      await gitService.commit(src, 'ok');
+      const res = await gitService.push(src, 'origin', 'feature/ok', true, true);
+      expect(res.updated).toBe(true);
+    } finally {
+      storage.setSetting('forcePushPolicy', undefined);
+      storage.setSetting('protectedBranches', undefined);
+    }
   });
 
   it('keeps the plain single-ref refspec when the target equals the source', async () => {

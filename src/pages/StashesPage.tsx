@@ -15,11 +15,14 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useContextMenu } from '../lib/useContextMenu';
 import { useI18n } from '../lib/i18n';
+import { useDateFormatter } from '../lib/formatDate';
 export function StashesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastActions();
   const { t } = useI18n();
+  // 0.7 — honors settings.dateFormat (relative / absolute / both)
+  const fmtDate = useDateFormatter();
   const showContextMenu = useContextMenu();
   const navigate = useNavigate();
   const [stashes, setStashes] = useState<StashEntry[]>([]);
@@ -239,7 +242,7 @@ export function StashesPage() {
                   <div className="text-sm text-text-primary truncate">{s.message}</div>
                   <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
                     <CommitHashLink hash={s.hash} />
-                    <span>· {formatDate(s.date)}</span>
+                    <span>· {fmtDate(s.date)}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>

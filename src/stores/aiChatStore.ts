@@ -1,5 +1,11 @@
 import { create } from 'zustand';
 import type { ChatMessage, TokenUsage } from '../lib/aiChat';
+// The history limit lives in the IPC-backed settings store (prismgit-settings
+// JSON in userData) — NOT in localStorage. The old code read the
+// non-existent localStorage key 'prismgit-settings', so the configured
+// aiChatHistoryLimit was silently ignored (bug Б2 in docs/implementation-plan).
+// There is no import cycle: settingsStore does not import aiChatStore.
+import { useSettingsStore } from './settingsStore';
 
 /**
  * AI Chat shared state — keeps the floating AiAssistant.tsx popup and the
@@ -141,20 +147,10 @@ function scheduleSave(get: () => AiChatState): void {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     const { sessionRepoPath, messages } = get();
-    // historyLimit comes from settings — we read it lazily here to avoid
-    // an import cycle with settingsStore.
-    let limit = DEFAULT_HISTORY_LIMIT;
-    try {
-      const rawSettings = localStorage.getItem('prismgit-settings');
-      if (rawSettings) {
-        const parsed = JSON.parse(rawSettings);
-        if (parsed && typeof parsed.aiChatHistoryLimit === 'number') {
-          limit = parsed.aiChatHistoryLimit;
-        }
-      }
-    } catch {
-      // ignore
-    }
+    // historyLimit comes from the IPC-backed settings store — read it
+    // non-reactively via getState() (this is a plain async callback, not
+    // a React render).
+    const limit = useSettingsStore.getState().settings.aiChatHistoryLimit ?? DEFAULT_HISTORY_LIMIT;
     saveChatHistory(sessionRepoPath, messages, limit);
   }, SAVE_DEBOUNCE_MS);
 }

@@ -12,6 +12,7 @@ import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../com
 import { CommitHashLink } from '../components/StatusBar';
 import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, generateCommitMessageStream, type LLMProvider } from '../lib/aiCommitMessages';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
+import { findCommentLines, resolveCommentChar, stripCommitComments } from '../lib/commitMessage';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { buildFileMenu, getIndexFlagsAsync, invalidateIndexFlagsCache, runFileAction, type IndexFlags } from '../lib/fileContextMenu';
 import { useI18n } from '../lib/i18n';
@@ -258,6 +259,18 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const aiSuggestAbortRef = useRef<AbortController | null>(null);
   // When true, commit auto-stages all changes before committing (git add . && git commit)
   const [commitAll, setCommitAll] = useState(false);
+  // ── SmartGit Preferences → Commands — activated settings ───────────────
+  // 0.3 EOL-only changes: paths whose ONLY difference is line endings
+  // (CRLF↔LF). Detected in the background when distinguishEolChanges is on;
+  // rendered as an "EOL" badge in the file rows + hideable via a toggle.
+  const [eolOnlyPaths, setEolOnlyPaths] = useState<Set<string>>(new Set());
+  const [hideEolOnly, setHideEolOnly] = useState(false);
+  // 1.1 core.commentChar for the commit-message comment detection ('#' default).
+  const [commentChar, setCommentChar] = useState('#');
+  // 1.2 "If nothing is staged" — SmartGit's 3-button dialog.
+  const [showNothingStagedDialog, setShowNothingStagedDialog] = useState(false);
+  // 1.3 Suggestion banners (add untracked / stage missing) — dismiss per session.
+  const [dismissedBanners, setDismissedBanners] = useState<Set<'untracked' | 'missing'>>(new Set());
   const [fileFilter, setFileFilter] = useState('');
   const [draggedFile, setDraggedFile] = useState<string | null>(null);
   const [journal, setJournal] = useState<LogEntry[]>([]);
@@ -740,6 +753,57 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       );
       return;
     }
+    // ── SmartGit "If nothing is staged" (Preferences → Commands) ──────────
+    // Previously the Commit button was simply disabled with an empty index;
+    // now it stays enabled while ANY change exists and this setting decides
+    // what to commit: ask (3-button dialog) / all-except-untracked / all.
+    if (!commitAll && stagedFiles.length === 0) {
+      const hasUntracked = (status?.files ?? []).some(
+        (f) => (f.index as string) === '?' && (f.working_dir as string) === '?'
+      );
+      const hasUnstaged = unstagedFiles.length > 0 || hasUntracked;
+      if (hasUnstaged) {
+        const mode = settings?.commitNothingStaged ?? 'ask';
+        if (mode === 'ask') {
+          setShowNothingStagedDialog(true);
+          return;
+        }
+        try {
+          if (mode === 'all-except-untracked') {
+            await api.git.stageAllTracked(repo.path);
+          } else {
+            await stageAll(repo.path);
+          }
+          await refreshStatus(repo.path);
+        } catch (e) {
+          toast.error(t('changes.stageFailed'), String(e));
+          return;
+        }
+      }
+    }
+    await performCommit();
+  };
+
+  // "If nothing is staged → ask" dialog — user chose what to stage.
+  const handleNothingStagedChoice = async (kind: 'tracked' | 'all') => {
+    setShowNothingStagedDialog(false);
+    try {
+      if (kind === 'tracked') {
+        await api.git.stageAllTracked(repo.path);
+      } else {
+        await stageAll(repo.path);
+      }
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error(t('changes.stageFailed'), String(e));
+      return;
+    }
+    await performCommit();
+  };
+
+  /** Shared commit path — runs after staging decisions; handles the
+   *  SmartGit commit-message behaviors and the pushed-commit warning. */
+  const performCommit = async () => {
     try {
       // SmartGit Manual: AI Commit Messages — @ai placeholder → replace with AI-generated
       let finalMsg = commitMsg.trim();
@@ -765,6 +829,52 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             setAiGenerating(false);
           }
         }
+      }
+      // ── SmartGit "Commit Comments" handling (Preferences → Commands) ─────
+      // Lines starting with core.commentChar are treated like the editor
+      // template comments git strips during `git commit`. Three modes.
+      const commentsMode = settings?.commitCommentsMode ?? 'ask';
+      if (commentsMode !== 'as-is') {
+        const commentCount = findCommentLines(finalMsg, commentChar).length;
+        if (commentsMode === 'strip') {
+          finalMsg = stripCommitComments(finalMsg, commentChar);
+        } else if (commentCount > 0) {
+          const strip = await confirmDialog({
+            title: t('changes.commentsDetectedTitle'),
+            message: t('changes.commentsDetectedBody', { n: commentCount, char: commentChar }),
+            confirmLabel: t('changes.commentsStrip'),
+            cancelLabel: t('changes.commentsKeep'),
+          });
+          if (strip) finalMsg = stripCommitComments(finalMsg, commentChar);
+        }
+        if (!finalMsg.trim()) {
+          toast.warning(t('changes.emptyAfterStrip'));
+          return;
+        }
+      }
+      // ── Pushed-commit warning (Preferences → Commands) ────────────
+      // isCommitPushed() IPC existed with ZERO callers. Before amending a
+      // commit that is already on a remote, warn the user: rewriting history
+      // forces a push and breaks collaborators. allowModifyingPushedCommits
+      // downgrades the confirmation to a warning toast.
+      if (amend) {
+        try {
+          const headHash = (await api.git.raw(repo.path, ['rev-parse', 'HEAD'])).trim();
+          const pushed = await api.git.isCommitPushed(repo.path, headHash);
+          if (pushed) {
+            if (settings?.allowModifyingPushedCommits) {
+              toast.warning(t('changes.pushedAmendWarn'));
+            } else {
+              const ok = await confirmDialog({
+                title: t('changes.pushedAmendTitle'),
+                message: t('changes.pushedAmendBody'),
+                confirmLabel: t('changes.pushedAmendProceed'),
+                danger: true,
+              });
+              if (!ok) return;
+            }
+          }
+        } catch { /* best-effort check — never block the commit on it */ }
       }
       // If commitAll is checked, stage everything first (git add .)
       if (commitAll) {
@@ -1240,7 +1350,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
-    ), [status, sortFiles, fileDisplayFlags]);
+    .filter((f) => !hideEolOnly || !eolOnlyPaths.has(f.path))
+    ), [status, sortFiles, fileDisplayFlags, hideEolOnly, eolOnlyPaths]);
 
   // Detect unstaged renames by comparing content hashes of deleted tracked
   // files with untracked files. Delegates the heavy lifting to a single
@@ -1262,6 +1373,13 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const [detectedRenames, setDetectedRenames] = useState<{ oldPath: string; newPath: string }[]>([]);
   useEffect(() => {
     if (!repo?.path || !status) return;
+    // ── SmartGit "Detect renames" setting (Preferences → Commands) ──
+    // The setting existed in the UI but nothing consumed it (dead setting).
+    // When OFF, added/deleted files stay as-is — no pairing pass at all.
+    if (settings?.detectRenames === false) {
+      setDetectedRenames(prev => prev.length === 0 ? prev : []);
+      return;
+    }
     const deletedFiles = status.files
       .filter(f => {
         const wd = f.working_dir as string;
@@ -1329,7 +1447,68 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [repo?.path, status]);
+  }, [repo?.path, status, settings?.detectRenames]);
+
+  // ── 1.1 core.commentChar — read once per repository ─────────────────────
+  // Used by the commit-comments handling in performCommit ('ask'/'strip').
+  // Local config wins over global (same as git). Missing → '#' (git default).
+  useEffect(() => {
+    if (!repo?.path) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const local = await api.git.configGet(repo.path, 'core.commentChar', 'local').catch(() => undefined);
+        const global = local
+          ? undefined
+          : await api.git.configGet(repo.path, 'core.commentChar', 'global').catch(() => undefined);
+        if (!cancelled) setCommentChar(resolveCommentChar(local ?? global));
+      } catch {
+        if (!cancelled) setCommentChar('#');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [repo?.path]);
+
+  // ── 0.3 EOL-only change detection (Preferences → Commands) ──────────
+  // The IPC (git:isEolOnlyChange) existed but had ZERO renderer callers —
+  // dead backend. When distinguishEolChanges is ON, changed files are
+  // checked in the background (batch, 4-way concurrency, capped at 100
+  // files); results power the "EOL" badge in file rows and the
+  // "hide EOL-only" toggle. When OFF — no diff subprocesses at all.
+  useEffect(() => {
+    if (!repo?.path || !status) return;
+    if (!settings?.distinguishEolChanges) {
+      setEolOnlyPaths(prev => prev.size === 0 ? prev : new Set<string>());
+      return;
+    }
+    // Only unstaged modifications matter here: `git diff` (worktree vs
+    // index) is what isEolOnlyChange inspects. Staged-only changes would
+    // be false negatives; untracked/deleted files have no EOL diff.
+    const changed = status.files
+      .filter(f => (f.working_dir as string) === 'M')
+      .map(f => f.path)
+      .slice(0, 100);
+    if (changed.length === 0) {
+      setEolOnlyPaths(prev => prev.size === 0 ? prev : new Set<string>());
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const found = new Set<string>();
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < changed.length) {
+          const p = changed[cursor++];
+          try {
+            if (await api.git.isEolOnlyChange(repo.path, p)) found.add(p);
+          } catch { /* per-file failure is fine */ }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, changed.length) }, worker));
+      if (!cancelled) setEolOnlyPaths(found);
+    })();
+    return () => { cancelled = true; };
+  }, [repo?.path, status, settings?.distinguishEolChanges]);
 
   // Sets of old/new paths for detected renames — used to filter out the
   // individual delete + untracked entries and show a single renamed entry.
@@ -1407,7 +1586,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
-    ), [status, sortFiles, fileDisplayFlags, renamedOldPaths, renamedNewPaths, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs]);
+    .filter((f) => !hideEolOnly || !eolOnlyPaths.has(f.path))
+    ), [status, sortFiles, fileDisplayFlags, renamedOldPaths, renamedNewPaths, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs, hideEolOnly, eolOnlyPaths]);
 
   // Detected rename entries — shown in the unstaged section as Renamed rows.
   // Each entry has the new path as the file path and old_path set.
@@ -1445,8 +1625,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       if (renamedNewPaths.has(f.path)) return false;
       return true;
     }).filter((f) => matchesFileFilter(f.path))
-      .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-      .filter((f) => matchesDirScope(f.path)));
+    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+    .filter((f) => matchesDirScope(f.path))
+    .filter((f) => !hideEolOnly || !eolOnlyPaths.has(f.path)));
   }, [status, sortFiles, hasFlag, fileFilter, fileScopeDir, renamedNewPaths]);
 
   // Unchanged tracked files — shown only when 'unchanged' flag is ON.
@@ -1835,6 +2016,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         </span>
         {/* Name */}
         <span className="flex-1 truncate font-mono whitespace-nowrap" title={renameTitle}>{renameLabel}</span>
+        {/* 0.3 — EOL-only badge: the file's only change is line endings (CRLF↔LF) */}
+        {eolOnlyPaths.has(file.path) && (
+          <span
+            className="text-3xs px-1 rounded border border-border-subtle text-text-tertiary flex-shrink-0"
+            title={t('changes.eolOnlyTitle')}
+          >
+            EOL
+          </span>
+        )}
         {/* Line-change counts (+N -M) — reserved width keeps columns aligned */}
         <span
           className="text-2xs flex-shrink-0 text-right tabular-nums whitespace-nowrap overflow-hidden"
@@ -1891,6 +2081,28 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       </div>
     );
   };
+
+  // ── SmartGit Commands settings — derived render data ───────────────────
+  // 1.3 Banner counts: untracked files + files missing on disk (unstaged 'D').
+  const untrackedBannerCount = (status?.files ?? []).filter(
+    (f) => (f.index as string) === '?' && (f.working_dir as string) === '?'
+  ).length;
+  const missingBannerPaths = (status?.files ?? [])
+    .filter((f) => (f.working_dir as string) === 'D')
+    .map((f) => f.path);
+  // 1.4 Commit-message line length guides (SmartGit 50/72 convention).
+  const lineGuidesSetting = settings?.commitLineGuides ?? 'none';
+  const lineGuideCols: number[] =
+    lineGuidesSetting === '50' ? [50]
+    : lineGuidesSetting === '72' ? [72]
+    : lineGuidesSetting === '50+72' ? [50, 72]
+    : [];
+  // 1.2 — Commit stays enabled while ANY change exists (nothing-staged
+  // setting decides what gets staged); with an empty tree it stays disabled.
+  const hasAnyCommittableChanges =
+    stagedFiles.length > 0 ||
+    unstagedFiles.length > 0 ||
+    untrackedBannerCount > 0;
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -1956,6 +2168,21 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               );
             })}
           </div>
+          {/* 0.3 — Hide EOL-only files toggle (visible when detection is ON and found any) */}
+          {settings?.distinguishEolChanges && eolOnlyPaths.size > 0 && (
+            <button
+              className={cn(
+                'w-5 h-5 rounded flex items-center justify-center transition-colors text-2xs font-bold',
+                hideEolOnly
+                  ? 'bg-accent-muted text-accent'
+                  : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'
+              )}
+              title={hideEolOnly ? t('changes.showEolOnly') : t('changes.hideEolOnly')}
+              onClick={() => setHideEolOnly(v => !v)}
+            >
+              EOL
+            </button>
+          )}
           {/* Extension filter */}
           <input
             type="text"
@@ -2396,7 +2623,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <button
                 className="btn btn-secondary text-xs"
                 onClick={handleCommitAndPush}
-                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || isCommitBlocked(status)}
+                disabled={!commitMsg.trim() || (!commitAll && !hasAnyCommittableChanges) || isCommitBlocked(status)}
                 title={isCommitBlocked(status) ? t('changes.operationBlockedTitle') : t('changes.commitThenPushTitle')}
               >
                 <GitPullRequest size={11} />
@@ -2405,13 +2632,46 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <button
                 className="btn btn-primary text-xs"
                 onClick={handleCommit}
-                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || isCommitBlocked(status)}
+                disabled={!commitMsg.trim() || (!commitAll && !hasAnyCommittableChanges) || isCommitBlocked(status)}
                 title={isCommitBlocked(status) ? t('changes.operationBlockedTitle') : t('changes.ctrlEnterHint')}
               >
                 <GitCommit size={11} />
                 {t('changes.commitButton')}
               </button>
             </div>
+            {/* 1.3 — SmartGit suggestion banners (Preferences → Commands):
+                "N untracked files — Add all?" / "N missing files — Stage deletions?".
+                Non-blocking inline banners, dismissible for the session. */}
+            {settings?.commitSuggestAddUntracked && untrackedBannerCount > 0 && !dismissedBanners.has('untracked') && (
+              <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs">
+                <FilePlus size={10} className="flex-shrink-0 text-accent" />
+                <span className="flex-1 truncate">{t('changes.suggestAddUntracked', { n: untrackedBannerCount })}</span>
+                <button
+                  className="btn btn-secondary text-2xs !py-0 !px-1.5"
+                  onClick={async () => { try { await stageAll(repo.path); } catch (e) { toast.error(t('changes.stageFailed'), String(e)); } }}
+                >
+                  {t('changes.suggestAddAll')}
+                </button>
+                <button className="icon-btn !w-4 !h-4 flex-shrink-0" title={t('changes.dismissBanner')} onClick={() => setDismissedBanners(prev => new Set(prev).add('untracked'))}>
+                  <X size={10} />
+                </button>
+              </div>
+            )}
+            {settings?.commitSuggestRemoveMissing !== false && missingBannerPaths.length > 0 && !dismissedBanners.has('missing') && (
+              <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs">
+                <Trash size={10} className="flex-shrink-0 text-status-deleted" />
+                <span className="flex-1 truncate">{t('changes.suggestStageMissing', { n: missingBannerPaths.length })}</span>
+                <button
+                  className="btn btn-secondary text-2xs !py-0 !px-1.5"
+                  onClick={async () => { try { await api.git.add(repo.path, missingBannerPaths); await refreshStatus(repo.path); } catch (e) { toast.error(t('changes.stageFailed'), String(e)); } }}
+                >
+                  {t('changes.suggestStageDeletions')}
+                </button>
+                <button className="icon-btn !w-4 !h-4 flex-shrink-0" title={t('changes.dismissBanner')} onClick={() => setDismissedBanners(prev => new Set(prev).add('missing'))}>
+                  <X size={10} />
+                </button>
+              </div>
+            )}
             <div className="flex-1 flex overflow-hidden flex-col">
               {/* AI auto-suggestion hint — appears above the textarea when
                   the AI has generated a suggestion in the background.
@@ -2436,7 +2696,20 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 </div>
               )}
               <div className="flex-1 flex overflow-hidden">
-                <textarea
+                <div className="relative flex-1 flex overflow-hidden">
+                  {/* 1.4 — Line length guides (50/72, SmartGit "Show line length guides").
+                      Decorative overlay: pointer-events none, positioned at N·ch —
+                      ch resolves against the SAME font-mono text-sm metrics as the
+                      textarea, so the line lands exactly on column N (0.5rem = p-2). */}
+                  {lineGuideCols.map(col => (
+                    <div
+                      key={col}
+                      aria-hidden
+                      className="pointer-events-none absolute top-0 bottom-0 w-px bg-border-strong/40 font-mono text-sm"
+                      style={{ left: `calc(0.5rem + ${col}ch)` }}
+                    />
+                  ))}
+                  <textarea
                 id="commit-message-input"
                 className="flex-1 text-sm font-mono resize-none p-2 bg-bg-primary border-r border-border-subtle"
                 placeholder={t('changes.commitMessage')}
@@ -2450,6 +2723,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 }}
                 style={{ minHeight: 0 }}
               />
+                </div>
               {showMarkdownPreview && (
                 <div className="flex-1 overflow-y-auto p-2 text-xs">
                   <CommitMarkdownPreview content={commitMsg} />
@@ -2483,6 +2757,35 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           </>
         )}
       </div>
+
+      {/* 1.2 — SmartGit "If nothing is staged" ask dialog (Preferences → Commands).
+          The Commit button is now enabled with an empty index; this dialog
+          lets the user pick what to stage: tracked modifications only, or
+          everything including untracked files. */}
+      {showNothingStagedDialog && (
+        <div
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
+          onClick={() => setShowNothingStagedDialog(false)}
+        >
+          <div className="panel w-[460px]" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-medium px-4 pt-4">{t('changes.nothingStagedTitle')}</h3>
+            <div className="px-4 py-2 text-xs text-text-tertiary">
+              {t('changes.nothingStagedBody')}
+            </div>
+            <div className="flex flex-col gap-2 px-4 pb-4 pt-1">
+              <button className="btn btn-primary w-full" onClick={() => handleNothingStagedChoice('tracked')}>
+                {t('changes.nothingStagedTracked')}
+              </button>
+              <button className="btn btn-secondary w-full" onClick={() => handleNothingStagedChoice('all')}>
+                {t('changes.nothingStagedAll')}
+              </button>
+              <button className="btn btn-secondary w-full" onClick={() => setShowNothingStagedDialog(false)}>
+                {t('common.cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Clean untracked: dry-run preview → confirm → git clean -fd */}
       {showCleanDialog && (

@@ -19,7 +19,11 @@
  * useI18nStore so components re-render when the locale changes.
  */
 
+import { useCallback } from 'react';
 import { useI18nStore, type Locale } from './i18n';
+// 0.7 — dateFormat setting (Preferences → Appearance): 'relative' | 'absolute' | 'both'.
+// The key existed in AppSettings with a full UI but ZERO consumers (dead setting).
+import { useSettingsStore } from '../stores/settingsStore';
 
 const BCP47: Record<Locale, string> = {
   en: 'en-US',
@@ -108,8 +112,40 @@ export function formatTime(dateStr: string, locale: Locale = currentLocale()): s
   }
 }
 
-// --- Internal: relative-time translation table ---
+// --- dateFormat setting (Preferences → Appearance) — 0.7 ---
 
+export type DateFormatMode = 'relative' | 'absolute' | 'both';
+
+/**
+ * Mode-aware date label driven by settings.dateFormat:
+ *  - 'relative' — "5 мин назад" (default, previous behavior);
+ *  - 'absolute' — "15 янв. 2024 г.";
+ *  - 'both'     — "5 мин назад (15 янв. 2024 г.)".
+ */
+export function formatDateByMode(
+  dateStr: string,
+  mode: DateFormatMode = 'relative',
+  locale: Locale = currentLocale()
+): string {
+  if (!dateStr) return '';
+  const abs = () => formatAbsoluteDate(dateStr, locale, { year: 'numeric', month: 'short', day: 'numeric' });
+  if (mode === 'absolute') return abs();
+  const rel = formatDate(dateStr, locale);
+  if (mode === 'both') return `${rel} (${abs()})`;
+  return rel;
+}
+
+/**
+ * Hook form — subscribes to settings.dateFormat so history lists re-render
+ * immediately when the user switches the preference. Returns a stable-ish
+ * formatter (recreated only when the mode changes).
+ */
+export function useDateFormatter(): (dateStr: string) => string {
+  const mode = useSettingsStore((s) => s.settings.dateFormat) ?? 'relative';
+  return useCallback((dateStr: string) => formatDateByMode(dateStr, mode), [mode]);
+}
+
+// --- Internal: relative-time translation table ---
 type RelativeKey = 'justNow' | 'minutesAgo' | 'hoursAgo' | 'yesterday' | 'daysAgo' | 'weeksAgo' | 'monthsAgo' | 'yearsAgo';
 
 const RELATIVE_STRINGS: Record<Locale, Record<RelativeKey, string>> = {

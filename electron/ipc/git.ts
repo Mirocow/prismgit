@@ -41,6 +41,8 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:listAllDirectories', (_e, p: string, d?: number) => wrap(gitService.listAllDirectories)(p, d));
   ipcMain.handle('git:add', (_e, p: string, f: string[]) => wrap(gitService.add)(p, f));
   ipcMain.handle('git:addAll', (_e, p: string) => wrap(gitService.addAll)(p));
+  // SmartGit "Commit all except untracked" (git add -u)
+  ipcMain.handle('git:stageAllTracked', (_e, p: string) => wrap(gitService.stageAllTracked)(p));
   ipcMain.handle('git:restore', (_e, p: string, f: string[], staged?: boolean) => wrap(gitService.restore)(p, f, staged));
   ipcMain.handle('git:commit', (_e, p: string, m: string, a?: boolean, so?: boolean, nv?: boolean) =>
     wrap(gitService.commit)(p, m, a, so, nv)

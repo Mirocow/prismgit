@@ -46,6 +46,15 @@ export function SettingsPage() {
   const [vscodeTool, setVscodeTool] = useState<{ diffTool: string; mergeTool: string; vscodeConfigured: boolean } | null>(null);
   const [vscodePathInput, setVscodePathInput] = useState('');
 
+  // === About panel — real versions from the main process (fix Б1) ===
+  // The old panel hardcoded "2.0.1" while package.json said 2.1.0.
+  const [appVersions, setAppVersions] = useState<{ app: string; electron: string; node: string } | null>(null);
+  useEffect(() => {
+    Promise.resolve(api.app?.getVersions?.())
+      .then((v) => setAppVersions(v ?? null))
+      .catch(() => setAppVersions(null));
+  }, []);
+
 
   const loadConfig = useCallback(async () => {
     if (!currentRepo) return;
@@ -982,6 +991,80 @@ export function SettingsPage() {
                 </div>
               </div>
             </label>
+
+            {/* 1.1 — Commit Comments handling (core.commentChar) */}
+            <div>
+              <div className="mb-1">{t('settings.commitCommentsMode')}</div>
+              <select
+                className="text-xs px-2 py-1 bg-bg-tertiary border border-border-default rounded"
+                value={settings.commitCommentsMode ?? 'ask'}
+                onChange={(e) => setSetting('commitCommentsMode', e.target.value as 'as-is' | 'ask' | 'strip')}
+              >
+                <option value="as-is">{t('settings.commitCommentsAsIs')}</option>
+                <option value="ask">{t('settings.commitCommentsAsk')}</option>
+                <option value="strip">{t('settings.commitCommentsStrip')}</option>
+              </select>
+              <div className="text-2xs text-text-tertiary mt-0.5">
+                {t('settings.commitCommentsHint')}
+              </div>
+            </div>
+
+            {/* 1.2 — If nothing is staged */}
+            <div>
+              <div className="mb-1">{t('settings.commitNothingStaged')}</div>
+              <select
+                className="text-xs px-2 py-1 bg-bg-tertiary border border-border-default rounded"
+                value={settings.commitNothingStaged ?? 'ask'}
+                onChange={(e) => setSetting('commitNothingStaged', e.target.value as 'ask' | 'all-except-untracked' | 'all-including-untracked')}
+              >
+                <option value="ask">{t('settings.commitNothingStagedAsk')}</option>
+                <option value="all-except-untracked">{t('settings.commitNothingStagedExcept')}</option>
+                <option value="all-including-untracked">{t('settings.commitNothingStagedIncluding')}</option>
+              </select>
+              <div className="text-2xs text-text-tertiary mt-0.5">
+                {t('settings.commitNothingStagedHint')}
+              </div>
+            </div>
+
+            {/* 1.3 — Commit dialog suggestions */}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.commitSuggestAddUntracked ?? false}
+                onChange={(e) => setSetting('commitSuggestAddUntracked', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>{t('settings.commitSuggestAddUntracked')}</div>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.commitSuggestRemoveMissing ?? true}
+                onChange={(e) => setSetting('commitSuggestRemoveMissing', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>{t('settings.commitSuggestRemoveMissing')}</div>
+              </div>
+            </label>
+
+            {/* 1.4 — Line length guides 50/72 */}
+            <div>
+              <div className="mb-1">{t('settings.commitLineGuides')}</div>
+              <select
+                className="text-xs px-2 py-1 bg-bg-tertiary border border-border-default rounded"
+                value={settings.commitLineGuides ?? 'none'}
+                onChange={(e) => setSetting('commitLineGuides', e.target.value as 'none' | '50' | '72' | '50+72')}
+              >
+                <option value="none">{t('settings.commitLineGuidesNone')}</option>
+                <option value="50">{t('settings.commitLineGuides50')}</option>
+                <option value="72">{t('settings.commitLineGuides72')}</option>
+                <option value="50+72">{t('settings.commitLineGuidesBoth')}</option>
+              </select>
+              <div className="text-2xs text-text-tertiary mt-0.5">
+                {t('settings.commitLineGuidesHint')}
+              </div>
+            </div>
           </div>
         </section>
         )}
@@ -1884,7 +1967,7 @@ smartgit.refresh.inspectEol=true
           <div className="p-5 text-sm space-y-2">
             <div className="flex justify-between">
               <span className="text-text-tertiary">{t('settings.version')}</span>
-              <span className="font-mono">2.0.1</span>
+              <span className="font-mono">{appVersions?.app ?? '…'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-text-tertiary">{t('settings.platform')}</span>
@@ -1892,7 +1975,11 @@ smartgit.refresh.inspectEol=true
             </div>
             <div className="flex justify-between">
               <span className="text-text-tertiary">Electron</span>
-              <span className="font-mono">v32</span>
+              <span className="font-mono">v{appVersions?.electron || '—'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-text-tertiary">Node</span>
+              <span className="font-mono">v{appVersions?.node || '—'}</span>
             </div>
           </div>
         </section>

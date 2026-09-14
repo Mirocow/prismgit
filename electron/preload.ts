@@ -14,6 +14,8 @@ const api = {
     listAllDirectories: (repoPath: string, maxDepth?: number) => ipcRenderer.invoke('git:listAllDirectories', repoPath, maxDepth),
     add: (repoPath: string, files: string[]) => ipcRenderer.invoke('git:add', repoPath, files),
     addAll: (repoPath: string) => ipcRenderer.invoke('git:addAll', repoPath),
+    // SmartGit "Commit all except untracked" (git add -u) — no untracked files
+    stageAllTracked: (repoPath: string) => ipcRenderer.invoke('git:stageAllTracked', repoPath),
     restore: (repoPath: string, files: string[], staged?: boolean) => ipcRenderer.invoke('git:restore', repoPath, files, staged),
     commit: (repoPath: string, message: string, amend?: boolean, signoff?: boolean, noVerify?: boolean) =>
       ipcRenderer.invoke('git:commit', repoPath, message, amend, signoff, noVerify),
@@ -426,6 +428,8 @@ const api = {
   // App info
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
+    /** { app, electron, node } versions for the About panel (Settings → About). */
+    getVersions: () => ipcRenderer.invoke('app:versions') as Promise<{ app: string; electron: string; node: string }>,
     getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
     openExternal: (url: string) => ipcRenderer.send('app:openExternal', url),
     /** Locale override for e2e/tests (PRISMGIT_LOCALE), empty in normal runs. */

@@ -14,6 +14,7 @@ const mockApi = {
     status: vi.fn(),
     add: vi.fn(),
     addAll: vi.fn(),
+    stageAllTracked: vi.fn(),
     commit: vi.fn(),
     push: vi.fn(),
     pull: vi.fn(),
@@ -27,6 +28,11 @@ const mockApi = {
     extractRepoInfo: vi.fn(),
     revealInFileManager: vi.fn(),
     openFile: vi.fn(),
+    // SmartGit Commands settings — safety checks used by UI components
+    isForcePushAllowed: vi.fn().mockResolvedValue({ allowed: true, reason: 'ok' }),
+    isCommitPushed: vi.fn().mockResolvedValue(false),
+    isEolOnlyChange: vi.fn().mockResolvedValue(false),
+    configGet: vi.fn().mockResolvedValue(undefined),
   },
   fs: {
     openDirectoryPicker: vi.fn(),
@@ -54,6 +60,7 @@ const mockApi = {
   },
   app: {
     getVersion: vi.fn().mockResolvedValue('4.0.0'),
+    getVersions: vi.fn().mockResolvedValue({ app: '4.0.0', electron: '32.0.0', node: '20.0.0' }),
     getPlatform: vi.fn().mockResolvedValue('linux'),
     openExternal: vi.fn(),
   },

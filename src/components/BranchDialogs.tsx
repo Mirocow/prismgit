@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Loader, Check, Settings as SettingsIcon, Search } from './icons';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
+import { useSettingsStore } from '../stores/settingsStore';
 import type { RemoteProperties } from '../../electron/types/git-api';
 
 export type ResetMode = 'soft' | 'mixed' | 'hard' | 'keep';
@@ -275,6 +277,25 @@ export function PushToDialog({
   const [force, setForce] = useState(false);
   const { t } = useI18n();
   useEscapeKey(true, onClose);
+  // 0.1 — Force-push policy gate: disable the force checkbox when the policy
+  // denies force-push for this branch (activates the dead isForcePushAllowed IPC).
+  const forcePushPolicy = useSettingsStore((s) => s.settings.forcePushPolicy);
+  const protectedBranches = useSettingsStore((s) => s.settings.protectedBranches);
+  const [forceVerdict, setForceVerdict] = useState<{ allowed: boolean; reason: string } | null>(null);
+  useEffect(() => {
+    if (typeof api.git?.isForcePushAllowed !== 'function') { setForceVerdict(null); return; }
+    let cancelled = false;
+    api.git
+      .isForcePushAllowed(branchName, forcePushPolicy ?? 'feature-only', protectedBranches)
+      .then((v) => { if (!cancelled) setForceVerdict(v); })
+      .catch(() => { if (!cancelled) setForceVerdict(null); });
+    return () => { cancelled = true; };
+  }, [branchName, forcePushPolicy, protectedBranches]);
+  const forceDenied = forceVerdict != null && !forceVerdict.allowed;
+  // Policy flipped to "denied" while the checkbox was already checked → uncheck.
+  useEffect(() => {
+    if (forceDenied && force) setForce(false);
+  }, [forceDenied, force]);
 
   const trimmed = target.trim();
   const targetError = !trimmed
@@ -374,9 +395,18 @@ export function PushToDialog({
             <input type="checkbox" checked={setUpstream} onChange={(e) => setSetUpstream(e.target.checked)} />
             {t('branches.setUpstreamCheckbox')}
           </label>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+          <label
+            className={cn('flex items-center gap-2 text-sm', forceDenied ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer')}
+            title={forceDenied ? forceVerdict!.reason : undefined}
+          >
+            <input
+              type="checkbox"
+              checked={force}
+              disabled={forceDenied}
+              onChange={(e) => setForce(e.target.checked)}
+            />
             {t('branches.forcePushCheckbox')}
+            {forceDenied && <span className="text-2xs text-text-tertiary">— {forceVerdict!.reason}</span>}
           </label>
         </div>
         <div data-testid="push-to-cmd" className="text-2xs text-text-tertiary font-mono bg-bg-hover/60 rounded px-2 py-1.5 break-all">

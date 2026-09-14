@@ -307,14 +307,22 @@ export interface PushResult {
   summary: string;
 }
 
+/** Result of pull()/checkout() when auto-stash (Preferences → Commands) kicked in. */
+export interface AutoStashResult {
+  autoStashed: boolean;
+  popFailed: boolean;
+}
+
 export interface GitApi {
   status: (repoPath: string) => Promise<StatusResult>;
   add: (repoPath: string, files: string[]) => Promise<void>;
   addAll: (repoPath: string) => Promise<void>;
+  /** Stage only tracked-file modifications (git add -u) — no untracked. */
+  stageAllTracked: (repoPath: string) => Promise<void>;
   restore: (repoPath: string, files: string[], staged?: boolean) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean, signoff?: boolean, noVerify?: boolean) => Promise<string>;
   push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string) => Promise<PushResult>;
-  pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) => Promise<void>;
+  pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) => Promise<AutoStashResult>;
   fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) => Promise<void>;
   fetchAll: (repoPath: string, prune?: boolean) => Promise<void>;
   /** Deepen a shallow clone by N commits (git fetch --deepen=N). */
@@ -328,7 +336,7 @@ export interface GitApi {
   findCommit: (repoPath: string, query: string) => Promise<LogEntry | null>;
   branches: (repoPath: string) => Promise<BranchInfo[]>;
   remotes: (repoPath: string) => Promise<RemoteInfo[]>;
-  checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) => Promise<void>;
+  checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) => Promise<AutoStashResult>;
   checkoutFile: (repoPath: string, file: string, ref?: string) => Promise<void>;
   checkoutFiles: (repoPath: string, files: string[], ref?: string) => Promise<void>;
   createBranch: (repoPath: string, name: string, startPoint?: string, force?: boolean, track?: boolean) => Promise<void>;

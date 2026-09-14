@@ -403,6 +403,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastActions();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const settings = useSettingsStore((s) => s.settings);
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
@@ -414,6 +415,21 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
   const [setUpstream, setSetUpstream] = useState(false);
   const [force, setForce] = useState(false);
   const [pushTags, setPushTags] = useState(false);
+  // 0.1 — Force-push policy gate: the isForcePushAllowed IPC existed with zero
+  // renderer callers. Query it for the selected branch and disable the force
+  // checkbox when the policy denies (deny / feature-only + protected branch).
+  const [forceAllowed, setForceAllowed] = useState<{ allowed: boolean; reason: string } | null>(null);
+
+  useEffect(() => {
+    if (!selectedBranch || typeof api.git?.isForcePushAllowed !== 'function') { setForceAllowed(null); return; }
+    let cancelled = false;
+    api.git
+      .isForcePushAllowed(selectedBranch, settings?.forcePushPolicy ?? 'feature-only', settings?.protectedBranches)
+      .then((v) => { if (!cancelled) setForceAllowed(v); })
+      .catch(() => { if (!cancelled) setForceAllowed(null); });
+    return () => { cancelled = true; };
+  }, [selectedBranch, settings?.forcePushPolicy, settings?.protectedBranches]);
+  const forceDenied = forceAllowed != null && !forceAllowed.allowed;
 
   // Load on mount too — the one-click Push button needs a valid default remote.
   useEffect(() => {
@@ -578,9 +594,18 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
                   </label>
                 </div>
                 <div className="px-3 py-1">
-                  <label className="flex items-center gap-2 text-xs cursor-pointer">
-                    <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+                  <label
+                    className={cn('flex items-center gap-2 text-xs', forceDenied ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer')}
+                    title={forceDenied ? forceAllowed!.reason : undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={force}
+                      disabled={forceDenied}
+                      onChange={(e) => setForce(e.target.checked)}
+                    />
                     <span className="text-status-deleted">{t('shell.forcePush')}</span>
+                    {forceDenied && <span className="text-2xs text-text-tertiary">— {forceAllowed!.reason}</span>}
                   </label>
                 </div>
                 <div className="px-3 py-1">
