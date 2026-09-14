@@ -839,6 +839,41 @@ export const tauriApi = {
         return { ok: false, status: 0, statusText: String(e), body: '' };
       }
     },
+    providerListModels: async (kind: string, url: string, apiKey?: string): Promise<{ ok: boolean; error: string | null; models: { id: string; size?: number; family?: string; parameterSize?: string; quantization?: string; format?: string }[]; latencyMs: number }> => {
+      // Tauri: direct fetch, same dispatch logic as the Electron main process.
+      const started = Date.now();
+      const base = (url || '').trim().replace(/\/+$/, '');
+      try {
+        if (kind === 'ollama') {
+          const b = base || 'http://localhost:11434';
+          const res = await fetch(`${b}/api/tags`);
+          if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [], latencyMs: Date.now() - started };
+          const data = await res.json();
+          const models = (data.models || []).map((m: { name: string; size?: number; details?: { family?: string; parameter_size?: string; quantization_level?: string; format?: string } }) => ({
+            id: m.name, size: m.size, family: m.details?.family,
+            parameterSize: m.details?.parameter_size, quantization: m.details?.quantization_level, format: m.details?.format,
+          }));
+          return { ok: true, error: null, models, latencyMs: Date.now() - started };
+        }
+        if (kind === 'anthropic') {
+          const b = base || 'https://api.anthropic.com';
+          const res = await fetch(`${b}/v1/models`, { headers: { 'x-api-key': apiKey || '', 'anthropic-version': '2023-06-01' } });
+          if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [], latencyMs: Date.now() - started };
+          const data = await res.json();
+          const models = (data.data || []).map((m: { id?: string }) => ({ id: m.id || '' })).filter((m: { id: string }) => m.id);
+          return { ok: true, error: null, models, latencyMs: Date.now() - started };
+        }
+        if (!base) return { ok: false, error: 'URL is not configured', models: [], latencyMs: Date.now() - started };
+        const res = await fetch(`${base}/models`, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} });
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [], latencyMs: Date.now() - started };
+        const data = await res.json();
+        const rawList: Array<{ id?: string; name?: string }> = Array.isArray(data) ? data : (data.data || data.models || []);
+        const models = rawList.map((m) => ({ id: m.id || m.name || '' })).filter((m: { id: string }) => m.id);
+        return { ok: true, error: null, models, latencyMs: Date.now() - started };
+      } catch (e) {
+        return { ok: false, error: String(e), models: [], latencyMs: Date.now() - started };
+      }
+    },
   },
 
   github: {

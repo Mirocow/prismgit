@@ -174,6 +174,22 @@ export function migratePlaintextSecrets(): void {
     }
   }
 
+  // 4. aiProviders registry (multi-provider grid) — vault each entry key
+  const aiProviders = settings['aiProviders'] as
+    | Array<{ id?: string; apiKey?: string; [k: string]: unknown }>
+    | undefined;
+  if (Array.isArray(aiProviders)) {
+    for (const entry of aiProviders) {
+      if (!entry || typeof entry !== 'object' || !entry.id) continue;
+      const apiKey = entry.apiKey;
+      if (typeof apiKey === 'string' && apiKey) {
+        setSecret(NS_AI, `provider:${entry.id}`, apiKey);
+        entry.apiKey = '';
+        changed = true;
+      }
+    }
+  }
+
   if (changed) store.set('settings', settings);
 }
 

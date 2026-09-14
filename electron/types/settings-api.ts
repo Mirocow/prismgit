@@ -48,6 +48,37 @@ export interface RepositoryMetadata {
   webUrl?: string;
 }
 
+/**
+ * One configured AI provider instance — the unit of the multi-provider
+ * registry (settings.aiProviders). Unlike the legacy per-preset config
+ * (one slot per preset id), entries are UNLIMITED: the user can register
+ * any number of Ollama servers (e.g. home GPU box + work workstation) and
+ * OpenAI-compatible endpoints (OpenAI, Groq, OpenRouter, vLLM, LM Studio,
+ * corporate gateways...), each with its own URL, key and model.
+ */
+export interface AiProviderEntry {
+  /** Stable unique id ("prov-<random>"), referenced by aiActiveProviderId. */
+  id: string;
+  /**
+   * Protocol/preset flavor — an LLMProvider type id ('ollama',
+   * 'openai-compatible', 'anthropic', 'openai', 'groq', ...). Determines
+   * which API protocol the caller uses and which icon/label the UI shows.
+   */
+  kind: string;
+  /** User-editable display name ("Home Ollama", "Groq free", ...). */
+  name: string;
+  /** Base URL (Ollama: http://host:11434; OpenAI-compatible: .../v1). */
+  url: string;
+  /** API key — vault-backed placeholder on disk (see credentialKeys.ts). */
+  apiKey?: string;
+  /** Default model for this provider ("llama3.2", "gpt-4o-mini", ...). */
+  model: string;
+  /** Soft switch — disabled entries stay configured but are not offered. */
+  enabled: boolean;
+  /** Creation timestamp (epoch ms) — used to sort the grid. */
+  createdAt?: number;
+}
+
 export interface AppSettings {
   /**
    * UI theme id. Stored as a string; validated at runtime against the registry
@@ -210,17 +241,27 @@ export interface AppSettings {
   /** Provider URL (for Ollama: http://localhost:11434). */
   aiUrl?: string;
   /**
-   * Per-provider configuration storage — saves URL + API key + model
-   * SEPARATELY for each provider. When the user switches from OpenAI
-   * to Groq and back, their OpenAI API key and model are preserved.
+   * Multi-provider registry — an UNLIMITED list of configured AI providers
+   * (several Ollama servers on different hosts, multiple OpenAI-compatible
+   * endpoints, cloud presets, ...). Replaces the old "one config per preset
+   * id" aiProviderConfigs model while keeping it in sync (see mirror logic
+   * in src/lib/aiProviders.ts).
    *
-   * Key = provider id (e.g., "openai", "groq", "zai").
-   * Value = { url?, apiKey?, model? } — only the fields the user set.
+   * The active entry is referenced by aiActiveProviderId; its url/apiKey/
+   * model are mirrored into the legacy flat aiUrl/aiApiKey/aiModel fields
+   * so every existing reader (ChangesPage, AiChatPage, AiAssistant)
+   * keeps working unchanged.
    *
-   * The ACTIVE provider's config is ALSO mirrored in the flat
-   * aiUrl/aiApiKey/aiModel fields (for backward compat with code that
-   * reads those directly). When switching providers, the flat fields
-   * are updated from this store.
+   * NOTE: apiKey values are vault-backed — on disk each entry stores only
+   * an empty placeholder; the real key lives in the encrypted vault under
+   * ns 'ai', key 'provider:<entryId>' (see credentialKeys.ts).
+   */
+  aiProviders?: AiProviderEntry[];
+  /** Id of the currently active entry in aiProviders (empty/undefined = none). */
+  aiActiveProviderId?: string;
+  /**
+   * @deprecated Legacy per-preset config (one slot per preset id). Kept in
+   * sync for backward compatibility; new code should read aiProviders.
    */
   aiProviderConfigs?: Record<string, { url?: string; apiKey?: string; model?: string }>;
   /** Custom AI system prompt template with {{branch}}, {{author}}, etc. */

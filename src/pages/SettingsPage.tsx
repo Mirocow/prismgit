@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CloudModelPicker } from '../components/CloudModelPicker';
+import { AiProvidersGrid } from '../components/AiProvidersGrid';
 import { confirmDialog } from '../components/ConfirmDialog';
 import { Folder, Github, Loader, Lock, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
-import { OllamaModelPicker } from '../components/OllamaModelPicker';
 import { SecuritySettings } from '../components/settings/SecuritySettings';
-import { getProviderPreset, PROVIDER_PRESETS } from '../lib/aiCommitMessages';
 import { api, type GitConfigEntry } from '../lib/api';
 import { restoreAllConfirmations } from '../lib/confirmations';
 import { LOCALES, useI18n } from '../lib/i18n';
@@ -56,27 +54,6 @@ export function SettingsPage() {
   const { repos, removeRepo, loadRepos } = useRepositoryStore();
   const { t, locale, setLocale } = useI18n();
 
-  /**
-   * Save one AI connection field (aiUrl / aiApiKey / aiModel) AND mirror it
-   * into the active provider's saved config. Previously the values landed
-   * ONLY in the flat settings — switching providers and coming back lost
-   * every edit (the per-provider map stayed stale).
-   */
-  const saveAiConnectionField = useCallback(async (field: 'aiUrl' | 'aiApiKey' | 'aiModel', value: string) => {
-    await setSetting(field, value as never);
-    const provider = useSettingsStore.getState().settings.aiProvider;
-    if (!provider) return;
-    const current = useSettingsStore.getState().settings;
-    const configs = { ...(current.aiProviderConfigs ?? {}) };
-    const cur = configs[provider] ?? {};
-    configs[provider] = {
-      ...cur,
-      url: field === 'aiUrl' ? value : (cur.url ?? '' ),
-      apiKey: field === 'aiApiKey' ? value : (cur.apiKey ?? ''),
-      model: field === 'aiModel' ? value : (cur.model ?? ''),
-    };
-    await setSetting('aiProviderConfigs', configs);
-  }, [setSetting]);
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
   // Top-level tab: Application Settings vs Project Settings vs Themes
@@ -1336,195 +1313,10 @@ smartgit.refresh.inspectEol=true
             {t('settings.aiCommitMessages')}
           </div>
           <div className="p-5 text-sm space-y-4">
-            {/* Provider + Model — primary config */}
-            <div>
-              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                {t('settings.aiProviderSection') || 'Provider'}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.provider')}</label>
-                  <select
-                    className="w-full text-sm bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
-                    value={settings.aiProvider || ''}
-                    onChange={async (e) => {
-                      const newProviderId = e.target.value;
-                      const oldProviderId = settings.aiProvider || '';
-                      // ── 1. Save current provider's config ──
-                      // Read current flat values and merge into configs.
-                      const currentUrl = settings.aiUrl || '';
-                      const currentApiKey = settings.aiApiKey || '';
-                      const currentModel = settings.aiModel || '';
-                      const existingConfigs = settings.aiProviderConfigs || {};
-                      const updatedConfigs = { ...existingConfigs };
-                      if (oldProviderId) {
-                        const existing = updatedConfigs[oldProviderId] || {};
-                        updatedConfigs[oldProviderId] = {
-                          url: currentUrl || existing.url,
-                          apiKey: currentApiKey || existing.apiKey,
-                          model: currentModel || existing.model,
-                        };
-                      }
-                      // ── 2. Get new provider's saved config or defaults ──
-                      if (newProviderId) {
-                        const preset = getProviderPreset(newProviderId);
-                        const savedConfig = updatedConfigs[newProviderId];
-                        const newUrl = savedConfig?.url || preset.defaultUrl;
-                        const newModel = savedConfig?.model || preset.defaultModel;
-                        const newApiKey = savedConfig?.apiKey || '';
-                        // ── 3. Apply ALL settings atomically ──
-                        await Promise.all([
-                          setSetting('aiProviderConfigs', updatedConfigs),
-                          setSetting('aiProvider', newProviderId),
-                          setSetting('aiUrl', newUrl),
-                          setSetting('aiModel', newModel),
-                          setSetting('aiApiKey', newApiKey),
-                        ]);
-                      } else {
-                        // Provider set to empty (disabled)
-                        await setSetting('aiProvider', '');
-                      }
-                    }}
-                  >
-                    <option value="">{t('settings.disabledOption')}</option>
-                    {PROVIDER_PRESETS.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}{p.freeTier ? ' — FREE' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.model')}</label>
-                  {/* For Ollama, hide the manual Model input — the model is
-                      chosen via the OllamaModelPicker below (which fetches
-                      the live model list from the server and shows metadata:
-                      parameter count, file size, quantization, family).
-                      For other providers (OpenAI/Anthropic/Mistral/custom),
-                      keep the free-text input — there's no server to query. */}
-                  {settings.aiProvider === 'ollama' ? (
-                    <input
-                      type="text"
-                      className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5 opacity-60"
-                      placeholder={settings.aiModel || 'Pick from list below ↓'}
-                      value={settings.aiModel || ''}
-                      readOnly
-                      title="Model is chosen via the picker below"
-                    />
-                  ) : (
-                    <BlurSaveInput
-                      type="text"
-                      className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
-                      placeholder="gpt-4o-mini"
-                      value={settings.aiModel || ''}
-                      onSave={(v) => void saveAiConnectionField('aiModel', v)}
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Provider description + API key hint — shown when a provider
-                is selected. Helps the user understand what the provider
-                offers (free tier? latency?) and where to get an API key. */}
-            {settings.aiProvider && (() => {
-              const preset = getProviderPreset(settings.aiProvider);
-              return (
-                <div className="text-2xs text-text-tertiary mt-2 p-2 rounded bg-bg-tertiary border border-border-subtle">
-                  <div className="flex items-center gap-2 mb-1">
-                    {preset.freeTier && (
-                      <span className="px-1.5 py-0.5 rounded bg-status-added/15 text-status-added font-semibold text-3xs uppercase">
-                        FREE
-                      </span>
-                    )}
-                    <span>{preset.description}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="opacity-70">API key:</span>
-                    {preset.apiKeyHint.startsWith('http') ? (
-                      <a
-                        href={preset.apiKeyHint}
-                        onClick={(e) => { e.preventDefault(); api.app.openExternal(preset.apiKeyHint); }}
-                        className="text-accent hover:underline"
-                      >
-                        {preset.apiKeyHint}
-                      </a>
-                    ) : (
-                      <span>{preset.apiKeyHint}</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Connection — URL + API key */}
-            <div>
-              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                {t('settings.aiConnectionSection') || 'Connection'}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiUrl')}</label>
-                  {/* Controlled + blur-save: MUST re-render when the provider
-                      switch rewrites aiUrl/aiModel/aiApiKey. The old
-                      defaultValue version kept showing the previous
-                      provider's URL and wrote the STALE value back on blur,
-                      which made provider switching appear broken. */}
-                  <BlurSaveInput
-                    type="text"
-                    className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
-                    placeholder="https://api.openai.com/v1/chat/completions"
-                    value={settings.aiUrl || ''}
-                    onSave={(v) => void saveAiConnectionField('aiUrl', v)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiKey')}</label>
-                  <BlurSaveInput
-                    type="password"
-                    autoComplete="new-password"
-                    className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
-                    placeholder="sk-..."
-                    value={settings.aiApiKey || ''}
-                    onSave={(v) => void saveAiConnectionField('aiApiKey', v)}
-                  />
-                </div>
-              </div>
-              <div className="text-2xs text-text-tertiary mt-2">
-                {t('settings.ollamaHint')} <code className="mono bg-bg-tertiary px-1 rounded">http://localhost:11434</code>. {t('settings.ollamaPullHint')} (<code className="mono bg-bg-tertiary px-1 rounded">ollama pull llama3.2</code>).
-              </div>
-            </div>
-
-            {/* Ollama model picker — fetches /api/tags from the Ollama server,
-                shows a dropdown of available models. User can select instead of
-                typing the model name manually. */}
-            {/* Model picker — different pickers for different providers:
-                - Ollama: rich picker with metadata (params, size, quantization, family)
-                - Anthropic: no /models endpoint — manual text input only
-                - All other cloud providers (OpenAI, Groq, Cerebras, OpenRouter,
-                  Z.ai, Mistral, GitHub Models, Hugging Face, Custom):
-                  CloudModelPicker — fetches /models from the provider's API */}
-            {settings.aiProvider === 'ollama' && (
-              <OllamaModelPicker
-                url={settings.aiUrl || 'http://localhost:11434'}
-                selectedModel={settings.aiModel || ''}
-                onSelect={(model) => setSetting('aiModel', model)}
-              />
-            )}
-            {settings.aiProvider && settings.aiProvider !== 'ollama' && settings.aiProvider !== 'anthropic' && settings.aiProvider !== 'custom' && (
-              <CloudModelPicker
-                preset={getProviderPreset(settings.aiProvider)}
-                url={settings.aiUrl || ''}
-                apiKey={settings.aiApiKey}
-                selectedModel={settings.aiModel || ''}
-                onSelect={(model) => setSetting('aiModel', model)}
-              />
-            )}
-            {settings.aiProvider === 'custom' && (
-              <div className="pt-3 border-t border-border-subtle text-2xs text-text-tertiary italic">
-                Custom endpoint — enter the model name manually. If the endpoint has a /models endpoint, you can switch to a named provider above to use the model picker.
-              </div>
-            )}
+            {/* AI providers — unlimited registry rendered as a grid.
+                Replaces the old per-preset dropdown + flat connection fields.
+                Handles activation (legacy-field mirroring), testing, editing. */}
+            <AiProvidersGrid />
 
             {/* Enable toggle */}
             <div className="pt-3 border-t border-border-subtle">

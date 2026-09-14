@@ -6,7 +6,11 @@ import { useI18n, useI18nStore } from '../lib/i18n';
 import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download, ChevronRight, ChevronDown, RefreshCw } from './icons';
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage, type TokenUsage } from '../lib/aiChat';
-import { PROVIDER_PRESETS, getProviderPreset, type LLMProvider } from '../lib/aiCommitMessages';
+import type { LLMProvider } from '../lib/aiCommitMessages';
+import {
+  getEnabledAiProviders, getActiveAiProvider, buildProviderFromActiveEntry,
+  ensureAiProvidersMigrated, activateAiProvider,
+} from '../lib/aiProviders';
 import MarkdownRenderer from './MarkdownRenderer';
 import {
   useAiChatStore,
@@ -271,6 +275,10 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   }, [repos]);
 
   const buildProvider = useCallback((): LLMProvider | null => {
+    // Preferred: the multi-provider registry (Settings → AI grid).
+    const fromRegistry = buildProviderFromActiveEntry(settings);
+    if (fromRegistry) return fromRegistry;
+    // Legacy fallback: flat fields (registry not migrated yet / empty).
     if (!settings?.aiProvider) return null;
     const type = settings.aiProvider as LLMProvider['type'];
     const id = settings.aiProvider;
@@ -381,46 +389,17 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   // Per-provider configs (URL + API key + model) are saved/restored from
   // aiProviderConfigs so the user doesn't re-enter credentials on each switch.
   const [showProviderMenu, setShowProviderMenu] = useState(false);
-  const switchProvider = useCallback(async (newProviderId: string) => {
-    const oldProviderId = settings?.aiProvider || '';
-    // ── 1. Save current provider's config to aiProviderConfigs ──
-    // Read the CURRENT flat values (aiUrl, aiApiKey, aiModel) and merge
-    // them into the configs store. We use functional updates to avoid
-    // stale-closure issues — settings in this closure may be outdated
-    // by the time the async setSetting calls complete.
-    const currentUrl = settings?.aiUrl || '';
-    const currentApiKey = settings?.aiApiKey || '';
-    const currentModel = settings?.aiModel || '';
+  const enabledProviders = useMemo(() => getEnabledAiProviders(settings), [settings]);
+  const activeProvider = useMemo(() => getActiveAiProvider(settings), [settings]);
 
-    // Build the updated configs map — merge old + new.
-    const existingConfigs = settings?.aiProviderConfigs || {};
-    const updatedConfigs = { ...existingConfigs };
-    if (oldProviderId) {
-      const existing = updatedConfigs[oldProviderId] || {};
-      updatedConfigs[oldProviderId] = {
-        url: currentUrl || existing.url,
-        apiKey: currentApiKey || existing.apiKey,
-        model: currentModel || existing.model,
-      };
-    }
+  // One-shot legacy → registry migration.
+  useEffect(() => {
+    void ensureAiProvidersMigrated(settings, setSetting);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    // ── 2. Get the new provider's saved config or defaults ──
-    const preset = getProviderPreset(newProviderId);
-    const savedConfig = updatedConfigs[newProviderId];
-    const newUrl = savedConfig?.url || preset.defaultUrl;
-    const newModel = savedConfig?.model || preset.defaultModel;
-    const newApiKey = savedConfig?.apiKey || '';
-
-    // ── 3. Apply ALL settings in one batch ──
-    // We set them all together so the UI updates atomically — no flicker
-    // of half-switched state (old URL with new model, etc.).
-    await Promise.all([
-      setSetting('aiProviderConfigs', updatedConfigs),
-      setSetting('aiProvider', newProviderId),
-      setSetting('aiUrl', newUrl),
-      setSetting('aiModel', newModel),
-      setSetting('aiApiKey', newApiKey),
-    ]);
+  const switchProvider = useCallback(async (entryId: string) => {
+    await activateAiProvider(settings, setSetting, entryId);
     setShowProviderMenu(false);
   }, [settings, setSetting]);
 
@@ -576,19 +555,18 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
               </>
             )}
           </div>
-          {/* Provider switcher — compact dropdown to switch LLM provider
-              ON THE FLY. Saves the current provider's config (URL+key+model)
-              and restores the new provider's saved config. Conversation
-              history is preserved — the new provider continues the chat. */}
+          {/* Provider switcher — lists the unlimited provider registry
+              (Settings → AI grid). Switching mid-conversation preserves
+              history; each entry keeps its own URL/key/model. */}
           <div className="relative ml-1">
             <button
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs bg-bg-secondary border border-border-subtle hover:border-accent transition-colors"
               onClick={() => setShowProviderMenu(v => !v)}
-              title={settings?.aiProvider ? `${t('aiAssistant.providerTitle')}: ${getProviderPreset(settings.aiProvider).label}` : t('aiAssistant.noProviderSelected')}
+              title={activeProvider ? `${t('aiAssistant.providerTitle')}: ${activeProvider.name}` : t('aiAssistant.noProviderSelected')}
             >
               <span className="truncate max-w-20">
-                {settings?.aiProvider
-                  ? getProviderPreset(settings.aiProvider).label.split(' ')[0]
+                {activeProvider
+                  ? activeProvider.name
                   : t('aiAssistant.noProviderSelected')}
               </span>
               <span className="text-text-tertiary text-3xs">▾</span>
@@ -600,20 +578,22 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                   <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
                     {t('aiAssistant.switchProvider')}
                   </div>
-                  {PROVIDER_PRESETS.map(p => (
+                  {enabledProviders.length === 0 && (
+                    <div className="px-3 py-2 text-2xs text-text-tertiary italic">
+                      {t('aiAssistant.noProvidersHint') || 'Add providers in Settings → AI.'}
+                    </div>
+                  )}
+                  {enabledProviders.map(p => (
                     <button
                       key={p.id}
                       className={cn(
                         'w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors flex items-center gap-2',
-                        settings?.aiProvider === p.id && 'bg-accent-muted text-accent',
+                        activeProvider?.id === p.id && 'bg-accent-muted text-accent',
                       )}
-                      onClick={() => switchProvider(p.id)}
+                      onClick={() => void switchProvider(p.id)}
                     >
-                      <span className="flex-1 truncate">{p.label}</span>
-                      {p.freeTier && (
-                        <span className="text-3xs px-1 rounded bg-status-added/15 text-status-added">FREE</span>
-                      )}
-                      {settings?.aiProviderConfigs?.[p.id]?.apiKey && (
+                      <span className="flex-1 truncate">{p.name}</span>
+                      {p.apiKey && (
                         <span className="text-3xs text-status-added" title="API key saved">✓</span>
                       )}
                     </button>

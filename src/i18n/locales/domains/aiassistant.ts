@@ -22,6 +22,7 @@ export const en: Record<string, string> = {
   'aiAssistant.stopButton': 'Stop',
   'aiAssistant.switchProvider': 'Switch AI Provider',
   'aiAssistant.switchProviderHint': 'Switching preserves the conversation — the new provider continues the chat.',
+  'aiAssistant.noProvidersHint': 'No providers yet — add them in Settings → AI.',
   'aiAssistant.noProviderSelected': 'no provider',
   'aiAssistant.providerTitle': 'Provider',
 
@@ -108,6 +109,7 @@ export const ru: Record<string, string> = {
   'aiAssistant.stopButton': 'Стоп',
   'aiAssistant.switchProvider': 'Сменить AI провайдера',
   'aiAssistant.switchProviderHint': 'Переключение сохраняет разговор — новый провайдер продолжит чат.',
+  'aiAssistant.noProvidersHint': 'Провайдеров пока нет — добавьте их в Настройки → AI.',
   'aiAssistant.noProviderSelected': 'нет провайдера',
   'aiAssistant.providerTitle': 'Провайдер',
 
@@ -194,6 +196,7 @@ export const zh: Record<string, string> = {
   'aiAssistant.stopButton': '停止',
   'aiAssistant.switchProvider': '切换 AI 提供商',
   'aiAssistant.switchProviderHint': '切换会保留对话 — 新提供商将继续聊天。',
+  'aiAssistant.noProvidersHint': '暂无提供商——请在设置 → AI 中添加。',
   'aiAssistant.noProviderSelected': '无提供商',
   'aiAssistant.providerTitle': '提供商',
 
@@ -280,6 +283,7 @@ export const de: Record<string, string> = {
   'aiAssistant.stopButton': 'Stopp',
   'aiAssistant.switchProvider': 'KI-Anbieter wechseln',
   'aiAssistant.switchProviderHint': 'Wechseln erhält die Konversation — der neue Anbieter setzt den Chat fort.',
+  'aiAssistant.noProvidersHint': 'Noch keine Anbieter — bitte in Einstellungen → AI hinzufügen.',
   'aiAssistant.noProviderSelected': 'kein Anbieter',
   'aiAssistant.providerTitle': 'Anbieter',
 

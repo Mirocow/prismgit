@@ -15,7 +15,7 @@
  *
  * Pure functions — unit-testable without Electron.
  */
-import type { RemoteCredential } from '../types/settings-api.js';
+import type { RemoteCredential, AiProviderEntry } from '../types/settings-api.js';
 
 /** Scalar settings keys whose ENTIRE value is a secret. */
 export const SECRET_SCALAR_KEYS: readonly string[] = [
@@ -122,6 +122,26 @@ export function splitSettingSecrets(key: string, value: unknown): SplitResult | 
     return { sanitized, secrets };
   }
 
+  // Multi-provider registry: AiProviderEntry[] — each entry's apiKey is
+  // vaulted under ns 'ai', key 'provider:<entryId>' (same namespace as the
+  // legacy aiProviderConfigs so keys survive legacy→registry migration when
+  // the entry id reuses the legacy provider id).
+  if (key === 'aiProviders') {
+    if (value === undefined || value === null) return { sanitized: value, secrets: {} };
+    if (!Array.isArray(value)) return { sanitized: value, secrets: {} };
+    const secrets: Record<string, string | undefined> = {};
+    const sanitized: AiProviderEntry[] = [];
+    for (const entry of value as AiProviderEntry[]) {
+      if (!entry || typeof entry !== 'object' || !entry.id) continue;
+      const apiKey = typeof entry.apiKey === 'string' ? entry.apiKey : '';
+      const vk = `provider:${entry.id}`;
+      if (apiKey) secrets[vk] = apiKey;
+      else secrets[vk] = undefined;
+      sanitized.push({ ...entry, apiKey: SECRET_PLACEHOLDER });
+    }
+    return { sanitized, secrets };
+  }
+
   return null;
 }
 
@@ -177,6 +197,18 @@ export function rehydrateSettingSecrets(
     for (const [providerId, cfg] of Object.entries(map)) {
       const secret = lookup(`provider:${providerId}`);
       out[providerId] = { ...cfg, ...(secret ? { apiKey: secret } : {}) };
+    }
+    return out;
+  }
+
+  // aiProviders registry — rehydrate each entry's apiKey from the vault.
+  if (key === 'aiProviders') {
+    if (!value || !Array.isArray(value)) return value;
+    const out: AiProviderEntry[] = [];
+    for (const entry of value as AiProviderEntry[]) {
+      if (!entry || typeof entry !== 'object' || !entry.id) continue;
+      const secret = lookup(`provider:${entry.id}`);
+      out.push({ ...entry, ...(secret ? { apiKey: secret } : {}) });
     }
     return out;
   }

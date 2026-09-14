@@ -526,6 +526,9 @@ const api = {
       ipcRenderer.invoke('ai:memory:summary', repoPath),
     chat: (config: { url: string; headers: Record<string, string>; body: string; method?: string }) =>
       ipcRenderer.invoke('ai:chat', config),
+    /** Multi-provider registry: unified model list / connectivity test. */
+    providerListModels: (kind: string, url: string, apiKey?: string) =>
+      ipcRenderer.invoke('ai:providerListModels', kind, url, apiKey),
   },
 
   // Raw git command log (Output panel → Commands tab)
