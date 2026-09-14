@@ -423,13 +423,74 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     setShowProviderMenu(false);
   }, [settings, setSetting]);
 
+  // Resizable panel — user can drag the edges to resize the chat.
+  // Default: 28rem (448px) wide × 80vh tall. Stored in localStorage.
+  const [panelWidth, setPanelWidth] = useState(() => {
+    try { return parseInt(localStorage.getItem('prismgit-ai-panel-width') || '448', 10); }
+    catch { return 448; }
+  });
+  const [panelHeight, setPanelHeight] = useState(() => {
+    try { return parseInt(localStorage.getItem('prismgit-ai-panel-height') || '600', 10); }
+    catch { return 600; }
+  });
+  const dragRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+
+  // Save to localStorage on change (debounced via requestAnimationFrame).
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      try {
+        localStorage.setItem('prismgit-ai-panel-width', String(panelWidth));
+        localStorage.setItem('prismgit-ai-panel-height', String(panelHeight));
+      } catch { /* ignore */ }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [panelWidth, panelHeight]);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent, edge: 'left' | 'top' | 'corner') => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startW: panelWidth, startH: panelHeight };
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      const dx = ev.clientX - dragRef.current.startX;
+      const dy = ev.clientY - dragRef.current.startY;
+      if (edge === 'left' || edge === 'corner') {
+        // Dragging left edge → width increases as mouse moves left
+        const newW = Math.max(320, Math.min(800, dragRef.current.startW - dx));
+        setPanelWidth(newW);
+      }
+      if (edge === 'top' || edge === 'corner') {
+        // Dragging top edge → height increases as mouse moves up
+        const newH = Math.max(300, Math.min(window.innerHeight - 100, dragRef.current.startH - dy));
+        setPanelHeight(newH);
+      }
+    };
+
+    const handleMouseUp = () => {
+      dragRef.current = null;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = edge === 'left' ? 'ew-resize' : edge === 'top' ? 'ns-resize' : 'nwse-resize';
+    document.body.style.userSelect = 'none';
+  }, [panelWidth, panelHeight]);
+
   // Starter prompts — different sets for repo vs no-repo mode.
   const starterPrompts = sessionRepoPath === null
     ? STARTER_PROMPTS_NO_REPO
     : STARTER_PROMPTS_WITH_REPO;
 
   return (
-    <div className="fixed bottom-4 right-4 w-[28rem] max-h-[80vh] bg-bg-elevated border border-border-default rounded-lg shadow-2xl flex flex-col z-50">
+    <div
+      className="fixed bottom-4 right-4 bg-bg-elevated border border-border-default rounded-lg shadow-2xl flex flex-col z-50"
+      style={{ width: `${panelWidth}px`, height: `${panelHeight}px` }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-tertiary rounded-t-lg">
         <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -709,6 +770,21 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           </button>
         )}
       </div>
+      {/* Resize handles — left edge (horizontal), top edge (vertical),
+          top-left corner (diagonal). The panel is anchored bottom-right,
+          so we resize from the LEFT and TOP edges only. */}
+      <div
+        className="absolute top-0 left-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-accent/30 transition-colors z-10"
+        onMouseDown={(e) => handleResizeStart(e, 'left')}
+      />
+      <div
+        className="absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize hover:bg-accent/30 transition-colors z-10"
+        onMouseDown={(e) => handleResizeStart(e, 'top')}
+      />
+      <div
+        className="absolute top-0 left-0 w-3 h-3 cursor-nwse-resize hover:bg-accent/40 transition-colors rounded-tl-lg z-10"
+        onMouseDown={(e) => handleResizeStart(e, 'corner')}
+      />
     </div>
   );
 }
