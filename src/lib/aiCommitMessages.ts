@@ -12,6 +12,8 @@
  * Configuration is stored in AppSettings and in .git/config under [smartgit-ai-llm "..."] sections.
  */
 
+import { proxyFetch } from './aiChat';
+
 export interface LLMProvider {
   id: string;
   name: string;
@@ -289,16 +291,20 @@ async function callOpenAICompatible(
     max_tokens: maxTokens,
     temperature: provider.temperature ?? 0.4,
   };
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  // proxyFetch routes through the main process (ai:chat IPC) — cloud
+  // providers (Z.ai, OpenAI, Groq, Cerebras, …) do NOT send CORS headers,
+  // so a renderer-side fetch() fails with "Failed to fetch" before the
+  // request ever reaches the API. The IPC proxy has no CORS restriction.
+  const response = await proxyFetch(url, headers, JSON.stringify(body));
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`LLM API error ${response.status}: ${text}`);
+    throw new Error(`LLM API error ${response.status}: ${response.body}`);
   }
-  const data = await response.json();
+  let data: { choices?: { message?: { content?: string } }[] };
+  try {
+    data = JSON.parse(response.body);
+  } catch {
+    throw new Error(`LLM API returned non-JSON response: ${response.body.slice(0, 200)}`);
+  }
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error('Empty LLM response');
   return content.trim();
@@ -325,16 +331,17 @@ async function callAnthropic(
     messages: [{ role: 'user', content: userPrompt }],
     max_tokens: maxTokens,
   };
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  // IPC proxy — see callOpenAICompatible (CORS).
+  const response = await proxyFetch(url, headers, JSON.stringify(body));
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Anthropic API error ${response.status}: ${text}`);
+    throw new Error(`Anthropic API error ${response.status}: ${response.body}`);
   }
-  const data = await response.json();
+  let data: { content?: { text?: string }[] };
+  try {
+    data = JSON.parse(response.body);
+  } catch {
+    throw new Error(`Anthropic API returned non-JSON response: ${response.body.slice(0, 200)}`);
+  }
   const content = data.content?.[0]?.text;
   if (!content) throw new Error('Empty Anthropic response');
   return content.trim();
@@ -360,16 +367,21 @@ async function callOllama(
     },
     stream: false,
   };
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  // IPC proxy — keeps Ollama + cloud providers on one code path (no CORS).
+  const response = await proxyFetch(
+    url,
+    { 'Content-Type': 'application/json' },
+    JSON.stringify(body)
+  );
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Ollama API error ${response.status}: ${text}`);
+    throw new Error(`Ollama API error ${response.status}: ${response.body}`);
   }
-  const data = await response.json();
+  let data: { message?: { content?: string } };
+  try {
+    data = JSON.parse(response.body);
+  } catch {
+    throw new Error(`Ollama API returned non-JSON response: ${response.body.slice(0, 200)}`);
+  }
   const content = data.message?.content;
   if (!content) throw new Error('Empty Ollama response');
   return content.trim();
@@ -663,7 +675,20 @@ export async function* callLLMStream(
       temperature: provider.temperature ?? 0.4,
       stream: true,
     });
-    const response = await fetch(url, { method: 'POST', headers, body, signal });
+    let response: Response;
+    try {
+      response = await fetch(url, { method: 'POST', headers, body, signal });
+    } catch {
+      // CORS / network failure (Z.ai, OpenAI, … don't send CORS headers):
+      // fall back to the IPC proxy. Streaming becomes a single batch, but
+      // the request WORKS — without this the stream path always failed for
+      // cloud providers.
+      const msg = await callOpenAICompatible(provider, systemPrompt, userPrompt, maxTokens);
+      full += msg;
+      onToken?.(msg);
+      yield msg;
+      return;
+    }
     if (!response.ok || !response.body) {
       const text = await response.text();
       throw new Error(`LLM stream error ${response.status}: ${text}`);
@@ -711,7 +736,17 @@ export async function* callLLMStream(
       max_tokens: maxTokens,
       stream: true,
     });
-    const response = await fetch(url, { method: 'POST', headers, body, signal });
+    let response: Response;
+    try {
+      response = await fetch(url, { method: 'POST', headers, body, signal });
+    } catch {
+      // CORS / network failure — IPC proxy fallback (see streamOpenAICompatible).
+      const msg = await callAnthropic(provider, systemPrompt, userPrompt, maxTokens);
+      full += msg;
+      onToken?.(msg);
+      yield msg;
+      return;
+    }
     if (!response.ok || !response.body) {
       const text = await response.text();
       throw new Error(`Anthropic stream error ${response.status}: ${text}`);
@@ -758,7 +793,17 @@ export async function* callLLMStream(
       stream: true,
       options: { temperature: provider.temperature ?? 0.4 },
     });
-    const response = await fetch(url, { method: 'POST', headers, body, signal });
+    let response: Response;
+    try {
+      response = await fetch(url, { method: 'POST', headers, body, signal });
+    } catch {
+      // Network failure — IPC proxy fallback (Ollama has no CORS headers either).
+      const msg = await callOllama(provider, systemPrompt, userPrompt, maxTokens);
+      full += msg;
+      onToken?.(msg);
+      yield msg;
+      return;
+    }
     if (!response.ok || !response.body) {
       const text = await response.text();
       throw new Error(`Ollama stream error ${response.status}: ${text}`);
