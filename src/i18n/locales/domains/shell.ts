@@ -30,6 +30,7 @@ export const en: Record<string, string> = {
   // Sidebar — group dialogs / context menus
   'shell.addToGroup': 'Add Project to Group…',
   'shell.cloneIntoGroup': 'Clone Project into Group…',
+  'shell.createIntoGroup': 'Create Project in Group…',
   'shell.newSubgroup': 'New subgroup',
   'shell.newGroupTitle': 'New group',
   'shell.subgroupPrompt': 'Enter a name for the subgroup:',
@@ -338,6 +339,7 @@ export const ru: Record<string, string> = {
   // Sidebar — group dialogs / context menus
   'shell.addToGroup': 'Добавить проект в группу…',
   'shell.cloneIntoGroup': 'Клонировать проект в группу…',
+  'shell.createIntoGroup': 'Создать проект в группе…',
   'shell.newSubgroup': 'Новая подгруппа',
   'shell.newGroupTitle': 'Новая группа',
   'shell.subgroupPrompt': 'Введите имя подгруппы:',
@@ -646,6 +648,7 @@ export const zh: Record<string, string> = {
   // Sidebar — group dialogs / context menus
   'shell.addToGroup': '将项目添加到分组…',
   'shell.cloneIntoGroup': '克隆项目到分组…',
+  'shell.createIntoGroup': '在分组中创建项目…',
   'shell.newSubgroup': '新建子分组',
   'shell.newGroupTitle': '新建分组',
   'shell.subgroupPrompt': '请输入子分组名称：',
@@ -954,6 +957,7 @@ export const de: Record<string, string> = {
   // Sidebar — group dialogs / context menus
   'shell.addToGroup': 'Projekt zur Gruppe hinzufügen…',
   'shell.cloneIntoGroup': 'Projekt in Gruppe klonen…',
+  'shell.createIntoGroup': 'Projekt in Gruppe erstellen…',
   'shell.newSubgroup': 'Neue Untergruppe',
   'shell.newGroupTitle': 'Neue Gruppe',
   'shell.subgroupPrompt': 'Namen für die Untergruppe eingeben:',

@@ -124,11 +124,7 @@ export default function App() {
   useEffect(() => {
     const onCloneIntoGroup = (e: Event) => {
       const detail = (e as CustomEvent).detail as { groupId: string; groupName: string } | undefined;
-      // Could pre-fill the target-group in CloneModal via prop, but the
-      // modal already groups new clones into the current group context.
-      // For now, just open the modal — the user can move it post-clone.
       if (detail) {
-        // Persist target group so the cloned repo lands here.
         sessionStorage.setItem('prismgit-clone-target-group', detail.groupId);
       }
       setShowClone(true);
@@ -137,9 +133,20 @@ export default function App() {
     // Root context menu 'Clone' → open Clone modal without a target group
     const onOpenClone = () => setShowClone(true);
     window.addEventListener('prismgit:open-clone-modal', onOpenClone);
+    // 'prismgit:init-into-group' → open Init modal (create new repo) with
+    // target group preselected so the new repo lands in this group.
+    const onInitIntoGroup = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { groupId: string; groupName: string } | undefined;
+      if (detail) {
+        sessionStorage.setItem('prismgit-clone-target-group', detail.groupId);
+      }
+      setShowInit(true);
+    };
+    window.addEventListener('prismgit:init-into-group', onInitIntoGroup);
     return () => {
       window.removeEventListener('prismgit:clone-into-group', onCloneIntoGroup);
       window.removeEventListener('prismgit:open-clone-modal', onOpenClone);
+      window.removeEventListener('prismgit:init-into-group', onInitIntoGroup);
     };
   }, []);
   const [showInit, setShowInit] = useState(false);

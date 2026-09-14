@@ -398,6 +398,7 @@ export function Sidebar() {
     void showContextMenu([
       { label: t('shell.addToGroup'), clickId: 'add-to-group' },
       { label: t('shell.cloneIntoGroup'), clickId: 'clone-into-group' },
+      { label: t('shell.createIntoGroup'), clickId: 'create-into-group' },
       { type: 'separator' },
       { label: t('shell.newSubgroup'), clickId: 'subgroup' },
       { label: t('common.rename'), clickId: 'rename' },
@@ -418,6 +419,10 @@ export function Sidebar() {
         // Trigger the global Clone modal, but mark this group as the target
         // via a CustomEvent App.tsx listens for.
         window.dispatchEvent(new CustomEvent('prismgit:clone-into-group', { detail: { groupId: node.group.id, groupName: node.group.name } }));
+      } else if (clickId === 'create-into-group') {
+        // Trigger the global Init modal (create new repo) with this group
+        // as the target.
+        window.dispatchEvent(new CustomEvent('prismgit:init-into-group', { detail: { groupId: node.group.id, groupName: node.group.name } }));
       } else if (clickId === 'subgroup') {
         void handleCreateGroup(node.group.id);
       } else if (clickId === 'rename') {
