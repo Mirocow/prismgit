@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
-import { useI18n } from '../lib/i18n';
+import { useI18n, useI18nStore } from '../lib/i18n';
 import {
   Sparkles, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder,
   Square, Copy, Check, ChevronRight, ChevronDown, Search, X,
@@ -178,6 +178,7 @@ export default function AiChatPage() {
         signal: controller.signal,
         priorHistory: historyForContext,
         contextMaxChars: settings?.aiContextMaxChars ?? 20_000,
+        userLocale: useI18nStore.getState().locale,
         onTokenUsage: (usage: TokenUsage) => {
           setTokenUsage({
             input: usage.inputTokens,

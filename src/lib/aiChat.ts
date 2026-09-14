@@ -216,11 +216,28 @@ export interface TokenUsage {
  * This lets the AI gracefully handle "no repo open" by suggesting the user
  * clone/init/open one instead of failing on a git command.
  */
-export function buildToolSystemPrompt(tools: AITool[] = AI_TOOLS, repoPath?: string): string {
+export function buildToolSystemPrompt(tools: AITool[] = AI_TOOLS, repoPath?: string, userLocale?: string): string {
   const toolDocs = tools.map(t => `- ${t.name}: ${t.description}\n  Parameters: ${JSON.stringify(t.parameters)}`).join('\n');
   const repoContext = repoPath
     ? `Current repository context: ${repoPath}\nYou can run git commands against this repo directly using the repository-scoped tools.`
     : `No repository is currently open. For repository-scoped tools (get_status, get_log, commit, push, etc.) to work, the user must first open or clone a repo. Use the app-scoped tools (list_repos, search_repos, clone_repo, init_repo, open_repo) to help them set one up — they do NOT require an open repo.`;
+
+  // ── Language detection ──────────────────────────────────────────────
+  // The app's UI locale (from settings) tells us the user's preferred
+  // language. We inject it into the system prompt so the LLM ALWAYS
+  // responds in that language — even if the user's message is short
+  // or ambiguous (which causes some models to fall back to English).
+  const localeMap: Record<string, string> = {
+    'en': 'English',
+    'ru': 'Russian (Русский)',
+    'zh': 'Chinese (中文)',
+    'de': 'German (Deutsch)',
+  };
+  const langName = localeMap[userLocale || ''] || 'the same language the user writes in';
+  const langInstruction = userLocale
+    ? `CRITICAL: The user's PrismGit UI is set to ${langName}. You MUST respond in ${langName} for ALL messages — tool summaries, explanations, error reports, everything. Even if the user types a short message in English (e.g. "ok" or "status"), respond in ${langName}. This is non-negotiable.`
+    : `MATCH THE USER'S LANGUAGE. If the user writes in Russian, respond in Russian. If in English, respond in English. If in Chinese, respond in Chinese. If in German, respond in German. Detect the language from the user's message and use it for ALL your responses.`;
+
   return `You are PrismGit's AI assistant — you help the user manage their Git repositories.
 
 ${repoContext}
@@ -258,7 +275,7 @@ Rules:
 21. If the user repeats the same request 2+ times and you keep failing, STOP and explain what's going wrong — don't just retry the same tool call in a loop.
 
 ── Language ──
-22. MATCH THE USER'S LANGUAGE. If the user writes in Russian, respond in Russian. If in English, respond in English. If in Chinese, respond in Chinese. If in German, respond in German. Detect the language from the user's message and use it for ALL your responses — tool descriptions, summaries, explanations. This is critical for a good user experience.
+22. ${langInstruction}
 
 ── Persistent memory ──
 23. You have persistent memory via save_memory and get_memory tools. When the user tells you something worth remembering (e.g. "we use conventional commits", "main branch is called develop", "don't commit the dist folder"), call save_memory to store it. The memory persists between sessions in .prismgit/ai-memory.json — next time the user starts a conversation, call get_memory to recall the saved facts.
@@ -333,9 +350,12 @@ export async function runWithTools(
      *  Default: 20,000 chars (~5,000 tokens). When exceeded, old messages
      *  are compressed into a text summary. User-configurable via Settings. */
     contextMaxChars?: number;
+    /** User's UI locale ('en' | 'ru' | 'zh' | 'de') — injected into the
+     *  system prompt so the LLM always responds in the user's language. */
+    userLocale?: string;
   },
 ): Promise<{ finalMessage: string; history: ChatMessage[] }> {
-  const systemPrompt = buildToolSystemPrompt(AI_TOOLS, repoPath);
+  const systemPrompt = buildToolSystemPrompt(AI_TOOLS, repoPath, options?.userLocale);
   const priorMessages = options?.priorHistory ?? [];
   const maxChars = options?.contextMaxChars ?? DEFAULT_CONTEXT_MAX_CHARS;
 
