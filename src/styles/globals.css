@@ -1585,6 +1585,16 @@ input[type="checkbox"], input[type="radio"] {
   line-height: 1.3;
 }
 
+/* === Left bar (Sidebar) font size — settings.fontSizeSidebar ===
+   The setting drives the sidebar's PRIMARY text (.text-sm — nav items,
+   repo switcher); secondary text (.text-xs / .text-2xs — repo tree rows,
+   badges, counts) follows at −1.5px via --font-size-sidebar-sm.
+   Fallbacks reproduce the exact pre-setting sizes, so an unset setting
+   means zero visual change. Specificity (0,2,0) beats the utilities. */
+.sidebar-root .text-sm  { font-size: var(--font-size-sidebar, 0.875rem); }
+.sidebar-root .text-xs  { font-size: var(--font-size-sidebar-sm, 0.75rem); }
+.sidebar-root .text-2xs { font-size: var(--font-size-sidebar-sm, 10.5px); }
+
 /* === Syntax highlighting colors (Ayu Dark) === */
 .text-keyword { color: var(--accent-yellow); }
 .text-string { color: var(--status-added); }

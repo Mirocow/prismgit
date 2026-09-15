@@ -266,6 +266,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (settings.fontSizeList) document.documentElement.style.setProperty('--font-size-list', `${settings.fontSizeList}px`);
       if (settings.fontSizeDiff) document.documentElement.style.setProperty('--font-size-diff', `${settings.fontSizeDiff}px`);
       if (settings.fontSizeMonospace) document.documentElement.style.setProperty('--font-size-mono', `${settings.fontSizeMonospace}px`);
+      // Left bar (Sidebar) font size — primary text + secondary (−1.5px)
+      if (settings.fontSizeSidebar) {
+        document.documentElement.style.setProperty('--font-size-sidebar', `${settings.fontSizeSidebar}px`);
+        document.documentElement.style.setProperty('--font-size-sidebar-sm', `${Math.max(8, settings.fontSizeSidebar - 1.5)}px`);
+      }
       // Apply UI contrast on load (default to 100 = no filter)
       applyContrastToDOM(settings.contrast ?? 100);
       // Apply sidebar dim mode (Discord/Slack-style channel sidebar)
@@ -303,6 +308,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
     if (key === 'fontSizeMonospace') {
       document.documentElement.style.setProperty('--font-size-mono', `${value}px`);
+    }
+    // Left bar (Sidebar) font size — applied live while the slider/input drags
+    if (key === 'fontSizeSidebar') {
+      document.documentElement.style.setProperty('--font-size-sidebar', `${value}px`);
+      document.documentElement.style.setProperty('--font-size-sidebar-sm', `${Math.max(8, (value as number) - 1.5)}px`);
     }
     if (key === 'sidebarWidth') {
       document.documentElement.style.setProperty('--sidebar-width', `${value}px`);

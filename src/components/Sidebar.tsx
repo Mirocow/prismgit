@@ -655,7 +655,7 @@ export function Sidebar() {
   return (
     <>
     <aside
-      className="flex flex-col bg-bg-secondary flex-shrink-0 no-drag"
+      className="sidebar-root flex flex-col bg-bg-secondary flex-shrink-0 no-drag"
       style={{ width: sidebarWidth }}
     >
       {/* Repository switcher */}

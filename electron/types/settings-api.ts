@@ -102,6 +102,14 @@ export interface AppSettings {
   fontSizeList: number;      // Commit lists, branch lists, tag lists
   fontSizeDiff: number;      // Diff viewer (code)
   fontSizeMonospace: number; // Monospace elements (hashes, paths)
+  /**
+   * Left bar (Sidebar) font size in px — controls the sidebar's PRIMARY
+   * text (navigation items, repo switcher). Secondary text inside the
+   * sidebar (repo tree rows, badges, counts) follows at −1.5px. When
+   * unset the sidebar keeps its default rem-based sizing (zero change).
+   * Range 10–18. Applied live via --font-size-sidebar CSS variables.
+   */
+  fontSizeSidebar?: number;
   sidebarWidth: number;
   /**
    * Sidebar visual mode — Discord/Slack-style dim sidebar.

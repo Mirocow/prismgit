@@ -526,6 +526,12 @@ export function SettingsPage() {
                   <input type="number" min={8} max={20} value={settings.fontSizeMonospace ?? 11}
                     onChange={(e) => setSetting('fontSizeMonospace', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
+                {/* Left bar (Sidebar) — the only per-area size wired to the sidebar */}
+                <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
+                  <span className="text-xs">{t('settings.fontAreaSidebar')}</span>
+                  <input type="number" min={8} max={20} value={settings.fontSizeSidebar ?? 12}
+                    onChange={(e) => setSetting('fontSizeSidebar', Number(e.target.value))} className="w-16 text-xs" />
+                </label>
               </div>
               <div className="text-2xs text-text-tertiary mt-2 px-2">{t('settings.fontSizesApplyHint')}</div>
             </div>
