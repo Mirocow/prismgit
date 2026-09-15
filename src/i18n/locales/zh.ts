@@ -283,5 +283,6 @@ export const zh: Record<string, string> = {
   // MED-4 — line-context menu extras
   'common.copied': '已复制',
   'common.copyFailed': '复制失败',
+  'common.copyHash': '复制提交哈希',
   'common.copyLineNumber': '复制行号 ({n})',
 };

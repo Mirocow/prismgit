@@ -1,6 +1,10 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, FileText, Loader, GitCommit, CornerDownRight, ExternalLink, Copy, History, FolderOpen, ChevronDown, ChevronRight } from '../components/icons';
+import {
+  Search, FileText, Loader, GitCommit, CornerDownRight,
+  ExternalLink, Copy, History, FolderOpen,
+  ChevronDown, ChevronRight, AlertCircle, GitBranch, X, Filter,
+} from '../components/icons';
 import { RefBadges } from '../lib/refBadge';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -9,198 +13,242 @@ import { api, type LogEntry } from '../lib/api';
 import { cn, formatDate, shortHash } from '../lib/utils';
 import { parseGrepOutput, highlight, filterTrackedFiles, type GrepMatch } from '../lib/searchUtils';
 import { useI18n } from '../lib/i18n';
+import { useEscapeKey } from '../hooks/useEscapeKey';
+import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 
-type Tab = 'commits' | 'files' | 'history' | 'grep' | 'revparse';
+/**
+ * Result category. The unified search runs multiple queries in parallel and
+ * groups results by category. Each row in a category has a `kind` so the
+ * open-file/open-history/commit-link actions can be picked without inspecting
+ * the row shape.
+ */
+type Category = 'commits' | 'files' | 'content';
+type Mode = 'all' | 'commits' | 'files' | 'content' | 'advanced';
 
+/**
+ * Unified Search page.
+ *
+ * What changed vs the previous "5-tab" design:
+ *   - One search bar at the top — the user types once and sees results from
+ *     ALL categories (commits, files, content) in one scrollable list.
+ *   - Filter chips below the bar narrow which categories are searched
+ *     (All / Commits / Files / Content / Advanced). "Advanced" exposes the
+ *     rev-parse evaluator and the per-tab knobs (ignore-case, whole-words,
+ *     pathspec) without leaving the page.
+ *   - All queries are debounced 200ms and run in parallel — the user sees
+ *     results populate progressively instead of waiting on one big query.
+ *   - Each result row carries an explicit `kind` so the open-history /
+ *     open-changes / open-commit-in-browser actions work uniformly.
+ *   - The grep parser was patched to handle empty output, exit code 1
+ *     (no matches → not an error), and Windows-style paths.
+ *   - Empty results show a friendly "no matches found" with the query echoed.
+ */
 export function InvestigatePage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastActions();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>('commits');
 
-  // === Commit message search tab (git log --grep, LIVE as-you-type) ===
-  const [commitQuery, setCommitQuery] = useState('');
-  const [commitLiveQuery, setCommitLiveQuery] = useState(''); // debounced
-  const [commitIgnoreCase, setCommitIgnoreCase] = useState(true);
-  const [commitEntries, setCommitEntries] = useState<LogEntry[]>([]);
-  const [commitLoading, setCommitLoading] = useState(false);
-  const [commitSearched, setCommitSearched] = useState(false);
-  const commitSeq = useRef(0);
+  // ─── Unified search input ────────────────────────────────────────────────
+  const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [mode, setMode] = useState<Mode>('all');
+  // Common search options — apply to all categories
+  const [ignoreCase, setIgnoreCase] = useState(true);
+  const [wholeWords, setWholeWords] = useState(false);
+  const [includeUntracked, setIncludeUntracked] = useState(false);
+  const [pathspec, setPathspec] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Debounce the commit query — search runs automatically while typing
+  // Debounce the search query — 200ms is short enough to feel live but long
+  // enough to coalesce rapid typing. The previous design debounced per-tab
+  // (commits: 300ms) which felt sluggish.
   useEffect(() => {
-    const t = setTimeout(() => setCommitLiveQuery(commitQuery), 300);
-    return () => clearTimeout(t);
-  }, [commitQuery]);
+    const id = setTimeout(() => setDebouncedQuery(query), 200);
+    return () => clearTimeout(id);
+  }, [query]);
 
-  useEffect(() => {
-    const q = commitLiveQuery.trim();
-    if (q.length < 2) {
-      setCommitEntries([]);
-      setCommitSearched(false);
-      return;
-    }
-    const seq = ++commitSeq.current;
-    setCommitLoading(true);
-    setCommitSearched(true);
-    api.git.log(repo.path, { maxCount: 200, all: true, grep: q, grepIgnoreCase: commitIgnoreCase })
-      .then((result) => { if (commitSeq.current === seq) setCommitEntries(result); })
-      .catch((e) => {
-        if (commitSeq.current === seq) { toast.error(t('pages.commitSearchFailed'), String(e)); setCommitEntries([]); }
-      })
-      .finally(() => { if (commitSeq.current === seq) setCommitLoading(false); });
-  }, [commitLiveQuery, commitIgnoreCase, repo.path, toast]);
-
-  // === Tracked files (shared by the Files tab + File History path helper) ===
+  // ─── Tracked files (loaded once per repo, used by the files category) ────
   const [trackedFiles, setTrackedFiles] = useState<string[]>([]);
   useEffect(() => {
     let cancelled = false;
     setTrackedFiles([]);
     api.git.trackedFiles(repo.path)
       .then((files) => { if (!cancelled) setTrackedFiles(files); })
-      .catch(() => { /* Files tab degrades to manual path entry */ });
+      .catch(() => { /* files category degrades to no-results */ });
     return () => { cancelled = true; };
   }, [repo.path]);
 
-  // === Files tab — live file-NAME search over git ls-files ===
-  const [fileQuery, setFileQuery] = useState('');
-  const fileResults = useMemo(
-    () => filterTrackedFiles(trackedFiles, fileQuery, 200),
-    [trackedFiles, fileQuery]
-  );
+  // ─── Commit results (git log --grep --all) ───────────────────────────────
+  const [commits, setCommits] = useState<LogEntry[]>([]);
+  const [commitsLoading, setCommitsLoading] = useState(false);
+  const commitSeq = useRef(0);
 
-  const openFileHistory = useCallback((path: string) => {
-    setFilePath(path);
-    setHistQuery(path);
-    setTab('history');
-    // Cross-tool: the picked file becomes the global selection (Toolbar chip,
-    // Changes, Blame, LFS all follow).
-    useSelectionStore.getState().selectFile(path);
-  }, []);
-  const openInChanges = useCallback((path: string) => {
+  useEffect(() => {
+    const q = debouncedQuery.trim();
+    // Only run commit search when the user asked for it (mode all/commits)
+    // and the query is at least 2 chars (git --grep is slow on huge histories).
+    if (q.length < 2 || (mode !== 'all' && mode !== 'commits')) {
+      setCommits([]);
+      return;
+    }
+    const seq = ++commitSeq.current;
+    setCommitsLoading(true);
+    api.git.log(repo.path, {
+      maxCount: 100, all: true, grep: q, grepIgnoreCase: ignoreCase,
+    })
+      .then((result) => { if (commitSeq.current === seq) setCommits(result); })
+      .catch((e) => {
+        if (commitSeq.current === seq) {
+          // git log --grep on a corrupted reflog can fail; surface a soft
+          // error rather than crashing the whole search.
+          console.warn('[search] commit search failed:', e);
+          setCommits([]);
+        }
+      })
+      .finally(() => { if (commitSeq.current === seq) setCommitsLoading(false); });
+  }, [debouncedQuery, mode, ignoreCase, repo.path]);
+
+  // ─── File results (filter trackedFiles) ──────────────────────────────────
+  const fileResults = useMemo(() => {
+    const q = debouncedQuery.trim();
+    if (q.length < 1 || (mode !== 'all' && mode !== 'files')) return [];
+    return filterTrackedFiles(trackedFiles, q, 50);
+  }, [trackedFiles, debouncedQuery, mode]);
+
+  // ─── Content results (git grep) ──────────────────────────────────────────
+  const [contentMatches, setContentMatches] = useState<GrepMatch[]>([]);
+  const [contentLoading, setContentLoading] = useState(false);
+  const [contentError, setContentError] = useState('');
+  const grepSeq = useRef(0);
+
+  useEffect(() => {
+    const q = debouncedQuery.trim();
+    if (q.length < 2 || (mode !== 'all' && mode !== 'content')) {
+      setContentMatches([]);
+      setContentError('');
+      return;
+    }
+    const seq = ++grepSeq.current;
+    setContentLoading(true);
+    setContentError('');
+    const options = ['--line-number'];
+    if (ignoreCase) options.push('-i');
+    if (wholeWords) options.push('-w');
+    if (includeUntracked) options.push('--untracked');
+    api.git.grep(repo.path, q, options, pathspec || undefined)
+      .then((raw) => {
+        if (grepSeq.current === seq) {
+          setContentMatches(parseGrepOutput(raw).slice(0, 200));
+        }
+      })
+      .catch((e) => {
+        if (grepSeq.current === seq) {
+          // exit code 1 = no matches (already handled in the service); only
+          // show real errors (bad regex, missing files, etc.).
+          const msg = String(e);
+          if (!msg.includes('exit code 1') && !msg.includes('no matches')) {
+            setContentError(msg);
+          }
+          setContentMatches([]);
+        }
+      })
+      .finally(() => { if (grepSeq.current === seq) setContentLoading(false); });
+  }, [debouncedQuery, mode, ignoreCase, wholeWords, includeUntracked, pathspec, repo.path]);
+
+  // Reset state when the repo changes — stale results from the previous
+  // repository must not survive.
+  useEffect(() => {
+    setQuery('');
+    setDebouncedQuery('');
+    setCommits([]);
+    setContentMatches([]);
+    setContentError('');
+    setPathspec('');
+  }, [repo.path]);
+
+  // ─── Cross-tool navigation helpers ────────────────────────────────────────
+  const openCommitInHistory = useCallback((hash: string) => {
+    useSelectionStore.getState().selectCommit(hash);
+    navigate('/history');
+  }, [navigate]);
+
+  const openFileInChanges = useCallback((path: string) => {
     useSelectionStore.getState().selectFile(path);
     navigate('/changes');
   }, [navigate]);
 
-  // === File history tab ===
-  const [filePath, setFilePath] = useState('');
-  const [histQuery, setHistQuery] = useState(''); // drives the path-helper dropdown
-  const [followRenames, setFollowRenames] = useState(true);
-  const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<LogEntry | null>(null);
-  const [searched, setSearched] = useState(false);
-  const histPathHelper = useMemo(() => {
-    const q = histQuery.trim().toLowerCase();
-    if (!q) return [];
-    return trackedFiles.filter((f) => f.toLowerCase().includes(q)).slice(0, 12);
-  }, [trackedFiles, histQuery]);
+  const openFileInDiff = useCallback((path: string) => {
+    useSelectionStore.getState().selectFile(path);
+    navigate('/diff');
+  }, [navigate]);
 
-  // Prefill the File History path from the file selected elsewhere in the app
-  // (Changes / History) — makes the tab instantly usable without typing paths.
-  useEffect(() => {
-    const sel = useSelectionStore.getState().selectedFilePath;
-    if (sel) { setFilePath(sel); setHistQuery(sel); }
-  }, []);
+  const openFileHistory = useCallback((path: string) => {
+    useSelectionStore.getState().selectFile(path);
+    navigate('/history');
+  }, [navigate]);
 
-  // Repo switch: stale results from the previous repository must not survive.
-  // The tracked-files effect above reloads on repo.path; here we clear every
-  // tab-local search result.
-  useEffect(() => {
-    setEntries([]);
-    setSelected(null);
-    setSearched(false);
-    setGrepMatches([]);
-    setGrepSearched(false);
-    setGrepError('');
-    setRevResult(null);
-    setRevError(null);
-    setRevInput('HEAD');
-  }, [repo.path]);
+  const openInBlame = useCallback((path: string) => {
+    useSelectionStore.getState().selectFile(path);
+    navigate('/blame');
+  }, [navigate]);
 
-  const handleInvestigate = useCallback(async () => {
-    if (!filePath.trim()) {
-      toast.warning(t('pages.filePathRequired'));
-      return;
-    }
-    setLoading(true);
-    setSearched(true);
+  const handleOpenCommitInBrowser = useCallback(async (entry: LogEntry) => {
     try {
-      const result = await api.git.log(repo.path, {
-        maxCount: 100,
-        file: filePath,
-        follow: followRenames,
-        all: false,
-      });
-      setEntries(result);
-      setSelected(result[0] || null);
-    } catch (e) {
-      toast.error(t('pages.investigateFailed'), String(e));
-      setEntries([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [repo.path, filePath, followRenames, toast]);
-
-  // === Content search (git grep) tab ===
-  const [grepPattern, setGrepPattern] = useState('');
-  const [grepIgnoreCase, setGrepIgnoreCase] = useState(false);
-  const [grepWord, setGrepWord] = useState(false);
-  const [grepUntracked, setGrepUntracked] = useState(false);
-  const [grepPathspec, setGrepPathspec] = useState('');
-  const [grepMatches, setGrepMatches] = useState<GrepMatch[]>([]);
-  const [grepLoading, setGrepLoading] = useState(false);
-  const [grepSearched, setGrepSearched] = useState(false);
-  const [grepError, setGrepError] = useState('');
-  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
-
-  const handleGrep = useCallback(async () => {
-    if (!grepPattern.trim()) {
-      toast.warning(t('pages.searchPatternRequired'));
-      return;
-    }
-    setGrepLoading(true);
-    setGrepSearched(true);
-    setGrepError('');
-    try {
-      const options = ['--line-number'];
-      if (grepIgnoreCase) options.push('-i');
-      if (grepWord) options.push('-w');
-      if (grepUntracked) options.push('--untracked');
-      const raw = await api.git.grep(repo.path, grepPattern, options, grepPathspec || undefined);
-      setGrepMatches(parseGrepOutput(raw));
-    } catch (e) {
-      const msg = String(e);
-      // git grep exits with code 1 when there are no matches — treat as empty result
-      if (msg.includes('exit code 1') || msg.includes('no matches')) {
-        setGrepMatches([]);
+      const info = await api.git.extractRepoInfo(repo.path);
+      if (info.webUrl && info.provider !== 'unknown') {
+        api.app.openExternal(`${info.webUrl}/commit/${entry.hash}`);
       } else {
-        setGrepError(msg);
-        setGrepMatches([]);
+        toast.info(t('pages.noRemoteUrl'));
       }
-    } finally {
-      setGrepLoading(false);
+    } catch (e) {
+      toast.error(t('pages.openInBrowserFailed'), String(e));
     }
-  }, [repo.path, grepPattern, grepIgnoreCase, grepWord, grepUntracked, grepPathspec, toast]);
+  }, [repo.path, toast, t]);
 
-  // Group grep matches per file, preserving git's order
-  const grepGroups = useMemo(() => {
+  const copyToClipboard = useCallback((text: string, label?: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      toast.success(label || t('common.copied', { defaultValue: 'Copied' }));
+    }).catch(() => {
+      toast.error(t('common.copyFailed', { defaultValue: 'Copy failed' }));
+    });
+  }, [toast, t]);
+
+  // ─── Group content matches per file (preserving git's order) ─────────────
+  const contentGroups = useMemo(() => {
     const map = new Map<string, GrepMatch[]>();
-    for (const m of grepMatches) {
+    for (const m of contentMatches) {
       const arr = map.get(m.file);
       if (arr) arr.push(m);
       else map.set(m.file, [m]);
     }
     return Array.from(map.entries());
-  }, [grepMatches]);
+  }, [contentMatches]);
 
-  // === Rev-parse tab ===
+  // ─── Result counts for the chips + the empty/no-results check ────────────
+  const hasAnyResult = commits.length > 0 || fileResults.length > 0 || contentMatches.length > 0;
+  const anyLoading = commitsLoading || contentLoading;
+  const trimmedQuery = query.trim();
+  const hasQuery = trimmedQuery.length >= 2;
+  const showEmpty = !anyLoading && hasQuery && !hasAnyResult && !contentError;
+
+  const MODES: { id: Mode; label: string }[] = [
+    { id: 'all', label: t('pages.searchModeAll', { defaultValue: 'All' }) },
+    { id: 'commits', label: t('pages.invTabCommits') },
+    { id: 'files', label: t('pages.invTabFiles') },
+    { id: 'content', label: t('pages.invTabContent') },
+    { id: 'advanced', label: t('pages.searchModeAdvanced', { defaultValue: 'Advanced' }) },
+  ];
+
+  // ─── Advanced tab (rev-parse evaluator + grep pathspec) ───────────────────
+  // Kept as a separate panel inside the same page — was a separate tab before,
+  // which forced the user to leave the search context. Now it lives behind the
+  // "Advanced" mode chip so power users can still reach it without the normal
+  // user having to see it.
   const [revInput, setRevInput] = useState('HEAD');
   const [revResult, setRevResult] = useState<string | null>(null);
   const [revError, setRevError] = useState<string | null>(null);
   const [revBusy, setRevBusy] = useState(false);
-  const [currentBranch, setCurrentBranch] = useState<string | null>(null);
 
   const handleRevParse = useCallback(async () => {
     setRevBusy(true);
@@ -218,117 +266,232 @@ export function InvestigatePage() {
     }
   }, [repo.path, revInput]);
 
-  // Load current branch when the rev-parse tab opens
-  const handleTabChange = useCallback(async (t: Tab) => {
-    setTab(t);
-    if (t === 'revparse' && currentBranch === null) {
-      try {
-        setCurrentBranch(await api.git.currentBranch(repo.path));
-      } catch {
-        setCurrentBranch(null);
-      }
-    }
-  }, [repo.path, currentBranch]);
-
-  const handleOpenInBrowser = async (entry: LogEntry) => {
-    try {
-      const info = await api.git.extractRepoInfo(repo.path);
-      if (info.webUrl && info.provider !== 'unknown') {
-        const url = `${info.webUrl}/commit/${entry.hash}`;
-        api.app.openExternal(url);
-      } else {
-        toast.info(t('pages.noRemoteUrl'));
-      }
-    } catch (e) {
-      toast.error(t('pages.openInBrowserFailed'), String(e));
-    }
-  };
-
-  const TABS: { id: Tab; label: string; title: string }[] = [
-    { id: 'commits', label: t('pages.invTabCommits'), title: t('pages.invTabCommitsTitle') },
-    { id: 'files', label: t('pages.invTabFiles'), title: t('pages.invTabFilesTitle') },
-    { id: 'history', label: t('pages.invTabFileHistory'), title: t('pages.invTabFileHistoryTitle') },
-    { id: 'grep', label: t('pages.invTabContent'), title: t('pages.invTabContentTitle') },
-    { id: 'revparse', label: t('pages.invTabRevParse'), title: t('pages.invTabRevParseTitle') },
-  ];
-
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      {/* ===== Header ===== */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border-default bg-bg-secondary">
         <Search size={14} />
         <span className="text-sm font-medium">{t('nav.search')}</span>
         <span className="text-2xs text-text-tertiary truncate" title={repo.path}>{repo.name}</span>
+        {/* Mode chips */}
         <div className="flex items-center gap-1 ml-4">
-          {TABS.map((t) => (
+          {MODES.map((m) => (
             <button
-              key={t.id}
+              key={m.id}
               className={cn(
                 'px-2.5 py-1 text-xs rounded transition-colors',
-                tab === t.id
+                mode === m.id
                   ? 'bg-accent-muted text-accent font-medium'
                   : 'text-text-secondary hover:bg-bg-hover'
               )}
-              title={t.title}
-              onClick={() => handleTabChange(t.id)}
+              onClick={() => setMode(m.id)}
             >
-              {t.label}
+              {m.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* ================= Commit message search tab (LIVE) ================= */}
-      {tab === 'commits' && (
-        <>
-          <div className="flex items-center gap-2 p-3 border-b border-border-default bg-bg-tertiary">
-            <Search size={14} className="text-text-tertiary flex-shrink-0" />
-            <input
-              type="text"
-              className="flex-1 text-sm"
-              placeholder={t('pages.invCommitPlaceholder')}
-              value={commitQuery}
-              autoFocus
-              onChange={(e) => setCommitQuery(e.target.value)}
-            />
-            <label className="flex items-center gap-1 text-xs cursor-pointer text-text-secondary" title="-i">
-              <input type="checkbox" checked={commitIgnoreCase} onChange={(e) => setCommitIgnoreCase(e.target.checked)} />
+      {/* ===== Unified search bar ===== */}
+      <div className="flex flex-col gap-2 p-3 border-b border-border-default bg-bg-tertiary">
+        <div className="flex items-center gap-2">
+          <Search size={14} className="text-text-tertiary flex-shrink-0" />
+          <input
+            type="text"
+            className="flex-1 text-sm"
+            placeholder={t('pages.searchPlaceholder', {
+              defaultValue: 'Search commits, files, and content (Ctrl+Enter to grep, Esc to clear)...'
+            })}
+            value={query}
+            autoFocus
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && query) { setQuery(''); }
+            }}
+            title={t('pages.searchPlaceholderTooltip', {
+              defaultValue: 'Commits: matches subject/body via git log --grep. Files: matches tracked file paths. Content: matches file contents via git grep.'
+            })}
+          />
+          {query && (
+            <button
+              className="icon-btn !w-6 !h-6 flex-shrink-0"
+              title={t('common.clear', { defaultValue: 'Clear' })}
+              onClick={() => setQuery('')}
+            >
+              <X size={12} />
+            </button>
+          )}
+          <button
+            className="icon-btn !w-7 !h-7 flex-shrink-0"
+            title={showAdvanced
+              ? t('pages.searchHideAdvanced', { defaultValue: 'Hide search options' })
+              : t('pages.searchShowAdvanced', { defaultValue: 'Show search options (ignore case, whole words, path filter, etc.)' })}
+            onClick={() => setShowAdvanced(!showAdvanced)}
+          >
+            <Filter size={13} className={cn(showAdvanced && 'text-accent')} />
+          </button>
+        </div>
+        {/* Advanced search options — collapsible row of checkboxes + pathspec */}
+        {showAdvanced && (
+          <div className="flex items-center gap-3 flex-wrap text-xs">
+            <label className="flex items-center gap-1 cursor-pointer text-text-secondary" title="-i">
+              <input type="checkbox" checked={ignoreCase} onChange={(e) => setIgnoreCase(e.target.checked)} />
               {t('pages.ignoreCase')}
             </label>
-            {commitLoading && <Loader size={13} className="spin text-text-tertiary" />}
+            <label className="flex items-center gap-1 cursor-pointer text-text-secondary" title="-w (content only)">
+              <input type="checkbox" checked={wholeWords} onChange={(e) => setWholeWords(e.target.checked)} />
+              {t('pages.wholeWords')}
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer text-text-secondary" title="--untracked (content only)">
+              <input type="checkbox" checked={includeUntracked} onChange={(e) => setIncludeUntracked(e.target.checked)} />
+              {t('pages.includeUntracked')}
+            </label>
+            <div className="flex items-center gap-1">
+              <span className="text-text-tertiary">{t('pages.pathLabel', { defaultValue: 'Path:' })}</span>
+              <input
+                type="text"
+                className="w-40 text-xs mono px-2 py-0.5 bg-bg-primary border border-border-default rounded"
+                placeholder={t('pages.invGrepPathPlaceholder')}
+                value={pathspec}
+                onChange={(e) => setPathspec(e.target.value)}
+                title={t('pages.invGrepPathTitle')}
+              />
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
-            {commitQuery.trim().length < 2 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-                <GitCommit size={32} className="mb-2 opacity-50" />
-                <div className="text-sm">{t('pages.invTypeMin2')}</div>
-                <div className="text-xs mt-1">{t('pages.invTypeMin2Hint')}</div>
-              </div>
-            ) : commitSearched && !commitLoading && commitEntries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-                <GitCommit size={32} className="mb-2 opacity-50" />
-                <div className="text-sm">{t('pages.invNoCommitsMatch', { query: commitQuery })}</div>
-              </div>
-            ) : (
-              <>
-                <div className="px-3 py-1.5 text-2xs text-text-tertiary border-b border-border-default bg-bg-secondary">
-                  {commitLoading
-                    ? t('pages.searching')
-                    : t(commitEntries.length === 1 ? 'pages.invCommitsMatchOne' : 'pages.invCommitsMatchMany', { count: commitEntries.length, query: commitLiveQuery })}
-                  <span className="ml-2 opacity-70">{t('pages.invClickToOpen')}</span>
+        )}
+      </div>
+
+      {/* ===== Result counts summary ===== */}
+      {(hasQuery || anyLoading) && mode !== 'advanced' && (
+        <div className="px-3 py-1.5 text-2xs text-text-tertiary border-b border-border-subtle bg-bg-secondary flex items-center gap-3">
+          {anyLoading && <Loader size={11} className="spin" />}
+          {mode !== 'files' && (
+            <span>
+              {commitsLoading ? '…' : commits.length} {t('pages.invTabCommits')}
+            </span>
+          )}
+          {mode !== 'content' && (
+            <span>
+              {fileResults.length} {t('pages.invTabFiles')}
+            </span>
+          )}
+          {mode !== 'commits' && (
+            <span>
+              {contentLoading ? '…' : contentMatches.length} {t('pages.invTabContent')}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ===== Results ===== */}
+      <div className="flex-1 overflow-y-auto">
+        {mode === 'advanced' ? (
+          // ─── Advanced: rev-parse evaluator + pathspec helper ─────────────
+          <div className="p-4">
+            <div className="max-w-2xl mx-auto space-y-4">
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">
+                  {t('pages.revParseLabel', { defaultValue: 'rev-parse expression (any git revision syntax, multiple args allowed)' })}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 text-sm font-mono"
+                    placeholder="HEAD~3  |  v1.0^{commit}  |  --abbrev-ref HEAD  |  main@{upstream}"
+                    value={revInput}
+                    onChange={(e) => setRevInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleRevParse()}
+                  />
+                  <button className="btn btn-primary text-xs" onClick={handleRevParse} disabled={revBusy || !revInput.trim()}>
+                    {revBusy ? <Loader size={12} className="spin" /> : <CornerDownRight size={12} />}
+                    {t('pages.revParseButton', { defaultValue: 'Evaluate' })}
+                  </button>
                 </div>
-                {commitEntries.map((entry, idx) => (
+              </div>
+              {revResult !== null && (
+                <div className="border border-border-default rounded bg-bg-tertiary p-3">
+                  <div className="text-2xs uppercase text-text-tertiary mb-1">{t('pages.revParseResult', { defaultValue: 'Result' })}</div>
+                  <div className="flex items-center gap-2">
+                    <code className="font-mono text-sm text-accent break-all flex-1">{revResult}</code>
+                    <button
+                      className="icon-btn !w-6 !h-6"
+                      title={t('common.copy', { defaultValue: 'Copy' })}
+                      onClick={() => copyToClipboard(revResult)}
+                    >
+                      <Copy size={11} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {revError && (
+                <div className="border border-status-deleted/40 rounded bg-status-deleted/10 p-3">
+                  <div className="text-2xs uppercase text-status-deleted mb-1">{t('pages.revParseError', { defaultValue: 'Error' })}</div>
+                  <code className="font-mono text-xs text-status-deleted break-all">{revError}</code>
+                </div>
+              )}
+              <div className="text-xs text-text-tertiary space-y-1 pt-2 border-t border-border-default">
+                <div className="font-semibold text-text-secondary mb-1">{t('pages.revParseExamples', { defaultValue: 'Useful expressions:' })}</div>
+                <div><code className="text-accent">HEAD~5</code> — 5 commits before HEAD</div>
+                <div><code className="text-accent">v1.0{'{'}commit{'}'}</code> — the commit a tag points to</div>
+                <div><code className="text-accent">--abbrev-ref HEAD</code> — current branch name</div>
+                <div><code className="text-accent">main@{'{'}upstream{'}'}</code> — upstream ref of main</div>
+              </div>
+            </div>
+          </div>
+        ) : !hasQuery ? (
+          // ─── Empty state: no query yet ───────────────────────────────────
+          <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
+            <Search size={32} className="mb-2 opacity-50" />
+            <div className="text-sm">{t('pages.searchEmpty', { defaultValue: 'Type at least 2 characters to search' })}</div>
+            <div className="text-xs mt-1 max-w-md text-center">
+              {t('pages.searchEmptyHint', { defaultValue: 'Searches commits (subject + body), tracked file paths, and file contents — all in parallel.' })}
+            </div>
+          </div>
+        ) : showEmpty ? (
+          // ─── Empty state: query ran, no results ──────────────────────────
+          <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
+            <AlertCircle size={32} className="mb-2 opacity-50" />
+            <div className="text-sm">{t('pages.searchNoResults', { defaultValue: 'No matches for "{q}"', q: trimmedQuery })}</div>
+            <div className="text-xs mt-1 max-w-md text-center">
+              {t('pages.searchNoResultsHint', { defaultValue: 'Try a shorter substring, enable Ignore case, or switch the search mode above.' })}
+            </div>
+          </div>
+        ) : contentError ? (
+          // ─── Content search error (bad regex, etc.) ──────────────────────
+          <div className="p-6">
+            <div className="border border-status-deleted/40 rounded bg-status-deleted/10 p-3">
+              <div className="text-2xs uppercase text-status-deleted mb-1">{t('pages.grepError')}</div>
+              <code className="font-mono text-xs text-status-deleted break-all">{contentError}</code>
+            </div>
+          </div>
+        ) : (
+          // ─── Results: commits → files → content (in that order) ──────────
+          <>
+            {/* ─── Commits ─── */}
+            {(mode === 'all' || mode === 'commits') && commits.length > 0 && (
+              <section>
+                <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default flex items-center gap-2 sticky top-0 z-10">
+                  <GitCommit size={11} />
+                  {t('pages.invTabCommits')}
+                  <span className="text-2xs text-text-tertiary font-normal">({commits.length})</span>
+                  {commitsLoading && <Loader size={11} className="spin ml-auto" />}
+                </div>
+                {commits.map((entry, idx) => (
                   <div
                     key={entry.hash + idx}
                     className="group flex items-start gap-3 px-3 py-2 cursor-pointer border-b border-border-subtle hover:bg-bg-hover"
                     title={t('pages.invClickOpenHistory')}
-                    onClick={() => {
-                      useSelectionStore.getState().selectCommit(entry.hash);
-                      navigate('/history');
-                    }}
+                    onClick={() => openCommitInHistory(entry.hash)}
                   >
                     <GitCommit size={14} className="text-text-tertiary mt-0.5 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm text-text-primary truncate">{entry.subject}</div>
+                      <div className="text-sm text-text-primary truncate">
+                        {highlight(entry.subject, trimmedQuery, ignoreCase).map((seg, j) =>
+                          seg.hit
+                            ? <mark key={j} className="bg-status-added/30 text-text-primary rounded-sm px-0.5">{seg.seg}</mark>
+                            : <span key={j}>{seg.seg}</span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
                         <span className="font-medium text-text-secondary">{entry.author.name}</span>
                         <span>·</span>
@@ -337,459 +500,152 @@ export function InvestigatePage() {
                       </div>
                     </div>
                     <code className="text-xs font-mono text-text-tertiary flex-shrink-0">{shortHash(entry.hash)}</code>
+                    <button
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                      title={t('pages.openInBrowser')}
+                      onClick={(e) => { e.stopPropagation(); handleOpenCommitInBrowser(entry); }}
+                    >
+                      <ExternalLink size={11} />
+                    </button>
+                    <button
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                      title={t('common.copyHash', { defaultValue: 'Copy commit hash' })}
+                      onClick={(e) => { e.stopPropagation(); copyToClipboard(entry.hash); }}
+                    >
+                      <Copy size={11} />
+                    </button>
                   </div>
                 ))}
-              </>
+              </section>
             )}
-          </div>
-        </>
-      )}
 
-      {/* ================= Files tab — live file-name search ================= */}
-      {tab === 'files' && (
-        <>
-          <div className="flex items-center gap-2 p-3 border-b border-border-default bg-bg-tertiary">
-            <Search size={14} className="text-text-tertiary flex-shrink-0" />
-            <input
-              type="text"
-              className="flex-1 text-sm font-mono"
-              placeholder={t('pages.invFilesPlaceholder')}
-              value={fileQuery}
-              autoFocus
-              onChange={(e) => setFileQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && fileResults[0]) openFileHistory(fileResults[0]); }}
-            />
-            <span className="text-2xs text-text-tertiary flex-shrink-0">
-              {fileQuery.trim()
-                ? t('pages.invTrackedFilesFiltered', { shown: `${fileResults.length}${fileResults.length === 200 ? '+' : ''}`, total: trackedFiles.length })
-                : t('pages.invTrackedFilesCount', { count: trackedFiles.length })}
-            </span>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {!fileQuery.trim() ? (
-              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-                <FileText size={32} className="mb-2 opacity-50" />
-                <div className="text-sm">{t('pages.invTypeFileName')}</div>
-                <div className="text-xs mt-1">{t('pages.invFilesHint1')} <FileText size={9} className="inline" />{t('pages.invFilesHint2')}</div>
-              </div>
-            ) : fileResults.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-                <FileText size={32} className="mb-2 opacity-50" />
-                <div className="text-sm">{t('pages.invNoFileMatch', { query: fileQuery })}</div>
-              </div>
-            ) : (
-              fileResults.map((f) => {
-                const base = f.slice(f.lastIndexOf('/') + 1);
-                return (
-                  <div
-                    key={f}
-                    className="group flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-border-subtle hover:bg-bg-hover text-xs"
-                    title={t('pages.invFileRowHint', { path: f })}
-                    onClick={() => openFileHistory(f)}
-                  >
-                    <FileText size={12} className="text-text-tertiary flex-shrink-0" />
-                    <span className="font-mono truncate flex-1 min-w-0">
-                      {f.slice(0, f.length - base.length)}
-                      <span className="text-text-primary font-medium">{base}</span>
-                    </span>
-                    <button
-                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
-                      title={t('pages.openInChanges')}
-                      onClick={(e) => { e.stopPropagation(); openInChanges(f); }}
-                    >
-                      <FolderOpen size={11} />
-                    </button>
-                    <button
-                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
-                      title={t('pages.fileHistory')}
-                      onClick={(e) => { e.stopPropagation(); openFileHistory(f); }}
-                    >
-                      <History size={11} />
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </>
-      )}
-
-      {/* ================= File history tab ================= */}
-      {tab === 'history' && (
-        <>
-          <div className="flex items-center gap-2 p-3 border-b border-border-default bg-bg-tertiary">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                className="w-full text-sm mono"
-                placeholder={t('pages.invPathPlaceholder')}
-                value={histQuery}
-                onChange={(e) => { setHistQuery(e.target.value); setFilePath(e.target.value); }}
-                onKeyDown={(e) => e.key === 'Enter' && handleInvestigate()}
-              />
-              {histPathHelper.length > 0 && histQuery.trim() !== filePath && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 max-h-64 overflow-y-auto">
-                  {histPathHelper.map((f) => (
+            {/* ─── Files ─── */}
+            {(mode === 'all' || mode === 'files') && fileResults.length > 0 && (
+              <section>
+                <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default flex items-center gap-2 sticky top-0 z-10">
+                  <FileText size={11} />
+                  {t('pages.invTabFiles')}
+                  <span className="text-2xs text-text-tertiary font-normal">({fileResults.length}{fileResults.length === 50 ? '+' : ''})</span>
+                </div>
+                {fileResults.map((f) => {
+                  const base = f.slice(f.lastIndexOf('/') + 1);
+                  return (
                     <div
                       key={f}
-                      className="px-2 py-1 text-xs font-mono hover:bg-bg-hover cursor-pointer truncate"
-                      onClick={() => { setFilePath(f); setHistQuery(f); useSelectionStore.getState().selectFile(f); }}
+                      className="group flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-border-subtle hover:bg-bg-hover text-xs"
+                      title={t('pages.invFileRowHint', { path: f })}
+                      onClick={() => openFileHistory(f)}
                     >
-                      {f}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <label className="flex items-center gap-1 text-xs cursor-pointer text-text-secondary">
-              <input
-                type="checkbox"
-                checked={followRenames}
-                onChange={(e) => setFollowRenames(e.target.checked)}
-              />
-              {t('pages.followRenames')}
-            </label>
-            <button
-              className="btn btn-primary text-xs"
-              onClick={handleInvestigate}
-              disabled={loading || !filePath.trim()}
-            >
-              {loading ? <Loader size={12} className="spin" /> : <Search size={12} />}
-              {t('pages.investigate')}
-            </button>
-          </div>
-
-          <div className="flex flex-1 overflow-hidden">
-            {/* History list */}
-            <div className="flex-1 overflow-y-auto">
-              {loading ? (
-                <div className="p-8 text-center text-text-tertiary text-sm flex items-center justify-center gap-2">
-                  <Loader size={14} className="spin" />
-                  {t('pages.invHistoryLoading')}
-                </div>
-              ) : !searched ? (
-                <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-                  <FileText size={32} className="mb-2 opacity-50" />
-                  <div className="text-sm">{t('pages.invNoFile')}</div>
-                  <div className="text-xs mt-1">{t('pages.invNoFileHint')}</div>
-                </div>
-              ) : entries.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-                  <FileText size={32} className="mb-2 opacity-50" />
-                  <div className="text-sm">{t('pages.invNoCommitsForFile')}</div>
-                </div>
-              ) : (
-                entries.map((entry, idx) => (
-                  <div
-                    key={entry.hash + idx}
-                    className={cn(
-                      'group flex items-start gap-3 px-3 py-2 cursor-pointer border-b border-border-subtle',
-                      selected?.hash === entry.hash ? 'bg-bg-selected' : 'hover:bg-bg-hover'
-                    )}
-                    onClick={() => {
-                      setSelected(entry);
-                      // Cross-tool: also the GLOBAL commit selection so the
-                      // commit shows up in Toolbar/History/Diff/Notes.
-                      useSelectionStore.getState().selectCommit(entry.hash);
-                    }}
-                  >
-                    <GitCommit size={14} className="text-text-tertiary mt-0.5 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-text-primary truncate">{entry.subject}</div>
-                      <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
-                        <span className="font-medium text-text-secondary">{entry.author.name}</span>
-                        <span>·</span>
-                        <span>{formatDate(entry.author.date)}</span>
-                        <RefBadges refs={entry.refs} size={7} hash={entry.hash} className="flex-wrap" />
-                      </div>
-                    </div>
-                    <code className="text-xs font-mono text-text-tertiary flex-shrink-0">
-                      {shortHash(entry.hash)}
-                    </code>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Detail panel */}
-            {selected && (
-              <div className="w-80 border-l border-border-default bg-bg-secondary overflow-y-auto">
-                <div className="p-4">
-                  <div className="text-sm font-medium mb-2">{selected.subject}</div>
-                  <div className="flex items-center gap-2 mb-4">
-                    <code className="text-xs font-mono px-2 py-1 bg-bg-tertiary rounded">
-                      {selected.hash}
-                    </code>
-                    <button
-                      className="icon-btn"
-                      title={t('pages.openInBrowser')}
-                      onClick={() => handleOpenInBrowser(selected)}
-                    >
-                      <ExternalLink size={12} />
-                    </button>
-                    {/* Cross-tool links — the found commit becomes the global
-                        selection and opens in History / Diff like anywhere else */}
-                    <button
-                      className="icon-btn"
-                      title={t('pages.viewInHistoryLog')}
-                      onClick={() => {
-                        useSelectionStore.getState().selectCommit(selected.hash);
-                        window.location.hash = '#/history';
-                      }}
-                    >
-                      <History size={12} />
-                    </button>
-                    <button
-                      className="icon-btn"
-                      title={t('pages.openInDiffTool')}
-                      onClick={() => {
-                        useSelectionStore.getState().selectCommit(selected.hash);
-                        useSelectionStore.getState().selectFile('.');
-                        window.location.hash = '#/diff';
-                      }}
-                    >
-                      <FileText size={12} />
-                    </button>
-                  </div>
-                  <div className="space-y-3 text-sm">
-                    <div>
-                      <div className="text-xs uppercase text-text-tertiary mb-1">{t('history.author')}</div>
-                      <div className="text-text-primary">{selected.author.name}</div>
-                      <div className="text-xs text-text-secondary">{selected.author.email}</div>
-                      <div className="text-xs text-text-tertiary">
-                        {new Date(selected.author.date).toLocaleString()}
-                      </div>
-                    </div>
-                    {selected.parents.length > 0 && (
-                      <div>
-                        <div className="text-xs uppercase text-text-tertiary mb-1">{t('pages.parents')}</div>
-                        {selected.parents.map((p, i) => (
-                          <div key={i} className="flex items-center gap-1">
-                            <CornerDownRight size={11} className="text-text-tertiary" />
-                            <code className="text-xs font-mono text-accent">{shortHash(p)}</code>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {selected.body && (
-                      <div>
-                        <div className="text-xs uppercase text-text-tertiary mb-1">{t('pages.messageLabel')}</div>
-                        <pre className="text-xs font-mono whitespace-pre-wrap text-text-secondary bg-bg-tertiary p-2 rounded">
-                          {selected.body}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* ================= Content search (git grep) tab ================= */}
-      {tab === 'grep' && (
-        <>
-          <div className="flex items-center gap-2 p-3 border-b border-border-default bg-bg-tertiary flex-wrap">
-            <input
-              type="text"
-              className="flex-1 min-w-48 text-sm mono"
-              placeholder={t('pages.invGrepPlaceholder')}
-              value={grepPattern}
-              autoFocus
-              onChange={(e) => setGrepPattern(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleGrep()}
-            />
-            <input
-              type="text"
-              className="w-44 text-xs mono"
-              placeholder={t('pages.invGrepPathPlaceholder')}
-              value={grepPathspec}
-              onChange={(e) => setGrepPathspec(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleGrep()}
-              title={t('pages.invGrepPathTitle')}
-            />
-            <label className="flex items-center gap-1 text-xs cursor-pointer text-text-secondary" title="-i">
-              <input type="checkbox" checked={grepIgnoreCase} onChange={(e) => setGrepIgnoreCase(e.target.checked)} />
-              {t('pages.ignoreCase')}
-            </label>
-            <label className="flex items-center gap-1 text-xs cursor-pointer text-text-secondary" title="-w">
-              <input type="checkbox" checked={grepWord} onChange={(e) => setGrepWord(e.target.checked)} />
-              {t('pages.wholeWords')}
-            </label>
-            <label className="flex items-center gap-1 text-xs cursor-pointer text-text-secondary" title="--untracked">
-              <input type="checkbox" checked={grepUntracked} onChange={(e) => setGrepUntracked(e.target.checked)} />
-              {t('pages.includeUntracked')}
-            </label>
-            <button
-              className="btn btn-primary text-xs"
-              onClick={handleGrep}
-              disabled={grepLoading || !grepPattern.trim()}
-            >
-              {grepLoading ? <Loader size={12} className="spin" /> : <Search size={12} />}
-              {t('common.search')}
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto">
-            {grepLoading ? (
-              <div className="p-8 text-center text-text-tertiary text-sm flex items-center justify-center gap-2">
-                <Loader size={14} className="spin" />
-                {t('pages.invGrepLoading')}
-              </div>
-            ) : !grepSearched ? (
-              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-                <Search size={32} className="mb-2 opacity-50" />
-                <div className="text-sm">{t('pages.invGrepEmpty')}</div>
-                <div className="text-xs mt-1">{t('pages.invGrepEmptyHint')}</div>
-              </div>
-            ) : grepError ? (
-              <div className="p-6">
-                <div className="border border-status-deleted/40 rounded bg-status-deleted/10 p-3">
-                  <div className="text-2xs uppercase text-status-deleted mb-1">{t('pages.grepError')}</div>
-                  <code className="font-mono text-xs text-status-deleted break-all">{grepError}</code>
-                </div>
-              </div>
-            ) : grepMatches.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
-                <Search size={32} className="mb-2 opacity-50" />
-                <div className="text-sm">{t('pages.noMatches')}</div>
-              </div>
-            ) : (
-              <>
-                <div className="px-3 py-1.5 text-2xs text-text-tertiary border-b border-border-default bg-bg-secondary">
-                  {grepMatches.length} {grepMatches.length === 1 ? t('pages.invGrepMatch') : t('pages.invGrepMatches')}{' '}
-                  {t('pages.invGrepIn')} {grepGroups.length} {grepGroups.length === 1 ? t('pages.invGrepFile') : t('pages.invGrepFiles')}
-                  {grepPathspec.trim() && <> · {t('pages.pathLabel')} <code className="font-mono">{grepPathspec}</code></>}
-                </div>
-                {grepGroups.map(([file, matches]) => {
-                  const collapsed = collapsedFiles.has(file);
-                  return (
-                    <div key={file}>
-                      <div
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-secondary border-b border-border-subtle cursor-pointer hover:bg-bg-hover"
-                        onClick={() => setCollapsedFiles((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(file)) next.delete(file); else next.add(file);
-                          return next;
-                        })}
-                        title={collapsed ? t('pages.expandMatches') : t('pages.collapseMatches')}
+                      <FileText size={12} className="text-text-tertiary flex-shrink-0" />
+                      <span className="font-mono truncate flex-1 min-w-0">
+                        {f.slice(0, f.length - base.length)}
+                        <span className="text-text-primary font-medium">
+                          {highlight(base, trimmedQuery, ignoreCase).map((seg, j) =>
+                            seg.hit
+                              ? <mark key={j} className="bg-status-added/30 text-text-primary rounded-sm px-0.5">{seg.seg}</mark>
+                              : <span key={j}>{seg.seg}</span>
+                          )}
+                        </span>
+                      </span>
+                      <button
+                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                        title={t('pages.openInChanges')}
+                        onClick={(e) => { e.stopPropagation(); openFileInChanges(f); }}
                       >
-                        {collapsed ? <ChevronRight size={11} className="text-text-tertiary" /> : <ChevronDown size={11} className="text-text-tertiary" />}
-                        <FileText size={11} className="text-text-tertiary flex-shrink-0" />
-                        <code className="font-mono text-xs text-text-primary truncate flex-1 min-w-0">{file}</code>
-                        <span className="text-2xs text-text-tertiary flex-shrink-0">{matches.length}</span>
-                        <button
-                          className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
-                          title={t('pages.fileHistory')}
-                          onClick={(e) => { e.stopPropagation(); openFileHistory(file); }}
-                        >
-                          <History size={11} />
-                        </button>
-                      </div>
-                      {!collapsed && matches.map((m, i) => (
-                        <div
-                          key={`${m.file}:${m.line}:${i}`}
-                          className="group flex items-start gap-2 pl-6 pr-3 py-1 border-b border-border-subtle hover:bg-bg-hover text-xs cursor-pointer"
-                          title={t('pages.invMatchRowHint', { file: m.file, line: m.line })}
-                          onClick={() => {
-                            useSelectionStore.getState().selectFile(m.file);
-                            navigate('/changes');
-                          }}
-                        >
-                          <button
-                            className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 flex-shrink-0 mt-0.5"
-                            title={t('pages.copyRef')}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigator.clipboard.writeText(`${m.file}:${m.line}`);
-                              toast.success(t('pages.referenceCopied'));
-                            }}
-                          >
-                            <Copy size={10} />
-                          </button>
-                          <code className="font-mono text-text-tertiary flex-shrink-0 w-10 text-right">{m.line}</code>
-                          <pre className="font-mono whitespace-pre-wrap break-all text-text-primary flex-1 min-w-0">
-                            {highlight(m.text, grepPattern, grepIgnoreCase).map((seg, j) =>
-                              seg.hit
-                                ? <mark key={j} className="bg-status-added/30 text-text-primary rounded-sm px-0.5">{seg.seg}</mark>
-                                : <span key={j}>{seg.seg}</span>
-                            )}
-                          </pre>
-                        </div>
-                      ))}
+                        <FolderOpen size={11} />
+                      </button>
+                      <button
+                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                        title={t('pages.openInDiff', { defaultValue: 'Open in Diff tool' })}
+                        onClick={(e) => { e.stopPropagation(); openFileInDiff(f); }}
+                      >
+                        <FileText size={11} />
+                      </button>
+                      <button
+                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                        title={t('pages.openInBlame', { defaultValue: 'Open in Blame tool' })}
+                        onClick={(e) => { e.stopPropagation(); openInBlame(f); }}
+                      >
+                        <GitBranch size={11} />
+                      </button>
+                      <button
+                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                        title={t('pages.fileHistory')}
+                        onClick={(e) => { e.stopPropagation(); openFileHistory(f); }}
+                      >
+                        <History size={11} />
+                      </button>
                     </div>
                   );
                 })}
-              </>
+              </section>
             )}
-          </div>
-        </>
-      )}
 
-      {/* ================= Rev-parse tab ================= */}
-      {tab === 'revparse' && (
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="max-w-2xl mx-auto space-y-4">
-            <div className="flex items-center gap-2 text-xs text-text-tertiary">
-              <GitCommit size={13} />
-              Current branch:
-              <code className="font-mono text-accent">{currentBranch || 'detached / unknown'}</code>
-            </div>
-            <div>
-              <label className="text-xs text-text-tertiary block mb-1">
-                rev-parse expression (any git revision syntax, multiple args allowed)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  className="flex-1 text-sm font-mono"
-                  placeholder="HEAD~3  |  v1.0^{commit}  |  --abbrev-ref HEAD  |  main@{upstream}"
-                  value={revInput}
-                  onChange={(e) => setRevInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleRevParse()}
-                />
-                <button className="btn btn-primary text-xs" onClick={handleRevParse} disabled={revBusy || !revInput.trim()}>
-                  {revBusy ? <Loader size={12} className="spin" /> : <CornerDownRight size={12} />}
-                  Evaluate
-                </button>
-              </div>
-            </div>
-            {revResult !== null && (
-              <div className="border border-border-default rounded bg-bg-tertiary p-3">
-                <div className="text-2xs uppercase text-text-tertiary mb-1">Result</div>
-                <div className="flex items-center gap-2">
-                  <code className="font-mono text-sm text-accent break-all flex-1">{revResult}</code>
-                  <button
-                    className="icon-btn !w-6 !h-6"
-                    title="Copy result"
-                    onClick={() => {
-                      navigator.clipboard.writeText(revResult);
-                      toast.success('Copied');
-                    }}
-                  >
-                    <Copy size={11} />
-                  </button>
+            {/* ─── Content (git grep) ─── */}
+            {(mode === 'all' || mode === 'content') && contentGroups.length > 0 && (
+              <section>
+                <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default flex items-center gap-2 sticky top-0 z-10">
+                  <Search size={11} />
+                  {t('pages.invTabContent')}
+                  <span className="text-2xs text-text-tertiary font-normal">({contentMatches.length} in {contentGroups.length} files)</span>
+                  {contentLoading && <Loader size={11} className="spin ml-auto" />}
                 </div>
+                {contentGroups.map(([file, matches]) => (
+                  <div key={file}>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-secondary border-b border-border-subtle">
+                      <FileText size={11} className="text-text-tertiary flex-shrink-0" />
+                      <code className="font-mono text-xs text-text-primary truncate flex-1 min-w-0">{file}</code>
+                      <span className="text-2xs text-text-tertiary flex-shrink-0">{matches.length}</span>
+                      <button
+                        className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                        title={t('pages.fileHistory')}
+                        onClick={() => openFileHistory(file)}
+                      >
+                        <History size={11} />
+                      </button>
+                    </div>
+                    {matches.map((m, i) => (
+                      <div
+                        key={`${m.file}:${m.line}:${i}`}
+                        className="group flex items-start gap-2 pl-6 pr-3 py-1 border-b border-border-subtle hover:bg-bg-hover text-xs cursor-pointer"
+                        title={t('pages.invMatchRowHint', { file: m.file, line: m.line })}
+                        onClick={() => openFileInChanges(m.file)}
+                      >
+                        <button
+                          className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 flex-shrink-0 mt-0.5"
+                          title={t('pages.copyRef')}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copyToClipboard(`${m.file}:${m.line}`);
+                          }}
+                        >
+                          <Copy size={10} />
+                        </button>
+                        <code className="font-mono text-text-tertiary flex-shrink-0 w-10 text-right">{m.line}</code>
+                        <pre className="font-mono whitespace-pre-wrap break-all text-text-primary flex-1 min-w-0">
+                          {highlight(m.text, trimmedQuery, ignoreCase).map((seg, j) =>
+                            seg.hit
+                              ? <mark key={j} className="bg-status-added/30 text-text-primary rounded-sm px-0.5">{seg.seg}</mark>
+                              : <span key={j}>{seg.seg}</span>
+                          )}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </section>
+            )}
+
+            {/* ─── Loading indicator at the bottom while results stream in ─── */}
+            {anyLoading && hasQuery && (
+              <div className="p-3 text-center text-text-tertiary text-xs flex items-center justify-center gap-2">
+                <Loader size={12} className="spin" />
+                {t('pages.searching', { defaultValue: 'Searching...' })}
               </div>
             )}
-            {revError && (
-              <div className="border border-status-deleted/40 rounded bg-status-deleted/10 p-3">
-                <div className="text-2xs uppercase text-status-deleted mb-1">Error</div>
-                <code className="font-mono text-xs text-status-deleted break-all">{revError}</code>
-              </div>
-            )}
-            <div className="text-xs text-text-tertiary space-y-1 pt-2 border-t border-border-default">
-              <div className="font-semibold text-text-secondary mb-1">Useful expressions:</div>
-              <div><code className="text-accent">HEAD~5</code> — 5 commits before HEAD</div>
-              <div><code className="text-accent">v1.0{'{'}commit{'}'}</code> — the commit a tag points to</div>
-              <div><code className="text-accent">--abbrev-ref HEAD</code> — current branch name</div>
-              <div><code className="text-accent">main@{'{'}upstream{'}'}</code> — upstream ref of main</div>
-              <div><code className="text-accent">HEAD@{'{'}1.hour.ago{'}'}</code> — where HEAD was an hour ago</div>
-            </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

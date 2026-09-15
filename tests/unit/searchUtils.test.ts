@@ -90,4 +90,43 @@ describe('filterTrackedFiles', () => {
     const many = Array.from({ length: 500 }, (_, i) => `f${i}.txt`);
     expect(filterTrackedFiles(many, 'f', 200)).toHaveLength(200);
   });
+
+  // ─── New behaviour: multi-token space-separated queries ────────────────
+  it('matches multi-token queries (all tokens must appear, in any order)', () => {
+    // 'util test' should match tests/util.test.ts (basename contains both
+    // 'util' and 'test') — previously this would have returned [] because
+    // the search treated the whole string as one substring.
+    const res = filterTrackedFiles(files, 'util test');
+    expect(res).toContain('tests/util.test.ts');
+    // But NOT src/lib/util.ts — its basename only has 'util', not 'test'.
+    expect(res).not.toContain('src/lib/util.ts');
+  });
+
+  it('matches multi-token queries against the path too (not just basename)', () => {
+    // 'src ts' should match src/App.tsx (path contains 'src', basename contains 'ts')
+    const res = filterTrackedFiles(files, 'src ts');
+    expect(res).toContain('src/App.tsx');
+  });
+
+  // ─── New behaviour: highlight with plain-alphanumeric pattern ───────────
+  it('treats plain-alphanumeric patterns as literal substring search (no regex semantics)', () => {
+    // Pattern 'function(' contains '(' which is NOT alphanumeric — this falls
+    // into the regex path. But 'foo' (plain alphanumeric) should match 'foo'
+    // literally even if 'foo' would also be a valid regex.
+    const segs = highlight('foo bar foo', 'foo', false);
+    expect(segs.filter(s => s.hit)).toHaveLength(2);
+    expect(segs.filter(s => s.hit).every(s => s.seg === 'foo')).toBe(true);
+  });
+
+  it('escapes regex special chars in plain patterns (no surprise matches)', () => {
+    // Pattern 'foo.bar' is plain alphanumeric + dot. As a regex this would
+    // match 'fooXbar' too, but we want a LITERAL match.
+    const segs = highlight('fooXbar foo.bar', 'foo.bar', false);
+    // Only the literal 'foo.bar' should be a hit — not 'fooXbar'.
+    expect(segs.filter(s => s.hit)).toEqual([{ seg: 'foo.bar', hit: true }]);
+  });
+
+  it('returns single empty segment for empty text input', () => {
+    expect(highlight('', 'foo', false)).toEqual([{ seg: '', hit: false }]);
+  });
 });

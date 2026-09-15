@@ -283,5 +283,6 @@ export const de: Record<string, string> = {
   // MED-4 — line-context menu extras
   'common.copied': 'Kopiert',
   'common.copyFailed': 'Kopieren fehlgeschlagen',
+  'common.copyHash': 'Commit-Hash kopieren',
   'common.copyLineNumber': 'Zeilennummer kopieren ({n})',
 };
