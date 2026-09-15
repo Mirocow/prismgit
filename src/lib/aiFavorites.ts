@@ -195,6 +195,36 @@ export function countNotesInTree(tree: AiFavoriteNode[]): number {
   return count;
 }
 
+/** Flat list of folders for a "Move to folder" picker (left-click menu flow). */
+export interface FolderOption {
+  id: string;
+  name: string;
+  /** Nesting depth for indentation (root folders = 0). */
+  depth: number;
+}
+
+/**
+ * All folders in the tree, in display order, excluding `excludeId` itself
+ * AND its whole subtree (moving a folder into its own descendant would
+ * create a cycle). Used by the favorites panel menu — no drag & drop.
+ */
+export function collectFolderOptions(
+  tree: AiFavoriteNode[],
+  excludeId?: string | null,
+): FolderOption[] {
+  const out: FolderOption[] = [];
+  const walk = (nodes: AiFavoriteNode[], depth: number, skip: boolean) => {
+    for (const n of nodes) {
+      if (n.type !== 'folder') continue;
+      const skipSubtree = skip || n.id === excludeId;
+      if (!skipSubtree) out.push({ id: n.id, name: n.name, depth });
+      walk(n.children, depth + 1, skipSubtree);
+    }
+  };
+  walk(tree, 0, false);
+  return out;
+}
+
 /** Structural validation for data loaded from localStorage. */
 export function isValidFavoritesTree(value: unknown): value is AiFavoriteNode[] {
   if (!Array.isArray(value)) return false;

@@ -12,6 +12,7 @@ import {
   toggleFolderInTree,
   collapseAllInTree,
   countNotesInTree,
+  collectFolderOptions,
   isValidFavoritesTree,
 } from '../../src/lib/aiFavorites';
 
@@ -159,5 +160,42 @@ describe('favId', () => {
   it('produces unique ids', () => {
     const ids = new Set(Array.from({ length: 200 }, () => favId()));
     expect(ids.size).toBe(200);
+  });
+});
+
+describe('collectFolderOptions (move-to-folder picker)', () => {
+  it('lists all folders in display order with depths', () => {
+    const tree = [
+      note('a'),
+      folder('f1', [folder('f1a', [note('deep')]), note('b')]),
+      folder('f2', []),
+    ];
+    const opts = collectFolderOptions(tree);
+    expect(opts.map((o) => `${o.id}@${o.depth}`)).toEqual(['f1@0', 'f1a@1', 'f2@0']);
+  });
+
+  it('returns an empty array for a tree without folders', () => {
+    expect(collectFolderOptions([note('a'), note('b')])).toEqual([]);
+  });
+
+  it('excludes the given folder and its whole subtree (cycle guard)', () => {
+    const tree = [
+      folder('f1', [folder('f1a', [folder('f1ab', [])]), note('b')]),
+      folder('f2', []),
+    ];
+    const opts = collectFolderOptions(tree, 'f1');
+    expect(opts.map((o) => o.id)).toEqual(['f2']);
+  });
+
+  it('excludes a nested folder while keeping siblings', () => {
+    const tree = [folder('f1', [folder('f1a', []), folder('f1b', [])]), folder('f2', [])];
+    const opts = collectFolderOptions(tree, 'f1a');
+    expect(opts.map((o) => o.id)).toEqual(['f1', 'f1b', 'f2']);
+  });
+
+  it('accepts null/undefined excludeId (note move — all folders listed)', () => {
+    const tree = [folder('f1', [folder('f1a', [])])];
+    expect(collectFolderOptions(tree, null)).toHaveLength(2);
+    expect(collectFolderOptions(tree)).toHaveLength(2);
   });
 });
