@@ -63,8 +63,42 @@ export interface ProjectPrefs {
    * Sidebar section names the user has collapsed (e.g. ['Git Actions', 'Refs']).
    * Persisted so a user who collapsed groups does not see them all re-open on
    * next launch.
+   *
+   * Per-repo storage is the primary location. As a fallback (when no repo is
+   * open yet, or to seed a freshly-opened repo's prefs), a GLOBAL default
+   * lives in localStorage under GLOBAL_COLLAPSED_GROUPS_KEY so the user's
+   * collapse choice for the Welcome screen / no-repo state is also remembered.
    */
   collapsedSidebarGroups?: string[];
+}
+
+/**
+ * localStorage key for the GLOBAL sidebar collapsed-groups default. This is
+ * the value used when NO repository is open (Welcome screen) and as the
+ * initial value when a repo is opened for the first time (so the user's
+ * collapse choices carry over to new repos without manual re-setup).
+ */
+const GLOBAL_COLLAPSED_GROUPS_KEY = 'prismgit-sidebar-collapsed-groups';
+
+/** Read the global default for collapsed sidebar groups (no repo open / first run). */
+export function loadGlobalCollapsedGroups(): string[] {
+  try {
+    const raw = localStorage.getItem(GLOBAL_COLLAPSED_GROUPS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((s) => typeof s === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Persist the global default for collapsed sidebar groups. */
+export function saveGlobalCollapsedGroups(groups: string[]): void {
+  try {
+    localStorage.setItem(GLOBAL_COLLAPSED_GROUPS_KEY, JSON.stringify(groups));
+  } catch {
+    /* ignore */
+  }
 }
 
 export function loadProjectPrefs(repoPath: string): ProjectPrefs {

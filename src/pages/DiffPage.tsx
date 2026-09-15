@@ -130,6 +130,15 @@ export function DiffPage() {
     api.git.log(repo.path, { maxCount: 30 }).then(setRecentCommits).catch(() => {});
   }, [repo]);
 
+  // Ref mirror of selectedFileInList so computeDiff can read the latest
+  // value WITHOUT being in its dependency array. This prevents the
+  // auto-compute effect (which depends on computeDiff) from re-running
+  // every time the user clicks a file in the file list — the click
+  // handler already calls loadFileDiff() directly, so the auto-compute
+  // effect should ONLY run when repo / baseRef / compareMode change.
+  const selectedFileInListRef = useRef<string | null>(selectedFileInList);
+  selectedFileInListRef.current = selectedFileInList;
+
   const computeDiff = useCallback(async () => {
     if (!repo) return;
     setLoading(true);
@@ -141,10 +150,11 @@ export function DiffPage() {
       if (stashHash && (filePath === '.' || filePath === '')) {
         const files = await api.git.stashFiles(repo.path, stashHash);
         setChangedFiles(files);
-        if (!selectedFileInList && files.length > 0) {
+        const curSel = selectedFileInListRef.current;
+        if (!curSel && files.length > 0) {
           setSelectedFileInList(files[0].path);
         }
-        const fileToDiff = selectedFileInList || files[0]?.path;
+        const fileToDiff = curSel || files[0]?.path;
         if (fileToDiff) {
           const rawDiff = await api.git.stashFileRawDiff(repo.path, stashHash, fileToDiff);
           setDiff(parseRawDiff(rawDiff, fileToDiff));
@@ -167,11 +177,12 @@ export function DiffPage() {
         });
         setChangedFiles(files);
         // If no specific file selected, auto-select the first one
-        if (!selectedFileInList && files.length > 0) {
+        const curSel = selectedFileInListRef.current;
+        if (!curSel && files.length > 0) {
           setSelectedFileInList(files[0].path);
         }
         // Load diff for the selected file (or first file)
-        const fileToDiff = selectedFileInList || files[0]?.path;
+        const fileToDiff = curSel || files[0]?.path;
         if (fileToDiff) {
           const result = await api.git.diff(repo.path, fileToDiff, { ref: baseRef });
           setDiff(result);
@@ -192,10 +203,11 @@ export function DiffPage() {
           return { path, status: status[0] || 'M', additions: 0, deletions: 0, binary: false, mode: '' };
         });
         setChangedFiles(files);
-        if (!selectedFileInList && files.length > 0) {
+        const curSel = selectedFileInListRef.current;
+        if (!curSel && files.length > 0) {
           setSelectedFileInList(files[0].path);
         }
-        const fileToDiff = selectedFileInList || files[0]?.path;
+        const fileToDiff = curSel || files[0]?.path;
         if (fileToDiff) {
           const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', fileToDiff]);
           // Parse
@@ -225,12 +237,16 @@ export function DiffPage() {
     } finally {
       setLoading(false);
     }
-  }, [repo, filePath, baseRef, compareMode, compareRef, stashHash, toast, selectedFileInList]);
+  }, [repo, filePath, baseRef, compareMode, compareRef, stashHash, toast]);
 
-  // Auto-compute when inputs change
+  // Auto-compute when inputs change.
+  // Reduced debounce from 300ms → 150ms for snappier UX on filter changes.
+  // The original 300ms debounce was set for safety against rapid filter
+  // input, but with the dedupe in computeDiff (selectedFileInListRef) the
+  // compute is now cheap enough that 150ms is plenty.
   useEffect(() => {
     if (repo && baseRef) {
-      const timer = setTimeout(computeDiff, 300); // debounce 300ms
+      const timer = setTimeout(computeDiff, 150);
       return () => clearTimeout(timer);
     }
   }, [computeDiff, repo, baseRef]);

@@ -35,6 +35,12 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:addTag', (_e, path: string, tag: string) => storage.addTag(path, tag));
   ipcMain.handle('settings:removeTag', (_e, path: string, tag: string) => storage.removeTag(path, tag));
   ipcMain.handle('settings:refreshRepoStats', (_e, path: string) => storage.refreshRepoStats(path));
+  // Refresh metadata (last commit, branch count, commit count, provider) for
+  // every configured repo. Used by the Sidebar's "refresh" button so the
+  // user can force-reload the whole list (previously the button only ran the
+  // remote check — incoming/outgoing — but never recomputed the cached stats,
+  // which made the rows look "stuck" after a push/pull).
+  ipcMain.handle('settings:refreshAllRepoStats', () => storage.refreshAllRepoStats());
 
   // Repository groups (tree in the sidebar)
   ipcMain.handle('settings:getRepoGroups', () => storage.getRepoGroups());

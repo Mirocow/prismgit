@@ -278,6 +278,14 @@ export const en: Record<string, string> = {
   'settings.autoRefreshHint': 'Master switch for automatic repository refreshing. When off, no periodic remote checks happen — the ↓/↑ badges in the repository list stay frozen until you press "Check now".',
   'settings.remoteCheckInterval': 'Remote check interval',
   'settings.remoteCheckIntervalHint': 'How often the sidebar fetches all remotes of every listed repository and shows ↓ incoming / ↑ outgoing badges. Only applies while Auto refresh is on. Minimum 30\u00A0s; set 0 to disable the periodic check (the "Check now" button still works).',
+  'settings.autoRefreshHistory': 'Auto-refresh History page',
+  'settings.autoRefreshHistoryHint': 'Periodically re-run git log on the History page so new commits appear without manual refresh. Off by default to avoid excessive git log calls.',
+  'settings.historyRefreshInterval': 'History refresh interval',
+  'settings.historyRefreshIntervalHint': 'How often to re-run `git log` on the History page. 0 = disabled.',
+  'settings.autoPush': 'Periodically push to origin',
+  'settings.autoPushHint': 'Push the current branch’s outgoing commits to its upstream on origin on a timer. Off by default — opt-in only.',
+  'settings.autoPushInterval': 'Auto-push interval',
+  'settings.autoPushIntervalHint': 'How often to push outgoing commits. Min 60s.',
   'settings.secUnit': 'sec',
 
   // GitHub Integration
@@ -725,6 +733,14 @@ export const ru: Record<string, string> = {
   'settings.autoRefreshHint': 'Главный выключатель автоматического обновления репозиториев. Когда выключено, периодические проверки удалённых репозиториев не выполняются — значки ↓/↑ в списке репозиториев замирают, пока вы не нажмёте «Проверить сейчас».',
   'settings.remoteCheckInterval': 'Интервал проверки удалённых репозиториев',
   'settings.remoteCheckIntervalHint': 'Как часто боковая панель загружает все remote каждого репозитория и показывает значки ↓ входящих / ↑ исходящих. Действует только при включённом автообновлении. Минимум 30\u00A0с; установите 0, чтобы отключить периодическую проверку (кнопка «Проверить сейчас» продолжает работать).',
+  'settings.autoRefreshHistory': 'Автообновление страницы Истории',
+  'settings.autoRefreshHistoryHint': 'Периодически перезапускать git log на странице Истории, чтобы новые коммиты появлялись без ручного обновления. По умолчанию выключено, чтобы избежать лишних вызовов git log.',
+  'settings.historyRefreshInterval': 'Интервал обновления истории',
+  'settings.historyRefreshIntervalHint': 'Как часто перезапускать `git log` на странице Истории. 0 = отключено.',
+  'settings.autoPush': 'Периодически пушить в origin',
+  'settings.autoPushHint': 'Периодически отправлять исходящие коммиты текущей ветки в её upstream на origin по таймеру. По умолчанию выключено — только по явному включению.',
+  'settings.autoPushInterval': 'Интервал авто-push',
+  'settings.autoPushIntervalHint': 'Как часто отправлять исходящие коммиты. Минимум 60 с.',
   'settings.secUnit': 'с',
 
   // GitHub Integration
@@ -1171,6 +1187,14 @@ export const zh: Record<string, string> = {
   'settings.autoRefreshHint': '自动刷新仓库的总开关。关闭后不再进行定期远程检查——仓库列表中的 ↓/↑ 徽标会保持冻结，直到您点击“立即检查”。',
   'settings.remoteCheckInterval': '远程检查间隔',
   'settings.remoteCheckIntervalHint': '侧边栏每隔多久获取所有仓库的全部远程并显示 ↓ 流入 / ↑ 流出徽标。仅在自动刷新开启时生效。最小 30\u00A0秒；设为 0 可禁用定期检查（“立即检查”按钮仍然可用）。',
+  'settings.autoRefreshHistory': '自动刷新历史页面',
+  'settings.autoRefreshHistoryHint': '定期在历史页面重新运行 git log，以便新提交无需手动刷新即可显示。默认关闭，以避免过多的 git log 调用。',
+  'settings.historyRefreshInterval': '历史刷新间隔',
+  'settings.historyRefreshIntervalHint': '在历史页面重新运行 `git log` 的频率。0 = 禁用。',
+  'settings.autoPush': '定期推送到 origin',
+  'settings.autoPushHint': '按计时器将当前分支的传出提交推送到 origin 上的上游。默认关闭——仅可选择加入。',
+  'settings.autoPushInterval': '自动推送间隔',
+  'settings.autoPushIntervalHint': '推送传出提交的频率。最小 60 秒。',
   'settings.secUnit': '秒',
 
   // GitHub Integration
@@ -1617,6 +1641,14 @@ export const de: Record<string, string> = {
   'settings.autoRefreshHint': 'Hauptschalter für die automatische Repository-Aktualisierung. Bei ausgeschalteter Option finden keine periodischen Remote-Prüfungen statt — die ↓/↑-Abzeichen in der Repository-Liste bleiben eingefroren, bis Sie „Jetzt prüfen“ klicken.',
   'settings.remoteCheckInterval': 'Intervall der Remote-Prüfung',
   'settings.remoteCheckIntervalHint': 'Wie oft die Seitenleiste alle Remotes jedes gelisteten Repositories abruft und ↓ eingehend / ↑ ausgehend anzeigt. Gilt nur bei eingeschalteter Auto-Aktualisierung. Minimum 30\u00A0s; 0 deaktiviert die periodische Prüfung (die Schaltfläche „Jetzt prüfen“ funktioniert weiterhin).',
+  'settings.autoRefreshHistory': 'Verlauf-Seite automatisch aktualisieren',
+  'settings.autoRefreshHistoryHint': 'git log auf der Verlauf-Seite regelmäßig erneut ausführen, damit neue Commits ohne manuelles Aktualisieren erscheinen. Standardmäßig aus, um übermäßige git log-Aufrufe zu vermeiden.',
+  'settings.historyRefreshInterval': 'Verlauf-Aktualisierungsintervall',
+  'settings.historyRefreshIntervalHint': 'Wie oft `git log` auf der Verlauf-Seite erneut ausgeführt wird. 0 = deaktiviert.',
+  'settings.autoPush': 'Periodisch nach origin pushen',
+  'settings.autoPushHint': 'Ausgehende Commits des aktuellen Branches nach einem Timer in seinen Upstream auf origin pushen. Standardmäßig aus — nur opt-in.',
+  'settings.autoPushInterval': 'Auto-Push-Intervall',
+  'settings.autoPushIntervalHint': 'Wie oft ausgehende Commits gepusht werden. Mindestens 60 s.',
   'settings.secUnit': 'Sek.',
 
   // GitHub Integration

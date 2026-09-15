@@ -3,6 +3,7 @@ import * as path from 'path';
 import { registerGitIpc } from './ipc/git.js';
 import { registerFsIpc } from './ipc/fs.js';
 import { registerGithubIpc } from './ipc/github.js';
+import { registerGitlabIpc } from './ipc/gitlab.js';
 import { registerAiIpc } from './ipc/ai.js';
 import { registerWindowIpc } from './ipc/window.js';
 import { registerSettingsIpc } from './ipc/settings.js';
@@ -278,6 +279,7 @@ app.whenReady().then(() => {
   registerGitIpc();
   registerFsIpc();
   registerGithubIpc();
+  registerGitlabIpc();
   registerAiIpc();
   registerWindowIpc();
   registerSettingsIpc();

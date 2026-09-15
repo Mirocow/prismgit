@@ -8,17 +8,21 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useI18n } from '../lib/i18n';
 import {
   detectGitFlowConfig,
+  flowPrefix,
   startFeature,
   finishFeature,
   startRelease,
   finishRelease,
   startHotfix,
   finishHotfix,
+  startFix,
+  finishFix,
+  startSupport,
   listFlowBranches,
   type GitFlowConfig,
+  type FlowType,
 } from '../lib/gitflow';
 
-type FlowType = 'feature' | 'release' | 'hotfix';
 type Action = 'start' | 'finish';
 
 interface GitFlowDialogProps {
@@ -46,8 +50,10 @@ export function GitFlowDialog({
   const [name, setName] = useState(initialName);
   const [config, setConfig] = useState<GitFlowConfig | null>(null);
   const [loading, setLoading] = useState(false);
-  const [existingBranches, setExistingBranches] = useState<{ features: any[]; releases: any[]; hotfixes: any[] }>({
-    features: [], releases: [], hotfixes: [],
+  const [existingBranches, setExistingBranches] = useState<{
+    features: any[]; releases: any[]; hotfixes: any[]; fixes: any[]; supports: any[];
+  }>({
+    features: [], releases: [], hotfixes: [], fixes: [], supports: [],
   });
 
   // Options
@@ -67,6 +73,8 @@ export function GitFlowDialog({
         features: lists.features,
         releases: lists.releases,
         hotfixes: lists.hotfixes,
+        fixes: (lists as any).fixes ?? [],
+        supports: (lists as any).supports ?? [],
       });
     } catch (e) {
       toast.error(t('pages.gitflowConfigLoadFailed'), String(e));
@@ -106,7 +114,7 @@ export function GitFlowDialog({
           await finishRelease(repo.path, name, opts);
           toast.success(t('pages.flowReleaseFinished', { name }));
         }
-      } else {
+      } else if (flow === 'hotfix') {
         if (action === 'start') {
           await startHotfix(repo.path, name, undefined, config || undefined);
           toast.success(t('pages.flowHotfixStarted', { name }));
@@ -114,6 +122,22 @@ export function GitFlowDialog({
           await finishHotfix(repo.path, name, opts);
           toast.success(t('pages.flowHotfixFinished', { name }));
         }
+      } else if (flow === 'fix') {
+        if (action === 'start') {
+          await startFix(repo.path, name, undefined, config || undefined);
+          toast.success(t('pages.flowFixStarted', { defaultValue: 'Started fix {name}', name }));
+        } else {
+          await finishFix(repo.path, name, opts);
+          toast.success(t('pages.flowFixFinished', { defaultValue: 'Finished fix {name}', name }));
+        }
+      } else if (flow === 'support') {
+        // Support branches are not "finished" — they're long-lived.
+        if (action === 'finish') {
+          toast.warning(t('pages.flowSupportNoFinish', { defaultValue: 'Support branches are long-lived; there is no finish action.' }));
+          return;
+        }
+        await startSupport(repo.path, name, undefined, config || undefined);
+        toast.success(t('pages.flowSupportStarted', { defaultValue: 'Started support {name}', name }));
       }
       await refreshStatus(repo.path);
       onClose();
@@ -126,19 +150,18 @@ export function GitFlowDialog({
 
   if (!open) return null;
 
-  const prefix = config
-    ? flow === 'feature' ? config.featurePrefix
-    : flow === 'release' ? config.releasePrefix
-    : config.hotfixPrefix
-    : '';
+  const prefix = config ? flowPrefix(config, flow) : '';
   const fullBranchName = `${prefix}${name}`;
+  // Hotfix + support branch off master; everything else branches off develop.
   const baseBranch = config
-    ? flow === 'hotfix' ? config.masterBranch : config.developBranch
+    ? (flow === 'hotfix' || flow === 'support') ? config.masterBranch : config.developBranch
     : '';
 
   const existing = flow === 'feature' ? existingBranches.features
     : flow === 'release' ? existingBranches.releases
-    : existingBranches.hotfixes;
+    : flow === 'hotfix' ? existingBranches.hotfixes
+    : flow === 'fix' ? existingBranches.fixes
+    : existingBranches.supports;
 
   return (
     <div
@@ -152,7 +175,12 @@ export function GitFlowDialog({
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
           <h3 className="text-base font-medium flex items-center gap-2">
             <GitBranch size={16} />
-            {t('nav.gitflow')} — {action === 'start' ? t('pages.flowStartWord') : t('pages.flowFinishWord')} {flow}
+            {/* Title: "Git-Flow — Start feature" — translate the flow word
+                via t('pages.flowType.<flow>'). Previously `{flow}` rendered
+                the raw English kind ('feature'/'release'/'hotfix'/'fix'/'support')
+                which was one of the user's complaints about incomplete
+                localization. */}
+            {t('nav.gitflow')} — {action === 'start' ? t('pages.flowStartWord') : t('pages.flowFinishWord')} {t(`pages.flowType.${flow}`, { defaultValue: flow })}
           </h3>
           <button className="icon-btn" onClick={onClose}>
             <X size={14} />
@@ -161,16 +189,16 @@ export function GitFlowDialog({
 
         <div className="p-4 space-y-4">
           {/* Flow type tabs */}
-          <div className="flex gap-1 p-1 bg-bg-tertiary rounded">
-            {(['feature', 'release', 'hotfix'] as FlowType[]).map((f) => (
+          <div className="flex gap-1 p-1 bg-bg-tertiary rounded flex-wrap">
+            {(['feature', 'release', 'hotfix', 'fix', 'support'] as FlowType[]).map((f) => (
               <button
                 key={f}
-                className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
+                className={`flex-1 min-w-[60px] py-1.5 text-xs font-medium rounded transition-colors ${
                   flow === f ? 'bg-accent text-text-inverse' : 'text-text-secondary hover:bg-bg-hover'
                 }`}
                 onClick={() => setFlow(f)}
               >
-                {t(f === 'feature' ? 'pages.flowTypeFeature' : f === 'release' ? 'pages.flowTypeRelease' : 'pages.flowTypeHotfix')}
+                {t(`pages.flowType.${f}`, { defaultValue: f })}
               </button>
             ))}
           </div>
@@ -194,14 +222,22 @@ export function GitFlowDialog({
           {/* Name input */}
           <div>
             <label className="text-xs text-text-tertiary block mb-1">
-              {flow === 'feature' ? t('pages.flowFeatureNameLabel') : flow === 'release' ? t('pages.flowVersionNameLabel') : t('pages.flowHotfixNameLabel')}
+              {flow === 'feature' ? t('pages.flowFeatureNameLabel')
+                : flow === 'release' ? t('pages.flowVersionNameLabel')
+                : flow === 'hotfix' ? t('pages.flowHotfixNameLabel')
+                : flow === 'fix' ? t('pages.flowFixNameLabel', { defaultValue: 'Fix name' })
+                : t('pages.flowSupportNameLabel', { defaultValue: 'Support name like 1.x' })}
             </label>
             <div className="flex items-center gap-2">
               <code className="text-xs mono text-text-tertiary">{prefix}</code>
               <input
                 type="text"
                 className="flex-1 text-sm"
-                placeholder={flow === 'feature' ? 'my-feature' : flow === 'release' ? '1.2.0' : '1.2.1'}
+                placeholder={flow === 'feature' ? 'my-feature'
+                  : flow === 'release' ? '1.2.0'
+                  : flow === 'hotfix' ? '1.2.1'
+                  : flow === 'fix' ? 'login-crash'
+                  : '1.x'}
                 value={name}
                 autoFocus
                 onChange={(e) => setName(e.target.value)}

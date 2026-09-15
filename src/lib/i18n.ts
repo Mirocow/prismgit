@@ -99,9 +99,17 @@ export function useI18n() {
   useI18nStore((s) => s.dictVersion);
 
   const t = (key: string, params?: Record<string, string | number>): string => {
-    let str = translations[locale]?.[key] ?? translations.en?.[key] ?? key;
+    let str = translations[locale]?.[key] ?? translations.en?.[key];
+    if (str === undefined) {
+      // Fallback: when the key isn't translated yet, prefer the caller-supplied
+      // defaultValue (so new features ship in English until translations catch
+      // up). Without this, missing keys returned the key itself ("pages.foo")
+      // which looked broken even though the developer provided a default.
+      str = (params as { defaultValue?: string } | undefined)?.defaultValue ?? key;
+    }
     if (params) {
       for (const [k, v] of Object.entries(params)) {
+        if (k === 'defaultValue') continue;
         str = str.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
       }
     }
@@ -115,9 +123,13 @@ export function useI18n() {
 
 export function t(key: string, params?: Record<string, string | number>): string {
   const locale = useI18nStore.getState().locale;
-  let str = translations[locale]?.[key] ?? translations.en?.[key] ?? key;
+  let str = translations[locale]?.[key] ?? translations.en?.[key];
+  if (str === undefined) {
+    str = (params as { defaultValue?: string } | undefined)?.defaultValue ?? key;
+  }
   if (params) {
     for (const [k, v] of Object.entries(params)) {
+      if (k === 'defaultValue') continue;
       str = str.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
     }
   }

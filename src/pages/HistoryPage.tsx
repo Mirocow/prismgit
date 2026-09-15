@@ -45,6 +45,7 @@ import { useGitStore } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
@@ -438,6 +439,28 @@ export function HistoryPage() {
     window.addEventListener('smartgit:history-refresh', handler);
     return () => window.removeEventListener('smartgit:history-refresh', handler);
   }, [loadHistory]);
+
+  // User-configurable periodic auto-refresh — Settings → Git →
+  // "Auto-refresh History page". When enabled, re-runs `git log` on this
+  // cadence so new commits appear without manual refresh. When disabled
+  // (default), NO periodic `git log` calls happen — the previous behaviour
+  // re-ran git log on every lastRefresh bump which the user reported as
+  // "летит огромное кол-во запросов". Min interval 30s.
+  const autoRefreshHistory = useSettingsStore((s) => s.settings.autoRefreshHistory ?? false);
+  const historyRefreshSec = useSettingsStore((s) => s.settings.historyAutoRefreshIntervalSec ?? 0);
+  useEffect(() => {
+    if (!autoRefreshHistory) return;
+    if (!Number.isFinite(historyRefreshSec) || historyRefreshSec <= 0) return;
+    const ms = Math.max(30, historyRefreshSec) * 1000;
+    const id = setInterval(() => {
+      // Only refresh when the document is visible — no point re-running
+      // git log in a background tab.
+      if (document.visibilityState === 'visible') {
+        loadHistory();
+      }
+    }, ms);
+    return () => clearInterval(id);
+  }, [autoRefreshHistory, historyRefreshSec, loadHistory]);
 
   // Background fetch removed — it caused a double refresh on History open.
   // The initial loadHistory() already loads the log; the background fetch

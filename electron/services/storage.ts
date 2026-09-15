@@ -325,20 +325,37 @@ export function removeTag(repoPath: string, tag: string): void {
 /**
  * Refresh auto-collected stats from the actual Git repository.
  * This is called when a repo is opened or manually refreshed.
+ *
+ * CRITICAL: must read EVERY field fresh from git — never trust the cached
+ * metadata values, otherwise the row shows stale "last commit 3 weeks ago"
+ * even after the user just pushed a fresh one. The UI used to look cached
+ * precisely because commitCount was never recomputed and lastCommitDate was
+ * derived from a single log entry that was only updated on openRepository.
+ *
+ * We now also rev-parse the HEAD commit (cheap, never fails), count total
+ * commits reachable from HEAD (`git rev-list --count HEAD`), and re-read
+ * the local branch list. This makes a manual refresh actually refresh.
  */
 export async function refreshRepoStats(repoPath: string): Promise<Partial<RepositoryMetadata>> {
   try {
     const git = simpleGit({ baseDir: repoPath });
-    const [logResult, branchResult, remotes] = await Promise.all([
+
+    // Run all reads in parallel — they are independent.
+    const [logResult, branchResult, remotes, commitCountStr, headHash] = await Promise.all([
       git.log({ maxCount: 1 }).catch(() => ({ latest: null })),
       git.branchLocal().catch(() => ({ all: [] as string[] })),
       git.getRemotes(true).catch(() => []),
+      // Total commit count reachable from HEAD. May fail on empty repos
+      // (no HEAD yet) — fall back to 0.
+      git.raw(['rev-list', '--count', 'HEAD']).catch(() => '0'),
+      git.revparse('HEAD').catch(() => undefined),
     ]);
 
     const latest = (logResult as { latest: { hash: string; date: string; message: string } | null }).latest;
     const origin = (remotes as Array<{ name: string; refs: { fetch: string } }>).find(r => r.name === 'origin') ||
       (remotes as Array<{ name: string; refs: { fetch: string } }>)[0];
     const url = origin?.refs.fetch;
+    const commitCount = parseInt((commitCountStr || '0').trim(), 10) || 0;
 
     // Detect provider
     let provider: RepositoryMetadata['provider'] = 'unknown';
@@ -360,15 +377,21 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
     }
 
     const updates: Partial<RepositoryMetadata> = {
-      lastCommitHash: latest?.hash,
+      // Prefer revparse for the hash (always available even when log is empty
+      // for a fresh repo with one unborn commit) but fall back to log's hash.
+      lastCommitHash: (headHash && headHash.trim()) || latest?.hash,
       lastCommitDate: latest?.date,
       lastCommitMessage: latest?.message,
       branchCount: (branchResult as { all: string[] }).all.length,
+      commitCount,
       remoteUrl: url,
       provider,
       owner,
       repo,
       webUrl,
+      // Touch updatedAt so callers can verify the metadata was actually
+      // recomputed (used by the Sidebar's "refresh" tooltip + tests).
+      updatedAt: Date.now(),
     };
 
     setRepoMetadata(repoPath, updates);
@@ -376,6 +399,31 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
   } catch {
     return {};
   }
+}
+
+/**
+ * Refresh metadata for ALL configured repositories in a single sweep.
+ * Used by the Sidebar's "refresh" button so the user can force-refresh the
+ * whole list at once (previously the button only refreshed remote checks —
+ * incoming/outgoing counters — but NOT the cached branch count / last
+ * commit / commit count / provider info, which made the row look "stuck").
+ *
+ * Runs each refresh sequentially to avoid spawning N concurrent git
+ * subprocesses (would saturate the system on large repo lists).
+ */
+export async function refreshAllRepoStats(): Promise<{ refreshed: number; errors: Record<string, string> }> {
+  const repos = (store.get('repositories') || []) as RepositoryEntry[];
+  const errors: Record<string, string> = {};
+  let refreshed = 0;
+  for (const r of repos) {
+    try {
+      await refreshRepoStats(r.path);
+      refreshed++;
+    } catch (e) {
+      errors[r.path] = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { refreshed, errors };
 }
 
 // ============= Repository Groups (tree in the sidebar) =============

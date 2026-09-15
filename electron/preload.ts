@@ -401,6 +401,10 @@ const api = {
     addTag: (path: string, tag: string) => ipcRenderer.invoke('settings:addTag', path, tag),
     removeTag: (path: string, tag: string) => ipcRenderer.invoke('settings:removeTag', path, tag),
     refreshRepoStats: (path: string) => ipcRenderer.invoke('settings:refreshRepoStats', path),
+    // Force-refresh the cached metadata (lastCommit, branchCount, commitCount,
+    // provider...) for every configured repo. Returns the number of repos that
+    // were successfully refreshed.
+    refreshAllRepoStats: () => ipcRenderer.invoke('settings:refreshAllRepoStats'),
 
     // Repository groups (tree in the sidebar)
     getRepoGroups: () => ipcRenderer.invoke('settings:getRepoGroups'),

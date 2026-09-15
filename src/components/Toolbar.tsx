@@ -14,7 +14,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, Sun, Terminal, Trash } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, Sun, Terminal, Trash, Upload } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -1114,6 +1114,15 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                 <Divider />
               </div>
             );
+          case 'changes':
+            // Changes button — placed before History/Diff/Blame (the user
+            // wanted the most-used tool first). Opens the /changes page.
+            return (
+              <div key={key} className="flex items-center">
+                <LabeledButton icon={GitCommit} label={t('action.button.changes', { defaultValue: 'Changes' })} iconColor={COLOR_GREEN} onClick={() => navigate('/changes')} disabled={disabled} title={t('action.title.changes', { defaultValue: 'Working tree changes' })} active={currentPath === '/changes'} />
+                <Divider />
+              </div>
+            );
           case 'stash':
             return (
               <div key={key} className="flex items-center">
@@ -1126,7 +1135,10 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                     toast.success(t('toast.stash.saved')); refreshStatus(currentRepo.path);
                   }).catch((e) => toast.error(t('toast.stash.failed'), String(e)));
                 }} disabled={disabled} title={t('action.title.saveStash')} />
-                <LabeledButton icon={GitPullRequest} label={t('action.button.pop')} iconColor={COLOR_PURPLE} onClick={() => {
+                {/* Pop stash icon: was GitPullRequest (PR icon, misleading).
+                    Now Upload — an upward-pointing arrow that visually
+                    communicates "lift changes back out of the stash". */}
+                <LabeledButton icon={Upload} label={t('action.button.pop')} iconColor={COLOR_PURPLE} onClick={() => {
                   if (!currentRepo) return;
                   api.git.stashList(currentRepo.path).then(stashes => {
                     if (stashes.length === 0) { toast.info(t('toast.stash.none')); return; }

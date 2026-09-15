@@ -3,7 +3,7 @@ import { type DiffResult, type DiffHunk, type DiffLine } from '../lib/api';
 import { api } from '../lib/api';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { cn } from '../lib/utils';
-import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader, ExternalLink } from './icons';
+import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader, ExternalLink, Pencil, Check } from './icons';
 import { wordDiff, type WordSegment } from '../lib/wordDiff';
 import { useI18n } from '../lib/i18n';
 import { useContextMenu } from '../lib/useContextMenu';
@@ -335,6 +335,67 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       setSavingBlob(false);
     }
   }, [repoPath, filePath, toast, t]);
+
+  // ─── Edit-and-save flow ────────────────────────────────────────────────
+  // The user complaint: Diff tool was read-only. Now we add an "Edit" button
+  // that opens the file in the OS default editor (or VSCode if available).
+  // After the user saves and returns, a "Stage changes?" prompt asks whether
+  // to `git add` the just-edited file.
+  const [stagePromptOpen, setStagePromptOpen] = useState(false);
+  const [staging, setStaging] = useState(false);
+
+  const handleEditFile = useCallback(async () => {
+    if (!repoPath || !filePath) return;
+    // Open the working-tree file in the OS default editor. The user edits,
+    // saves, closes the editor, then we offer to stage the result.
+    // We DON'T wait for the editor to close (no portable way to do that
+    // from Electron's shell.openPath) — instead, after the user returns
+    // focus to the app, we show the "Stage changes?" prompt.
+    const fullPath = repoPath.replace(/\/+$/, '') + '/' + filePath;
+    const ok = await api.git.openFile(fullPath);
+    if (!ok) {
+      toast.error(t('diff.editOpenFailed', { defaultValue: 'Failed to open file for editing' }));
+      return;
+    }
+    toast.info(
+      t('diff.editOpened', { defaultValue: 'File opened for editing' }),
+      t('diff.editOpenedHint', { defaultValue: 'Save your changes in the editor, then return here to stage them.' })
+    );
+    // After ~2s of focus loss + regain, prompt for staging. We use a
+    // window focus event listener so the prompt only appears AFTER the
+    // user comes back to the app (i.e. after editing).
+    const onFocusBack = () => {
+      window.removeEventListener('focus', onFocusBack);
+      // Small delay so the editor has time to flush the write.
+      setTimeout(() => setStagePromptOpen(true), 500);
+    };
+    // Only prompt on the NEXT focus event — don't attach a permanent
+    // listener (would fire on every focus change afterwards).
+    window.addEventListener('focus', onFocusBack, { once: true });
+  }, [repoPath, filePath, toast, t]);
+
+  const handleStageAfterEdit = useCallback(async () => {
+    if (!repoPath || !filePath) return;
+    setStaging(true);
+    try {
+      await api.git.add(repoPath, [filePath]);
+      toast.success(
+        t('diff.stagedAfterEdit', { defaultValue: 'Staged {file}', file: filePath.split('/').pop() ?? filePath })
+      );
+      setStagePromptOpen(false);
+      // Notify the parent (Changes page / Diff page) so it refreshes the
+      // status — the just-staged file should now appear in the staged list.
+      onStaged?.();
+    } catch (e) {
+      toast.error(t('diff.stageFailed', { defaultValue: 'Failed to stage file' }), String(e));
+    } finally {
+      setStaging(false);
+    }
+  }, [repoPath, filePath, toast, t, onStaged]);
+
+  const handleDiscardEditPrompt = useCallback(() => {
+    setStagePromptOpen(false);
+  }, []);
 
   const rendered = useMemo(() => {
     if (!diff || diff.binary) return null;
@@ -772,6 +833,19 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               {mode === 'staged' ? t('diff.unstage') : t('toolbar.stage')} {t('diff.selectionCount', { count: selectedLines.size })}
             </button>
           )}
+          {/* Edit-and-save — opens the working-tree file in the OS default
+              editor (or VSCode if available). After the user returns to the
+              app, a "Stage changes?" prompt offers to `git add` the result. */}
+          {repoPath && filePath && !diff.binary && (
+            <button
+              className="btn btn-secondary text-2xs !py-0.5 !px-2"
+              onClick={handleEditFile}
+              title={t('diff.editFileTooltip', { defaultValue: 'Edit this file in your editor. After saving, you’ll be prompted to stage the changes.' })}
+            >
+              <Pencil size={11} />
+              {t('diff.editFile', { defaultValue: 'Edit' })}
+            </button>
+          )}
         </div>
       </div>
       {/* Diff content */}
@@ -781,6 +855,49 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
           <div className="p-4 text-sm text-text-tertiary">{t('diff.noChanges')}</div>
         )}
       </div>
+
+      {/* Stage-after-edit prompt. Shows up after the user returns to the app
+          from the editor (handleEditFile schedules it via a window focus
+          listener). Asks whether to `git add` the just-edited file. */}
+      {stagePromptOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in"
+          onClick={handleDiscardEditPrompt}
+        >
+          <div
+            className="panel w-[420px] flex flex-col shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
+              <h3 className="text-base font-medium flex items-center gap-2">
+                <Check size={16} className="text-status-added" />
+                {t('diff.stageAfterEditTitle', { defaultValue: 'Stage edited changes?' })}
+              </h3>
+            </div>
+            <div className="p-4 space-y-2">
+              <div className="text-sm text-text-primary">
+                {t('diff.stageAfterEditBody', { defaultValue: 'You edited {file} in your editor. Stage the changes now?', file: filePath?.split('/').pop() ?? '' })}
+              </div>
+              <div className="text-xs text-text-tertiary">
+                {t('diff.stageAfterEditHint', { defaultValue: 'Staging adds the file to the index so it can be committed. You can also stage later from the Changes page.' })}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
+              <button className="btn btn-secondary" onClick={handleDiscardEditPrompt}>
+                {t('common.cancel', { defaultValue: 'Cancel' })}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleStageAfterEdit}
+                disabled={staging}
+              >
+                {staging ? <Loader size={13} className="spin" /> : <Check size={13} />}
+                {t('toolbar.stage', { defaultValue: 'Stage' })}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

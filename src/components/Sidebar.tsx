@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type { RemoteCheckSummary } from '../lib/api';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
-import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
+import { loadProjectPrefs, saveProjectPrefs, loadGlobalCollapsedGroups, saveGlobalCollapsedGroups } from '../lib/projectPrefs';
 import {
   buildRepoTree, canMoveGroup, flattenGroupOptions,
   type RepoGroupNode, type RepoItemNode,
@@ -145,18 +145,27 @@ export function Sidebar() {
   // Persisted per-repo via ProjectPrefs so a user who collapsed groups does
   // not see them all re-open on next launch.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
-    if (!currentRepo?.path) return new Set();
+    // Init: when no repo is open, fall back to the GLOBAL collapsed-groups
+    // default so the user's collapse choices survive app restarts even
+    // before they open a repo. When a repo is open, prefer the per-repo
+    // prefs (falls back to the global default if the repo has no prefs yet).
+    if (!currentRepo?.path) {
+      const global = loadGlobalCollapsedGroups();
+      return new Set(global);
+    }
     const saved = loadProjectPrefs(currentRepo.path).collapsedSidebarGroups;
-    return saved ? new Set(saved) : new Set();
+    if (saved) return new Set(saved);
+    return new Set(loadGlobalCollapsedGroups());
   });
-  // When the user switches repositories, re-hydrate from the new repo's prefs.
+  // When the user switches repositories, re-hydrate from the new repo's prefs
+  // (or the global default if this repo has never been opened before).
   useEffect(() => {
     if (!currentRepo?.path) {
-      setCollapsedGroups(new Set());
+      setCollapsedGroups(new Set(loadGlobalCollapsedGroups()));
       return;
     }
     const saved = loadProjectPrefs(currentRepo.path).collapsedSidebarGroups;
-    setCollapsedGroups(saved ? new Set(saved) : new Set());
+    setCollapsedGroups(saved ? new Set(saved) : new Set(loadGlobalCollapsedGroups()));
   }, [currentRepo?.path]);
   // Favorites — GLOBAL (shared across all repositories), not per-repo.
   // Default: Changes, History, Diff — the 3 most-used tools.
@@ -454,6 +463,11 @@ export function Sidebar() {
       })),
       { type: 'separator' as const },
       { label: t('shell.checkRemotesNow'), clickId: 'check' },
+      // Per-row stats refresh — recomputes lastCommit / branchCount /
+      // commitCount / provider from git. The user complaint was that the
+      // sidebar showed stale cached stats even after a push/pull, because
+      // the per-row context menu had no "refresh stats" action.
+      { label: t('shell.refreshStatsNow', { defaultValue: 'Refresh stats' }), clickId: 'refresh-stats' },
       { type: 'separator' as const },
       { label: t('shell.repoSettingsMenu'), clickId: 'repo-settings' },
     ];
@@ -467,6 +481,15 @@ export function Sidebar() {
         void dropRepoIntoGroup(repoPath, null);
       } else if (clickId === 'check') {
         void checkRemotes([repoPath]);
+      } else if (clickId === 'refresh-stats') {
+        // Force-refresh metadata (lastCommit, branchCount, commitCount,
+        // provider) for this single repo. Falls back to the full refresh
+        // when the per-repo refreshStats action is unavailable.
+        void useRepositoryStore.getState().refreshStats(repoPath).then(() => {
+          // Also re-check remotes so the ↓/↑ badges stay in sync with the
+          // just-refreshed stats — a "refresh" should feel complete.
+          void checkRemotes([repoPath]);
+        });
       } else if (clickId === 'repo-settings') {
         // Open the repo first (if not already current), then trigger settings dialog
         // via a custom DOM event that App.tsx listens for.
@@ -488,6 +511,18 @@ export function Sidebar() {
 
   // ============= Tree rendering =============
 
+  /**
+   * Compact relative time formatter for the repo row's "last commit" hint.
+   * Mirrors timeAgo() but is co-located here so the row's stats line stays
+   * self-contained (no extra import churn when this file is edited).
+   */
+  const formatLastCommit = (isoDate: string | undefined): string => {
+    if (!isoDate) return '';
+    const ts = new Date(isoDate).getTime();
+    if (!ts || isNaN(ts)) return '';
+    return timeAgo(ts);
+  };
+
   const renderRepoRow = (node: RepoItemNode) => {
     const repo = node.repo;
     const meta = metadata[repo.path];
@@ -497,6 +532,22 @@ export function Sidebar() {
     const showBisectBadge = isActive && currentBisecting;
     const showDetachedBadge = isActive && currentDetached;
     const isFavorite = Boolean(meta?.favorite);
+    // Compact stats line — branch count, commit count, last commit time.
+    // These are EXACTLY the values the user reported as "cached / stale".
+    // Rendering them on the row makes the refresh visible: after a refresh,
+    // the numbers actually change instead of staying frozen.
+    const statsBits: string[] = [];
+    if (typeof meta?.branchCount === 'number' && meta.branchCount > 0) {
+      statsBits.push(`${meta.branchCount}b`);
+    }
+    if (typeof meta?.commitCount === 'number' && meta.commitCount > 0) {
+      statsBits.push(`${meta.commitCount}c`);
+    }
+    const lastCommit = formatLastCommit(meta?.lastCommitDate);
+    if (lastCommit) statsBits.push(lastCommit);
+    const providerLabel = meta?.provider && meta.provider !== 'unknown'
+      ? meta.provider.charAt(0).toUpperCase() + meta.provider.slice(1)
+      : '';
     return (
       <div
         key={repo.path}
@@ -509,7 +560,7 @@ export function Sidebar() {
         onDragOver={(e) => e.stopPropagation()}
         onContextMenu={(e) => showRepoMenu(e, repo.path, repo.groupId)}
         className={cn(
-          'group flex items-center gap-2 py-2 pr-2 cursor-pointer text-xs transition-colors hover:bg-bg-hover',
+          'group flex flex-col gap-0.5 py-1.5 pr-2 cursor-pointer text-xs transition-colors hover:bg-bg-hover',
           isActive && 'bg-bg-active'
         )}
         style={{
@@ -517,89 +568,111 @@ export function Sidebar() {
           borderLeft: meta?.color ? `3px solid ${meta.color}` : undefined,
         }}
         onClick={(e) => { e.stopPropagation(); openRepository(repo.path); }}
-        title={`${repo.path}${repo.groupId ? '\n' + t('shell.groupSuffix') : ''}`}
+        title={`${repo.path}${repo.groupId ? '\n' + t('shell.groupSuffix') : ''}${meta?.lastCommitMessage ? '\n' + meta.lastCommitMessage : ''}`}
         data-testid={`repo-item-${repo.name}`}
       >
-        {isActive ? <FolderGitOpen size={13} className="text-accent flex-shrink-0" /> : <FolderGit size={13} className="text-text-tertiary flex-shrink-0" />}
-        <span
-          className={cn(
-            'flex-1 truncate',
-            isActive && 'text-accent font-medium',
-            // Favorites within a group are rendered BOLD so they stand out
-            // visually after being sorted to the top of the group.
-            !isActive && isFavorite && 'font-semibold',
-          )}
-        >
-          {repo.name}
-        </span>
-        {/* In-progress state badge — only on the active repo, only when one
-            of the sequencer flags is true. */}
-        {showInProgressBadge && (
-          <a
-            href="#/changes"
-            onClick={(e) => e.stopPropagation()}
-            className="flex-shrink-0 w-1.5 h-1.5"
-            title={t('banner.stateTooltip').replace('{label}',
-              status?.isMerging ? t('banner.mergingLabel').toLowerCase()
-              : status?.isRebasing ? t('banner.rebasingLabel').toLowerCase()
-              : status?.isCherryPicking ? t('banner.cherryPickingLabel').toLowerCase()
-              : t('banner.revertingStatusBarLabel').toLowerCase()
+        <div className="flex items-center gap-2 min-w-0">
+          {isActive ? <FolderGitOpen size={13} className="text-accent flex-shrink-0" /> : <FolderGit size={13} className="text-text-tertiary flex-shrink-0" />}
+          <span
+            className={cn(
+              'flex-1 truncate',
+              isActive && 'text-accent font-medium',
+              // Favorites within a group are rendered BOLD so they stand out
+              // visually after being sorted to the top of the group.
+              !isActive && isFavorite && 'font-semibold',
             )}
-          />
-        )}
-        {showBisectBadge && !showInProgressBadge && (
-          <span
-            className="flex-shrink-0 text-2xs text-status-info font-semibold"
-            title={t('banner.bisectInProgressTooltip')}
           >
-            bisect
+            {repo.name}
           </span>
-        )}
-        {showDetachedBadge && !showInProgressBadge && (
-          <span
-            className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning inline-block"
-            title={t('banner.detachedHeadTooltip')}
-          />
-        )}
-        <RemoteBadges check={remoteChecks[repo.path]} />
-        {/* Favorite button — always visible for favorites, hover for others.
-            Toggling moves the repo to the top of its group (sorting handled
-            by repoTree's compareRepos). */}
-        <button
-          className={cn(
-            'icon-btn !w-5 !h-5 transition-opacity hover:!text-status-modified',
-            isFavorite ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+          {/* In-progress state badge — only on the active repo, only when one
+              of the sequencer flags is true. */}
+          {showInProgressBadge && (
+            <a
+              href="#/changes"
+              onClick={(e) => e.stopPropagation()}
+              className="flex-shrink-0 w-1.5 h-1.5"
+              title={t('banner.stateTooltip').replace('{label}',
+                status?.isMerging ? t('banner.mergingLabel').toLowerCase()
+                : status?.isRebasing ? t('banner.rebasingLabel').toLowerCase()
+                : status?.isCherryPicking ? t('banner.cherryPickingLabel').toLowerCase()
+                : t('banner.revertingStatusBarLabel').toLowerCase()
+              )}
+            />
           )}
-          title={isFavorite ? t('shell.unfavorite') : t('shell.favorite')}
-          onClick={(e) => {
-            e.stopPropagation();
-            void toggleFavoriteRepo(repo.path);
-          }}
-        >
-          <Star
-            size={11}
-            className={cn(isFavorite && 'fill-current text-status-modified')}
-          />
-        </button>
-        {meta?.tags && meta.tags.length > 0 && (
-          <span className="text-2xs text-text-tertiary flex-shrink-0 px-1.5 py-0.5 rounded-full bg-bg-tertiary">
-            {meta.tags.length}
-          </span>
+          {showBisectBadge && !showInProgressBadge && (
+            <span
+              className="flex-shrink-0 text-2xs text-status-info font-semibold"
+              title={t('banner.bisectInProgressTooltip')}
+            >
+              bisect
+            </span>
+          )}
+          {showDetachedBadge && !showInProgressBadge && (
+            <span
+              className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning inline-block"
+              title={t('banner.detachedHeadTooltip')}
+            />
+          )}
+          <RemoteBadges check={remoteChecks[repo.path]} />
+          {/* Favorite button — always visible for favorites, hover for others.
+              Toggling moves the repo to the top of its group (sorting handled
+              by repoTree's compareRepos). */}
+          <button
+            className={cn(
+              'icon-btn !w-5 !h-5 transition-opacity hover:!text-status-modified',
+              isFavorite ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+            )}
+            title={isFavorite ? t('shell.unfavorite') : t('shell.favorite')}
+            onClick={(e) => {
+              e.stopPropagation();
+              void toggleFavoriteRepo(repo.path);
+            }}
+          >
+            <Star
+              size={11}
+              className={cn(isFavorite && 'fill-current text-status-modified')}
+            />
+          </button>
+          {meta?.tags && meta.tags.length > 0 && (
+            <span className="text-2xs text-text-tertiary flex-shrink-0 px-1.5 py-0.5 rounded-full bg-bg-tertiary">
+              {meta.tags.length}
+            </span>
+          )}
+          <button
+            className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 transition-opacity"
+            title={repo.pinned ? t('shell.unpin') : t('shell.pin')}
+            onClick={(e) => { e.stopPropagation(); pinRepo(repo.path, !repo.pinned); }}
+          >
+            {repo.pinned ? <PinOff size={10} /> : <Pin size={10} />}
+          </button>
+          <button
+            className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 hover:!text-status-deleted transition-opacity"
+            title={t('shell.removeFromList')}
+            onClick={(e) => { e.stopPropagation(); removeRepo(repo.path); }}
+          >
+            <X size={10} />
+          </button>
+        </div>
+        {/* Stats line — branch count, commit count, last commit (relative).
+            Rendered only when there's something to show AND the row has
+            enough width to display it without truncating the repo name.
+            This is the line that previously never updated because the
+            refresh button only re-checked remotes, not metadata. */}
+        {(statsBits.length > 0 || providerLabel) && (
+          <div
+            className="flex items-center gap-1.5 pl-[21px] text-2xs text-text-tertiary tabular-nums min-w-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {providerLabel && (
+              <span className="px-1 rounded bg-bg-tertiary text-text-secondary">{providerLabel}</span>
+            )}
+            {statsBits.map((bit, i) => (
+              <span key={i} className="text-text-tertiary">
+                {bit}
+              </span>
+            ))}
+          </div>
         )}
-        <button
-          className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 transition-opacity"
-          title={repo.pinned ? t('shell.unpin') : t('shell.pin')}
-          onClick={(e) => { e.stopPropagation(); pinRepo(repo.path, !repo.pinned); }}
-        >
-          {repo.pinned ? <PinOff size={10} /> : <Pin size={10} />}
-        </button>
-        <button
-          className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 hover:!text-status-deleted transition-opacity"
-          title={t('shell.removeFromList')}
-          onClick={(e) => { e.stopPropagation(); removeRepo(repo.path); }}
-        >
-          <X size={10} />
-        </button>
       </div>
     );
   };
@@ -710,7 +783,18 @@ export function Sidebar() {
             <button
               className="icon-btn no-drag flex-shrink-0 !w-7 !h-7"
               title={checkingRemotes ? t('shell.checkingRemotes') : t('shell.checkAllRemotesFull')}
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); void checkRemotes(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                // Refresh BOTH:
+                //  1) remote checks (fetch + incoming/outgoing counters)
+                //  2) cached metadata (lastCommit, branchCount, commitCount,
+                //     provider) — previously this was NOT refreshed, which
+                //     made the sidebar rows look "stuck" after a push/pull
+                //     because the cached stats never updated.
+                void checkRemotes();
+                void useRepositoryStore.getState().refreshAllStats();
+              }}
             >
               <RefreshCw size={13} className={cn(checkingRemotes && 'animate-spin')} />
             </button>
@@ -887,7 +971,11 @@ export function Sidebar() {
                     if (next.has(groupName)) next.delete(groupName);
                     else next.add(groupName);
                     setCollapsedGroups(next);
-                    // Persist per-repo so collapsed state survives restarts.
+                    // Persist GLOBALLY (so the user's collapse choices
+                    // survive app restarts even with no repo open) AND
+                    // per-repo (so the per-repo prefs are seeded correctly
+                    // the next time this repo is opened).
+                    saveGlobalCollapsedGroups(Array.from(next));
                     if (currentRepo?.path) {
                       saveProjectPrefs(currentRepo.path, {
                         collapsedSidebarGroups: Array.from(next),

@@ -42,6 +42,7 @@ export const en: Record<string, string> = {
   'shell.deleteGroup': 'Delete group',
   'shell.removeFromGroup': 'Remove from group',
   'shell.checkRemotesNow': 'Check remotes now',
+  'shell.refreshStatsNow': 'Refresh stats',
   'shell.repoSettingsMenu': 'Repository Settings...',
 
   // Sidebar — repo rows / group rows
@@ -351,6 +352,7 @@ export const ru: Record<string, string> = {
   'shell.deleteGroup': 'Удалить группу',
   'shell.removeFromGroup': 'Убрать из группы',
   'shell.checkRemotesNow': 'Проверить remote сейчас',
+  'shell.refreshStatsNow': 'Обновить статистику',
   'shell.repoSettingsMenu': 'Настройки репозитория...',
 
   // Sidebar — repo rows / group rows
@@ -660,6 +662,7 @@ export const zh: Record<string, string> = {
   'shell.deleteGroup': '删除分组',
   'shell.removeFromGroup': '从分组中移除',
   'shell.checkRemotesNow': '立即检查远程',
+  'shell.refreshStatsNow': '刷新统计',
   'shell.repoSettingsMenu': '仓库设置...',
 
   // Sidebar — repo rows / group rows
@@ -969,6 +972,7 @@ export const de: Record<string, string> = {
   'shell.deleteGroup': 'Gruppe löschen',
   'shell.removeFromGroup': 'Aus Gruppe entfernen',
   'shell.checkRemotesNow': 'Remotes jetzt prüfen',
+  'shell.refreshStatsNow': 'Statistiken aktualisieren',
   'shell.repoSettingsMenu': 'Repository-Einstellungen...',
 
   // Sidebar — repo rows / group rows

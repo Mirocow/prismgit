@@ -689,6 +689,83 @@ export function SettingsPage() {
                   <span className="text-xs text-text-tertiary">{t('settings.secUnit')}</span>
                 </div>
               </div>
+              {/* History page auto-refresh — was previously unconfigurable.
+                  The History page re-ran `git log -100` on EVERY
+                  lastRefresh bump (every commit / fetch / push / file
+                  watcher tick), which the user reported as "летит огромное
+                  кол-во запросов". Now: opt-in, with a configurable cadence. */}
+              <label className="flex items-center justify-between cursor-pointer mt-3" data-testid="auto-refresh-history-setting">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.autoRefreshHistory', { defaultValue: 'Auto-refresh History page' })}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.autoRefreshHistoryHint', { defaultValue: 'Periodically re-run git log on the History page so new commits appear without manual refresh. Off by default to avoid excessive git log calls.' })}
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.autoRefreshHistory ?? false}
+                  onChange={(e) => setSetting('autoRefreshHistory', e.target.checked)}
+                />
+              </label>
+              {settings.autoRefreshHistory && (
+                <div className="flex items-center justify-between mt-2">
+                  <div>
+                    <div className="text-sm font-medium">{t('settings.historyRefreshInterval', { defaultValue: 'History refresh interval' })}</div>
+                    <div className="text-xs text-text-tertiary">
+                      {t('settings.historyRefreshIntervalHint', { defaultValue: 'How often to re-run `git log` on the History page. 0 = disabled.' })}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <input
+                      type="number"
+                      min={0}
+                      max={3600}
+                      step={30}
+                      value={settings.historyAutoRefreshIntervalSec ?? 0}
+                      onChange={(e) => setSetting('historyAutoRefreshIntervalSec', Math.max(0, Number(e.target.value)))}
+                      className="w-20 text-sm"
+                    />
+                    <span className="text-xs text-text-tertiary">{t('settings.secUnit')}</span>
+                  </div>
+                </div>
+              )}
+              {/* Auto-push to origin — opt-in periodic push of the current
+                  branch's outgoing commits. Disabled by default. */}
+              <label className="flex items-center justify-between cursor-pointer mt-3 border-t border-border-subtle pt-3" data-testid="auto-push-setting">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.autoPush', { defaultValue: 'Periodically push to origin' })}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.autoPushHint', { defaultValue: 'Push the current branch’s outgoing commits to its upstream on origin on a timer. Off by default — opt-in only.' })}
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.autoPushEnabled ?? false}
+                  onChange={(e) => setSetting('autoPushEnabled', e.target.checked)}
+                />
+              </label>
+              {settings.autoPushEnabled && (
+                <div className="flex items-center justify-between mt-2">
+                  <div>
+                    <div className="text-sm font-medium">{t('settings.autoPushInterval', { defaultValue: 'Auto-push interval' })}</div>
+                    <div className="text-xs text-text-tertiary">
+                      {t('settings.autoPushIntervalHint', { defaultValue: 'How often to push outgoing commits. Min 60s.' })}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <input
+                      type="number"
+                      min={60}
+                      max={3600}
+                      step={30}
+                      value={settings.autoPushIntervalSec ?? 300}
+                      onChange={(e) => setSetting('autoPushIntervalSec', Math.max(60, Number(e.target.value)))}
+                      className="w-20 text-sm"
+                    />
+                    <span className="text-xs text-text-tertiary">{t('settings.secUnit')}</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </section>

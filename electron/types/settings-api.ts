@@ -382,6 +382,30 @@ export interface AppSettings {
    * 0 disables the periodic check (manual "Check now" still works).
    */
   repoRemoteCheckIntervalSec?: number;
+  /**
+   * Periodic auto-push to origin: while the app is open and a repository is
+   * the active one, the local branch's outgoing commits are pushed to its
+   * configured upstream on `origin`. 0 (default) disables the auto-push —
+   * the user must opt in via Settings → Git → "Periodically push to origin".
+   * Min 60s (1 minute) — anything lower would hammer the remote.
+   */
+  autoPushIntervalSec?: number;
+  /**
+   * Master switch for the auto-push. Even when `autoPushIntervalSec` is set,
+   * no pushes happen unless this is true. Default: false.
+   */
+  autoPushEnabled?: boolean;
+  /**
+   * History page auto-refresh interval (seconds). When the History page is
+   * visible and `autoRefreshHistory` is on, the page re-runs `git log` on
+   * this cadence so newly created commits appear without manual refresh.
+   * Default 0 (off) — the previous behavior re-ran git log on every
+   * lastRefresh bump which created an excessive amount of `git log -N`
+   * calls (the user complaint). 0 = disabled; min 30s.
+   */
+  historyAutoRefreshIntervalSec?: number;
+  /** Master switch for History page auto-refresh. Default: false (opt-in). */
+  autoRefreshHistory?: boolean;
   /** Max number of commands shown in the Output panel (default 20). */
   commandLogLimit?: number;
   // === Per-remote authorization (Repository Settings → Remotes) ===
@@ -434,6 +458,13 @@ export interface SettingsApi {
   addTag: (path: string, tag: string) => Promise<void>;
   removeTag: (path: string, tag: string) => Promise<void>;
   refreshRepoStats: (path: string) => Promise<Partial<RepositoryMetadata>>;
+  /**
+   * Refresh cached metadata (lastCommit, branchCount, commitCount, provider)
+   * for every configured repo. Used by the Sidebar's "refresh" button so the
+   * user can force-reload the whole list at once.
+   * Returns { refreshed: number, errors: Record<path, msg> }.
+   */
+  refreshAllRepoStats: () => Promise<{ refreshed: number; errors: Record<string, string> }>;
 
   // Repository groups (tree in the sidebar)
   getRepoGroups: () => Promise<RepoGroup[]>;

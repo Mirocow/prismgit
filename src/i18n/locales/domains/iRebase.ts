@@ -8,6 +8,12 @@
  */
 export const en: Record<string, string> = {
   'iRebase.title': 'Interactive Rebase',
+  'iRebase.actionPick': 'Use commit',
+  'iRebase.actionReword': 'Use commit, but edit the commit message',
+  'iRebase.actionEdit': 'Use commit, but stop for amending',
+  'iRebase.actionSquash': 'Combine with previous commit',
+  'iRebase.actionFixup': 'Like squash, but discard commit message',
+  'iRebase.actionDrop': 'Remove commit',
   'iRebase.rebasingOnto': 'Rebasing onto:',
   'iRebase.commitsCount': '{count} commits',
   'iRebase.selectBranchHint': 'Select this branch (visible in all tools) — click to view in History',
@@ -30,6 +36,12 @@ export const en: Record<string, string> = {
 
 export const ru: Record<string, string> = {
   'iRebase.title': 'Интерактивный Rebase',
+  'iRebase.actionPick': 'Использовать коммит',
+  'iRebase.actionReword': 'Использовать коммит, но изменить сообщение',
+  'iRebase.actionEdit': 'Использовать коммит, но остановить для правки',
+  'iRebase.actionSquash': 'Объединить с предыдущим коммитом',
+  'iRebase.actionFixup': 'Как squash, но без сообщения коммита',
+  'iRebase.actionDrop': 'Удалить коммит',
   'iRebase.rebasingOnto': 'Rebase на:',
   'iRebase.commitsCount': '{count} коммитов',
   'iRebase.selectBranchHint': 'Выбрать эту ветку (видна во всех инструментах) — нажмите, чтобы открыть в Истории',
@@ -52,6 +64,12 @@ export const ru: Record<string, string> = {
 
 export const zh: Record<string, string> = {
   'iRebase.title': '交互式变基',
+  'iRebase.actionPick': '使用提交',
+  'iRebase.actionReword': '使用提交，但编辑提交信息',
+  'iRebase.actionEdit': '使用提交，但暂停以修改',
+  'iRebase.actionSquash': '与前一个提交合并',
+  'iRebase.actionFixup': '类似 squash，但丢弃提交信息',
+  'iRebase.actionDrop': '删除提交',
   'iRebase.rebasingOnto': '变基到:',
   'iRebase.commitsCount': '{count} 个提交',
   'iRebase.selectBranchHint': '选择此分支 (在所有工具中可见) — 点击在历史中查看',
@@ -74,6 +92,12 @@ export const zh: Record<string, string> = {
 
 export const de: Record<string, string> = {
   'iRebase.title': 'Interaktiver Rebase',
+  'iRebase.actionPick': 'Commit verwenden',
+  'iRebase.actionReword': 'Commit verwenden, aber Commit-Nachricht bearbeiten',
+  'iRebase.actionEdit': 'Commit verwenden, aber zum Ändern anhalten',
+  'iRebase.actionSquash': 'Mit vorherigem Commit zusammenführen',
+  'iRebase.actionFixup': 'Wie squash, aber Commit-Nachricht verwerfen',
+  'iRebase.actionDrop': 'Commit entfernen',
   'iRebase.rebasingOnto': 'Rebase auf:',
   'iRebase.commitsCount': '{count} Commits',
   'iRebase.selectBranchHint': 'Diesen Branch auswählen (in allen Tools sichtbar) — klicken, um in der Historie anzuzeigen',

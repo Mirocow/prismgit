@@ -29,13 +29,16 @@ interface InteractiveRebaseDialogProps {
   numCommits?: number;
 }
 
-const ACTION_LABELS: Record<RebaseAction, { label: string; color: string; description: string }> = {
-  pick: { label: 'pick', color: 'var(--accent)', description: 'Use commit' },
-  reword: { label: 'reword', color: 'var(--status-modified)', description: 'Use commit, but edit the commit message' },
-  edit: { label: 'edit', color: 'var(--accent-purple)', description: 'Use commit, but stop for amending' },
-  squash: { label: 'squash', color: 'var(--status-renamed)', description: 'Combine with previous commit' },
-  fixup: { label: 'fixup', color: 'var(--status-renamed)', description: 'Like squash, but discard commit message' },
-  drop: { label: 'drop', color: 'var(--status-deleted)', description: 'Remove commit' },
+// ACTION_LABELS — translated lazily (the labels themselves stay English so
+// they match git's own todo-list output, but the descriptions are user-facing
+// tooltip text and must be translated).
+const ACTION_LABELS: Record<RebaseAction, { label: string; color: string; descriptionKey: string }> = {
+  pick:   { label: 'pick',   color: 'var(--accent)',          descriptionKey: 'iRebase.actionPick' },
+  reword: { label: 'reword', color: 'var(--status-modified)', descriptionKey: 'iRebase.actionReword' },
+  edit:   { label: 'edit',   color: 'var(--accent-purple)',    descriptionKey: 'iRebase.actionEdit' },
+  squash: { label: 'squash', color: 'var(--status-renamed)',   descriptionKey: 'iRebase.actionSquash' },
+  fixup:  { label: 'fixup',  color: 'var(--status-renamed)',   descriptionKey: 'iRebase.actionFixup' },
+  drop:   { label: 'drop',   color: 'var(--status-deleted)',   descriptionKey: 'iRebase.actionDrop' },
 };
 
 export function InteractiveRebaseDialog({
@@ -485,7 +488,7 @@ export function InteractiveRebaseDialog({
             {Object.entries(ACTION_LABELS).map(([key, val]) => (
               <div key={key} className="flex items-center gap-1">
                 <code style={{ color: val.color }}>{val.label}</code>
-                <span>{val.description}</span>
+                <span>{t(val.descriptionKey, { defaultValue: val.label })}</span>
               </div>
             ))}
           </div>

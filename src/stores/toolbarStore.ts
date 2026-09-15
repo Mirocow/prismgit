@@ -9,6 +9,7 @@ import { create } from 'zustand';
 export const DEFAULT_TOOLBAR_GROUPS = {
   sync: true,
   stage: true,
+  changes: true,
   stash: true,
   log: true,
   workflows: true,

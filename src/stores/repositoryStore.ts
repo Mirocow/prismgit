@@ -47,6 +47,13 @@ interface RepositoryState {
   addTag: (path: string, tag: string) => Promise<void>;
   removeTag: (path: string, tag: string) => Promise<void>;
   refreshStats: (path: string) => Promise<void>;
+  /**
+   * Force-refresh metadata (lastCommit, branchCount, commitCount, provider)
+   * for every configured repo. Used by the Sidebar's "refresh" button.
+   * Backed by `api.settings.refreshAllRepoStats()` — single IPC call that
+   * loops the repo list in the main process and re-runs git per repo.
+   */
+  refreshAllStats: () => Promise<void>;
 }
 
 export const useRepositoryStore = create<RepositoryState>((set, get) => ({
@@ -329,6 +336,19 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     await get().loadMetadata();
     if (get().currentRepo?.path === path) {
       set({ currentMetadata: get().metadata[path] });
+    }
+  },
+
+  refreshAllStats: async () => {
+    // Single IPC call → main process loops the repo list and re-runs git
+    // per repo (sequential to avoid saturating the system with N concurrent
+    // git subprocesses). Once done, reload metadata into the store so the
+    // sidebar rows re-render with fresh lastCommit / branchCount / etc.
+    await api.settings.refreshAllRepoStats();
+    await get().loadMetadata();
+    const cur = get().currentRepo;
+    if (cur) {
+      set({ currentMetadata: get().metadata[cur.path] ?? null });
     }
   },
 }));

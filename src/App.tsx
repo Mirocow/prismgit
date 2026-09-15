@@ -14,6 +14,7 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
 import { useBackgroundFetch } from './hooks/useBackgroundFetch';
 import { useChunkPreload } from './hooks/useChunkPreload';
+import { useAutoPush } from './hooks/useAutoPush';
 import { useRemotePolling } from './hooks/useRemotePolling';
 import { api } from './lib/api';
 import {
@@ -261,6 +262,9 @@ export default function App() {
   useBackgroundFetch();
   // Periodic remote check for the repository list (fetch --all + ↓/↑ badges)
   useRemotePolling();
+  // Periodic auto-push to origin for the active repository (Settings → Git →
+  // "Periodically push to origin"). Disabled by default — opt-in only.
+  useAutoPush();
   // Warm lazily-loaded page/dialog chunks during idle time so every tool and
   // dialog opens instantly (no first-open chunk fetch/parse penalty).
   useChunkPreload();
