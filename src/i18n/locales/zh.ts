@@ -18,6 +18,7 @@ export const zh: Record<string, string> = {
   'common.search': '搜索',
   'common.clear': '清除',
   'common.close': '关闭',
+  'common.dismiss': '忽略',
   'common.copy': '复制',
   'common.success': '成功',
   'common.error': '错误',

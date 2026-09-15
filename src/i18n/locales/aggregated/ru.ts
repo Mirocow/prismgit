@@ -28,6 +28,7 @@ import { ru as banner } from '../domains/banner';
 import { ru as conflict } from '../domains/conflict';
 import { ru as iRebase } from '../domains/iRebase';
 import { ru as nav } from '../domains/nav';
+import { ru as errors } from '../domains/errors';
 
 export const ru: Record<string, string> = {
   ...core,
@@ -53,4 +54,5 @@ export const ru: Record<string, string> = {
   ...conflict,
   ...iRebase,
   ...nav,
+  ...errors,
 };

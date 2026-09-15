@@ -24,6 +24,7 @@ import { zh as banner } from '../domains/banner';
 import { zh as conflict } from '../domains/conflict';
 import { zh as iRebase } from '../domains/iRebase';
 import { zh as nav } from '../domains/nav';
+import { zh as errors } from '../domains/errors';
 
 export const zh: Record<string, string> = {
   ...core,
@@ -49,4 +50,5 @@ export const zh: Record<string, string> = {
   ...conflict,
   ...iRebase,
   ...nav,
+  ...errors,
 };

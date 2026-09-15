@@ -24,6 +24,7 @@ import { de as banner } from '../domains/banner';
 import { de as conflict } from '../domains/conflict';
 import { de as iRebase } from '../domains/iRebase';
 import { de as nav } from '../domains/nav';
+import { de as errors } from '../domains/errors';
 
 export const de: Record<string, string> = {
   ...core,
@@ -49,4 +50,5 @@ export const de: Record<string, string> = {
   ...conflict,
   ...iRebase,
   ...nav,
+  ...errors,
 };

@@ -226,15 +226,55 @@
         observer.observe(document.getElementById('root'), { childList: true, subtree: false });
         // Safety net — if React fails to mount (runtime error in App.tsx),
         // the MutationObserver never fires and the user is stuck on the
-        // boot screen. After 15 seconds, assume the boot failed and hide
-        // the boot screen anyway so the user can at least see the error
-        // in dev tools / reload.
+        // boot screen. After 15 seconds, assume the boot failed:
+        //   1. Hide the boot spinner.
+        //   2. Read the persisted error from localStorage (the boot-time
+        //      window.onerror handler in main.tsx stores it there).
+        //   3. Show a plain-HTML error panel with the stack trace + a
+        //      "Reload" button, so the user can copy the trace and recover
+        //      instead of staring at a white screen.
+        //   4. If no error was captured, show a generic "failed to start"
+        //      message with a Reload button.
         setTimeout(function () {
           var bs = document.getElementById('boot-screen');
           if (bs && bs.parentNode) {
-            console.warn('PrismGit: boot screen safety timeout fired — React mount took >15s, hiding boot screen.');
-            bs.classList.add('fade-out');
-            setTimeout(function () { if (bs.parentNode) bs.parentNode.removeChild(bs); }, 250);
+            console.warn('PrismGit: boot screen safety timeout fired — React mount took >15s, showing error recovery screen.');
+            // Read the persisted error (if the boot-time handler caught one).
+            var errJson = null;
+            try { errJson = localStorage.getItem('prismgit-last-error'); } catch (e) { /* ignore */ }
+            var err = errJson ? JSON.parse(errJson) : null;
+            // Build the recovery screen HTML.
+            var html = '<div style="max-width:640px;width:90%;background:#1a1d21;color:#e6edf3;border-radius:12px;padding:24px;box-shadow:0 8px 32px rgba(0,0,0,0.5);font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;">';
+            html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">';
+            html += '<div style="width:32px;height:32px;border-radius:8px;background:#dc2626;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:white;">!</div>';
+            html += '<div><div style="font-size:16px;font-weight:600;">PrismGit failed to start</div>';
+            html += '<div style="font-size:11px;color:#8b949e;">The app crashed before it could load. The error has been captured below.</div></div></div>';
+            if (err && err.message) {
+              html += '<div style="font-size:12px;color:#f85149;margin-bottom:8px;font-weight:500;">' + (err.kind || 'Error') + ': ' + err.message + '</div>';
+            } else {
+              html += '<div style="font-size:12px;color:#8b949e;margin-bottom:8px;">No specific error was captured. This usually means a JavaScript bundle failed to load (network or build issue).</div>';
+            }
+            html += '<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;max-height:200px;overflow-y:auto;font-family:ui-monospace,SFMono-Regular,\'SF Mono\',Menlo,monospace;font-size:11px;white-space:pre-wrap;word-break:break-all;color:#e6edf3;margin-bottom:16px;">';
+            html += err && err.stack ? err.stack.replace(/</g, '&lt;') : '(no stack trace available)';
+            html += '</div>';
+            html += '<div style="display:flex;gap:8px;justify-content:flex-end;">';
+            html += '<button id="prismgit-copy-error" style="background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;">Copy error</button>';
+            html += '<button id="prismgit-reload" style="background:#238636;color:white;border:none;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;font-weight:500;">Reload app</button>';
+            html += '</div>';
+            html += '</div>';
+            bs.innerHTML = html;
+            bs.style.alignItems = 'center';
+            // Wire up the buttons.
+            var copyBtn = document.getElementById('prismgit-copy-error');
+            if (copyBtn) copyBtn.onclick = function () {
+              var text = 'PrismGit Boot Error\n===================\n\n' + (err && err.message ? ('Kind: ' + (err.kind || 'unknown') + '\nMessage: ' + err.message + '\n\n') : '') + (err && err.stack ? ('Stack:\n' + err.stack) : '(no stack)');
+              try { navigator.clipboard.writeText(text); copyBtn.textContent = 'Copied!'; setTimeout(function () { copyBtn.textContent = 'Copy error'; }, 2000); } catch (e) { /* ignore */ }
+            };
+            var reloadBtn = document.getElementById('prismgit-reload');
+            if (reloadBtn) reloadBtn.onclick = function () {
+              try { localStorage.removeItem('prismgit-last-error'); } catch (e) { /* ignore */ }
+              window.location.reload();
+            };
           }
         }, 15000);
       })();

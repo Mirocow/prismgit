@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { ConfirmDialogHost, confirmDialog, promptDialog } from './components/ConfirmDialog';
 import { DeepLinkHandler } from './components/DeepLinkHandler';
 import { DragDropHandler } from './components/DragDropHandler';
+import { ErrorReportDialog, type CapturedError, formatErrorStack, collectEnvironment, persistError, loadPersistedError, clearPersistedError } from './components/ErrorReportDialog';
+import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { HelpBanner } from './components/HelpBanner';
 import { NAV_SHORTCUTS } from './components/navItems';
 import { ResizableSplitter } from './components/ResizableSplitter';
@@ -16,6 +18,7 @@ import { useBackgroundFetch } from './hooks/useBackgroundFetch';
 import { useChunkPreload } from './hooks/useChunkPreload';
 import { useAutoPush } from './hooks/useAutoPush';
 import { useRemotePolling } from './hooks/useRemotePolling';
+import { useWatchdog } from './hooks/useWatchdog';
 import { api } from './lib/api';
 import {
   buildCurrentDeepLink,
@@ -120,6 +123,73 @@ export default function App() {
   const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
   const navigate = useNavigate();
   const [showClone, setShowClone] = useState(false);
+
+  // ─── Global error reporting ─────────────────────────────────────────────
+  // The ErrorReportDialog lives OUTSIDE the GlobalErrorBoundary so it can
+  // render even when the rest of the app has crashed. The dialog reads
+  // `errorState` — set by either:
+  //   1. The boundary's onError callback (for React render errors).
+  //   2. The window 'error' / 'unhandledrejection' handlers (for sync
+  //      throws and unhandled promise rejections).
+  //   3. The 'smartgit:watchdog-freeze' CustomEvent (for UI freezes).
+  // On mount, we also load any persisted error from localStorage so the
+  // dialog re-opens after a reload (the user can then copy the trace
+  // before deciding what to do).
+  const [errorState, setErrorState] = useState<CapturedError | null>(() => loadPersistedError());
+
+  const captureError = useCallback((err: {
+    kind: CapturedError['kind'];
+    message: string;
+    stack: string;
+    componentStack?: string;
+    context?: string;
+  }) => {
+    const captured: CapturedError = {
+      id: `${err.kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: Date.now(),
+      kind: err.kind,
+      message: err.message,
+      stack: err.stack,
+      componentStack: err.componentStack,
+      context: err.context,
+      ...collectEnvironment(),
+    };
+    persistError(captured);
+    setErrorState(captured);
+  }, []);
+
+  // On mount, also subscribe to the persisted-error channel — if a NEW
+  // error gets persisted from outside the React tree (e.g. from the
+  // window error handlers when React is unmounted), we pick it up here.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'prismgit-last-error' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && parsed.id && parsed.stack) {
+            setErrorState(parsed as CapturedError);
+          }
+        } catch { /* ignore */ }
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const handleBoundaryError = useCallback((captured: CapturedError) => {
+    setErrorState(captured);
+  }, []);
+
+  const handleCloseErrorDialog = useCallback(() => {
+    clearPersistedError();
+    setErrorState(null);
+  }, []);
+
+  // Watchdog: detect UI freezes (white screen) and surface them. The
+  // watchdog runs in a Web Worker so it can keep ticking even when the
+  // main thread is frozen.
+  useWatchdog();
+
   // Task 10 — listen for 'prismgit:clone-into-group' custom events
   // dispatched by Sidebar's group right-click menu. Opens the Clone modal.
   useEffect(() => {
@@ -312,42 +382,78 @@ export default function App() {
   // Catch UNHANDLED Promise rejections so the app NEVER freezes / hangs on
   // an unexpected git failure (e.g. `git checkout -- .` returns exit 128
   // when git-lfs is configured but git-lfs is not installed — the LFS
-  // filter-process crashes mid-checkout, the spawn rejects, and without
-  // this handler the rejection becomes an unhandled promise rejection that
-  // makes the app look frozen even though the page is technically still
-  // responsive).
+  // ─── Global error handlers (window.onerror + unhandledrejection) ─────────
+  //
+  // Why this exists: without global handlers, an uncaught throw inside a
+  // setTimeout/setInterval callback (e.g. a polling hook that crashes when
+  // the repo is deleted mid-poll) leaves the renderer in a broken state.
+  // The user sees a frozen UI or a white screen with NO explanation — they
+  // have to open DevTools to find the error.
+  //
+  // With these handlers:
+  //   1. The error is caught and its stack trace is captured.
+  //   2. The error is persisted to localStorage (so it survives a reload).
+  //   3. The ErrorReportDialog opens with the full trace + a "Copy report"
+  //      button so the user can paste it to the developer.
+  //   4. A non-blocking toast is ALSO shown (legacy behaviour) so the user
+  //      gets immediate feedback even if the dialog is dismissed.
+  //
+  // We also listen for 'smartgit:watchdog-freeze' events from the useWatchdog
+  // hook — these fire when the main thread was frozen for too long.
   useEffect(() => {
     const onUnhandledRejection = (event: PromiseRejectionEvent) => {
       // Prevent the default (which logs to console + can crash on Node side).
       event.preventDefault();
       const reason = event.reason;
-      const msg = reason instanceof Error ? reason.message : String(reason);
-      // Show a toast so the user knows something went wrong. The toast is
-      // non-blocking — the user can keep working.
+      const { message, stack } = formatErrorStack(reason);
+      // Persist + open the error dialog with the full trace.
+      captureError({
+        kind: 'unhandledrejection',
+        message: message || i18nT('toast.git.unhandledRejection'),
+        stack,
+        context: 'Unhandled promise rejection (window.addEventListener)',
+      });
+      // Also show a non-blocking toast so the user gets immediate feedback
+      // even if they dismiss the dialog.
       try {
-        toast.error(i18nT('toast.git.unhandledRejection'), msg);
-      } catch {
-        // toast store unavailable (during initial mount?) — at least we
-        // prevented the rejection from crashing the app.
-      }
-      // Also log to the console for debugging.
+        toast.error(i18nT('toast.git.unhandledRejection'), message);
+      } catch { /* toast store unavailable (during initial mount?) */ }
       // eslint-disable-next-line no-console
       console.error('[PrismGit] Unhandled promise rejection:', reason);
     };
     const onError = (event: ErrorEvent) => {
       // Sync errors (throw inside a callback) — same treatment.
-      const msg = event.message || String(event.error || event);
-      try { toast.error(i18nT('toast.git.uncaughtError'), msg); } catch { /* ignore */ }
+      const err = event.error || new Error(event.message || 'Uncaught error');
+      const { message, stack } = formatErrorStack(err);
+      captureError({
+        kind: 'uncaught',
+        message: message || i18nT('toast.git.uncaughtError'),
+        stack: stack || `${event.filename}:${event.lineno}:${event.colno}`,
+        context: `Uncaught error at ${event.filename}:${event.lineno}:${event.colno}`,
+      });
+      try { toast.error(i18nT('toast.git.uncaughtError'), message); } catch { /* ignore */ }
       // eslint-disable-next-line no-console
       console.error('[PrismGit] Uncaught error:', event.error || event.message);
     };
+    const onWatchdogFreeze = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { elapsed?: number } | undefined;
+      const elapsed = detail?.elapsed ?? 0;
+      captureError({
+        kind: 'watchdog',
+        message: i18nT('errors.watchdogFreeze', { defaultValue: 'UI was frozen (unresponsive)' }),
+        stack: `The main thread was unresponsive for ${elapsed}ms.\nThis usually indicates an infinite loop in a render or a long-running synchronous operation.\nWatchdog detected the freeze and surfaced this dialog so you can copy the trace and reload.`,
+        context: 'Watchdog freeze detection (useWatchdog hook)',
+      });
+    };
     window.addEventListener('unhandledrejection', onUnhandledRejection);
     window.addEventListener('error', onError);
+    window.addEventListener('smartgit:watchdog-freeze', onWatchdogFreeze);
     return () => {
       window.removeEventListener('unhandledrejection', onUnhandledRejection);
       window.removeEventListener('error', onError);
+      window.removeEventListener('smartgit:watchdog-freeze', onWatchdogFreeze);
     };
-  }, [toast]);
+  }, [toast, captureError]);
 
   useEffect(() => {
     loadRepos();
@@ -1411,6 +1517,7 @@ export default function App() {
 
   if (!currentRepo) {
     return (
+      <GlobalErrorBoundary onError={handleBoundaryError}>
       <div className="flex flex-col h-screen">
         <Toolbar onFind={handleFind} onGlobalSearch={() => setShowGlobalSearch(true)} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onShowShortcuts={() => setShowShortcuts(true)} onShowClone={() => setShowClone(true)} onShowInit={() => setShowInit(true)} onToggleAiAssistant={() => setShowAiAssistant(v => !v)} />
         <div className="flex flex-1 overflow-hidden">
@@ -1461,11 +1568,15 @@ export default function App() {
           />
         </Suspense>
         <Suspense fallback={null}>{showAiAssistant && <AiAssistant onClose={() => setShowAiAssistant(false)} />}</Suspense>
+        {/* Global error report dialog — also shown on the welcome screen. */}
+        <ErrorReportDialog error={errorState} onClose={handleCloseErrorDialog} />
       </div>
+    </GlobalErrorBoundary>
     );
   }
 
   return (
+    <GlobalErrorBoundary onError={handleBoundaryError}>
     <div className="flex flex-col h-screen">
       <Toolbar
         onFind={handleFind}
@@ -1601,6 +1712,10 @@ export default function App() {
       <Suspense fallback={null}>{showTour && <TourOverlay onClose={() => setShowTour(false)} />}</Suspense>
       {/* LAR-3 — AI Assistant chat panel (floating, bottom-right). */}
       <Suspense fallback={null}>{showAiAssistant && <AiAssistant onClose={() => setShowAiAssistant(false)} />}</Suspense>
+      {/* Global error report dialog — rendered OUTSIDE the GlobalErrorBoundary
+          so it can show even when the rest of the app has crashed. */}
+      <ErrorReportDialog error={errorState} onClose={handleCloseErrorDialog} />
     </div>
+    </GlobalErrorBoundary>
   );
 }

@@ -18,6 +18,7 @@ export const ru: Record<string, string> = {
   'common.search': 'Поиск',
   'common.clear': 'Очистить',
   'common.close': 'Закрыть',
+  'common.dismiss': 'Закрыть',
   'common.copy': 'Копировать',
   'common.success': 'Успешно',
   'common.error': 'Ошибка',

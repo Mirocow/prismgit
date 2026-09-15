@@ -35,6 +35,7 @@ import * as banner from './domains/banner';
 import * as conflict from './domains/conflict';
 import * as iRebase from './domains/iRebase';
 import * as nav from './domains/nav';
+import * as errors from './domains/errors';
 
 /** All domain modules — used by the parity tests to walk every dictionary. */
 export const DOMAINS: Record<string, { en: Record<string, string>; ru: Record<string, string>; zh: Record<string, string>; de: Record<string, string> }> = {
@@ -61,6 +62,7 @@ export const DOMAINS: Record<string, { en: Record<string, string>; ru: Record<st
   conflict,
   iRebase,
   nav,
+  errors,
 };
 
 /** Static English merge — synchronous fallback for the whole app. */

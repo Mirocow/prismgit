@@ -18,6 +18,7 @@ export const en: Record<string, string> = {
   'common.search': 'Search',
   'common.clear': 'Clear',
   'common.close': 'Close',
+  'common.dismiss': 'Dismiss',
   'common.copy': 'Copy',
   'common.success': 'Success',
   'common.error': 'Error',
