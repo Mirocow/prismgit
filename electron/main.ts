@@ -64,12 +64,20 @@ app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc')
 //    (we already use software rendering) prevents SharedImageManager from
 //    being involved.
 //
+// 3b. --disable-gpu-compositing — Electron 32 (Chromium 128) STILL runs
+//     the Viz display compositor's SharedImageManager for SOFTWARE frames,
+//     so the mailbox message can leak through --disable-gpu alone (observed
+//     2026-09 on window recreate / panel resize). The switch forces plain
+//     software compositing end-to-end. Zero cost here: hardware
+//     acceleration is already off, so no GPU-composited path existed.
+//
 // 4. --disable-dev-shm-usage — prevents /dev/shm exhaustion warnings on
 //    Linux containers (Docker/CI). Forces Chromium to use /tmp instead.
 //
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication,Translate,MediaRouter');
 app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-compositing');
 app.commandLine.appendSwitch('disable-software-rasterizer');
 app.commandLine.appendSwitch('disable-dev-shm-usage');
 
