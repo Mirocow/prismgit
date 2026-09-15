@@ -5,20 +5,73 @@ import { useGitStore } from '../stores/gitStore';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { api, type GithubPullRequest } from '../lib/api';
+import { api, type GithubPullRequest, type GitLabMergeRequest } from '../lib/api';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { cn, formatDate } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog } from '../components/ConfirmDialog';
+
+/**
+ * Normalized MR/PR shape — GitHub PRs and GitLab MRs are mapped into this
+ * common shape so the UI doesn't need to branch on provider for every row.
+ */
+interface UnifiedPR {
+  number: number;
+  title: string;
+  state: 'open' | 'closed' | 'merged';
+  html_url: string;
+  author: { login: string; avatar_url?: string };
+  head: { ref: string; sha: string };
+  base: { ref: string; sha: string };
+  created_at: string;
+  updated_at: string;
+  merged_at?: string | null;
+}
+
+function githubToUnified(pr: GithubPullRequest): UnifiedPR {
+  return {
+    number: pr.number,
+    title: pr.title,
+    state: pr.state,
+    html_url: pr.html_url,
+    author: { login: pr.user.login, avatar_url: pr.user.avatar_url },
+    head: { ref: pr.head.ref, sha: pr.head.sha },
+    base: { ref: pr.base.ref, sha: pr.base.sha },
+    created_at: pr.created_at,
+    updated_at: pr.updated_at,
+    merged_at: pr.merged_at,
+  };
+}
+
+function gitlabToUnified(mr: GitLabMergeRequest): UnifiedPR {
+  return {
+    number: mr.iid,
+    title: mr.title,
+    state: mr.state === 'opened' ? 'open' : mr.state,
+    html_url: mr.web_url,
+    author: { login: mr.author.username, avatar_url: mr.author.avatar_url },
+    head: { ref: mr.source_branch, sha: '' },
+    base: { ref: mr.target_branch, sha: '' },
+    created_at: mr.created_at,
+    updated_at: mr.updated_at,
+    merged_at: mr.merged_at,
+  };
+}
+
 export function PullRequestsPage() {
   const { t } = useI18n();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const { authenticated, user } = useAuthStore();
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastActions();
-  const [prs, setPRs] = useState<GithubPullRequest[]>([]);
+  const [prs, setPRs] = useState<UnifiedPR[]>([]);
+  // GitLab project ID — resolved from the repo's remote URL on mount.
+  // Required because GitLab MRs are addressed by project ID (numeric),
+  // not by owner/repo like GitHub.
+  const [gitlabProjectId, setGitlabProjectId] = useState<number | null>(null);
+  const [gitlabAuthed, setGitlabAuthed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<'fetch' | 'pull' | null>(null);
   const [state, setState] = useState<'open' | 'closed' | 'all'>('open');
@@ -27,7 +80,7 @@ export function PullRequestsPage() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeKey(showCreate, () => setShowCreate(false));
-  const [repoInfo, setRepoInfo] = useState<{ owner?: string; repo?: string; provider?: string }>({});
+  const [repoInfo, setRepoInfo] = useState<{ owner?: string; repo?: string; provider?: string; webUrl?: string }>({});
 
   // Create PR form — head/base prefill from the app-wide branch selection
   // (Branches/History/Toolbar): the PR grows out of the branch you picked.
@@ -38,12 +91,27 @@ export function PullRequestsPage() {
   const [prBody, setPrBody] = useState('');
   const [creating, setCreating] = useState(false);
 
+  const isGitLabRepo = repoInfo.provider === 'gitlab';
+  // For GitLab, we need EITHER GitHub auth OR GitLab auth — but only GitLab
+  // auth is meaningful for a GitLab repo. For GitHub repos, GitHub auth.
+  const isAuthed = isGitLabRepo ? gitlabAuthed : authenticated;
+
   const loadRepoInfo = useCallback(async () => {
     try {
       const info = await api.git.extractRepoInfo(repo.path);
       setRepoInfo(info);
       if (info.provider === 'github' && info.owner && info.repo) {
         setPrBase(info.repo ? await api.git.raw(repo.path, ['symbolic-ref', '--short', 'HEAD']).catch(() => 'main') : 'main');
+      } else if (info.provider === 'gitlab') {
+        // GitLab MRs are addressed by project ID — resolve it from the
+        // remote URL via the GitLab API. We use listProjects to find the
+        // matching project by path_with_namespace (owner/repo).
+        setPrBase(await api.git.raw(repo.path, ['symbolic-ref', '--short', 'HEAD']).catch(() => 'main'));
+        // Check GitLab auth state.
+        try {
+          const glState = await api.gitlab.getAuthState();
+          setGitlabAuthed(!!glState.token);
+        } catch { /* GitLab not configured */ }
       }
     } catch {
       /* ignore */
@@ -51,19 +119,35 @@ export function PullRequestsPage() {
   }, [repo.path]);
 
   const loadPRs = useCallback(async () => {
-    // Guard: don't even try if not authenticated or not a GitHub repo.
-    // The useEffect below fires whenever repoInfo or state changes, and
-    // without this guard it would spam IPC errors every time the user
-    // opens the Pull Requests tab without GitHub auth configured.
-    if (!authenticated) return;
-    if (!repoInfo.owner || !repoInfo.repo || repoInfo.provider !== 'github') return;
+    // Guard: don't even try if not authenticated or not a known-provider repo.
+    if (!isAuthed) return;
+    if (!repoInfo.owner || !repoInfo.repo) return;
+    if (repoInfo.provider !== 'github' && repoInfo.provider !== 'gitlab') return;
     setLoading(true);
     try {
-      const result = await api.github.listPullRequests(repoInfo.owner, repoInfo.repo, state);
-      setPRs(result);
+      if (repoInfo.provider === 'github') {
+        const result = await api.github.listPullRequests(repoInfo.owner!, repoInfo.repo!, state);
+        setPRs(result.map(githubToUnified));
+      } else if (repoInfo.provider === 'gitlab') {
+        // Resolve the GitLab project ID from the owner/repo path.
+        // We do this by listing the user's projects and finding the one
+        // whose path_with_namespace matches owner/repo.
+        if (gitlabProjectId == null) {
+          const projects = await api.gitlab.listProjects(1, 100);
+          const fullPath = `${repoInfo.owner}/${repoInfo.repo}`;
+          const found = projects.find((p) => p.path_with_namespace === fullPath);
+          if (!found) {
+            toast.error(t('pages.prLoadFailed'), `GitLab project "${fullPath}" not found in your accessible projects`);
+            setPRs([]);
+            return;
+          }
+          setGitlabProjectId(found.id);
+        }
+        const glState = state === 'open' ? 'opened' : state === 'closed' ? 'closed' : 'all';
+        const result = await api.gitlab.listMergeRequests(gitlabProjectId ?? 0, glState as 'opened' | 'closed' | 'merged' | 'all');
+        setPRs(result.map(gitlabToUnified));
+      }
     } catch (e) {
-      // Don't spam the toast on every retry — only show if it's a real error
-      // (not just "not authenticated" which is handled by the auth check above)
       const msg = String(e);
       if (!msg.includes('Not authenticated')) {
         toast.error(t('pages.prLoadFailed'), msg);
@@ -71,7 +155,7 @@ export function PullRequestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [authenticated, repoInfo, state, toast]);
+  }, [isAuthed, repoInfo, state, toast, gitlabProjectId]);
 
   useEffect(() => {
     loadRepoInfo();
@@ -83,13 +167,16 @@ export function PullRequestsPage() {
     }
   }, [repoInfo, state, loadPRs]);
 
-  // LAR-2 — PR action handlers. Wire up to api.github.* methods which
-  // already exist in electron/services/github.ts.
-  // Note: api.github.* take (owner, repo, prNumber, ...) — not repoPath.
+  // LAR-2 — PR action handlers. Branch on provider so the same UI works
+  // for GitHub PRs and GitLab MRs.
   const handleApprove = async (prNumber: number) => {
     if (!repoInfo.owner || !repoInfo.repo) return;
     try {
-      await api.github.submitPRReview(repoInfo.owner, repoInfo.repo, prNumber, 'APPROVE', '');
+      if (repoInfo.provider === 'github') {
+        await api.github.submitPRReview(repoInfo.owner, repoInfo.repo, prNumber, 'APPROVE', '');
+      } else if (repoInfo.provider === 'gitlab' && gitlabProjectId != null) {
+        await api.gitlab.approveMergeRequest(gitlabProjectId, prNumber);
+      }
       toast.success(t('pages.prApproved', { n: prNumber }));
       await loadPRs();
     } catch (e) { toast.error(t('pages.prApproveFailed'), String(e)); }
@@ -99,7 +186,12 @@ export function PullRequestsPage() {
     const body = await promptForComment();
     if (body == null) return;
     try {
-      await api.github.submitPRReview(repoInfo.owner, repoInfo.repo, prNumber, 'REQUEST_CHANGES', body);
+      if (repoInfo.provider === 'github') {
+        await api.github.submitPRReview(repoInfo.owner, repoInfo.repo, prNumber, 'REQUEST_CHANGES', body);
+      } else if (repoInfo.provider === 'gitlab' && gitlabProjectId != null) {
+        // GitLab has no "request changes" review event — add a comment instead.
+        await api.gitlab.addMRComment(gitlabProjectId, prNumber, `:warning: Changes requested: ${body}`);
+      }
       toast.success(t('pages.prRequestedChanges', { n: prNumber }));
       await loadPRs();
     } catch (e) { toast.error(t('pages.prRequestChangesFailed'), String(e)); }
@@ -112,7 +204,11 @@ export function PullRequestsPage() {
       confirmLabel: t('pages.prMerge'),
     }))) return;
     try {
-      await api.github.mergePR(repoInfo.owner, repoInfo.repo, prNumber, { merge_method: 'merge' });
+      if (repoInfo.provider === 'github') {
+        await api.github.mergePR(repoInfo.owner, repoInfo.repo, prNumber, { merge_method: 'merge' });
+      } else if (repoInfo.provider === 'gitlab' && gitlabProjectId != null) {
+        await api.gitlab.mergeMergeRequest(gitlabProjectId, prNumber, { should_remove_source_branch: true });
+      }
       toast.success(t('pages.prMerged', { n: prNumber }));
       await loadPRs();
       await refreshStatus(repo.path);
@@ -121,7 +217,15 @@ export function PullRequestsPage() {
   const handleClose = async (prNumber: number) => {
     if (!repoInfo.owner || !repoInfo.repo) return;
     try {
-      await api.github.closePR(repoInfo.owner, repoInfo.repo, prNumber);
+      if (repoInfo.provider === 'github') {
+        await api.github.closePR(repoInfo.owner, repoInfo.repo, prNumber);
+      } else if (repoInfo.provider === 'gitlab' && gitlabProjectId != null) {
+        // GitLab doesn't have a direct "close MR" — we'd need a PUT to
+        // /projects/:id/merge_requests/:iid with state_event=close. The
+        // current gitlab.ts service doesn't expose this, so we show a hint.
+        toast.info(t('pages.prCloseGitLabUnsupported', { defaultValue: 'GitLab MR close is not yet supported — use the GitLab web UI' }));
+        return;
+      }
       toast.success(t('pages.prClosed', { n: prNumber }));
       await loadPRs();
     } catch (e) { toast.error(t('pages.prCloseFailed'), String(e)); }
@@ -169,7 +273,11 @@ export function PullRequestsPage() {
     }
   };
 
-  const isGitHubRepo = repoInfo.provider === 'github' && repoInfo.owner && repoInfo.repo;
+  // Show the PR list for both GitHub and GitLab repos. The provider check
+  // is split out so the "not a supported repo" empty state can suggest
+  // authenticating with the right provider.
+  const isSupportedRepo = (repoInfo.provider === 'github' || repoInfo.provider === 'gitlab') && repoInfo.owner && repoInfo.repo;
+  const isGitHubRepo = isSupportedRepo;
 
   // Filtered PRs — title, PR number, head/base branch, or author match the
   // search query. The search is case-insensitive and accepts `#123` syntax
@@ -186,7 +294,7 @@ export function PullRequestsPage() {
     const numQ = /^\d+$/.test(q) ? parseInt(q, 10) : null;
     return prs.filter(pr =>
       pr.title.toLowerCase().includes(q) ||
-      pr.user.login.toLowerCase().includes(q) ||
+      pr.author.login.toLowerCase().includes(q) ||
       pr.head.ref.toLowerCase().includes(q) ||
       pr.base.ref.toLowerCase().includes(q) ||
       (numQ != null && pr.number === numQ)
@@ -243,7 +351,8 @@ export function PullRequestsPage() {
     </>
   );
 
-  if (!authenticated) {
+  // Auth gate — show different prompts for GitHub vs GitLab repos.
+  if (!isAuthed) {
     return (
       <div className="flex flex-col flex-1 overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
@@ -254,8 +363,16 @@ export function PullRequestsPage() {
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary">
           <GitPullRequest size={32} className="mb-2 opacity-50" />
-          <div className="text-sm">{t('pages.ghNotConnected')}</div>
-          <div className="text-xs mt-1">{t('pages.ghNotConnectedHint')}</div>
+          <div className="text-sm">
+            {isGitLabRepo
+              ? t('pages.glNotConnected', { defaultValue: 'Not connected to GitLab' })
+              : t('pages.ghNotConnected')}
+          </div>
+          <div className="text-xs mt-1">
+            {isGitLabRepo
+              ? t('pages.glNotConnectedHint', { defaultValue: 'Open the Clone dialog → GitLab tab, or Settings → Integrations, to authenticate with a GitLab personal access token.' })
+              : t('pages.ghNotConnectedHint')}
+          </div>
         </div>
       </div>
     );
@@ -391,8 +508,8 @@ export function PullRequestsPage() {
                   <span className="text-2xs text-text-tertiary flex-shrink-0">#{pr.number}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
-                  <img src={pr.user.avatar_url} alt="" className="w-4 h-4 rounded-full" />
-                  <span>{pr.user.login}</span>
+                  {pr.author.avatar_url && <img src={pr.author.avatar_url} alt="" className="w-4 h-4 rounded-full" />}
+                  <span>{pr.author.login}</span>
                   <span>·</span>
                   <button
                     className="text-status-renamed hover:underline"
@@ -427,7 +544,7 @@ export function PullRequestsPage() {
                   mergePR / closePR / reopenPR). Buttons are shown only
                   for OPEN PRs in a GitHub repo where the user is
                   authenticated. */}
-              {pr.state === 'open' && repoInfo.provider === 'github' && authenticated && (
+              {pr.state === 'open' && isSupportedRepo && isAuthed && (
                 <div className="flex items-center gap-1 ml-2" onClick={(e) => e.stopPropagation()}>
                   <button
                     className="text-2xs px-2 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 border border-status-added/30"
@@ -459,7 +576,7 @@ export function PullRequestsPage() {
                   </button>
                 </div>
               )}
-              {pr.state === 'closed' && repoInfo.provider === 'github' && authenticated && !pr.merged_at && (
+              {pr.state === 'closed' && isSupportedRepo && isAuthed && !pr.merged_at && (
                 <button
                   className="text-2xs px-2 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 border border-status-added/30 ml-2"
                   onClick={(e) => { e.stopPropagation(); handleReopen(pr.number); }}

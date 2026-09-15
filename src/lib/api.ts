@@ -36,6 +36,13 @@ import type {
   GithubPullRequest,
   CommitCheckStatus,
 } from '../../electron/types/github-api';
+import type {
+  GitLabUser,
+  GitLabProject,
+  GitLabMergeRequest,
+  GitLabPipeline,
+  GitLabApi,
+} from '../../electron/types/gitlab-api';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../../electron/types/settings-api';
 import type { CommandLogEntry } from '../../electron/types/command-log-api';
 import type { SshKeyMeta, SshTestResult, SshSystemKey, CredentialsStatus, SecretEntryMeta, SshProfile, SshProfileInput, SshProfileTestParams, SshUrlResolution } from '../../electron/types/ssh-api';
@@ -76,6 +83,10 @@ export type {
   GithubRepository,
   GithubPullRequest,
   CommitCheckStatus,
+  GitLabUser,
+  GitLabProject,
+  GitLabMergeRequest,
+  GitLabPipeline,
   AppSettings,
   RepositoryEntry,
   RepositoryMetadata,

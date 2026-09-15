@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { GitApi } from './types/git-api.js';
 import type { GithubApi } from './types/github-api.js';
+import type { GitLabApi } from './types/gitlab-api.js';
 import type { FsApi } from './types/fs-api.js';
 import type { SettingsApi } from './types/settings-api.js';
 import type { CommandLogEntry } from './types/command-log-api.js';
@@ -365,6 +366,33 @@ const api = {
     listPRComments: (owner: string, repo: string, prNumber: number) =>
       ipcRenderer.invoke('github:listPRComments', owner, repo, prNumber),
   } as GithubApi,
+
+  // GitLab integration — mirrors github shape. Used by the Clone modal
+  // (GitLab projects tab) and the Pull Requests page (when the repo's
+  // remote is on a GitLab instance). The IPC handlers live in
+  // electron/ipc/gitlab.ts and were already registered in main.ts; this
+  // preload binding is what makes them callable from the renderer as
+  // `api.gitlab.*`.
+  gitlab: {
+    authWithPAT: (token: string, baseUrl?: string) =>
+      ipcRenderer.invoke('gitlab:authWithPAT', token, baseUrl),
+    logout: () => ipcRenderer.invoke('gitlab:logout'),
+    getAuthState: () => ipcRenderer.invoke('gitlab:getAuthState'),
+    listProjects: (page?: number, perPage?: number) =>
+      ipcRenderer.invoke('gitlab:listProjects', page, perPage),
+    listMergeRequests: (projectId: number, state?: 'opened' | 'closed' | 'merged' | 'all') =>
+      ipcRenderer.invoke('gitlab:listMergeRequests', projectId, state),
+    createMergeRequest: (projectId: number, data: { title: string; source_branch: string; target_branch: string; description?: string }) =>
+      ipcRenderer.invoke('gitlab:createMergeRequest', projectId, data),
+    approveMergeRequest: (projectId: number, mrIid: number) =>
+      ipcRenderer.invoke('gitlab:approveMergeRequest', projectId, mrIid),
+    mergeMergeRequest: (projectId: number, mrIid: number, options?: { squash?: boolean; should_remove_source_branch?: boolean }) =>
+      ipcRenderer.invoke('gitlab:mergeMergeRequest', projectId, mrIid, options),
+    addMRComment: (projectId: number, mrIid: number, body: string) =>
+      ipcRenderer.invoke('gitlab:addMRComment', projectId, mrIid, body),
+    listPipelines: (projectId: number, sha?: string) =>
+      ipcRenderer.invoke('gitlab:listPipelines', projectId, sha),
+  } as GitLabApi,
 
   // File system
   fs: {
