@@ -63,6 +63,7 @@ const NBSP = '\u00A0';
 
 export function AiFavoritesPanel({ onInsertToInput, onJumpToNote, className }: AiFavoritesPanelProps) {
   const { t } = useI18n();
+  const showContextMenu = useContextMenu();
   const tree = useAiFavoritesStore((s) => s.tree);
   const loaded = useAiFavoritesStore((s) => s.loaded);
   const ensureLoaded = useAiFavoritesStore((s) => s.ensureLoaded);
@@ -134,8 +135,20 @@ export function AiFavoritesPanel({ onInsertToInput, onJumpToNote, className }: A
         </button>
       </div>
 
-      {/* Tree body */}
-      <div className="flex-1 overflow-y-auto p-1.5 min-h-0">
+      {/* Tree body — right click on empty space: New folder / Collapse all */}
+      <div
+        className="flex-1 overflow-y-auto p-1.5 min-h-0"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          void showContextMenu([
+            { label: t('aiFav.newFolderRoot'), clickId: 'newfolder' },
+            { label: t('aiFav.collapseAll'), clickId: 'collapse' },
+          ], (id) => {
+            if (id === 'newfolder') setCreatingFolderIn(null);
+            else if (id === 'collapse') useAiFavoritesStore.getState().collapseAll();
+          });
+        }}
+      >
         {/* New folder at root — also rendered while the tree is empty */}
         {creatingFolderIn === null && (
           <div className="py-0.5" style={{ paddingLeft: 4 }}>
@@ -215,6 +228,11 @@ function FolderRow({ node: folder, depth, ctx }: { node: AiFavoriteFolder; depth
         className="group flex items-center gap-1 rounded px-1 py-0.5 text-xs cursor-pointer select-none transition-colors border border-transparent hover:bg-bg-hover"
         style={{ paddingLeft: depth * 14 + 4 }}
         onClick={() => useAiFavoritesStore.getState().toggleFolder(folder.id)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openMenu();
+        }}
       >
         {folder.expanded
           ? <ChevronDown size={10} className="text-text-tertiary flex-shrink-0" />
@@ -311,6 +329,11 @@ function NoteRow({ node: note, depth, ctx }: { node: AiFavoriteNote; depth: numb
       style={{ paddingLeft: depth * 14 + 4 }}
       title={t('aiFav.showInChat')}
       onClick={() => ctx.onJump(note)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openMenu();
+      }}
     >
       {note.role === 'user'
         ? <User size={11} className="text-text-tertiary flex-shrink-0" />
