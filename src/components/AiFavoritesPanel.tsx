@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Star, Folder, FolderOpen, User, Bot, Copy, Check, Trash, Pencil,
-  ChevronRight, ChevronDown, FolderPlus, CornerDownRight,
+  Star, Folder, FolderOpen, User, Bot,
+  ChevronRight, ChevronDown, FolderPlus,
 } from './icons';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 import { useAiFavoritesStore, countNotesInTree } from '../stores/aiFavoritesStore';
+import { useToastActions } from '../stores/toastStore';
 import { confirmDialog } from './ConfirmDialog';
+import { useContextMenu } from '../lib/useContextMenu';
 import {
   type AiFavoriteNode,
   type AiFavoriteNote,
@@ -24,9 +26,11 @@ import {
  *                  message); ⋯ menu (left click) = copy / insert into
  *                  input / move / rename / delete
  *
- * No inline preview and no drag & drop — every action is a plain LEFT
- * CLICK, menus follow the app-wide dropdown pattern (relative wrapper +
- * absolute top-full menu + fixed inset-0 click-away overlay).
+ * Row menus are NATIVE Electron menus via useContextMenu() — exactly the
+ * same style the rest of the app uses (Sidebar, branches, stashes, …).
+ * They open on a plain LEFT CLICK on ⋯; "Move to folder" is a native
+ * submenu (no drag & drop). No inline preview — clicking a note goes to
+ * the chat and highlights the original message.
  *
  * The tree is GLOBAL: one localStorage key shared by every project, so
  * saved notes are visible no matter which repository is open. Notes are
@@ -46,7 +50,6 @@ interface AiFavoritesPanelProps {
 /** Context shared by every row (defined once, forwarded recursively). */
 interface RowContext {
   t: (key: string) => string;
-  copiedId: string | null;
   /** undefined = closed; null = new folder at root; string = inside folder */
   creatingFolderIn: string | null | undefined;
   setCreatingFolderIn: (id: string | null | undefined) => void;
@@ -56,13 +59,15 @@ interface RowContext {
   onDelete: (node: AiFavoriteNode) => void;
 }
 
+const NBSP = '\u00A0';
+
 export function AiFavoritesPanel({ onInsertToInput, onJumpToNote, className }: AiFavoritesPanelProps) {
   const { t } = useI18n();
   const tree = useAiFavoritesStore((s) => s.tree);
   const loaded = useAiFavoritesStore((s) => s.loaded);
   const ensureLoaded = useAiFavoritesStore((s) => s.ensureLoaded);
+  const toast = useToastActions();
 
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [creatingFolderIn, setCreatingFolderIn] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
@@ -70,11 +75,10 @@ export function AiFavoritesPanel({ onInsertToInput, onJumpToNote, className }: A
   }, [ensureLoaded]);
 
   const handleCopy = useCallback((note: AiFavoriteNote) => {
-    navigator.clipboard.writeText(note.content).then(() => {
-      setCopiedId(note.id);
-      setTimeout(() => setCopiedId(null), 1500);
-    }).catch(() => { /* ignore */ });
-  }, []);
+    navigator.clipboard.writeText(note.content)
+      .then(() => toast.success(t('aiFav.copied')))
+      .catch(() => { /* ignore */ });
+  }, [t, toast]);
 
   const handleJump = useCallback((note: AiFavoriteNote) => {
     const found = onJumpToNote?.(note) ?? false;
@@ -95,7 +99,6 @@ export function AiFavoritesPanel({ onInsertToInput, onJumpToNote, className }: A
 
   const ctx: RowContext = {
     t,
-    copiedId,
     creatingFolderIn,
     setCreatingFolderIn,
     onCopy: handleCopy,
@@ -173,9 +176,38 @@ function TreeRow({ node, depth, ctx }: { node: AiFavoriteNode; depth: number; ct
 
 function FolderRow({ node: folder, depth, ctx }: { node: AiFavoriteFolder; depth: number; ctx: RowContext }) {
   const { t } = ctx;
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [moving, setMoving] = useState(false);
+  const showContextMenu = useContextMenu();
   const [renaming, setRenaming] = useState(false);
+
+  const openMenu = () => {
+    const tree = useAiFavoritesStore.getState().tree;
+    const items = [
+      { label: t('aiFav.newFolderInside'), clickId: 'newfolder' },
+      { type: 'separator' as const },
+      {
+        label: t('aiFav.moveToFolder'),
+        submenu: [
+          { label: t('aiFav.moveToRoot'), clickId: 'move:root' },
+          ...collectFolderOptions(tree, folder.id).map((f) => ({
+            label: NBSP.repeat(f.depth * 2) + f.name,
+            clickId: `move:${f.id}`,
+          })),
+        ],
+      },
+      { type: 'separator' as const },
+      { label: t('aiFav.rename'), clickId: 'rename' },
+      { label: t('common.delete'), clickId: 'delete' },
+    ];
+    void showContextMenu(items, (id) => {
+      if (id === 'newfolder') ctx.setCreatingFolderIn(folder.id);
+      else if (id === 'rename') setRenaming(true);
+      else if (id === 'delete') ctx.onDelete(folder);
+      else if (id.startsWith('move:')) {
+        const target = id.slice('move:'.length);
+        useAiFavoritesStore.getState().move(folder.id, target === 'root' ? null : target);
+      }
+    });
+  };
 
   return (
     <div>
@@ -201,25 +233,15 @@ function FolderRow({ node: folder, depth, ctx }: { node: AiFavoriteFolder; depth
         ) : (
           <span className="truncate flex-1" title={folder.name}>{folder.name}</span>
         )}
-        <RowMenu open={menuOpen} setOpen={setMenuOpen}>
-          {moving ? (
-            <MovePicker
-              excludeId={folder.id}
-              onPick={(parentId) => {
-                setMoving(false);
-                setMenuOpen(false);
-                useAiFavoritesStore.getState().move(folder.id, parentId);
-              }}
-            />
-          ) : (
-            <>
-              <MenuItem label={t('aiFav.newFolderInside')} icon={<FolderPlus size={11} />} onClick={() => { setMenuOpen(false); ctx.setCreatingFolderIn(folder.id); }} />
-              <MenuItem label={t('aiFav.moveToFolder')} icon={<CornerDownRight size={11} />} onClick={() => setMoving(true)} />
-              <MenuItem label={t('aiFav.rename')} icon={<Pencil size={11} />} onClick={() => { setMenuOpen(false); setRenaming(true); }} />
-              <MenuItem label={t('common.delete')} icon={<Trash size={11} />} danger onClick={() => { setMenuOpen(false); ctx.onDelete(folder); }} />
-            </>
-          )}
-        </RowMenu>
+        <button
+          className="icon-btn !w-5 !h-5 opacity-70 group-hover:opacity-100 flex-shrink-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            openMenu();
+          }}
+        >
+          <span className="text-xs leading-none">⋯</span>
+        </button>
       </div>
 
       {folder.expanded && (
@@ -248,9 +270,40 @@ function FolderRow({ node: folder, depth, ctx }: { node: AiFavoriteFolder; depth
 
 function NoteRow({ node: note, depth, ctx }: { node: AiFavoriteNote; depth: number; ctx: RowContext }) {
   const { t } = ctx;
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [moving, setMoving] = useState(false);
+  const showContextMenu = useContextMenu();
   const [renaming, setRenaming] = useState(false);
+
+  const openMenu = () => {
+    const tree = useAiFavoritesStore.getState().tree;
+    const items = [
+      { label: t('aiFav.copy'), clickId: 'copy' },
+      ...(ctx.onInsert ? [{ label: t('aiFav.insertToInput'), clickId: 'insert' }] : []),
+      { type: 'separator' as const },
+      {
+        label: t('aiFav.moveToFolder'),
+        submenu: [
+          { label: t('aiFav.moveToRoot'), clickId: 'move:root' },
+          ...collectFolderOptions(tree, null).map((f) => ({
+            label: NBSP.repeat(f.depth * 2) + f.name,
+            clickId: `move:${f.id}`,
+          })),
+        ],
+      },
+      { type: 'separator' as const },
+      { label: t('aiFav.rename'), clickId: 'rename' },
+      { label: t('common.delete'), clickId: 'delete' },
+    ];
+    void showContextMenu(items, (id) => {
+      if (id === 'copy') ctx.onCopy(note);
+      else if (id === 'insert') ctx.onInsert?.(note.content);
+      else if (id === 'rename') setRenaming(true);
+      else if (id === 'delete') ctx.onDelete(note);
+      else if (id.startsWith('move:')) {
+        const target = id.slice('move:'.length);
+        useAiFavoritesStore.getState().move(note.id, target === 'root' ? null : target);
+      }
+    });
+  };
 
   return (
     <div
@@ -273,130 +326,20 @@ function NoteRow({ node: note, depth, ctx }: { node: AiFavoriteNote; depth: numb
       ) : (
         <span className="truncate flex-1">{note.name}</span>
       )}
-      <RowMenu open={menuOpen} setOpen={setMenuOpen}>
-        {moving ? (
-          <MovePicker
-            excludeId={null}
-            onPick={(parentId) => {
-              setMoving(false);
-              setMenuOpen(false);
-              useAiFavoritesStore.getState().move(note.id, parentId);
-            }}
-          />
-        ) : (
-          <>
-            <MenuItem
-              label={ctx.copiedId === note.id ? t('aiFav.copied') : t('aiFav.copy')}
-              icon={ctx.copiedId === note.id ? <Check size={11} className="text-status-added" /> : <Copy size={11} />}
-              onClick={() => ctx.onCopy(note)}
-            />
-            {ctx.onInsert && (
-              <MenuItem label={t('aiFav.insertToInput')} icon={<CornerDownRight size={11} />} onClick={() => { setMenuOpen(false); ctx.onInsert?.(note.content); }} />
-            )}
-            <MenuItem label={t('aiFav.moveToFolder')} icon={<Folder size={11} className="text-accent" />} onClick={() => setMoving(true)} />
-            <MenuItem label={t('aiFav.rename')} icon={<Pencil size={11} />} onClick={() => { setMenuOpen(false); setRenaming(true); }} />
-            <MenuItem label={t('common.delete')} icon={<Trash size={11} />} danger onClick={() => { setMenuOpen(false); ctx.onDelete(note); }} />
-          </>
-        )}
-      </RowMenu>
+      <button
+        className="icon-btn !w-5 !h-5 opacity-70 group-hover:opacity-100 flex-shrink-0"
+        onClick={(e) => {
+          e.stopPropagation();
+          openMenu();
+        }}
+      >
+        <span className="text-xs leading-none">⋯</span>
+      </button>
     </div>
   );
 }
 
 // ── Small shared pieces ──────────────────────────────────────────────────────
-
-/** App-standard dropdown menu: relative wrapper + absolute top-full menu +
- *  fixed inset-0 click-away overlay. Opens and acts on LEFT CLICK only. */
-function RowMenu({
-  open, setOpen, children,
-}: {
-  open: boolean;
-  setOpen: (v: boolean) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-      <button
-        className="icon-btn !w-5 !h-5 opacity-70 group-hover:opacity-100"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen(!open);
-        }}
-      >
-        <span className="text-xs leading-none">⋯</span>
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-          <div className="absolute top-full right-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-xl z-50 min-w-[200px] py-1">
-            {children}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function MenuItem({
-  label, icon, danger, onClick,
-}: {
-  label: string;
-  icon?: React.ReactNode;
-  danger?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={cn(
-        'w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors hover:bg-bg-hover',
-        danger ? 'text-status-deleted' : 'text-text-secondary',
-      )}
-      onClick={onClick}
-    >
-      {icon}
-      <span className="truncate">{label}</span>
-    </button>
-  );
-}
-
-/** "Move to folder…" picker shown inside the row menu after a left click
- *  on the menu item. Lists every folder except the excluded subtree. */
-function MovePicker({
-  excludeId, onPick,
-}: {
-  excludeId: string | null;
-  onPick: (parentId: string | null) => void;
-}) {
-  const { t } = useI18n();
-  const tree = useAiFavoritesStore((s) => s.tree);
-  const options = collectFolderOptions(tree, excludeId);
-
-  return (
-    <>
-      <div className="px-3 pt-1 pb-1.5 text-3xs uppercase tracking-wide text-text-tertiary font-semibold border-b border-border-subtle mb-0.5">
-        {t('aiFav.moveToFolder')}
-      </div>
-      <MenuItem label={t('aiFav.moveToRoot')} icon={<CornerDownRight size={11} />} onClick={() => onPick(null)} />
-      {options.length === 0 ? (
-        <div className="px-3 py-1.5 text-2xs text-text-tertiary italic">
-          {t('aiFav.noTargetFolders')}
-        </div>
-      ) : (
-        options.map((f) => (
-          <button
-            key={f.id}
-            className="w-full text-left pr-3 py-1.5 text-xs flex items-center gap-2 transition-colors hover:bg-bg-hover text-text-secondary"
-            style={{ paddingLeft: 12 + f.depth * 14 }}
-            onClick={() => onPick(f.id)}
-          >
-            <Folder size={11} className="text-accent flex-shrink-0" />
-            <span className="truncate flex-1">{f.name}</span>
-          </button>
-        ))
-      )}
-    </>
-  );
-}
 
 /** Inline text input for create/rename — Enter commits, Escape cancels. */
 function InlineRename({
