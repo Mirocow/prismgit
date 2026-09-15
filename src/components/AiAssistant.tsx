@@ -3,7 +3,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { useI18n, useI18nStore } from '../lib/i18n';
-import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download, ChevronRight, ChevronDown, RefreshCw } from './icons';
+import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download, ChevronRight, ChevronDown, RefreshCw, Star } from './icons';
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage, type TokenUsage } from '../lib/aiChat';
 import type { LLMProvider } from '../lib/aiCommitMessages';
@@ -12,6 +12,9 @@ import {
   ensureAiProvidersMigrated, activateAiProvider,
 } from '../lib/aiProviders';
 import MarkdownRenderer from './MarkdownRenderer';
+import { AiFavoritesPanel } from './AiFavoritesPanel';
+import { useAiFavoritesStore } from '../stores/aiFavoritesStore';
+import type { AiFavoriteNote } from '../lib/aiFavorites';
 import {
   useAiChatStore,
   storageKeyFor, loadChatHistory, saveChatHistory, clearChatHistory,
@@ -248,6 +251,34 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   // The IPC itself can't be cancelled (Electron limitation), but the
   // Promise.race in proxyFetch rejects early so the UI updates immediately.
   const abortRef = useRef<AbortController | null>(null);
+
+  // ── Favorites (saved parts of the dialogue, tree navigation) ───────────
+  const [showFavorites, setShowFavorites] = useState(false);
+  const [flashIdx, setFlashIdx] = useState<number | null>(null);
+
+  const saveFavorite = useCallback((msg: ChatMessage) => {
+    if (msg.role !== 'user' && msg.role !== 'assistant') return;
+    useAiFavoritesStore.getState().addNote(null, {
+      content: msg.content,
+      role: msg.role,
+      repoPath: sessionRepoPath ?? undefined,
+    });
+    toast.success(t('aiFav.saved'));
+  }, [sessionRepoPath, t, toast]);
+
+  // Scroll to + flash-highlight the original message of a favorite note.
+  const jumpToNote = useCallback((note: AiFavoriteNote): boolean => {
+    const idx = messages.findIndex((m) => m.content === note.content);
+    if (idx < 0) return false;
+    setShowFavorites(false);
+    requestAnimationFrame(() => {
+      const el = scrollRef.current?.querySelector(`[data-msg-idx="${idx}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFlashIdx(idx);
+      setTimeout(() => setFlashIdx(null), 1800);
+    });
+    return true;
+  }, [messages]);
 
   // Follow the app's currentRepo — when the user switches projects in the
   // sidebar, the AI Assistant follows (loads that project's chat history).
@@ -607,6 +638,15 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
+          {/* Favorites toggle — tree of saved parts of the dialogue */}
+          <button
+            className={cn('icon-btn !w-5 !h-5', showFavorites ? '!text-accent' : 'hover:!text-accent')}
+            onClick={() => setShowFavorites(v => !v)}
+            title={t('aiFav.title')}
+            aria-label={t('aiFav.title')}
+          >
+            <Star size={11} />
+          </button>
           {messages.length > 0 && (
             <>
               {/* Export chat log as Markdown — used to share the
@@ -636,7 +676,14 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      {/* Messages */}
+      {/* Messages — or the favorites tree when toggled */}
+      {showFavorites ? (
+        <AiFavoritesPanel
+          className="flex-1 min-h-[300px] max-h-[60vh]"
+          onInsertToInput={(text) => setInput((input ? input.replace(/\s+$/, '') + '\n\n' : '') + text)}
+          onJumpToNote={jumpToNote}
+        />
+      ) : (
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[300px] max-h-[60vh]">
         {messages.length === 0 ? (
           <div className="space-y-3">
@@ -681,7 +728,23 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                   if (lastUserMsg) retryHandler = () => void handleSend(lastUserMsg!, true);
                 }
               }
-              return <MessageBubble key={idx} msg={msg} onRegenerate={retryHandler} t={t} />;
+              return (
+                <div
+                  key={idx}
+                  data-msg-idx={idx}
+                  className={cn(
+                    'rounded transition-colors',
+                    flashIdx === idx && 'bg-accent-muted/40 outline outline-1 outline-accent/60 -mx-1 px-1',
+                  )}
+                >
+                  <MessageBubble
+                    msg={msg}
+                    onRegenerate={retryHandler}
+                    onSaveFavorite={() => saveFavorite(msg)}
+                    t={t}
+                  />
+                </div>
+              );
             })}
           </>
         )}
@@ -692,6 +755,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           </div>
         )}
       </div>
+      )}
 
       {/* Token usage bar — shows input/output tokens and context size.
           Helps the user understand how much of their quota is being
@@ -777,7 +841,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
  *   - assistant with tool_calls: italic "Calling tool..." bubble
  *   - assistant final: markdown-rendered with copy button
  */
-export function MessageBubble({ msg, onRegenerate, t }: { msg: ChatMessage; onRegenerate?: () => void; t: (key: string) => string }) {
+export function MessageBubble({ msg, onRegenerate, onSaveFavorite, t }: { msg: ChatMessage; onRegenerate?: () => void; onSaveFavorite?: () => void; t: (key: string) => string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -796,16 +860,28 @@ export function MessageBubble({ msg, onRegenerate, t }: { msg: ChatMessage; onRe
           </div>
           {/* Retry button — ALWAYS visible (not hover-only). Re-sends
               this message to get a fresh AI response. */}
-          {onRegenerate && (
-            <button
-              className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
-              onClick={onRegenerate}
-              title={t('aiAssistant.resendMessage')}
-            >
-              <RefreshCw size={9} />
-              {t('aiAssistant.retry')}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {onRegenerate && (
+              <button
+                className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
+                onClick={onRegenerate}
+                title={t('aiAssistant.resendMessage')}
+              >
+                <RefreshCw size={9} />
+                {t('aiAssistant.retry')}
+              </button>
+            )}
+            {onSaveFavorite && (
+              <button
+                className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
+                onClick={onSaveFavorite}
+                title={t('aiFav.saveTooltip')}
+              >
+                <Star size={9} />
+                {t('aiFav.save')}
+              </button>
+            )}
+          </div>
         </div>
         <User size={14} className="flex-shrink-0 mt-0.5 text-text-tertiary" />
       </div>
@@ -840,7 +916,7 @@ export function MessageBubble({ msg, onRegenerate, t }: { msg: ChatMessage; onRe
       <Bot size={14} className="flex-shrink-0 mt-0.5 text-accent" />
       <div className="bg-bg-secondary rounded px-3 py-1.5 text-xs max-w-[85%] whitespace-pre-wrap break-words">
         <MarkdownLite text={msg.content} />
-        {/* Action buttons — Retry (regenerate) + Copy. Always visible. */}
+        {/* Action buttons — Retry (regenerate) + Copy + Save to favorites. Always visible. */}
         <div className="mt-1 flex justify-end gap-2">
           {onRegenerate && (
             <button
@@ -860,6 +936,16 @@ export function MessageBubble({ msg, onRegenerate, t }: { msg: ChatMessage; onRe
             {copied ? <Check size={9} className="text-status-added" /> : <Copy size={9} />}
             {copied ? t('aiAssistant.copied') : t('aiAssistant.copy')}
           </button>
+          {onSaveFavorite && (
+            <button
+              onClick={onSaveFavorite}
+              className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
+              title={t('aiFav.saveTooltip')}
+            >
+              <Star size={9} />
+              {t('aiFav.save')}
+            </button>
+          )}
         </div>
       </div>
     </div>

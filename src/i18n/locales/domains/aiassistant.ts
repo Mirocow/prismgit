@@ -10,6 +10,29 @@
  */
 
 export const en: Record<string, string> = {
+
+  // ── Favorites — saved parts of the dialogue, tree navigation ────────────
+  'aiFav.title': 'Favorites',
+  'aiFav.notes': 'notes',
+  'aiFav.save': 'Save',
+  'aiFav.saveTooltip': 'Save this message to favorites',
+  'aiFav.saved': 'Added to favorites',
+  'aiFav.empty': 'Nothing saved yet.',
+  'aiFav.emptyHint': 'Press "Save" under any chat message to keep it here. Organize saved messages into nested folders.',
+  'aiFav.newFolderRoot': 'New folder',
+  'aiFav.newFolderInside': 'New subfolder',
+  'aiFav.folderName': 'Folder name',
+  'aiFav.rename': 'Rename',
+  'aiFav.deleteTitle': 'Delete from favorites',
+  'aiFav.deleteFolderConfirm': 'Delete folder "{name}" and everything inside it?',
+  'aiFav.deleteNoteConfirm': 'Delete "{name}" from favorites?',
+  'aiFav.copy': 'Copy',
+  'aiFav.copied': 'Copied',
+  'aiFav.insertToInput': 'Insert into input',
+  'aiFav.showInChat': 'Show in chat',
+  'aiFav.notFoundInChat': 'The original message is no longer in the history, but its text is preserved — use Copy or Insert into input.',
+  'aiFav.collapseAll': 'Collapse all',
+
   // ── Header / titles ──────────────────────────────────────────────────────
   'aiAssistant.title': 'AI Assistant',
   'aiAssistant.toggleTitle': 'Toggle AI Assistant chat (Ctrl+Shift+A)',
@@ -97,6 +120,29 @@ export const en: Record<string, string> = {
 };
 
 export const ru: Record<string, string> = {
+
+  // ── Favorites — saved parts of the dialogue, tree navigation ────────────
+  'aiFav.title': 'Избранное',
+  'aiFav.notes': 'заметок',
+  'aiFav.save': 'В избранное',
+  'aiFav.saveTooltip': 'Сохранить это сообщение в избранное',
+  'aiFav.saved': 'Добавлено в избранное',
+  'aiFav.empty': 'Пока ничего не сохранено.',
+  'aiFav.emptyHint': 'Нажмите «В избранное» под любым сообщением чата, чтобы сохранить его здесь. Раскладывайте сохранённое по вложенным папкам.',
+  'aiFav.newFolderRoot': 'Новая папка',
+  'aiFav.newFolderInside': 'Новая вложенная папка',
+  'aiFav.folderName': 'Название папки',
+  'aiFav.rename': 'Переименовать',
+  'aiFav.deleteTitle': 'Удалить из избранного',
+  'aiFav.deleteFolderConfirm': 'Удалить папку «{name}» и всё её содержимое?',
+  'aiFav.deleteNoteConfirm': 'Удалить «{name}» из избранного?',
+  'aiFav.copy': 'Копировать',
+  'aiFav.copied': 'Скопировано',
+  'aiFav.insertToInput': 'Вставить в поле ввода',
+  'aiFav.showInChat': 'Показать в чате',
+  'aiFav.notFoundInChat': 'Оригинал уже не в истории — но текст сохранён: используйте «Копировать» или «Вставить в поле ввода».',
+  'aiFav.collapseAll': 'Свернуть все',
+
   // ── Header / titles ──────────────────────────────────────────────────────
   'aiAssistant.title': 'AI Ассистент',
   'aiAssistant.toggleTitle': 'Переключить чат AI Ассистента (Ctrl+Shift+A)',
@@ -184,6 +230,29 @@ export const ru: Record<string, string> = {
 };
 
 export const zh: Record<string, string> = {
+
+  // ── Favorites — saved parts of the dialogue, tree navigation ────────────
+  'aiFav.title': '收藏',
+  'aiFav.notes': '条',
+  'aiFav.save': '收藏',
+  'aiFav.saveTooltip': '将此消息保存到收藏',
+  'aiFav.saved': '已加入收藏',
+  'aiFav.empty': '还没有保存的内容。',
+  'aiFav.emptyHint': '点击聊天消息下方的"收藏"按钮即可保存到这里。可用嵌套文件夹整理收藏。',
+  'aiFav.newFolderRoot': '新建文件夹',
+  'aiFav.newFolderInside': '新建子文件夹',
+  'aiFav.folderName': '文件夹名称',
+  'aiFav.rename': '重命名',
+  'aiFav.deleteTitle': '从收藏中删除',
+  'aiFav.deleteFolderConfirm': '删除文件夹"{name}"及其全部内容？',
+  'aiFav.deleteNoteConfirm': '从收藏中删除"{name}"？',
+  'aiFav.copy': '复制',
+  'aiFav.copied': '已复制',
+  'aiFav.insertToInput': '插入到输入框',
+  'aiFav.showInChat': '在聊天中显示',
+  'aiFav.notFoundInChat': '原消息已不在历史记录中，但文本已保存 — 使用"复制"或"插入到输入框"。',
+  'aiFav.collapseAll': '全部折叠',
+
   // ── Header / titles ──────────────────────────────────────────────────────
   'aiAssistant.title': 'AI 助手',
   'aiAssistant.toggleTitle': '切换 AI 助手聊天 (Ctrl+Shift+A)',
@@ -271,6 +340,29 @@ export const zh: Record<string, string> = {
 };
 
 export const de: Record<string, string> = {
+
+  // ── Favorites — saved parts of the dialogue, tree navigation ────────────
+  'aiFav.title': 'Favoriten',
+  'aiFav.notes': 'Einträge',
+  'aiFav.save': 'Speichern',
+  'aiFav.saveTooltip': 'Diese Nachricht zu den Favoriten hinzufügen',
+  'aiFav.saved': 'Zu Favoriten hinzugefügt',
+  'aiFav.empty': 'Noch nichts gespeichert.',
+  'aiFav.emptyHint': 'Klicken Sie unter einer Chat-Nachricht auf "Speichern", um sie hier abzulegen. Ordnen Sie gespeicherte Nachrichten in verschachtelten Ordnern an.',
+  'aiFav.newFolderRoot': 'Neuer Ordner',
+  'aiFav.newFolderInside': 'Neuer Unterordner',
+  'aiFav.folderName': 'Ordnername',
+  'aiFav.rename': 'Umbenennen',
+  'aiFav.deleteTitle': 'Aus Favoriten löschen',
+  'aiFav.deleteFolderConfirm': 'Ordner "{name}" und den gesamten Inhalt löschen?',
+  'aiFav.deleteNoteConfirm': '"{name}" aus den Favoriten löschen?',
+  'aiFav.copy': 'Kopieren',
+  'aiFav.copied': 'Kopiert',
+  'aiFav.insertToInput': 'In Eingabefeld einfügen',
+  'aiFav.showInChat': 'Im Chat anzeigen',
+  'aiFav.notFoundInChat': 'Die Originalnachricht ist nicht mehr im Verlauf, der Text ist aber erhalten — verwenden Sie Kopieren oder In Eingabefeld einfügen.',
+  'aiFav.collapseAll': 'Alle einklappen',
+
   // ── Header / titles ──────────────────────────────────────────────────────
   'aiAssistant.title': 'KI-Assistent',
   'aiAssistant.toggleTitle': 'KI-Assistent-Chat umschalten (Strg+Shift+A)',

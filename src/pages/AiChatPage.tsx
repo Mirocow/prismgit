@@ -5,7 +5,7 @@ import { useToastActions } from '../stores/toastStore';
 import { useI18n, useI18nStore } from '../lib/i18n';
 import {
   Sparkles, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder,
-  Square, Copy, Check, ChevronRight, ChevronDown, Search, X,
+  Square, Copy, Check, ChevronRight, ChevronDown, Search, X, Star,
   Download, RefreshCw,
 } from '../components/icons';
 import { cn } from '../lib/utils';
@@ -20,6 +20,9 @@ import {
 } from '../components/AiAssistant';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { useAiChatStore } from '../stores/aiChatStore';
+import { AiFavoritesPanel } from '../components/AiFavoritesPanel';
+import { useAiFavoritesStore } from '../stores/aiFavoritesStore';
+import type { AiFavoriteNote } from '../lib/aiFavorites';
 
 /**
  * Full-page version of the AI Assistant chat.
@@ -115,6 +118,36 @@ export default function AiChatPage() {
   // ── Chat search state — filters messages by text, highlights matches.
   // Local-only (not shared with the popup — search is page-specific).
   const [searchQuery, setSearchQuery] = useState('');
+
+  // ── Favorites (saved parts of the dialogue) + right panel tab.
+  const [rightTab, setRightTab] = useState<'search' | 'favorites'>('search');
+  const [flashIdx, setFlashIdx] = useState<number | null>(null);
+
+  const saveFavorite = useCallback((msg: ChatMessage) => {
+    if (msg.role !== 'user' && msg.role !== 'assistant') return;
+    useAiFavoritesStore.getState().addNote(null, {
+      content: msg.content,
+      role: msg.role,
+      repoPath: sessionRepoPath ?? undefined,
+    });
+    toast.success(t('aiFav.saved'));
+  }, [sessionRepoPath, t, toast]);
+
+  // Jump from a favorite note to its original message: clear the search
+  // filter (the target may be filtered out), scroll + flash-highlight.
+  const jumpToNote = useCallback((note: AiFavoriteNote): boolean => {
+    const idx = messages.findIndex((m) => m.content === note.content);
+    if (idx < 0) return false;
+    setSearchQuery('');
+    setRightTab('search');
+    requestAnimationFrame(() => {
+      const el = scrollRef.current?.querySelector(`[data-msg-idx="${idx}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFlashIdx(idx);
+      setTimeout(() => setFlashIdx(null), 1800);
+    });
+    return true;
+  }, [messages]);
 
   // ── Resizable chat panel width (search panel takes the remainder).
   // ResizableSplitter sits BETWEEN chat and search — drag right shrinks chat,
@@ -502,12 +535,21 @@ export default function AiChatPage() {
                     }
                   }
                   return (
-                    <MessageBubble
+                    <div
                       key={idx}
-                      msg={msg}
-                      onRegenerate={retryHandler}
-                      t={t}
-                    />
+                      data-msg-idx={idx}
+                      className={cn(
+                        'rounded transition-colors',
+                        flashIdx === idx && 'bg-accent-muted/40 outline outline-1 outline-accent/60 -mx-1 px-1',
+                      )}
+                    >
+                      <MessageBubble
+                        msg={msg}
+                        onRegenerate={retryHandler}
+                        onSaveFavorite={() => saveFavorite(msg)}
+                        t={t}
+                      />
+                    </div>
                   );
                 })}
                 {busy && (
@@ -582,17 +624,49 @@ export default function AiChatPage() {
             the LEFT of the splitter, per the ResizableSplitter convention). */}
         <ResizableSplitter direction="horizontal" onResize={handleChatResize} />
 
-        {/* Search panel — takes the remaining width (flex-1) */}
+        {/* Right panel — Search / Favorites tabs (takes the remaining width) */}
         <div className="flex flex-col min-w-0 flex-1 bg-bg-secondary">
-          <div className="px-3 py-2 border-b border-border-default flex items-center gap-2 bg-bg-elevated">
-            <Search size={12} className="text-text-tertiary flex-shrink-0" />
-            <span className="text-xs font-medium text-text-secondary">{t('aiAssistant.chatSearch')}</span>
-            <span className="text-3xs text-text-tertiary ml-auto">
-              {searchLower
-                ? `${matchCount} ${matchCount === 1 ? t('aiAssistant.match') : t('aiAssistant.matches')}`
-                : `${messages.length} ${t('aiAssistant.total')}`}
-            </span>
+          <div className="px-2 py-1.5 border-b border-border-default flex items-center gap-1 bg-bg-elevated">
+            <button
+              className={cn(
+                'flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors',
+                rightTab === 'search'
+                  ? 'bg-accent-muted text-accent'
+                  : 'text-text-secondary hover:bg-bg-hover',
+              )}
+              onClick={() => setRightTab('search')}
+            >
+              <Search size={11} />
+              {t('aiAssistant.chatSearch')}
+            </button>
+            <button
+              className={cn(
+                'flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors',
+                rightTab === 'favorites'
+                  ? 'bg-accent-muted text-accent'
+                  : 'text-text-secondary hover:bg-bg-hover',
+              )}
+              onClick={() => setRightTab('favorites')}
+            >
+              <Star size={11} />
+              {t('aiFav.title')}
+            </button>
+            {rightTab === 'search' && (
+              <span className="text-3xs text-text-tertiary ml-auto pr-1">
+                {searchLower
+                  ? `${matchCount} ${matchCount === 1 ? t('aiAssistant.match') : t('aiAssistant.matches')}`
+                  : `${messages.length} ${t('aiAssistant.total')}`}
+              </span>
+            )}
           </div>
+          {rightTab === 'favorites' ? (
+            <AiFavoritesPanel
+              className="flex-1"
+              onInsertToInput={(text) => setInput((input ? input.replace(/\s+$/, '') + '\n\n' : '') + text)}
+              onJumpToNote={jumpToNote}
+            />
+          ) : (
+            <>
           <div className="p-2 border-b border-border-subtle">
             <div className="relative">
               <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-tertiary" />
@@ -657,6 +731,8 @@ export default function AiChatPage() {
               })
             )}
           </div>
+            </>
+          )}
         </div>
       </div>
     </div>
