@@ -5192,6 +5192,33 @@ export async function listRemote(repoPath: string, remote: string = 'origin'): P
 }
 
 /**
+ * list-remote for a RAW URL (no repository yet) — Clone dialog "detect active
+ * branch" for ssh:// and scp-like URLs. MUST carry the same SSH environment
+ * as clone() itself: the old renderer path went through git:raw → cached
+ * instance → system ssh only, so for ssh://git@host:50022/repo.git with a
+ * PrismGit-managed key or password profile the detection failed (or hung on
+ * a prompt) while the actual clone worked.
+ */
+export async function lsRemoteUrl(
+  url: string,
+  args: string[] = ['--symref', 'HEAD']
+): Promise<string> {
+  const ssh = buildSshEnv(url, '');
+  const httpArgs = buildHttpAuthArgs(url, undefined);
+  const git = simpleGit(GIT_SSH_UNSAFE_OPTIONS).env({
+    ...GIT_ENV_LFS_SKIP,
+    ...ssh.env,
+    // GUI: never block on a terminal prompt for an unreachable/private host.
+    GIT_TERMINAL_PROMPT: '0',
+  });
+  try {
+    return await git.raw([...httpArgs, 'ls-remote', ...args, url]);
+  } finally {
+    ssh.cleanup();
+  }
+}
+
+/**
  * Add an annotated tag — wraps `git tag -a -m`.
  *
  * Annotated tags store metadata (tagger, date, message) in addition to

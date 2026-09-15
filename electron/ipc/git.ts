@@ -215,6 +215,9 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:countObjects', (_e, p: string, verbose?: boolean) => wrap(gitService.countObjects)(p, verbose));
   ipcMain.handle('git:updateServerInfo', (_e, p: string) => wrap(gitService.updateServerInfo)(p));
   ipcMain.handle('git:listRemote', (_e, p: string, remote?: string) => wrap(gitService.listRemote)(p, remote));
+  // ls-remote for a raw URL (no repository yet) — carries the SSH env for
+  // ssh:// and scp-like clone URLs (Clone dialog branch detection).
+  ipcMain.handle('git:lsRemoteUrl', (_e, url: string, args?: string[]) => wrap(gitService.lsRemoteUrl)(url, args));
   ipcMain.handle('git:addAnnotatedTag', (_e, p: string, name: string, msg: string, ref?: string) => wrap(gitService.addAnnotatedTag)(p, name, msg, ref));
 
   // Worktrees (SmartGit 20+)

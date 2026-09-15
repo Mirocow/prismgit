@@ -223,6 +223,15 @@ export const zh: Record<string, string> = {
   'clone.credentialHelper': '使用 PrismGit 作为凭据助手',
   'clone.skipSubmodules': '跳过子模块初始化',
   'clone.clone': '克隆',
+  'clone.ssh.title': 'SSH 连接',
+  'clone.ssh.usingProfile': '配置：{name}',
+  'clone.ssh.usingKey': '托管密钥：{name}',
+  'clone.ssh.usingSystem': '系统 ssh — 该主机没有配置档案',
+  'clone.ssh.hintSystem': '在 设置 → 安全 → SSH 连接 中添加配置档案，以使用托管密钥或密码。',
+  'clone.ssh.test': '测试',
+  'clone.ssh.testing': '测试中…',
+  'clone.ssh.ok': '已连接',
+  'clone.ssh.failed': '失败',
 
   // Diff
   'diff.unified': '统一',

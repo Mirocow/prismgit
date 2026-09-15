@@ -435,6 +435,8 @@ export interface GitApi {
   countObjects: (repoPath: string, verbose?: boolean) => Promise<string>;
   updateServerInfo: (repoPath: string) => Promise<string>;
   listRemote: (repoPath: string, remote?: string) => Promise<string>;
+  /** ls-remote for a RAW url (no repo yet) — Clone dialog branch detection with SSH env. */
+  lsRemoteUrl: (url: string, args?: string[]) => Promise<string>;
   addAnnotatedTag: (repoPath: string, name: string, message: string, ref?: string) => Promise<string>;
 
   // SmartGit 20-24 extended features

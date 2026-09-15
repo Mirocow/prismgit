@@ -223,6 +223,15 @@ export const ru: Record<string, string> = {
   'clone.credentialHelper': 'Использовать PrismGit как credential helper',
   'clone.skipSubmodules': 'Пропустить инициализацию подмодулей',
   'clone.clone': 'Клонировать',
+  'clone.ssh.title': 'SSH-подключение',
+  'clone.ssh.usingProfile': 'Профиль: {name}',
+  'clone.ssh.usingKey': 'Управляемый ключ: {name}',
+  'clone.ssh.usingSystem': 'Системный ssh — профиль для этого хоста не задан',
+  'clone.ssh.hintSystem': 'Добавьте профиль в Настройки → Безопасность → SSH-подключения, чтобы использовать управляемый ключ или пароль.',
+  'clone.ssh.test': 'Проверить',
+  'clone.ssh.testing': 'Проверка…',
+  'clone.ssh.ok': 'Подключено',
+  'clone.ssh.failed': 'Не удалось',
 
   // Diff
   'diff.unified': 'Единый',

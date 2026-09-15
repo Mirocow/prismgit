@@ -129,6 +129,7 @@ const api = {
     countObjects: (repoPath: string, verbose?: boolean) => ipcRenderer.invoke('git:countObjects', repoPath, verbose),
     updateServerInfo: (repoPath: string) => ipcRenderer.invoke('git:updateServerInfo', repoPath),
     listRemote: (repoPath: string, remote?: string) => ipcRenderer.invoke('git:listRemote', repoPath, remote),
+    lsRemoteUrl: (url: string, args?: string[]) => ipcRenderer.invoke('git:lsRemoteUrl', url, args),
     addAnnotatedTag: (repoPath: string, name: string, message: string, ref?: string) => ipcRenderer.invoke('git:addAnnotatedTag', repoPath, name, message, ref),
 
     // SmartGit 20-24 extended
@@ -430,6 +431,7 @@ const api = {
     deleteProfile: (id: string) => ipcRenderer.invoke('ssh:deleteProfile', id),
     testProfile: (id: string) => ipcRenderer.invoke('ssh:testProfile', id),
     testParams: (params) => ipcRenderer.invoke('ssh:testParams', params),
+    resolveForUrl: (url: string) => ipcRenderer.invoke('ssh:resolveForUrl', url),
   } as SshApi,
 
   // Credential storage status + secrets manager (Settings → Security)

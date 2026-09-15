@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Folder, X, Github, Loader, Download } from './icons';
+import { Folder, X, Github, Loader, Download, Lock } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useAuthStore } from '../stores/authStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
-import { api, type GithubRepository } from '../lib/api';
+import { api, type GithubRepository, type SshUrlResolution, type SshTestResult } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 
@@ -44,6 +44,10 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
   // SmartGit 24.1: detect active branch from remote
   const [detectedBranch, setDetectedBranch] = useState<string>('');
   const [detectingBranch, setDetectingBranch] = useState(false);
+  // DBeaver-style inline SSH panel: what will this URL authenticate with?
+  const [sshRes, setSshRes] = useState<SshUrlResolution | null>(null);
+  const [sshTesting, setSshTesting] = useState(false);
+  const [sshTestResult, setSshTestResult] = useState<SshTestResult | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -55,6 +59,8 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
       setPartialClone(false);
       setSetupCredentialHelper(false);
       setNoRecursive(false);
+      setSshRes(null);
+      setSshTestResult(null);
       if (authenticated) {
         loadRepos();
       }
@@ -70,7 +76,10 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
     setDetectingBranch(true);
     try {
       // git ls-remote --symref <url> HEAD returns: ref: refs/heads/main\t<hash>
-      const output = await api.git.raw('', ['ls-remote', '--symref', cloneUrl, 'HEAD']);
+      // lsRemoteUrl (NOT git:raw) — carries the same SSH env as the actual
+      // clone, so managed keys / SSH connection profiles / passwords work
+      // for ssh://git@host:50022/repo.git too.
+      const output = await api.git.lsRemoteUrl(cloneUrl, ['--symref', 'HEAD']);
       const match = output.match(/ref:\s*refs\/heads\/(\S+)/);
       if (match && match[1]) {
         const branchName = match[1];
@@ -95,6 +104,46 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
     const timer = setTimeout(() => detectActiveBranch(url), 500);
     return () => clearTimeout(timer);
   }, [url, mirror]);
+
+  // Debounced SSH resolution when URL changes (DBeaver shows the SSH tab
+  // inside the connection dialog — here we show what the URL would use).
+  useEffect(() => {
+    if (!url) {
+      setSshRes(null);
+      setSshTestResult(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const r = await api.ssh.resolveForUrl(url);
+        if (!cancelled) {
+          setSshRes(r);
+          setSshTestResult(null); // URL changed — previous test is stale
+        }
+      } catch {
+        if (!cancelled) setSshRes(null);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [url]);
+
+  const testSshForClone = async () => {
+    if (!sshRes?.profile) return;
+    setSshTesting(true);
+    setSshTestResult(null);
+    try {
+      const r = await api.ssh.testProfile(sshRes.profile.id);
+      setSshTestResult(r);
+    } catch (e) {
+      setSshTestResult({ ok: false, output: String(e) });
+    } finally {
+      setSshTesting(false);
+    }
+  };
 
   const loadRepos = async () => {
     setLoadingRepos(true);
@@ -274,6 +323,69 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                   onChange={(e) => handleUrlChange(e.target.value)}
                 />
               </div>
+              {sshRes?.isSsh && (
+                <div className="rounded border border-border-subtle bg-bg-secondary/60 px-2.5 py-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 text-xs">
+                      <Lock size={12} className="text-text-tertiary flex-shrink-0" />
+                      <span className="font-mono truncate">
+                        {sshRes.user || 'git'}@{sshRes.host}{sshRes.port ? `:${sshRes.port}` : ''}
+                      </span>
+                    </div>
+                    {sshRes.profile && (
+                      <button
+                        className="btn btn-secondary text-2xs py-0.5 px-2 flex-shrink-0"
+                        onClick={testSshForClone}
+                        disabled={sshTesting}
+                      >
+                        {sshTesting ? <Loader size={10} className="animate-spin" /> : null}
+                        {sshTesting ? t('clone.ssh.testing') : t('clone.ssh.test')}
+                      </button>
+                    )}
+                  </div>
+                  {sshRes.fallback === 'profile' && sshRes.profile && (
+                    <div className="text-2xs text-text-secondary flex items-center gap-1.5 flex-wrap">
+                      <span className="text-status-added">●</span>
+                      <span className="truncate">
+                        {t('clone.ssh.usingProfile', {
+                          name: sshRes.profile.label || `${sshRes.profile.user}@${sshRes.profile.host}`,
+                        })}
+                        {' · '}
+                        {sshRes.profile.authMethod === 'password'
+                          ? 'password'
+                          : sshRes.keyLabel || 'key'}
+                      </span>
+                    </div>
+                  )}
+                  {sshRes.fallback === 'key' && (
+                    <div className="text-2xs text-text-secondary flex items-center gap-1.5">
+                      <span className="text-status-added">●</span>
+                      <span className="truncate">{t('clone.ssh.usingKey', { name: sshRes.keyLabel || '' })}</span>
+                    </div>
+                  )}
+                  {sshRes.fallback === 'system' && (
+                    <div className="text-2xs space-y-0.5">
+                      <div className="text-status-modified">{t('clone.ssh.usingSystem')}</div>
+                      <div className="text-text-tertiary">{t('clone.ssh.hintSystem')}</div>
+                    </div>
+                  )}
+                  {sshTestResult && (
+                    <div
+                      className={cn(
+                        'text-2xs space-y-0.5',
+                        sshTestResult.ok ? 'text-status-added' : 'text-status-deleted'
+                      )}
+                    >
+                      <div>{sshTestResult.ok ? t('clone.ssh.ok') : t('clone.ssh.failed')}</div>
+                      {sshTestResult.output && (
+                        <div className="font-mono text-text-tertiary line-clamp-2" title={sshTestResult.output}>
+                          {sshTestResult.output.split('\n').filter(Boolean).slice(-2).join('\n')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="text-xs text-text-tertiary block mb-1">
                   {t('clone.target')}

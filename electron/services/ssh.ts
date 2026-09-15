@@ -27,6 +27,7 @@ import { app, dialog, BrowserWindow } from 'electron';
 import { getSetting, setSetting } from './storage.js';
 import { getSecret, setSecret, deleteSecret } from './secrets.js';
 import { NS_SSH, classifyRemoteUrl } from './credentialKeys.js';
+import { parseSshUrl, matchProfileForUrl } from './sshUrl.js';
 import type {
   SshKeyMeta, SshTestResult, SshSystemKey, SshEnvResult,
   SshProfile, SshProfileInput, SshProfileTestParams,
@@ -373,29 +374,72 @@ export function findProfileForHost(host: string | undefined | null): SshProfile 
 }
 
 /**
- * Extract user@host:port from an SSH URL (ssh:// or scp-like syntax).
- * Returns { host, user, port } with defaults where missing.
+ * Find the profile for a git remote URL — host+port exact match first,
+ * host-only fallback (see services/sshUrl.ts matchProfileForUrl).
  */
-export function parseSshUrl(url: string): { host: string; user?: string; port?: number } {
-  try {
-    let u = url.trim();
-    if (!/^ssh:\/\//i.test(u)) {
-      // scp-like: user@host:path → normalize to ssh://user@host/path
-      const m = /^(([^@/\s]+)@)?([^:/\s]+):(.*)$/.exec(u);
-      if (!m) return { host: u };
-      return { host: m[3], user: m[2], port: undefined };
-    }
-    u = u.replace(/^ssh:\/\//i, 'http://'); // reuse URL parser
-    const parsed = new URL(u);
-    return {
-      host: parsed.hostname,
-      user: parsed.username || undefined,
-      port: parsed.port ? Number(parsed.port) : undefined,
-    };
-  } catch {
-    return { host: url };
-  }
+export function findProfileForUrl(url: string | undefined | null): SshProfile | undefined {
+  return matchProfileForUrl(getSshProfiles(), url);
 }
+
+export interface SshUrlResolution {
+  /** URL carries SSH transport (ssh:// or scp-like). */
+  isSsh: boolean;
+  host?: string;
+  port?: number;
+  user?: string;
+  /** DBeaver-style profile that buildSshEnv will apply (if any). */
+  profile?: SshProfile;
+  /** Managed key that will be used (profile key, per-repo or global default). */
+  keyLabel?: string;
+  /** What git falls back to when neither a profile nor a key is configured. */
+  fallback: 'profile' | 'key' | 'system';
+}
+
+/**
+ * Explain to the UI what a clone/fetch over this SSH URL would use —
+ * mirrors buildSshEnv resolution WITHOUT touching the vault (no secrets).
+ * Used by the Clone dialog's SSH panel (DBeaver shows the SSH tab inline).
+ */
+export function resolveSshForUrl(url: string | undefined | null): SshUrlResolution {
+  if (classifyRemoteUrl(url) !== 'ssh') {
+    return { isSsh: false, fallback: 'system' };
+  }
+  const parsed = parseSshUrl(url || '');
+  const profile = findProfileForUrl(url);
+  if (profile) {
+    const key = findSshKey(profile.keyId);
+    return {
+      isSsh: true,
+      host: parsed.host,
+      port: parsed.port ?? profile.port,
+      user: parsed.user ?? profile.user,
+      profile,
+      keyLabel: key?.label,
+      fallback: 'profile',
+    };
+  }
+  // No profile — the global default key still applies (per-repo overrides
+  // need an existing repository and cannot play a role at clone time).
+  const globalKey = findSshKey(getSetting('sshDefaultKeyId') as string | undefined);
+  if (globalKey) {
+    return {
+      isSsh: true,
+      host: parsed.host,
+      port: parsed.port,
+      user: parsed.user,
+      keyLabel: globalKey.label,
+      fallback: 'key',
+    };
+  }
+  return { isSsh: true, host: parsed.host, port: parsed.port, user: parsed.user, fallback: 'system' };
+}
+
+/**
+ * Extract user@host:port from an SSH URL (ssh:// or scp-like syntax).
+ * Pure implementation lives in services/sshUrl.ts — re-exported here to
+ * keep the existing import surface stable.
+ */
+export { parseSshUrl } from './sshUrl.js';
 
 /**
  * Core SSH connectivity check for explicit parameters (saved or unsaved).
@@ -565,9 +609,10 @@ export function buildSshEnv(url: string | undefined | null, repoPath: string): S
   const perRepo = (getSetting('sshRepoKeys') as Record<string, string> | undefined)?.[repoPath];
   const meta = findSshKey(perRepo);
 
-  // Profile matched by URL host — may define key OR password authentication.
+  // Profile matched by URL host (+port precision) — may define key OR
+  // password authentication.
   const parsed = parseSshUrl(url || '');
-  const profile = findProfileForHost(parsed.host);
+  const profile = findProfileForUrl(url);
 
   if (!meta && !profile) return NO_SSH;
 

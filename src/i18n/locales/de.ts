@@ -223,6 +223,15 @@ export const de: Record<string, string> = {
   'clone.credentialHelper': 'PrismGit als Credential Helper verwenden',
   'clone.skipSubmodules': 'Submodule-Initialisierung überspringen',
   'clone.clone': 'Klonen',
+  'clone.ssh.title': 'SSH-Verbindung',
+  'clone.ssh.usingProfile': 'Profil: {name}',
+  'clone.ssh.usingKey': 'Verwalteter Schlüssel: {name}',
+  'clone.ssh.usingSystem': 'System-ssh — kein Profil für diesen Host',
+  'clone.ssh.hintSystem': 'Legen Sie unter Einstellungen → Sicherheit → SSH-Verbindungen ein Profil an, um einen verwalteten Schlüssel oder ein Passwort zu verwenden.',
+  'clone.ssh.test': 'Testen',
+  'clone.ssh.testing': 'Teste…',
+  'clone.ssh.ok': 'Verbunden',
+  'clone.ssh.failed': 'Fehlgeschlagen',
 
   // Diff
   'diff.unified': 'Unified',

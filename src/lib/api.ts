@@ -38,7 +38,7 @@ import type {
 } from '../../electron/types/github-api';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../../electron/types/settings-api';
 import type { CommandLogEntry } from '../../electron/types/command-log-api';
-import type { SshKeyMeta, SshTestResult, SshSystemKey, CredentialsStatus, SecretEntryMeta, SshProfile, SshProfileInput, SshProfileTestParams } from '../../electron/types/ssh-api';
+import type { SshKeyMeta, SshTestResult, SshSystemKey, CredentialsStatus, SecretEntryMeta, SshProfile, SshProfileInput, SshProfileTestParams, SshUrlResolution } from '../../electron/types/ssh-api';
 
 export type {
   StatusResult,
@@ -86,6 +86,7 @@ export type {
   SshProfile,
   SshProfileInput,
   SshProfileTestParams,
+  SshUrlResolution,
   CredentialsStatus,
   SecretEntryMeta,
 };

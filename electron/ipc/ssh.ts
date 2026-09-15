@@ -54,6 +54,10 @@ export function registerSshIpc(): void {
     sshService.testSshParams(params)
   );
 
+  // What would a git operation over this URL use? (Clone dialog SSH panel —
+  // parses user@host:port, matches a DBeaver-style profile, no secrets.)
+  ipcMain.handle('ssh:resolveForUrl', (_e, url: string) => sshService.resolveSshForUrl(url));
+
   // Credential storage status for Settings → Security.
   ipcMain.handle('credentials:status', () => ({
     safeStorageAvailable: secrets.isEncryptionAvailable(),

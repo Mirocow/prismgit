@@ -223,6 +223,15 @@ export const en: Record<string, string> = {
   'clone.credentialHelper': 'Use PrismGit as credential helper',
   'clone.skipSubmodules': 'Skip submodule initialization',
   'clone.clone': 'Clone',
+  'clone.ssh.title': 'SSH connection',
+  'clone.ssh.usingProfile': 'Profile: {name}',
+  'clone.ssh.usingKey': 'Managed key: {name}',
+  'clone.ssh.usingSystem': 'System ssh — no profile for this host',
+  'clone.ssh.hintSystem': 'Add a profile in Settings → Security → SSH connections to use a managed key or password.',
+  'clone.ssh.test': 'Test',
+  'clone.ssh.testing': 'Testing…',
+  'clone.ssh.ok': 'Connected',
+  'clone.ssh.failed': 'Failed',
 
   // Diff
   'diff.unified': 'Unified',

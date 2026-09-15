@@ -96,6 +96,24 @@ export interface SshEnvResult {
   usedKeyId?: string;
 }
 
+/**
+ * What a git operation over an SSH URL would use (Clone dialog SSH panel).
+ * Mirrors services/ssh.ts buildSshEnv resolution without touching the vault.
+ */
+export interface SshUrlResolution {
+  /** URL carries SSH transport (ssh:// or scp-like). */
+  isSsh: boolean;
+  host?: string;
+  port?: number;
+  user?: string;
+  /** Matched DBeaver-style profile (id/label/authMethod are enough for UI). */
+  profile?: SshProfile;
+  /** Managed key label that will be used (profile key or global default). */
+  keyLabel?: string;
+  /** 'profile' | 'key' | 'system' — what supplies the credentials. */
+  fallback: 'profile' | 'key' | 'system';
+}
+
 export interface SshApi {
   list: () => Promise<SshKeyMeta[]>;
   generate: (options: { label: string; comment?: string; type?: 'ed25519' | 'rsa'; passphrase?: string }) => Promise<SshKeyMeta>;
@@ -112,6 +130,8 @@ export interface SshApi {
   deleteProfile: (id: string) => Promise<void>;
   testProfile: (id: string) => Promise<SshTestResult>;
   testParams: (params: SshProfileTestParams) => Promise<SshTestResult>;
+  /** Explain what a git operation over this URL would use (no secrets). */
+  resolveForUrl: (url: string) => Promise<SshUrlResolution>;
 }
 
 export interface CredentialsStatus {
