@@ -424,6 +424,12 @@ const api = {
     copyPublicKey: (id: string) => ipcRenderer.invoke('ssh:copyPublicKey', id),
     test: (id: string, opts?: { host?: string; user?: string }) => ipcRenderer.invoke('ssh:test', id, opts),
     listSystemKeys: () => ipcRenderer.invoke('ssh:listSystemKeys'),
+    pickKeyFile: () => ipcRenderer.invoke('ssh:pickKeyFile'),
+    listProfiles: () => ipcRenderer.invoke('ssh:listProfiles'),
+    saveProfile: (input) => ipcRenderer.invoke('ssh:saveProfile', input),
+    deleteProfile: (id: string) => ipcRenderer.invoke('ssh:deleteProfile', id),
+    testProfile: (id: string) => ipcRenderer.invoke('ssh:testProfile', id),
+    testParams: (params) => ipcRenderer.invoke('ssh:testParams', params),
   } as SshApi,
 
   // Credential storage status + secrets manager (Settings → Security)

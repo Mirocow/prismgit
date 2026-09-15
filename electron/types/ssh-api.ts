@@ -40,6 +40,51 @@ export interface SshSystemKey {
 }
 
 /**
+ * One SSH connection profile (DBeaver-style "SSH configuration"):
+ * host/port/user + authentication method. Secrets (key passphrase or
+ * account password) live ONLY in the encrypted vault — never here.
+ */
+export interface SshProfile {
+  id: string;
+  /** User-visible name; defaults to `user@host`. */
+  label?: string;
+  host: string;
+  port: number;
+  /** SSH login; git servers expect 'git'. */
+  user: string;
+  authMethod: 'publickey' | 'password';
+  /** Managed key id (authMethod === 'publickey'). */
+  keyId?: string;
+  /** Vault holds the passphrase (publickey) or password (password). */
+  hasSecret: boolean;
+  createdAt: number;
+}
+
+/** Parameters for testing an UNSAVED profile (DBeaver "Test connection"). */
+export interface SshProfileTestParams {
+  host: string;
+  port?: number;
+  user?: string;
+  authMethod?: 'publickey' | 'password';
+  keyId?: string;
+  /** In-memory only — never persisted. */
+  secret?: string;
+}
+
+/** Editable form payload; `secret` is persisted straight into the vault. */
+export interface SshProfileInput {
+  id?: string;
+  label?: string;
+  host: string;
+  port?: number;
+  user: string;
+  authMethod: 'publickey' | 'password';
+  keyId?: string;
+  /** Empty/undefined clears the stored secret. */
+  secret?: string;
+}
+
+/**
  * Environment for ONE network git command over SSH
  * (services/ssh.ts buildSshEnv). Empty env = nothing to inject.
  */
@@ -59,6 +104,14 @@ export interface SshApi {
   copyPublicKey: (id: string) => Promise<string>;
   test: (id: string, opts?: { host?: string; user?: string }) => Promise<SshTestResult>;
   listSystemKeys: () => Promise<SshSystemKey[]>;
+  /** Native file picker for a private key (DBeaver-style Browse). */
+  pickKeyFile: () => Promise<string | null>;
+  /** SSH connection profiles (DBeaver-style). */
+  listProfiles: () => Promise<SshProfile[]>;
+  saveProfile: (input: SshProfileInput) => Promise<SshProfile>;
+  deleteProfile: (id: string) => Promise<void>;
+  testProfile: (id: string) => Promise<SshTestResult>;
+  testParams: (params: SshProfileTestParams) => Promise<SshTestResult>;
 }
 
 export interface CredentialsStatus {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AiProvidersGrid } from '../components/AiProvidersGrid';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { Folder, Github, Loader, Lock, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
+import { Folder, GitBranch, Github, Loader, Lock, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
 import { SecuritySettings } from '../components/settings/SecuritySettings';
 import { api, type GitConfigEntry } from '../lib/api';
 import { restoreAllConfirmations } from '../lib/confirmations';
@@ -57,8 +57,9 @@ export function SettingsPage() {
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
   // Top-level tab: Application Settings vs Project Settings vs Themes
-  const [activeTab, setActiveTab] = useState<'application' | 'project' | 'themes' | 'ai' | 'security' | 'show-integrations'>('application');
+  const [activeTab, setActiveTab] = useState<'application' | 'git' | 'project' | 'themes' | 'ai' | 'security' | 'show-integrations'>('application');
   const showApp = activeTab === 'application';
+  const showGit = activeTab === 'git';
   const showProject = activeTab === 'project' && !!currentRepo;
   const showThemes = activeTab === 'themes';
   const showAi = activeTab === 'ai';
@@ -232,6 +233,18 @@ export function SettingsPage() {
             onClick={() => setActiveTab('application')}
           >
             {t('settings.application')}
+          </button>
+          <button
+            className={cn(
+              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              showGit
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            )}
+            onClick={() => setActiveTab('git')}
+          >
+            <GitBranch size={14} />
+            {t('settings.git')}
           </button>
           <button
             className={cn(
@@ -534,8 +547,8 @@ export function SettingsPage() {
         </section>
         )}
 
-        {/* Git */}
-        {showProject && (
+        {/* Git — global, always visible (default author, clone dir, history) */}
+        {showGit && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.git')}</div>
           <div className="p-5 space-y-5">

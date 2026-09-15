@@ -23,11 +23,14 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
-import { app } from 'electron';
+import { app, dialog, BrowserWindow } from 'electron';
 import { getSetting, setSetting } from './storage.js';
 import { getSecret, setSecret, deleteSecret } from './secrets.js';
 import { NS_SSH, classifyRemoteUrl } from './credentialKeys.js';
-import type { SshKeyMeta, SshTestResult, SshSystemKey, SshEnvResult } from '../types/ssh-api.js';
+import type {
+  SshKeyMeta, SshTestResult, SshSystemKey, SshEnvResult,
+  SshProfile, SshProfileInput, SshProfileTestParams,
+} from '../types/ssh-api.js';
 
 export type { SshEnvResult };
 
@@ -79,6 +82,25 @@ export function resolveSshKeyForRepo(repoPath: string): SshKeyMeta | undefined {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Expand a user-typed path: `~`/`~/…` → home dir, `%VAR%` / `$VAR` → env,
+ * quotes stripped. Fixes the classic "Private key file not found: ~/.ssh/id_rsa"
+ * — the renderer passes literal tilde paths and fs.existsSync never resolves them.
+ */
+export function expandPath(input: string): string {
+  let p = (input || '').trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
+  if (!p) return p;
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) {
+    p = path.join(os.homedir(), p.slice(1));
+  }
+  if (process.platform === 'win32') {
+    p = p.replace(/%([^%]+)%/g, (_, name) => process.env[name] || `%${name}%`);
+  } else {
+    p = p.replace(/\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([^}]+)\}/g, (_, a, b) => process.env[a || b] || '');
+  }
+  return p;
+}
 
 interface RunResult { code: number; stdout: string; stderr: string }
 
@@ -175,9 +197,10 @@ export interface ImportSshKeyOptions {
  * passphrase-protected key needs the passphrase (passed via askpass env).
  */
 export async function importSshKey(options: ImportSshKeyOptions): Promise<SshKeyMeta> {
-  const sourcePath = (options.sourcePath || '').trim();
+  // Expand `~`, env vars and strip quotes — users paste "~/.ssh/id_rsa" as-is.
+  const sourcePath = expandPath(options.sourcePath);
   if (!sourcePath || !fs.existsSync(sourcePath)) {
-    throw new Error(`Private key file not found: ${sourcePath}`);
+    throw new Error(`Private key file not found: ${sourcePath || options.sourcePath}`);
   }
   const label = (options.label || '').trim() || path.basename(sourcePath);
   const id = randomUUID().slice(0, 8);
@@ -285,6 +308,202 @@ export function listSystemPublicKeys(): SshSystemKey[] {
   }
 }
 
+// ── Public API: connection profiles (DBeaver-style SSH configuration) ────────
+
+// Vault layout for profiles: ns 'ssh', key `conn:<profileId>:secret` — holds
+// the key passphrase (authMethod=publickey) or account password (password).
+const profileVaultKey = (profileId: string): string => `conn:${profileId}:secret`;
+
+export function getSshProfiles(): SshProfile[] {
+  return (getSetting('sshProfiles') as SshProfile[] | undefined) ?? [];
+}
+
+function saveSshProfiles(profiles: SshProfile[]): void {
+  setSetting('sshProfiles', profiles);
+}
+
+export function saveSshProfile(input: SshProfileInput): SshProfile {
+  const host = (input.host || '').trim();
+  if (!host) throw new Error('SSH profile requires a host');
+  const user = (input.user || 'git').trim() || 'git';
+  const port = Math.min(65535, Math.max(1, Math.round(input.port || 22)));
+  const authMethod = input.authMethod === 'password' ? 'password' : 'publickey';
+  if (authMethod === 'publickey' && input.keyId && !findSshKey(input.keyId)) {
+    throw new Error(`SSH key not found: ${input.keyId}`);
+  }
+
+  const profiles = getSshProfiles();
+  const id = input.id || randomUUID().slice(0, 8);
+  const existing = profiles.find((p) => p.id === id);
+  const meta: SshProfile = {
+    id,
+    label: (input.label || '').trim() || undefined,
+    host,
+    port,
+    user,
+    authMethod,
+    keyId: authMethod === 'publickey' ? input.keyId : undefined,
+    hasSecret: input.secret ? true : (existing?.hasSecret ?? false),
+    createdAt: existing?.createdAt ?? Date.now(),
+  };
+
+  // Secret goes straight into the vault; empty value = clear it.
+  if (input.secret !== undefined) {
+    if (input.secret) setSecret(NS_SSH, profileVaultKey(id), input.secret);
+    else deleteSecret(NS_SSH, profileVaultKey(id));
+  }
+
+  const idx = profiles.findIndex((p) => p.id === id);
+  if (idx >= 0) profiles[idx] = meta;
+  else profiles.push(meta);
+  saveSshProfiles(profiles);
+  return meta;
+}
+
+export function deleteSshProfile(id: string): void {
+  saveSshProfiles(getSshProfiles().filter((p) => p.id !== id));
+  deleteSecret(NS_SSH, profileVaultKey(id));
+}
+
+/** Find a profile whose host matches the URL host (case-insensitive). */
+export function findProfileForHost(host: string | undefined | null): SshProfile | undefined {
+  if (!host) return undefined;
+  const h = host.trim().toLowerCase();
+  return getSshProfiles().find((p) => p.host.toLowerCase() === h);
+}
+
+/**
+ * Extract user@host:port from an SSH URL (ssh:// or scp-like syntax).
+ * Returns { host, user, port } with defaults where missing.
+ */
+export function parseSshUrl(url: string): { host: string; user?: string; port?: number } {
+  try {
+    let u = url.trim();
+    if (!/^ssh:\/\//i.test(u)) {
+      // scp-like: user@host:path → normalize to ssh://user@host/path
+      const m = /^(([^@/\s]+)@)?([^:/\s]+):(.*)$/.exec(u);
+      if (!m) return { host: u };
+      return { host: m[3], user: m[2], port: undefined };
+    }
+    u = u.replace(/^ssh:\/\//i, 'http://'); // reuse URL parser
+    const parsed = new URL(u);
+    return {
+      host: parsed.hostname,
+      user: parsed.username || undefined,
+      port: parsed.port ? Number(parsed.port) : undefined,
+    };
+  } catch {
+    return { host: url };
+  }
+}
+
+/**
+ * Core SSH connectivity check for explicit parameters (saved or unsaved).
+ * DBeaver's "Test connection": connects to host:port as user, either with a
+ * managed key (passphrase via askpass) or a password (askpass), and reports
+ * the server's own reply. Most git servers answer success with exit code 1
+ * ("Hi <user>! You've successfully authenticated"), so the heuristic checks
+ * the output text, not just the exit code.
+ */
+async function testSshConnection(params: {
+  host: string;
+  port?: number;
+  user?: string;
+  authMethod: 'publickey' | 'password';
+  keyPath?: string;      // private key file (publickey method)
+  secret?: string;       // passphrase (publickey) or password (password)
+}): Promise<SshTestResult> {
+  const host = params.host.trim();
+  const user = params.user?.trim() || 'git';
+  const port = params.port && params.port !== 22 ? ['-p', String(params.port)] : [];
+  const args: string[] = [...port];
+
+  if (params.authMethod === 'publickey') {
+    if (!params.keyPath || !fs.existsSync(params.keyPath)) {
+      throw new Error(`Private key file not found: ${params.keyPath || '(not set)'}`);
+    }
+    args.push('-i', params.keyPath, '-o', 'IdentitiesOnly=yes');
+  } else {
+    args.push('-o', 'PreferredAuthentications=password', '-o', 'PubkeyAuthentication=no', '-o', 'NumberOfPasswordPrompts=1');
+  }
+  args.push(
+    '-o', 'BatchMode=no',
+    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'ConnectTimeout=10',
+    '-T', `${user}@${host}`,
+  );
+
+  const env: NodeJS.ProcessEnv = params.secret ? makeAskpassEnv(params.secret).env : {};
+  try {
+    const r = await run(sshBinary('ssh'), args, { timeoutMs: 25_000, env });
+    const output = `${r.stderr}\n${r.stdout}`.trim();
+    const ok = r.code === 0 || /successfully authenticated|Hi \S+!|Welcome to GitLab/i.test(output);
+    return { ok, output };
+  } finally {
+    cleanupAskpassEnv(env);
+  }
+}
+
+/** Test an UNSAVED profile — secret stays in memory, nothing is persisted. */
+export async function testSshParams(params: SshProfileTestParams): Promise<SshTestResult> {
+  const authMethod = params.authMethod === 'password' ? 'password' : 'publickey';
+  let keyPath: string | undefined;
+  if (authMethod === 'publickey') {
+    const meta = findSshKey(params.keyId);
+    if (meta) keyPath = meta.privateKeyPath;
+  }
+  return testSshConnection({
+    host: params.host,
+    port: params.port,
+    user: params.user,
+    authMethod,
+    keyPath,
+    secret: params.secret,
+  });
+}
+
+/** Test a SAVED profile — secret comes from the vault, never the renderer. */
+export async function testSshProfile(id: string): Promise<SshTestResult> {
+  const profile = getSshProfiles().find((p) => p.id === id);
+  if (!profile) throw new Error(`SSH profile not found: ${id}`);
+  const secret = profile.hasSecret ? getSecret(NS_SSH, profileVaultKey(id)) : undefined;
+  const keyPath = profile.authMethod === 'publickey'
+    ? findSshKey(profile.keyId)?.privateKeyPath
+    : undefined;
+  return testSshConnection({
+    host: profile.host,
+    port: profile.port,
+    user: profile.user,
+    authMethod: profile.authMethod,
+    keyPath,
+    secret,
+  });
+}
+
+/**
+ * Native "Browse…" dialog for picking a private key file (DBeaver-style).
+ * Returns the ABSOLUTE path — never a tilde shortcut.
+ */
+export async function pickSshKeyFile(): Promise<string | null> {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const result = win
+    ? await dialog.showOpenDialog(win, {
+        title: 'Select private SSH key',
+        properties: ['openFile'],
+        defaultPath: path.join(os.homedir(), '.ssh'),
+        filters: [
+          { name: 'All files', extensions: ['*'] }, // private keys often have no extension
+        ],
+      })
+    : await dialog.showOpenDialog({
+        title: 'Select private SSH key',
+        properties: ['openFile'],
+        defaultPath: path.join(os.homedir(), '.ssh'),
+      });
+  const picked = result.filePaths?.[0];
+  return picked || null;
+}
+
 // ── Public API: connectivity test ────────────────────────────────────────────
 
 /**
@@ -331,31 +550,75 @@ const NO_SSH: SshEnvResult = { env: {}, cleanup: () => {} };
 /**
  * Build the SSH environment for ONE network git command.
  *
- * Returns NO_SSH for non-SSH URLs or when the user has not picked a key —
+ * Resolution order:
+ *  1. per-repository key override (Settings → sshRepoKeys)
+ *  2. a connection profile whose host matches the URL host
+ *     (DBeaver-style: the profile supplies key/password credentials)
+ *  3. the global default key (sshDefaultKeyId)
+ *
+ * Returns NO_SSH for non-SSH URLs or when nothing is configured —
  * in that case git keeps using the system ssh/agent untouched.
  */
 export function buildSshEnv(url: string | undefined | null, repoPath: string): SshEnvResult {
   if (classifyRemoteUrl(url) !== 'ssh') return NO_SSH;
-  const meta = resolveSshKeyForRepo(repoPath);
-  if (!meta || !fs.existsSync(meta.privateKeyPath)) return NO_SSH;
+
+  const perRepo = (getSetting('sshRepoKeys') as Record<string, string> | undefined)?.[repoPath];
+  const meta = findSshKey(perRepo);
+
+  // Profile matched by URL host — may define key OR password authentication.
+  const parsed = parseSshUrl(url || '');
+  const profile = findProfileForHost(parsed.host);
+
+  if (!meta && !profile) return NO_SSH;
+
+  if (profile?.authMethod === 'password' && !meta) {
+    // Password authentication for this host (askpass echoes the password).
+    const secret = profile.hasSecret ? getSecret(NS_SSH, profileVaultKey(profile.id)) : undefined;
+    const strict = (getSetting('sshStrictHostKeyChecking') as boolean | undefined) === true ? 'yes' : 'accept-new';
+    const portPart = profile.port && profile.port !== 22 ? ` -p ${profile.port}` : '';
+    const sshCommand = [
+      'ssh',
+      portPart,
+      '-o', 'PreferredAuthentications=password',
+      '-o', 'PubkeyAuthentication=no',
+      '-o', 'NumberOfPasswordPrompts=1',
+      '-o', `StrictHostKeyChecking=${strict}`,
+    ].join(' ');
+
+    const env: Record<string, string> = { GIT_SSH_COMMAND: sshCommand };
+    const askpass = secret ? makeAskpassEnv(secret) : null;
+    if (askpass) Object.assign(env, askpass.env);
+    return { env, cleanup: () => askpass?.cleanup(), usedKeyId: profile.id };
+  }
+
+  const key = meta ?? findSshKey(profile?.keyId) ?? findSshKey(getSetting('sshDefaultKeyId') as string | undefined);
+  if (!key || !fs.existsSync(key.privateKeyPath)) return NO_SSH;
 
   const strict = (getSetting('sshStrictHostKeyChecking') as boolean | undefined) === true ? 'yes' : 'accept-new';
+  const portPart = profile?.port && profile.port !== 22 ? ` -p ${profile.port}` : '';
   const sshCommand = [
     'ssh',
-    '-i', quoteShell(meta.privateKeyPath),
+    portPart,
+    '-i', quoteShell(key.privateKeyPath),
     '-o', 'IdentitiesOnly=yes',
     '-o', `StrictHostKeyChecking=${strict}`,
   ].join(' ');
 
   const env: Record<string, string> = { GIT_SSH_COMMAND: sshCommand };
-  const passphrase = meta.hasPassphrase ? getSecret(NS_SSH, `pass:${meta.id}`) : undefined;
-  const askpass = passphrase ? makeAskpassEnv(passphrase) : null;
+  const passphrase = key.hasPassphrase
+    ? getSecret(NS_SSH, `pass:${key.id}`)
+    : undefined;
+  const profileSecret = !passphrase && profile?.hasSecret
+    ? getSecret(NS_SSH, profileVaultKey(profile.id))
+    : undefined;
+  const askpassSecret = passphrase ?? profileSecret ?? undefined;
+  const askpass = askpassSecret ? makeAskpassEnv(askpassSecret) : null;
   if (askpass) Object.assign(env, askpass.env);
 
   return {
     env,
     cleanup: () => askpass?.cleanup(),
-    usedKeyId: meta.id,
+    usedKeyId: key.id,
   };
 }
 

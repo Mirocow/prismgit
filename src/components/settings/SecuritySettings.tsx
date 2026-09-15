@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle, Copy, Eye, KeyRound, Loader, Lock, Pencil, Plus, Save, Trash, Upload } from '../icons';
-import { api, type CredentialsStatus, type SecretEntryMeta, type SshKeyMeta } from '../../lib/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertCircle, CheckCircle, Copy, Eye, Folder, KeyRound, Loader, Lock, Pencil, PlugConnected, Plus, Save, Trash, Upload } from '../icons';
+import { api, type CredentialsStatus, type SecretEntryMeta, type SshKeyMeta, type SshProfile, type SshProfileInput, type SshProfileTestParams, type SshSystemKey } from '../../lib/api';
 import { confirmDialog } from '../ConfirmDialog';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useToastActions } from '../../stores/toastStore';
@@ -24,7 +24,7 @@ import { cn } from '../../lib/utils';
 const KNOWN_SECRET_GROUPS = ['tokens', 'remoteAuth', 'ai', 'github', 'ssh'] as const;
 
 /** Human-readable label for one vault entry (metadata → display name). */
-function secretLabel(entry: SecretEntryMeta): string {
+function secretLabel(entry: SecretEntryMeta, profileNames: Record<string, string> = {}): string {
   if (entry.ns === 'remoteAuth') {
     // key = "<repoPath>|<remote>" — split at the LAST separator
     const idx = entry.key.lastIndexOf('|');
@@ -32,7 +32,12 @@ function secretLabel(entry: SecretEntryMeta): string {
       ? `${entry.key.slice(idx + 1)}  ·  ${entry.key.slice(0, idx)}`
       : entry.key;
   }
-  if (entry.ns === 'ssh') return entry.key.replace(/^pass:/, '');
+  if (entry.ns === 'ssh') {
+    // conn:<profileId>:secret → name it after the connection profile
+    const conn = /^conn:([^:]+):secret$/.exec(entry.key);
+    if (conn) return `connection · ${profileNames[conn[1]] ?? conn[1]}`;
+    return entry.key.replace(/^pass:/, '');
+  }
   if (entry.ns === 'ai') return entry.key.replace(/^provider:/, '');
   return entry.key;
 }
@@ -44,7 +49,37 @@ export function SecuritySettings() {
   const [status, setStatus] = useState<CredentialsStatus | null>(null);
   const [keys, setKeys] = useState<SshKeyMeta[]>([]);
   const [secrets, setSecrets] = useState<SecretEntryMeta[]>([]);
+  const [profiles, setProfiles] = useState<SshProfile[]>([]);
+  const [systemKeys, setSystemKeys] = useState<SshSystemKey[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [st, ks, entries, pf, sys] = await Promise.all([
+        Promise.resolve(api.credentials?.status?.()).catch(() => null),
+        Promise.resolve(api.ssh?.list?.()).catch(() => [] as SshKeyMeta[]),
+        Promise.resolve(api.credentials?.list?.()).catch(() => [] as SecretEntryMeta[]),
+        Promise.resolve(api.ssh?.listProfiles?.()).catch(() => [] as SshProfile[]),
+        Promise.resolve(api.ssh?.listSystemKeys?.()).catch(() => [] as SshSystemKey[]),
+      ]);
+      setStatus((st as CredentialsStatus | null) ?? null);
+      setKeys((ks as SshKeyMeta[]) ?? []);
+      setSecrets((entries as SecretEntryMeta[]) ?? []);
+      setProfiles((pf as SshProfile[]) ?? []);
+      setSystemKeys((sys as SshSystemKey[]) ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Map of profile id → display label, used to name conn:<id>:secret vault
+  // entries inside the secrets manager.
+  const profileNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of profiles) map[p.id] = p.label || `${p.user}@${p.host}`;
+    return map;
+  }, [profiles]);
 
   // Add-secret form state
   const [showAdd, setShowAdd] = useState(false);
@@ -59,22 +94,6 @@ export function SecuritySettings() {
   const [editing, setEditing] = useState<{ ns: string; key: string } | null>(null);
   const [editValue, setEditValue] = useState('');
   const [editBusy, setEditBusy] = useState(false);
-
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [st, ks, entries] = await Promise.all([
-        Promise.resolve(api.credentials?.status?.()).catch(() => null),
-        Promise.resolve(api.ssh?.list?.()).catch(() => [] as SshKeyMeta[]),
-        Promise.resolve(api.credentials?.list?.()).catch(() => [] as SecretEntryMeta[]),
-      ]);
-      setStatus((st as CredentialsStatus | null) ?? null);
-      setKeys((ks as SshKeyMeta[]) ?? []);
-      setSecrets((entries as SecretEntryMeta[]) ?? []);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   const handleCopySecret = async (ns: string, key: string) => {
     try {
@@ -91,7 +110,7 @@ export function SecuritySettings() {
   };
 
   const handleDeleteSecret = async (entry: SecretEntryMeta) => {
-    const label = secretLabel(entry);
+    const label = secretLabel(entry, profileNames);
     if (!(await confirmDialog({
       title: t('security.secrets.delete'),
       message: t('security.secrets.deleteConfirm', { name: label }),
@@ -169,6 +188,169 @@ export function SecuritySettings() {
   const [importPath, setImportPath] = useState('');
   const [importPassphrase, setImportPassphrase] = useState('');
   const [importBusy, setImportBusy] = useState(false);
+
+  // ── SSH connection profiles (DBeaver-style) ──
+  const [showProfileForm, setShowProfileForm] = useState(false);
+  const [profEditId, setProfEditId] = useState<string | null>(null);
+  const [profLabel, setProfLabel] = useState('');
+  const [profHost, setProfHost] = useState('');
+  const [profPort, setProfPort] = useState('22');
+  const [profUser, setProfUser] = useState('git');
+  const [profMethod, setProfMethod] = useState<'publickey' | 'password'>('publickey');
+  const [profKeyId, setProfKeyId] = useState('');
+  const [profSecret, setProfSecret] = useState('');
+  const [profSecretTouched, setProfSecretTouched] = useState(false);
+  const [profBusy, setProfBusy] = useState(false);
+  const [profTestId, setProfTestId] = useState<string | null>(null); // form-level test
+  const [profListTestId, setProfListTestId] = useState<string | null>(null); // list-level test
+  const [profTestResult, setProfTestResult] = useState<{ ok: boolean; output: string; key: string } | null>(null);
+
+  const openProfileForm = (profile?: SshProfile) => {
+    if (profile) {
+      setProfEditId(profile.id);
+      setProfLabel(profile.label || '');
+      setProfHost(profile.host);
+      setProfPort(String(profile.port || 22));
+      setProfUser(profile.user);
+      setProfMethod(profile.authMethod);
+      setProfKeyId(profile.keyId || '');
+    } else {
+      setProfEditId(null);
+      setProfLabel('');
+      setProfHost('');
+      setProfPort('22');
+      setProfUser('git');
+      setProfMethod('publickey');
+      setProfKeyId('');
+    }
+    setProfSecret('');
+    setProfSecretTouched(false);
+    setProfTestResult(null);
+    setShowProfileForm(true);
+  };
+
+  const closeProfileForm = () => {
+    setShowProfileForm(false);
+    setProfEditId(null);
+    setProfTestResult(null);
+  };
+
+  const buildProfileInput = (): SshProfileInput => ({
+    id: profEditId ?? undefined,
+    label: profLabel.trim() || undefined,
+    host: profHost.trim(),
+    port: Number(profPort) || 22,
+    user: profUser.trim() || 'git',
+    authMethod: profMethod,
+    keyId: profMethod === 'publickey' && profKeyId ? profKeyId : undefined,
+    // Only send the secret when the user actually typed something in this
+    // session — otherwise the stored vault value is left untouched.
+    secret: profSecretTouched ? profSecret : undefined,
+  });
+
+  const handleSaveProfile = async () => {
+    if (!profHost.trim()) {
+      toast.warning(t('security.ssh.profiles.hostRequired'));
+      return;
+    }
+    if (profMethod === 'publickey' && !profKeyId) {
+      toast.warning(t('security.ssh.profiles.keyRequired'));
+      return;
+    }
+    setProfBusy(true);
+    try {
+      await api.ssh.saveProfile(buildProfileInput());
+      toast.success(t('security.ssh.profiles.saved'));
+      closeProfileForm();
+      await reload();
+    } catch (e) {
+      toast.error(t('common.error'), String(e));
+    } finally {
+      setProfBusy(false);
+    }
+  };
+
+  const handleTestProfileForm = async () => {
+    if (!profHost.trim()) {
+      toast.warning(t('security.ssh.profiles.hostRequired'));
+      return;
+    }
+    setProfTestId('form');
+    setProfTestResult(null);
+    try {
+      const input = buildProfileInput();
+      // For an existing profile with an untouched secret field, test against
+      // the stored vault value (fetch happens main-side via testProfile).
+      const res = profEditId && !profSecretTouched
+        ? await api.ssh.testProfile(profEditId)
+        : await api.ssh.testParams({
+            host: input.host!,
+            port: input.port,
+            user: input.user,
+            authMethod: input.authMethod,
+            keyId: input.keyId,
+            secret: input.secret,
+          } as SshProfileTestParams);
+      setProfTestResult({ ok: res.ok, output: res.output, key: 'form' });
+      if (res.ok) toast.success(t('security.ssh.testOk'));
+      else toast.warning(t('security.ssh.testFailed'));
+    } catch (e) {
+      setProfTestResult({ ok: false, output: String(e), key: 'form' });
+      toast.error(t('security.ssh.testFailed'), String(e));
+    } finally {
+      setProfTestId(null);
+    }
+  };
+
+  const handleTestProfileList = async (id: string) => {
+    setProfListTestId(id);
+    setProfTestResult(null);
+    try {
+      const res = await api.ssh.testProfile(id);
+      setProfTestResult({ ok: res.ok, output: res.output, key: id });
+      if (res.ok) toast.success(t('security.ssh.testOk'));
+      else toast.warning(t('security.ssh.testFailed'));
+    } catch (e) {
+      setProfTestResult({ ok: false, output: String(e), key: id });
+      toast.error(t('security.ssh.testFailed'), String(e));
+    } finally {
+      setProfListTestId(null);
+    }
+  };
+
+  const handleDeleteProfile = async (profile: SshProfile) => {
+    if (!(await confirmDialog({
+      title: t('security.ssh.profiles.delete'),
+      message: t('security.ssh.profiles.deleteConfirm', { name: profile.label || `${profile.user}@${profile.host}` }),
+      confirmLabel: t('common.delete'),
+      danger: true,
+    }))) return;
+    try {
+      await api.ssh.deleteProfile(profile.id);
+      toast.success(t('security.ssh.profiles.deleted'));
+      await reload();
+    } catch (e) {
+      toast.error(t('common.error'), String(e));
+    }
+  };
+
+  const handleBrowseKeyFile = async () => {
+    try {
+      const picked = await api.ssh.pickKeyFile();
+      if (picked) setImportPath(picked);
+    } catch (e) {
+      toast.error(t('common.error'), String(e));
+    }
+  };
+
+  const handlePickSystemKey = (sys: SshSystemKey) => {
+    if (!sys.existsPrivate) {
+      toast.warning(t('security.ssh.systemKeyNoPrivate', { name: sys.label }));
+      return;
+    }
+    setImportPath(sys.privateKeyPath);
+    if (!importLabel.trim()) setImportLabel(sys.label);
+  };
 
   // Connectivity test state (per key id)
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -408,8 +590,8 @@ export function SecuritySettings() {
                       <div key={`${entry.ns}\u001f${entry.key}`} className="rounded-md border border-border-default bg-bg-secondary/40 px-3 py-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <KeyRound size={12} className="text-accent flex-shrink-0" />
-                          <span className="text-xs font-medium font-mono truncate max-w-[45%]" title={secretLabel(entry)}>
-                            {secretLabel(entry)}
+                          <span className="text-xs font-medium font-mono truncate max-w-[45%]" title={secretLabel(entry, profileNames)}>
+                            {secretLabel(entry, profileNames)}
                           </span>
                           <span
                             className={cn(
@@ -473,6 +655,206 @@ export function SecuritySettings() {
         </div>
       </section>
 
+      {/* ── SSH connections (DBeaver-style profiles) ── */}
+      <section className="panel mb-4">
+        <div className="panel-header flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <PlugConnected size={12} />
+            {t('security.ssh.profiles.title')}
+            {profiles.length > 0 && (
+              <span className="badge badge-added text-2xs">{profiles.length}</span>
+            )}
+          </span>
+          <button
+            className="btn btn-secondary !py-1 !px-2.5 !text-xs"
+            onClick={() => (showProfileForm ? closeProfileForm() : openProfileForm())}
+          >
+            <Plus size={12} /> {t('security.ssh.profiles.add')}
+          </button>
+        </div>
+        <div className="p-5 space-y-3">
+          <p className="text-xs text-text-tertiary">{t('security.ssh.profiles.desc')}</p>
+
+          {/* Add/Edit connection form — DBeaver layout */}
+          {showProfileForm && (
+            <div className="rounded-md border border-border-default bg-bg-secondary/40 p-3 space-y-2.5">
+              <div className="text-xs font-semibold">
+                {profEditId ? t('security.ssh.profiles.editTitle') : t('security.ssh.profiles.addTitle')}
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <input className={inputCls} placeholder={t('security.ssh.profiles.label')} value={profLabel} onChange={(e) => setProfLabel(e.target.value)} />
+                <input
+                  className={inputCls + ' col-span-2'}
+                  placeholder={t('security.ssh.profiles.host')}
+                  value={profHost}
+                  onChange={(e) => setProfHost(e.target.value)}
+                  data-testid="ssh-profile-host"
+                />
+                <input
+                  className={inputCls}
+                  type="number"
+                  min={1}
+                  max={65535}
+                  placeholder={t('security.ssh.profiles.port')}
+                  value={profPort}
+                  onChange={(e) => setProfPort(e.target.value)}
+                />
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <div className="col-span-2">
+                  <label className="text-2xs text-text-tertiary block mb-1">{t('security.ssh.profiles.user')}</label>
+                  <input className={inputCls} placeholder="git" value={profUser} onChange={(e) => setProfUser(e.target.value)} />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-2xs text-text-tertiary block mb-1">{t('security.ssh.profiles.method')}</label>
+                  <select
+                    className={inputCls}
+                    value={profMethod}
+                    onChange={(e) => { setProfMethod(e.target.value as 'publickey' | 'password'); setProfTestResult(null); }}
+                  >
+                    <option value="publickey">{t('security.ssh.profiles.method.publickey')}</option>
+                    <option value="password">{t('security.ssh.profiles.method.password')}</option>
+                  </select>
+                </div>
+              </div>
+
+              {profMethod === 'publickey' ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('security.ssh.profiles.key')}</label>
+                    <select
+                      className={inputCls}
+                      value={profKeyId}
+                      onChange={(e) => setProfKeyId(e.target.value)}
+                      data-testid="ssh-profile-key"
+                    >
+                      <option value="">{t('security.ssh.profiles.keyNone')}</option>
+                      {keys.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {k.label} ({k.type}){k.fingerprint ? ` — ${k.fingerprint.split(' ').slice(1, 2).join('')}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('security.ssh.profiles.passphrase')}</label>
+                    <input
+                      className={inputCls}
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={t('security.ssh.profiles.secretPlaceholder')}
+                      value={profSecret}
+                      onChange={(e) => { setProfSecret(e.target.value); setProfSecretTouched(true); }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-2xs text-text-tertiary block mb-1">{t('security.ssh.profiles.password')}</label>
+                  <input
+                    className={inputCls}
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder={t('security.ssh.profiles.secretPlaceholder')}
+                    value={profSecret}
+                    onChange={(e) => { setProfSecret(e.target.value); setProfSecretTouched(true); }}
+                  />
+                </div>
+              )}
+              <div className="text-2xs text-text-tertiary">{t('security.ssh.profiles.secretHint')}</div>
+
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  className="btn btn-secondary !py-1 !px-2.5 !text-xs flex items-center gap-1.5"
+                  disabled={profTestId === 'form'}
+                  onClick={handleTestProfileForm}
+                >
+                  {profTestId === 'form' ? <Loader size={12} className="animate-spin" /> : <PlugConnected size={12} />}
+                  {t('security.ssh.profiles.test')}
+                </button>
+                <div className="flex gap-2">
+                  <button className="btn btn-secondary !py-1 !px-2.5 !text-xs" onClick={closeProfileForm}>{t('common.cancel')}</button>
+                  <button className="btn btn-primary !py-1 !px-2.5 !text-xs flex items-center gap-1.5" disabled={profBusy} onClick={handleSaveProfile}>
+                    {profBusy ? <Loader size={12} className="animate-spin" /> : <Save size={12} />}
+                    {t('security.secrets.save')}
+                  </button>
+                </div>
+              </div>
+
+              {profTestResult?.key === 'form' && (
+                <div className={cn('text-2xs rounded-md border px-2 py-1.5 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono',
+                  profTestResult.ok ? 'border-status-added/30 bg-status-added/10' : 'border-status-deleted/30 bg-status-deleted/10')}>
+                  {profTestResult.ok ? t('security.ssh.testOk') : t('security.ssh.testFailed')}
+                  {profTestResult.output ? `\n${profTestResult.output}` : ''}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Profile list */}
+          {loading ? (
+            <div className="flex justify-center py-4"><Loader size={16} className="animate-spin text-text-tertiary" /></div>
+          ) : profiles.length === 0 && !showProfileForm ? (
+            <div className="text-xs text-text-tertiary py-3 text-center">{t('security.ssh.profiles.empty')}</div>
+          ) : (
+            <div className="space-y-2" data-testid="ssh-profile-list">
+              {profiles.map((p) => {
+                const keyMeta = keys.find((k) => k.id === p.keyId);
+                return (
+                  <div key={p.id} className="rounded-md border border-border-default bg-bg-secondary/40 px-3 py-2 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <PlugConnected size={12} className="text-accent flex-shrink-0" />
+                      <span className="text-xs font-medium font-mono">
+                        {p.label ? `${p.label} · ` : ''}{p.user}@{p.host}{p.port !== 22 ? `:${p.port}` : ''}
+                      </span>
+                      <span className="badge badge-renamed uppercase">
+                        {p.authMethod === 'publickey' ? t('security.ssh.profiles.method.publickey') : t('security.ssh.profiles.method.password')}
+                      </span>
+                      {p.authMethod === 'publickey' && keyMeta && (
+                        <span className="badge text-2xs">{keyMeta.label}</span>
+                      )}
+                      <span className={cn('badge text-2xs', p.hasSecret ? 'badge-added' : 'badge-added/40')}>
+                        {p.hasSecret ? t('security.ssh.profiles.secretStored') : t('security.ssh.profiles.noSecret')}
+                      </span>
+                      <div className="flex-1" />
+                      <button
+                        className="icon-btn !w-6 !h-6"
+                        title={t('security.ssh.profiles.test')}
+                        disabled={profListTestId === p.id}
+                        onClick={() => handleTestProfileList(p.id)}
+                      >
+                        {profListTestId === p.id ? <Loader size={12} className="animate-spin" /> : <PlugConnected size={12} />}
+                      </button>
+                      <button
+                        className="icon-btn !w-6 !h-6"
+                        title={t('security.ssh.profiles.edit')}
+                        onClick={() => openProfileForm(p)}
+                      >
+                        <Pencil size={12} />
+                      </button>
+                      <button
+                        className="icon-btn !w-6 !h-6 hover:text-status-deleted"
+                        title={t('security.ssh.profiles.delete')}
+                        onClick={() => handleDeleteProfile(p)}
+                      >
+                        <Trash size={12} />
+                      </button>
+                    </div>
+                    {profTestResult?.key === p.id && (
+                      <div className={cn('text-2xs rounded-md border px-2 py-1.5 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono',
+                        profTestResult.ok ? 'border-status-added/30 bg-status-added/10' : 'border-status-deleted/30 bg-status-deleted/10')}>
+                        {profTestResult.ok ? t('security.ssh.testOk') : t('security.ssh.testFailed')}
+                        {profTestResult.output ? `\n${profTestResult.output}` : ''}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* ── SSH keys ── */}
       <section className="panel mb-4">
         <div className="panel-header flex items-center justify-between">
@@ -524,8 +906,46 @@ export function SecuritySettings() {
               <div className="text-xs font-semibold">{t('security.ssh.importTitle')}</div>
               <div className="grid grid-cols-2 gap-2">
                 <input className={inputCls} placeholder={t('security.ssh.keyLabel')} value={importLabel} onChange={(e) => setImportLabel(e.target.value)} />
-                <input className={inputCls} placeholder="~/.ssh/id_ed25519" value={importPath} onChange={(e) => setImportPath(e.target.value)} />
+                <div className="flex gap-2">
+                  <input
+                    className={inputCls + ' flex-1'}
+                    placeholder="~/.ssh/id_ed25519"
+                    value={importPath}
+                    onChange={(e) => setImportPath(e.target.value)}
+                    data-testid="ssh-import-path"
+                  />
+                  <button
+                    className="btn btn-secondary !py-1 !px-2.5 !text-xs flex items-center gap-1.5 flex-shrink-0"
+                    title={t('security.ssh.importBrowse')}
+                    onClick={handleBrowseKeyFile}
+                  >
+                    <Folder size={12} />
+                    {t('security.ssh.importBrowse')}
+                  </button>
+                </div>
               </div>
+
+              {/* Quick-pick keys from ~/.ssh (like DBeaver's key suggestions) */}
+              {systemKeys.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-2xs text-text-tertiary">{t('security.ssh.systemKeys')}</span>
+                  {systemKeys.map((sys) => (
+                    <button
+                      key={sys.path}
+                      className={cn(
+                        'badge text-2xs cursor-pointer hover:border-accent transition-colors',
+                        !sys.existsPrivate && 'opacity-40'
+                      )}
+                      title={sys.path + (sys.existsPrivate ? '' : ` — ${t('security.ssh.systemKeyNoPrivate', { name: sys.label })}`)}
+                      onClick={() => handlePickSystemKey(sys)}
+                    >
+                      <KeyRound size={10} className="inline mr-1" />
+                      {sys.label}{!sys.existsPrivate ? ' ?' : ''}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <input
                 className={inputCls}
                 type="password"

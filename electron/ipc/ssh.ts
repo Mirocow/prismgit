@@ -34,6 +34,26 @@ export function registerSshIpc(): void {
 
   ipcMain.handle('ssh:listSystemKeys', () => sshService.listSystemPublicKeys());
 
+  // Native "Browse…" for a private key file (returns an absolute path).
+  ipcMain.handle('ssh:pickKeyFile', () => sshService.pickSshKeyFile());
+
+  // ── SSH connection profiles (DBeaver-style SSH configuration) ──────────────
+  // Host/port/user/auth-method are plain settings; the passphrase or account
+  // password goes ONLY into the encrypted vault (ns 'ssh', conn:<id>:secret).
+  ipcMain.handle('ssh:listProfiles', () => sshService.getSshProfiles());
+
+  ipcMain.handle('ssh:saveProfile', (_e, input: { id?: string; label?: string; host: string; port?: number; user: string; authMethod: 'publickey' | 'password'; keyId?: string; secret?: string }) =>
+    sshService.saveSshProfile(input)
+  );
+
+  ipcMain.handle('ssh:deleteProfile', (_e, id: string) => sshService.deleteSshProfile(id));
+
+  ipcMain.handle('ssh:testProfile', (_e, id: string) => sshService.testSshProfile(id));
+
+  ipcMain.handle('ssh:testParams', (_e, params: { host: string; port?: number; user?: string; authMethod?: 'publickey' | 'password'; keyId?: string; secret?: string }) =>
+    sshService.testSshParams(params)
+  );
+
   // Credential storage status for Settings → Security.
   ipcMain.handle('credentials:status', () => ({
     safeStorageAvailable: secrets.isEncryptionAvailable(),
