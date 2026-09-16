@@ -1427,18 +1427,20 @@ export default function App() {
   // Refresh status when repository changes (only once, not on every render)
   useEffect(() => {
     if (currentRepo) {
-      refreshStatus(currentRepo.path);
+      // Don't await — fire-and-forget. The UI shows immediately with the
+      // previous status (or empty), then updates when the status resolves.
+      // Previously this was also fire-and-forget but the loadMetadata() call
+      // in openRepository was BLOCKING the repo from appearing in the UI.
+      void refreshStatus(currentRepo.path);
       setDismissRebase(false);
-      // A cold-start deep link (e.g. '#/history?file=X' before any repo was
-      // open) remembers its target page — land there instead of Changes.
       const pendingPage = takePendingDeepLinkPage();
-      // Default landing page is Changes (per user request). Even if the user
-      // was on Settings or another page, opening a repo should show it first.
       navigate(pendingPage || '/changes');
-      // LFS health check — detect if the repo has LFS filter rules in
-      // .gitattributes but git-lfs is NOT installed. If so, offer the user
-      // a choice: install git-lfs, remove the LFS filter, or skip.
-      void checkLfsHealth(currentRepo.path);
+      // LFS health check — deferred to next tick so it doesn't block the
+      // initial render. The check spawns git subprocesses that can take
+      // 3-5s on repos with LFS configured.
+      setTimeout(() => {
+        void checkLfsHealth(currentRepo.path);
+      }, 100);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRepo?.path]);

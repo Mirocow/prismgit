@@ -86,7 +86,7 @@ const GIT_ENV_LFS_SKIP: Record<string, string> = {
  * Combines the env override with the unsafe flags that allow GIT_CONFIG_COUNT
  * and core.hooksPath override (both blocked by simple-git's safety plugin).
  */
-const GIT_UNSAFE_OPTIONS = {
+export const GIT_UNSAFE_OPTIONS = {
   env: GIT_ENV_LFS_SKIP,
   unsafe: {
     allowUnsafeConfigEnvCount: true as const,
@@ -4583,13 +4583,22 @@ export async function lfsStatus(repoPath: string): Promise<{ installed: boolean;
  */
 export async function isLfsInstalled(repoPath: string): Promise<boolean> {
   try {
-    const { execFileSync } = await import('node:child_process');
-    const out = execFileSync('git', ['-C', repoPath, 'lfs', 'version'], {
-      encoding: 'utf8',
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],  // suppress stderr completely
+    // Use ASYNC spawn instead of execFileSync — execFileSync BLOCKS the entire
+    // main process (Electron event loop) for up to 5s on repos where git-lfs
+    // is not installed or is slow to respond. This was a major cause of
+    // "repos take a minute to open" — the main process was frozen.
+    const { execFile } = await import('node:child_process');
+    return new Promise<boolean>((resolve) => {
+      const child = execFile('git', ['-C', repoPath, 'lfs', 'version'], {
+        encoding: 'utf8',
+        timeout: 3000,
+        windowsHide: true,
+      }, (err: unknown, stdout: string) => {
+        if (err) { resolve(false); return; }
+        resolve(!!stdout.trim());
+      });
+      child.on('error', () => resolve(false));
     });
-    return !!out.trim();
   } catch {
     return false;
   }

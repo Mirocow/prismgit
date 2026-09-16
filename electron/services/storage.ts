@@ -338,7 +338,13 @@ export function removeTag(repoPath: string, tag: string): void {
  */
 export async function refreshRepoStats(repoPath: string): Promise<Partial<RepositoryMetadata>> {
   try {
-    const git = simpleGit({ baseDir: repoPath });
+    // Use the same LFS-skipping env as the main git service — without this,
+    // simpleGit creates a fresh instance WITHOUT GIT_LFS_SKIP_SMUDGE and
+    // GIT_CONFIG overrides, so git-lfs smudge filters run on EVERY file.
+    // This was a hidden cost: refreshRepoStats ran on repo open + every
+    // sidebar refresh, spawning git-lfs processes that took 5-10s each.
+    const { GIT_UNSAFE_OPTIONS } = await import('./git.js');
+    const git = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS });
 
     // Run all reads in parallel — they are independent.
     const [logResult, branchResult, remotes, commitCountStr, headHash] = await Promise.all([
