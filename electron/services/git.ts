@@ -1620,7 +1620,7 @@ async function autoStashIfNeeded(repoPath: string, op: 'pull' | 'checkout'): Pro
   const git = getGit(repoPath);
   let dirty = false;
   try {
-    dirty = !(await git.status()).isClean();
+    dirty = !(await git.status(['--ignore-submodules=all'])).isClean();
   } catch {
     return NO_AUTO_STASH;
   }
@@ -1954,7 +1954,7 @@ export async function findCommit(repoPath: string, query: string): Promise<LogEn
 
 export async function branches(repoPath: string): Promise<BranchInfo[]> {
   const git = getGit(repoPath);
-  const current = await git.status();
+  const current = await git.status(['--ignore-submodules=all']);
 
   // Use for-each-ref to get all branches in a single git call.
   // Note: simple-git passes args through to git as-is, so we use real tab characters,
@@ -2395,11 +2395,15 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
     }
   }
 
-  // 3. Current branch
+  // 3. Current branch — use --verify to avoid exit 128 on unborn HEAD
   try {
     const name = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
     summary.branch = name === 'HEAD' ? null : name; // detached HEAD
-  } catch { /* keep null */ }
+  } catch {
+    // Unborn HEAD (fresh repo, no commits) — rev-parse --abbrev-ref HEAD
+    // exits 128. Not an error, just means there's no branch yet.
+    summary.branch = null;
+  }
 
   // 4. Incoming: commits reachable from remote-tracking branches but not from
   //    any local branch. Outgoing is the mirror image. These aggregates don't
@@ -2413,7 +2417,9 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
 
   // 5. Working tree changes (local only, cheap)
   try {
-    const status = await git.raw(['status', '--porcelain']);
+    // --ignore-submodules=all: skip submodule discovery (the .gitmodules
+    // check that spams the command log on repos without submodules).
+    const status = await git.raw(['status', '--porcelain', '--ignore-submodules=all']);
     summary.dirty = status.split('\n').filter((line) => line.trim().length > 0).length;
   } catch { /* keep 0 */ }
 
@@ -6162,7 +6168,7 @@ export async function pushToGerrit(
       if (match) targetBranch = match[1].trim();
     }
     if (!targetBranch) {
-      const s = await git.status();
+      const s = await git.status(['--ignore-submodules=all']);
       targetBranch = s.current || 'main';
     }
   }
@@ -6549,7 +6555,7 @@ export async function smartPull(
     return { strategy: 'rebase', message: 'No remote tracking ref — pulled with --rebase' };
   }
   // Check working tree status
-  const st = await git.status();
+  const st = await git.status(['--ignore-submodules=all']);
   if (st.isClean() && ahead === 0) {
     // Safe to reset to remote — prevents divergence after remote force-push
     await git.raw(['reset', '--hard', remoteRef]);
@@ -6805,7 +6811,7 @@ export async function batchOperation(
                 await git.raw([...netArgs, '-c', 'http.version=HTTP/1.1', 'push', r, ...(options.force ? ['--force-with-lease'] : [])]);
                 break;
               case 'status':
-                await git.status();
+                await git.status(['--ignore-submodules=all']);
                 break;
             }
           } finally {
