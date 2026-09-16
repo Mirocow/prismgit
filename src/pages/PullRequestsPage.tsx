@@ -5,11 +5,13 @@ import { useGitStore } from '../stores/gitStore';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useProviderStore, suggestProviderFromUrl } from '../stores/providerStore';
 import { api, type GithubPullRequest, type GitLabMergeRequest } from '../lib/api';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { cn, formatDate } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 import { Avatar } from '../components/Avatar';
+import { ProviderChip } from '../components/ProviderChip';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog } from '../components/ConfirmDialog';
@@ -68,11 +70,6 @@ export function PullRequestsPage() {
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastActions();
   const [prs, setPRs] = useState<UnifiedPR[]>([]);
-  // GitLab project ID — resolved from the repo's remote URL on mount.
-  // Required because GitLab MRs are addressed by project ID (numeric),
-  // not by owner/repo like GitHub.
-  const [gitlabProjectId, setGitlabProjectId] = useState<number | null>(null);
-  const [gitlabAuthed, setGitlabAuthed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<'fetch' | 'pull' | null>(null);
   const [state, setState] = useState<'open' | 'closed' | 'all'>('open');
@@ -81,7 +78,31 @@ export function PullRequestsPage() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeKey(showCreate, () => setShowCreate(false));
-  const [repoInfo, setRepoInfo] = useState<{ owner?: string; repo?: string; provider?: string; webUrl?: string; url?: string }>({});
+
+  // ─── Single source of truth for provider/owner/repo ──────────────────
+  // The provider store is shared across PullRequests, Reviews, and Toolbar.
+  // Detection runs once per repo switch; manual overrides persist across
+  // page navigations. This replaces the per-page `repoInfo` state that
+  // used to lose the user's choice whenever they switched tabs.
+  const providerInfo = useProviderStore((s) => ({
+    provider: s.provider,
+    owner: s.owner,
+    repo: s.repo,
+    url: s.url,
+    webUrl: s.webUrl,
+    manualOverride: s.manualOverride,
+    loading: s.loading,
+  }));
+  const gitlabProjectId = useProviderStore((s) => s.gitlabProjectId);
+  const gitlabAuthed = useProviderStore((s) => s.gitlabAuthed);
+  const detectProvider = useProviderStore((s) => s.detect);
+  const selectProviderAction = useProviderStore((s) => s.selectProvider);
+  const setManualOwnerRepo = useProviderStore((s) => s.setManualOwnerRepo);
+  const setGitlabProjectId = useProviderStore((s) => s.setGitlabProjectId);
+
+  // Reuse store values via aliases so the rest of the component reads the
+  // same way the old local `repoInfo` did — minimal diff, same semantics.
+  const repoInfo = providerInfo;
 
   // Create PR form — head/base prefill from the app-wide branch selection
   // (Branches/History/Toolbar): the PR grows out of the branch you picked.
@@ -97,27 +118,19 @@ export function PullRequestsPage() {
   // auth is meaningful for a GitLab repo. For GitHub repos, GitHub auth.
   const isAuthed = isGitLabRepo ? gitlabAuthed : authenticated;
 
-  const loadRepoInfo = useCallback(async () => {
-    try {
-      const info = await api.git.extractRepoInfo(repo.path);
-      setRepoInfo(info);
-      if (info.provider === 'github' && info.owner && info.repo) {
-        setPrBase(info.repo ? await api.git.raw(repo.path, ['symbolic-ref', '--short', 'HEAD']).catch(() => 'main') : 'main');
-      } else if (info.provider === 'gitlab') {
-        // GitLab MRs are addressed by project ID — resolve it from the
-        // remote URL via the GitLab API. We use listProjects to find the
-        // matching project by path_with_namespace (owner/repo).
-        setPrBase(await api.git.raw(repo.path, ['symbolic-ref', '--short', 'HEAD']).catch(() => 'main'));
-        // Check GitLab auth state.
-        try {
-          const glState = await api.gitlab.getAuthState();
-          setGitlabAuthed(!!glState.token);
-        } catch { /* GitLab not configured */ }
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [repo.path]);
+  // Trigger detection on mount + on repo change. The store skips re-detection
+  // when the user has manually overridden the provider (so their choice sticks).
+  useEffect(() => {
+    detectProvider(repo.path);
+  }, [repo.path, detectProvider]);
+
+  // When a supported provider is detected, prefetch the base branch.
+  useEffect(() => {
+    if (repoInfo.provider !== 'github' && repoInfo.provider !== 'gitlab') return;
+    api.git.raw(repo.path, ['symbolic-ref', '--short', 'HEAD'])
+      .then((b) => setPrBase(b.trim() || 'main'))
+      .catch(() => setPrBase('main'));
+  }, [repo.path, repoInfo.provider]);
 
   const loadPRs = useCallback(async () => {
     // Guard: don't even try if not authenticated or not a known-provider repo.
@@ -157,10 +170,6 @@ export function PullRequestsPage() {
       setLoading(false);
     }
   }, [isAuthed, repoInfo, state, toast, gitlabProjectId]);
-
-  useEffect(() => {
-    loadRepoInfo();
-  }, [loadRepoInfo]);
 
   useEffect(() => {
     if (repoInfo.owner && repoInfo.repo) {
@@ -385,32 +394,18 @@ export function PullRequestsPage() {
     // Gitea, Gogs are NOT shown because clicking them would lead to a dead end.
     // We smart-suggest one of GitHub/GitLab based on the URL host substring,
     // and let the user override via the second button if the guess is wrong.
+    //
+    // The selection goes through the shared providerStore — so the choice
+    // persists across navigation to Reviews and back. No more re-picking.
     const url = repoInfo.url || '';
-    const hostMatch = url.match(/git@([^:]+):|https?:\/\/([^/]+)/);
-    const host = hostMatch ? (hostMatch[1] || hostMatch[2] || '').toLowerCase() : '';
-    const suggested = host.includes('gitlab') ? 'gitlab' : host.includes('github') ? 'github' : '';
+    const suggested = suggestProviderFromUrl(url);
     const providers = [
       { id: 'github', label: 'GitHub', desc: 'github.com or GitHub Enterprise' },
       { id: 'gitlab', label: 'GitLab', desc: 'gitlab.com or self-hosted GitLab' },
     ];
 
     const selectProvider = (providerId: 'github' | 'gitlab') => {
-      // Parse owner/repo from SSH or HTTPS URL.
-      const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
-      const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
-      const match = sshMatch || httpsMatch;
-      if (match) {
-        const [, host, ownerName, repoName] = match;
-        setRepoInfo({
-          ...repoInfo,
-          provider: providerId,
-          owner: ownerName,
-          repo: repoName,
-          webUrl: `https://${host}/${ownerName}/${repoName}`,
-        });
-      } else {
-        setRepoInfo({ ...repoInfo, provider: providerId, owner: '', repo: '' });
-      }
+      selectProviderAction(providerId);
     };
 
     return (
@@ -497,7 +492,7 @@ export function PullRequestsPage() {
                 if (e.key === 'Enter') {
                   const val = (e.target as HTMLInputElement).value.trim();
                   const [o, r] = val.split('/');
-                  if (o && r) setRepoInfo({ ...repoInfo, owner: o, repo: r });
+                  if (o && r) setManualOwnerRepo(o, r);
                 }
               }}
             />
@@ -507,7 +502,7 @@ export function PullRequestsPage() {
                 const input = (e.target as HTMLElement).previousElementSibling as HTMLInputElement;
                 const val = input.value.trim();
                 const [o, r] = val.split('/');
-                if (o && r) setRepoInfo({ ...repoInfo, owner: o, repo: r });
+                if (o && r) setManualOwnerRepo(o, r);
               }}
             >
               {t('common.ok', { defaultValue: 'OK' })}
@@ -524,7 +519,7 @@ export function PullRequestsPage() {
         <div className="flex items-center gap-2">
           <GitPullRequest size={14} />
           <span className="text-sm font-medium">{t('nav.pulls')}</span>
-          <span className="text-2xs text-text-tertiary">{repoInfo.owner}/{repoInfo.repo}</span>
+          <ProviderChip />
           {/* Live count — visible count / total. When the search is active,
               shows "5 / 12" so the user knows there are hidden matches. */}
           {search && prs.length > 0 && (

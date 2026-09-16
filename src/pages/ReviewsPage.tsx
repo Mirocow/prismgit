@@ -4,7 +4,9 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useAuthStore } from '../stores/authStore';
+import { useProviderStore } from '../stores/providerStore';
 import { api, type LogEntry } from '../lib/api';
+import { ProviderChip } from '../components/ProviderChip';
 import {
   loadReviews,
   addReviewComment,
@@ -156,17 +158,27 @@ export function ReviewsPage() {
   // the app. Comments are imported as local review comments (severity:
   // 'info', author: the GitHub/GitLab username) so they integrate with the
   // existing resolve/delete/push workflow.
+  //
+  // The provider info comes from the shared providerStore — same store that
+  // PullRequests uses. So if the user manually picked GitLab on the PR
+  // page, Reviews will already know about it.
   const { authenticated } = useAuthStore();
-  const [repoInfo, setRepoInfo] = useState<{ owner?: string; repo?: string; provider?: string }>({});
+  const providerInfo = useProviderStore((s) => ({
+    provider: s.provider,
+    owner: s.owner,
+    repo: s.repo,
+    gitlabAuthed: s.gitlabAuthed,
+  }));
+  const detectProvider = useProviderStore((s) => s.detect);
   const [prNumberInput, setPrNumberInput] = useState('');
   const [showPrLoader, setShowPrLoader] = useState(false);
 
   useEffect(() => {
-    api.git.extractRepoInfo(repo.path).then(setRepoInfo).catch(() => {});
-  }, [repo.path]);
+    detectProvider(repo.path);
+  }, [repo.path, detectProvider]);
 
   const handleLoadFromPR = async () => {
-    if (!repoInfo.owner || !repoInfo.repo) {
+    if (!providerInfo.owner || !providerInfo.repo) {
       toast.warning(t('pages.reviewsNoProvider', { defaultValue: 'Repository is not hosted on GitHub/GitLab' }));
       return;
     }
@@ -186,12 +198,12 @@ export function ReviewsPage() {
     setShowPrLoader(false);
     try {
       let imported = 0;
-      if (repoInfo.provider === 'github') {
+      if (providerInfo.provider === 'github') {
         if (!authenticated) {
           toast.warning(t('pages.reviewsGithubNotAuthed', { defaultValue: 'Connect to GitHub first (Settings → Integrations)' }));
           return;
         }
-        const comments = await api.github.listPRComments(repoInfo.owner, repoInfo.repo, prNum);
+        const comments = await api.github.listPRComments(providerInfo.owner, providerInfo.repo, prNum);
         // Import each GitHub PR comment as a local review comment on the
         // commit it was left on (commit_id field).
         for (const c of comments) {
@@ -207,7 +219,7 @@ export function ReviewsPage() {
           });
           imported++;
         }
-      } else if (repoInfo.provider === 'gitlab') {
+      } else if (providerInfo.provider === 'gitlab') {
         // GitLab MR notes/comments — we'd need a listMRNotes API call.
         // The current gitlab.ts service exposes addMRComment but not list.
         // For now, show a hint that GitLab MR note import is coming.
@@ -242,6 +254,7 @@ export function ReviewsPage() {
         <div className="flex items-center gap-2">
           <GitPullRequest size={14} />
           <span className="text-sm font-medium">{t('pages.reviewsTitle')}</span>
+          <ProviderChip />
           <span className="text-2xs text-text-tertiary">
             {t('pages.reviewsCounts', { comments: totalComments, unresolved: unresolvedCount })}
           </span>
@@ -272,7 +285,7 @@ export function ReviewsPage() {
               from the hosting provider so the user can see code review
               feedback without leaving the app. Disabled when the repo isn't
               on GitHub/GitLab or the user isn't authenticated. */}
-          {repoInfo.provider === 'github' || repoInfo.provider === 'gitlab' ? (
+          {providerInfo.provider === 'github' || providerInfo.provider === 'gitlab' ? (
             <button
               className="btn btn-secondary text-xs"
               onClick={handleLoadFromPR}
