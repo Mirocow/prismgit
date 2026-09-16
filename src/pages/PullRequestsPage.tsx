@@ -380,8 +380,37 @@ export function PullRequestsPage() {
   }
 
   if (!isSupportedRepo) {
-    // Provider not detected (self-hosted GitLab, GitHub Enterprise, etc.)
+    // Provider not detected (self-hosted GitLab, GitHub Enterprise, Gitea, etc.)
     // Let the user manually select which provider to use.
+    // A dropdown covers ALL providers — not just GitHub/GitLab.
+    const providers = [
+      { id: 'github', label: 'GitHub', desc: 'github.com or GitHub Enterprise' },
+      { id: 'gitlab', label: 'GitLab', desc: 'gitlab.com or self-hosted GitLab' },
+      { id: 'bitbucket', label: 'Bitbucket', desc: 'bitbucket.org or self-hosted' },
+      { id: 'gitea', label: 'Gitea', desc: 'self-hosted Gitea instance' },
+      { id: 'gogs', label: 'Gogs', desc: 'self-hosted Gogs instance' },
+    ];
+
+    const selectProvider = (providerId: string) => {
+      const url = repoInfo.url || '';
+      // Parse owner/repo from SSH or HTTPS URL.
+      const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
+      const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
+      const match = sshMatch || httpsMatch;
+      if (match) {
+        const [, host, ownerName, repoName] = match;
+        setRepoInfo({
+          ...repoInfo,
+          provider: providerId,
+          owner: ownerName,
+          repo: repoName,
+          webUrl: `https://${host}/${ownerName}/${repoName}`,
+        });
+      } else {
+        setRepoInfo({ ...repoInfo, provider: providerId, owner: '', repo: '' });
+      }
+    };
+
     return (
       <div className="flex flex-col flex-1 overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
@@ -391,70 +420,29 @@ export function PullRequestsPage() {
           </div>
           {syncButtons}
         </div>
-        <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary gap-4">
+        <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary gap-4 p-4">
           <GitPullRequest size={32} className="opacity-50" />
           <div className="text-sm">{t('pages.prProviderNotDetected', { defaultValue: 'Repository provider not detected' })}</div>
           <div className="text-xs text-center max-w-md">
-            {t('pages.prProviderNotDetectedHint', { defaultValue: 'The remote URL does not match a known provider (GitHub/GitLab). Select your provider manually to enable Pull Requests and Code Review.' })}
+            {t('pages.prProviderNotDetectedHint', { defaultValue: 'Select your hosting provider to enable Pull Requests and Code Review.' })}
           </div>
           {repoInfo.url && (
-            <div className="text-2xs text-text-quaternary font-mono bg-bg-tertiary px-2 py-1 rounded">
+            <div className="text-2xs text-text-tertiary font-mono bg-bg-tertiary px-2 py-1 rounded max-w-full truncate">
               {repoInfo.url}
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <button
-              className="btn btn-primary text-xs"
-              onClick={() => {
-                // Try to parse owner/repo from the remote URL manually.
-                const url = repoInfo.url || '';
-                // Handle SSH: git@host:owner/repo.git
-                const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
-                // Handle HTTP(S): https://host/owner/repo.git
-                const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
-                const match = sshMatch || httpsMatch;
-                if (match) {
-                  const [, host, ownerName, repoName] = match;
-                  setRepoInfo({
-                    ...repoInfo,
-                    provider: 'github',
-                    owner: ownerName,
-                    repo: repoName,
-                    webUrl: `https://${host}/${ownerName}/${repoName}`,
-                  });
-                } else {
-                  // Can't parse — set owner/repo to empty so the user can type them.
-                  setRepoInfo({ ...repoInfo, provider: 'github', owner: '', repo: '' });
-                }
-              }}
-            >
-              <Github size={12} />
-              {t('pages.prUseGithub', { defaultValue: 'Use GitHub' })}
-            </button>
-            <button
-              className="btn btn-primary text-xs"
-              onClick={() => {
-                const url = repoInfo.url || '';
-                const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
-                const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
-                const match = sshMatch || httpsMatch;
-                if (match) {
-                  const [, host, ownerName, repoName] = match;
-                  setRepoInfo({
-                    ...repoInfo,
-                    provider: 'gitlab',
-                    owner: ownerName,
-                    repo: repoName,
-                    webUrl: `https://${host}/${ownerName}/${repoName}`,
-                  });
-                } else {
-                  setRepoInfo({ ...repoInfo, provider: 'gitlab', owner: '', repo: '' });
-                }
-              }}
-            >
-              <GitBranch size={12} />
-              {t('pages.prUseGitlab', { defaultValue: 'Use GitLab' })}
-            </button>
+          <div className="flex flex-wrap items-center justify-center gap-2 max-w-lg">
+            {providers.map((p) => (
+              <button
+                key={p.id}
+                className="btn btn-secondary text-xs flex flex-col items-center gap-0.5 py-2 px-3 min-w-[100px]"
+                onClick={() => selectProvider(p.id)}
+                title={p.desc}
+              >
+                <span className="font-medium">{p.label}</span>
+                <span className="text-2xs text-text-tertiary">{p.desc}</span>
+              </button>
+            ))}
           </div>
         </div>
       </div>
