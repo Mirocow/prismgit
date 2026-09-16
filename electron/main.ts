@@ -17,6 +17,7 @@ import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
 import { SimpleStore } from './services/simpleStore.js';
 import { migratePlaintextSecrets } from './services/storage.js';
 import { migrateLegacyGithubToken } from './services/github.js';
+import { migrateLegacyGitLabToken } from './services/gitlab.js';
 import { flushSecrets } from './services/secrets.js';
 import { buildAppMenu } from './menu.js';
 import { setMenuLocale, normalizeMenuLocale } from './i18n-menu.js';
@@ -276,6 +277,7 @@ app.whenReady().then(() => {
   // from the JSON files. Both calls are idempotent.
   migratePlaintextSecrets();
   migrateLegacyGithubToken();
+  migrateLegacyGitLabToken();
 
   registerGitIpc();
   registerFsIpc();

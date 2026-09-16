@@ -4857,6 +4857,33 @@ export async function lfsTrack(repoPath: string, patterns: string[]): Promise<vo
   }
 }
 
+/**
+ * Stop tracking a pattern with Git LFS (git lfs untrack <pattern>).
+ * Removes the pattern from .gitattributes (LFS-managed section).
+ */
+export async function lfsUntrack(repoPath: string, pattern: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['lfs', 'untrack', pattern]);
+}
+
+/**
+ * Check LFS object integrity (git lfs fsck). Reports corrupt/missing
+ * LFS objects. Returns { ok, output } where ok=true means no issues.
+ */
+export async function lfsFsck(repoPath: string): Promise<{ ok: boolean; output: string }> {
+  const git = getGit(repoPath);
+  try {
+    const output = await git.raw(['lfs', 'fsck']);
+    // git lfs fsck exits 0 with empty output when everything is OK,
+    // and prints "Git LFS fsck OK" or lists corrupt objects.
+    const ok = !output.toLowerCase().includes('corrupt') &&
+               !output.toLowerCase().includes('missing');
+    return { ok, output: output || 'Git LFS fsck OK' };
+  } catch (e) {
+    return { ok: false, output: String(e) };
+  }
+}
+
 export async function lfsList(repoPath: string): Promise<string[]> {
   const git = getGit(repoPath);
   const result = await git.raw(['lfs', 'ls-files']).catch(() => '');
@@ -5959,6 +5986,76 @@ export async function garbageCollect(repoPath: string, aggressive = false): Prom
   return git.raw(['count-objects', '-vH']);
 }
 
+/**
+ * Repack all objects into a single packfile — more thorough than `git gc`
+ * and useful when the repo has many small packfiles (slow on network FS).
+ *
+ * Equivalent to: git repack -a -d --quiet
+ *   -a = pack all objects into a single pack
+ *   -d = delete redundant packs after repacking
+ */
+export async function repack(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['repack', '-a', '-d', '--quiet']);
+  invalidateCache(repoPath);
+}
+
+/**
+ * Pack loose refs into a single file (.git/packed-refs) for faster
+ * ref enumeration on large repos. Equivalent to: git pack-refs --all
+ */
+export async function packRefs(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['pack-refs', '--all']);
+  invalidateCache(repoPath);
+}
+
+/**
+ * Prune loose objects that are unreachable from any ref or the reflog.
+ * Equivalent to: git prune --expire=now
+ *
+ * Unlike `git gc`, this does NOT repack — it just deletes loose objects
+ * that are already unreachable. Faster than gc, less thorough.
+ */
+export async function pruneObjects(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['prune', '--expire=now', '-v']);
+  invalidateCache(repoPath);
+}
+
+/**
+ * Expire old reflog entries to free up reflog space.
+ * Equivalent to: git reflog expire --expire=now --expire-unreachable=now --all
+ *
+ * After expiring, you typically run `git gc --prune=now` to actually
+ * delete the now-unreachable objects.
+ */
+export async function reflogExpire(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['reflog', 'expire', '--expire=now', '--expire-unreachable=now', '--all']);
+  invalidateCache(repoPath);
+}
+
+/**
+ * Full maintenance: reflog expire + prune + repack + gc.
+ * This is the most thorough cleanup — equivalent to running:
+ *   git reflog expire --expire=now --expire-unreachable=now --all
+ *   git gc --prune=now --aggressive
+ *
+ * Returns the count-objects output so the UI can show before/after stats.
+ */
+export async function fullMaintenance(repoPath: string): Promise<string> {
+  const git = getGit(repoPath);
+  // 1. Expire reflog entries (frees reflog space)
+  await git.raw(['reflog', 'expire', '--expire=now', '--expire-unreachable=now', '--all']);
+  // 2. Aggressive gc with immediate prune (frees loose objects)
+  await git.raw(['gc', '--prune=now', '--aggressive', '--quiet']);
+  // 3. Pack refs (faster ref enumeration going forward)
+  await git.raw(['pack-refs', '--all']);
+  invalidateCache(repoPath);
+  return git.raw(['count-objects', '-vH']);
+}
+
 /** List commits unreachable from any ref (SmartGit "Recyclable Commits"). */
 export async function unreachableCommits(repoPath: string): Promise<UnreachableCommit[]> {
   const git = getGit(repoPath);
@@ -6831,20 +6928,6 @@ export async function createSignedTag(
     await git.addConfig('gpg.format', 'ssh', false, 'local');
   }
   await git.raw(args);
-}
-
-/**
- * LFS fsck — validate LFS object integrity.
- * SmartGit Manual: LFS validation.
- */
-export async function lfsFsck(repoPath: string): Promise<{ ok: boolean; output: string }> {
-  const git = getGit(repoPath);
-  try {
-    const out = await git.raw(['lfs', 'fsck']);
-    return { ok: true, output: out };
-  } catch (e) {
-    return { ok: false, output: String(e) };
-  }
 }
 
 /**

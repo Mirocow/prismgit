@@ -40,6 +40,7 @@ export const NS_TOKENS = 'tokens';
 export const NS_AI = 'ai';
 export const NS_REMOTE_AUTH = 'remoteAuth';
 export const NS_GITHUB = 'github';
+export const NS_GITLAB = 'gitlab';
 export const NS_SSH = 'ssh';
 
 /** Composite vault key for a per-remote credential. */

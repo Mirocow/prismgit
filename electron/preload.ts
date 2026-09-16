@@ -214,6 +214,8 @@ const api = {
     detectLfsConfigured: (repoPath: string) => ipcRenderer.invoke('git:detectLfsConfigured', repoPath),
     removeLfsFilter: (repoPath: string) => ipcRenderer.invoke('git:removeLfsFilter', repoPath),
     lfsTrack: (repoPath: string, patterns: string[]) => ipcRenderer.invoke('git:lfsTrack', repoPath, patterns),
+    lfsUntrack: (repoPath: string, pattern: string) => ipcRenderer.invoke('git:lfsUntrack', repoPath, pattern),
+    lfsFsck: (repoPath: string) => ipcRenderer.invoke('git:lfsFsck', repoPath),
     lfsList: (repoPath: string) => ipcRenderer.invoke('git:lfsList', repoPath),
 
     // Split commit
@@ -264,6 +266,11 @@ const api = {
     verifyDatabase: (repoPath: string) => ipcRenderer.invoke('git:verifyDatabase', repoPath),
     garbageCollect: (repoPath: string, aggressive?: boolean) =>
       ipcRenderer.invoke('git:garbageCollect', repoPath, aggressive),
+    repack: (repoPath: string) => ipcRenderer.invoke('git:repack', repoPath),
+    packRefs: (repoPath: string) => ipcRenderer.invoke('git:packRefs', repoPath),
+    pruneObjects: (repoPath: string) => ipcRenderer.invoke('git:pruneObjects', repoPath),
+    reflogExpire: (repoPath: string) => ipcRenderer.invoke('git:reflogExpire', repoPath),
+    fullMaintenance: (repoPath: string) => ipcRenderer.invoke('git:fullMaintenance', repoPath),
     unreachableCommits: (repoPath: string) => ipcRenderer.invoke('git:unreachableCommits', repoPath),
 
     // ===== Bugtraq =====
@@ -321,8 +328,6 @@ const api = {
       ipcRenderer.invoke('git:commitSigned', repoPath, message, options),
     createSignedTag: (repoPath: string, name: string, message: string, ref?: string, sshSign?: boolean) =>
       ipcRenderer.invoke('git:createSignedTag', repoPath, name, message, ref, sshSign),
-    lfsFsck: (repoPath: string) =>
-      ipcRenderer.invoke('git:lfsFsck', repoPath),
     batchOperation: (repos: string[], operation: 'fetch' | 'pull' | 'push' | 'status', options?: { remote?: string; branch?: string; force?: boolean }) =>
       ipcRenderer.invoke('git:batchOperation', repos, operation, options),
     exportConfig: (repoPath: string | null) =>

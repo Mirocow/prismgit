@@ -339,6 +339,8 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:detectLfsConfigured', (_e, p: string) => wrap(gitService.detectLfsConfigured)(p));
   ipcMain.handle('git:removeLfsFilter', (_e, p: string) => wrap(gitService.removeLfsFilter)(p));
   ipcMain.handle('git:lfsTrack', (_e, p: string, patterns: string[]) => wrap(gitService.lfsTrack)(p, patterns));
+  ipcMain.handle('git:lfsUntrack', (_e, p: string, pattern: string) => wrap(gitService.lfsUntrack)(p, pattern));
+  ipcMain.handle('git:lfsFsck', (_e, p: string) => wrap(gitService.lfsFsck)(p));
   ipcMain.handle('git:lfsList', (_e, p: string) => wrap(gitService.lfsList)(p));
 
   // Split commit
@@ -397,6 +399,13 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:garbageCollect', (_e, p: string, aggressive?: boolean) =>
     wrap(gitService.garbageCollect)(p, aggressive ?? false)
   );
+  // New maintenance operations — exposed for the Repository Settings
+  // → Maintenance panel.
+  ipcMain.handle('git:repack', (_e, p: string) => wrap(gitService.repack)(p));
+  ipcMain.handle('git:packRefs', (_e, p: string) => wrap(gitService.packRefs)(p));
+  ipcMain.handle('git:pruneObjects', (_e, p: string) => wrap(gitService.pruneObjects)(p));
+  ipcMain.handle('git:reflogExpire', (_e, p: string) => wrap(gitService.reflogExpire)(p));
+  ipcMain.handle('git:fullMaintenance', (_e, p: string) => wrap(gitService.fullMaintenance)(p));
   ipcMain.handle('git:unreachableCommits', (_e, p: string) => wrap(gitService.unreachableCommits)(p));
 
   // ===== Bugtraq =====

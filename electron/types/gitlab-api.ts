@@ -144,7 +144,7 @@ export interface GitLabApi {
   // === Auth ===
   authWithPAT: (token: string, baseUrl?: string) => Promise<GitLabUser>;
   logout: () => Promise<void>;
-  getAuthState: () => Promise<{ token?: string; user?: GitLabUser; baseUrl?: string }>;
+  getAuthState: () => Promise<{ authenticated?: boolean; token?: string; user?: GitLabUser; baseUrl?: string }>;
   // === Projects (clone source list) ===
   listProjects: (page?: number, perPage?: number) => Promise<GitLabProject[]>;
   /** Look up a single project by its URL-encoded path_with_namespace

@@ -9,6 +9,8 @@ import * as https from 'https';
 import * as http from 'http';
 import { URL } from 'url';
 import { SimpleStore } from './simpleStore.js';
+import { setSecret, getSecret, deleteSecret } from './secrets.js';
+import { NS_GITLAB } from './credentialKeys.js';
 import type {
   GitLabMergeRequestDetail,
   GitLabMRFile,
@@ -58,6 +60,9 @@ export interface GitLabPipeline {
 }
 
 interface GitLabAuthState {
+  /** Token is NO LONGER stored here — it lives in the encrypted vault
+   *  (NS_GITLAB/'pat'). This field is kept for backward-compat reads
+   *  from older PrismGit versions that stored it in plaintext JSON. */
   token?: string;
   baseUrl?: string; // default https://gitlab.com
   user?: GitLabUser;
@@ -69,11 +74,38 @@ const store = new SimpleStore({
 });
 
 function getAuthState(): GitLabAuthState {
-  return (store.get('gitlab') || {}) as GitLabAuthState;
+  const raw = (store.get('gitlab') || {}) as GitLabAuthState;
+  // The PAT never rests in the JSON file — it lives in the encrypted vault.
+  // Read it from the vault and inject it into the returned state so the
+  // rest of the file (apiJson, authWithPAT, etc.) can use it transparently.
+  const token = getSecret(NS_GITLAB, 'pat');
+  return { ...raw, token };
 }
 
 function setAuthState(state: GitLabAuthState): void {
-  store.set('gitlab', state);
+  // Split: token → vault, everything else (baseUrl, user) → JSON file.
+  // The JSON never sees the real token value.
+  const { token, ...rest } = state;
+  store.set('gitlab', rest);
+  if (token) {
+    setSecret(NS_GITLAB, 'pat', token);
+  } else {
+    deleteSecret(NS_GITLAB, 'pat');
+  }
+}
+
+/**
+ * Migration helper — moves any plaintext token found in the old JSON store
+ * into the encrypted vault. Idempotent. Called from main.ts on app-ready.
+ */
+export function migrateLegacyGitLabToken(): void {
+  const raw = (store.get('gitlab') || {}) as GitLabAuthState;
+  if (raw.token) {
+    // Move to vault, clear from JSON.
+    setSecret(NS_GITLAB, 'pat', raw.token);
+    const { token, ...rest } = raw;
+    store.set('gitlab', rest);
+  }
 }
 
 function getBaseUrl(): string {
@@ -160,8 +192,22 @@ export function logout(): void {
   setAuthState({});
 }
 
-export function getAuthStatePublic(): { token?: string; user?: GitLabUser; baseUrl?: string } {
-  return getAuthState();
+/** Public auth state for the renderer. The token is NOT exposed — only
+ *  whether one exists. This matches the GitHub auth shape (getStoredAuthState
+ *  returns { authenticated, user }) and prevents the renderer from ever
+ *  holding the raw PAT. */
+export function getAuthStatePublic(): { authenticated: boolean; user?: GitLabUser; baseUrl?: string; token?: string } {
+  const st = getAuthState();
+  // We keep `token` in the return shape for backward-compat with existing
+  // renderer code that checks `glState.token` — but it's just a boolean
+  // indicator (the real value never crosses the IPC boundary). The
+  // renderer only checks truthiness, never the value.
+  return {
+    authenticated: !!st.token,
+    user: st.user,
+    baseUrl: st.baseUrl,
+    token: st.token ? '***vaulted***' : undefined,
+  };
 }
 
 export async function listProjects(

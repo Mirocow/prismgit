@@ -256,7 +256,10 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     // GitLab auth
     try {
       const gl = await api.gitlab.getAuthState();
-      set({ gitlabAuthed: !!gl.token });
+      // gl.token is now a vaulted placeholder string ('***vaulted***') when
+      // authenticated — we check either `authenticated` (preferred) or
+      // `token` truthiness (backward-compat) to detect auth state.
+      set({ gitlabAuthed: !!gl.authenticated || !!gl.token });
     } catch { /* gitlab not configured */ }
   },
 

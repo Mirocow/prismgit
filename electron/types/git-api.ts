@@ -528,6 +528,10 @@ export interface GitApi {
   /** Remove LFS filter lines from .gitattributes. Returns number of lines removed. */
   removeLfsFilter: (repoPath: string) => Promise<number>;
   lfsTrack: (repoPath: string, patterns: string[]) => Promise<void>;
+  /** Stop tracking a pattern with LFS (git lfs untrack). */
+  lfsUntrack: (repoPath: string, pattern: string) => Promise<void>;
+  /** Check LFS object integrity (git lfs fsck). */
+  lfsFsck: (repoPath: string) => Promise<{ ok: boolean; output: string }>;
   lfsList: (repoPath: string) => Promise<string[]>;
 
   // Split commit
@@ -572,6 +576,16 @@ export interface GitApi {
   // ===== Verify Database / Garbage Collect (Query menu) =====
   verifyDatabase: (repoPath: string) => Promise<string>;
   garbageCollect: (repoPath: string, aggressive?: boolean) => Promise<string>;
+  /** Repack all objects into a single packfile (git repack -a -d). */
+  repack: (repoPath: string) => Promise<void>;
+  /** Pack loose refs into .git/packed-refs (git pack-refs --all). */
+  packRefs: (repoPath: string) => Promise<void>;
+  /** Prune loose unreachable objects (git prune --expire=now). */
+  pruneObjects: (repoPath: string) => Promise<void>;
+  /** Expire old reflog entries (git reflog expire --expire=now --all). */
+  reflogExpire: (repoPath: string) => Promise<void>;
+  /** Full maintenance: reflog expire + aggressive gc + pack-refs. Returns count-objects stats. */
+  fullMaintenance: (repoPath: string) => Promise<string>;
   unreachableCommits: (repoPath: string) => Promise<UnreachableCommit[]>;
 
   // ===== Bugtraq issue-tracker links =====
@@ -647,8 +661,6 @@ export interface GitApi {
   commitSigned: (repoPath: string, message: string, options?: { gpgSign?: boolean; sshSign?: boolean; signingKey?: string; noVerify?: boolean }) => Promise<string>;
   /** Create signed tag (annotated + signed). */
   createSignedTag: (repoPath: string, name: string, message: string, ref?: string, sshSign?: boolean) => Promise<void>;
-  /** LFS fsck — validate LFS object integrity. */
-  lfsFsck: (repoPath: string) => Promise<LfsFsckResult>;
   /** Multi-repo batch operation. */
   batchOperation: (repos: string[], operation: 'fetch' | 'pull' | 'push' | 'status', options?: { remote?: string; branch?: string; force?: boolean }) => Promise<BatchOpResult[]>;
   /** Export repo config as JSON for backup/migration. */
