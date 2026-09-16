@@ -1377,7 +1377,15 @@ export default function App() {
     const scheduleRefresh = () => {
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
       const elapsed = Date.now() - lastRefreshTime.current;
-      const delay = Math.max(0, 2000 - elapsed);
+      // Increased from 2000ms to 5000ms. The file watcher fires on EVERY
+      // .git/index change (every commit, every stage, every stash, every
+      // checkout). With 2s debounce, a busy repo could trigger 30+
+      // `git status` subprocess spawns per minute — and on a repo with LFS,
+      // each `git status` takes 1-5 seconds. 5s is a better balance:
+      // still responsive to user actions, but doesn't hammer git when
+      // the repo is being modified by an external tool (IDE auto-save,
+      // build system, etc.).
+      const delay = Math.max(0, 5000 - elapsed);
       refreshTimer.current = setTimeout(() => {
         refreshTimer.current = null;
         if (refreshInFlight.current) {

@@ -13,7 +13,7 @@ export const MIN_REMOTE_CHECK_INTERVAL_SEC = 30;
  * BOOST_INTERVAL_MS instead of the baseline.
  */
 export const BOOST_DURATION_MS = 120_000; // 2 min
-export const BOOST_INTERVAL_MS = 15_000;   // 15s during boost
+export const BOOST_INTERVAL_MS = 30_000;   // 30s during boost (was 15s — too aggressive on LFS repos)
 /**
  * PERF-2 — pause-polling timestamp. While pauseUntil > Date.now(), the
  * scheduler skips ticks. Set when the window blurs (no point fetching

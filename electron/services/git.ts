@@ -51,14 +51,29 @@ import { BrowserWindow } from 'electron';
 
 /**
  * The env vars to pass to every simple-git instance.
+ *
+ * LFS bypass: we override BOTH `filter.lfs.process` AND `filter.lfs.smudge`
+ * AND `filter.lfs.clean` to empty strings. The previous code only overrode
+ * `filter.lfs.process`, but git can still invoke `filter.lfs.smudge` and
+ * `filter.lfs.clean` separately (they're the per-file filter commands).
+ * Overriding all three ensures git NEVER spawns a git-lfs subprocess —
+ * which is the #1 cause of slowness on repos with Git LFS configured.
+ *
+ * We also set GIT_LFS_SKIP_SMUDGE=1 (belt + suspenders) and disable
+ * `core.hooksPath` so post-checkout/post-merge hooks (which often call
+ * git-lfs directly) never run.
  */
 const GIT_ENV_LFS_SKIP: Record<string, string> = {
   GIT_LFS_SKIP_SMUDGE: '1',
-  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_COUNT: '4',
   GIT_CONFIG_KEY_0: 'core.hooksPath',
   GIT_CONFIG_VALUE_0: '',
   GIT_CONFIG_KEY_1: 'filter.lfs.process',
   GIT_CONFIG_VALUE_1: '',
+  GIT_CONFIG_KEY_2: 'filter.lfs.smudge',
+  GIT_CONFIG_VALUE_2: '',
+  GIT_CONFIG_KEY_3: 'filter.lfs.clean',
+  GIT_CONFIG_VALUE_3: '',
 };
 
 /**
@@ -209,7 +224,14 @@ function getGit(repoPath: string): SimpleGit {
     git = simpleGit({
       baseDir: repoPath,
       binary: 'git',
-      maxConcurrentProcesses: 2,
+      // maxConcurrentProcesses=4 (was 2). With 2, every git command queued
+      // behind the 2 in-flight ones — on a repo with LFS, a single `git status`
+      // could take 5+ seconds, blocking the file-watcher refresh, the sidebar
+      // remote-check, and the History page load all at once. 4 is a safe
+      // middle ground: enough parallelism for the common case (status +
+      // log + diff + branches in parallel) without spawning too many
+      // subprocesses (which would saturate the OS process table).
+      maxConcurrentProcesses: 4,
       trimmed: false,
       ...GIT_UNSAFE_OPTIONS,
     });

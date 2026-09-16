@@ -383,6 +383,24 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     }
   }, [repo.path, toast, t]);
 
+  // ─── Debounced journal loading ─────────────────────────────────────────
+  // The journal (last 20 commits) was being reloaded on EVERY status refresh
+  // (file-watcher tick, commit, stage, etc.) — which spawned a `git log -20`
+  // subprocess each time. On a repo with LFS, each git invocation takes
+  // 1-5 seconds, so the journal was the #1 source of git subprocess spam.
+  //
+  // Now: debounce the journal load to once per 5 seconds. The journal only
+  // needs to be fresh when the user LOOKS at it (after a commit), not on
+  // every file-watcher tick.
+  const journalLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadJournalDebounced = useCallback(() => {
+    if (journalLoadTimerRef.current) clearTimeout(journalLoadTimerRef.current);
+    journalLoadTimerRef.current = setTimeout(() => {
+      journalLoadTimerRef.current = null;
+      void loadJournal();
+    }, 5000); // 5 seconds — the journal is a "recent commits" list, not real-time
+  }, [loadJournal]);
+
   // Load diff when selected file changes — debounced to avoid multiple calls
   // when status refreshes or multiple events fire simultaneously.
   const lastLoadedFileRef = useRef<string | null>(null);
@@ -406,7 +424,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
 
   useEffect(() => {
     loadJournal();
-  }, [loadJournal]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo.path]); // Only reload journal when repo changes — NOT on every status refresh
 
   const loadDirTree = useCallback(async () => {
     setDirTreeLoading(true);
@@ -625,7 +644,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
 
   const handleRefresh = () => {
     refreshStatus(repo.path);
-    loadJournal();
+    loadJournal(); // Manual refresh — user clicked the button, so load immediately
   };
 
   const handleStageAll = async () => {
