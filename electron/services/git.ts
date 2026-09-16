@@ -3,6 +3,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { getSetting } from './storage.js';
+import {
+  GIT_ENV_LFS_SKIP,
+  GIT_UNSAFE_OPTIONS,
+  GIT_SSH_UNSAFE_OPTIONS,
+} from './git-env.js';
 import type { RemoteCredential } from '../types/settings-api.js';
 import { buildSshEnv } from './ssh.js';
 import type { SshEnvResult } from '../types/ssh-api.js';
@@ -10,103 +15,11 @@ import type { PushRefStatus, PushResult, PushVerification } from '../types/git-a
 import { BrowserWindow } from 'electron';
 
 /**
- * Global environment overrides applied to EVERY simple-git instance.
- *
- * THREE problems this solves:
- *
- * 1. GIT_LFS_SKIP_SMUDGE=1 — tells git to skip the LFS smudge/clean
- *    filter-process entirely. Without this, `git restore` / `git checkout`
- *    crash with "git-lfs filter-process: git-lfs: command not found" when
- *    the repo has .gitattributes with LFS rules but git-lfs is NOT installed.
- *
- * 2. GIT_CONFIG_COUNT + GIT_CONFIG_KEY_0 + GIT_CONFIG_VALUE_0 — overrides
- *    `core.hooksPath` to empty string, effectively DISABLING ALL GIT HOOKS
- *    for operations run by PrismGit. This is the KEY fix for the LFS hook
- *    problem: even with GIT_LFS_SKIP_SMUDGE=1, git still runs post-checkout
- *    / post-merge hooks that call `git-lfs` directly. The hook fails with:
- *      "This repository is configured for Git LFS but 'git-lfs' was not
- *       found on your path. If you no longer wish to use Git LFS, remove
- *       this hook by deleting the 'post-checkout' file in the hooks
- *       directory (set by 'core.hookspath'; usually '.git/hooks')."
- *    By setting core.hooksPath="" via env override (highest priority in git's
- *    config hierarchy), hooks are NEVER invoked — no crash.
- *
- *    PrismGit is a GUI git client, not a terminal. Hooks (pre-commit linting,
- *    post-checkout notifications, etc.) are CI/CLI concerns. The user can
- *    still run hooks via the terminal if they want them.
- *
- * 3. GIT_CONFIG_KEY_1 + GIT_CONFIG_VALUE_1 — overrides `filter.lfs.process`
- *    to empty, so git doesn't try to invoke `git-lfs filter-process` even
- *    if the config entry exists.
- *
- * NOTE: This env override has the HIGHEST priority in git's config hierarchy
- * (above --system, --global, --local, and --file). It cannot be overridden
- * by anything in the repo. Requires git 2.31+ (GIT_CONFIG_COUNT).
- *
- * NOTE: simple-git BLOCKS GIT_CONFIG_COUNT by default as an "unsafe" env var.
- * Every simpleGit() call must include `unsafe: { allowUnsafeConfigEnvCount: true }`.
- * The `getGit()` function adds this automatically; ad-hoc simpleGit() calls
- * must also add it (see GIT_UNSAFE_OPTIONS below).
+ * Global environment overrides — see git-env.ts for the actual constants.
+ * The constants are in a separate file to break the circular dependency:
+ * git.ts → storage.ts (getSetting) → git.ts (GIT_UNSAFE_OPTIONS).
  */
 
-/**
- * The env vars to pass to every simple-git instance.
- *
- * LFS bypass: we override BOTH `filter.lfs.process` AND `filter.lfs.smudge`
- * AND `filter.lfs.clean` to empty strings. The previous code only overrode
- * `filter.lfs.process`, but git can still invoke `filter.lfs.smudge` and
- * `filter.lfs.clean` separately (they're the per-file filter commands).
- * Overriding all three ensures git NEVER spawns a git-lfs subprocess —
- * which is the #1 cause of slowness on repos with Git LFS configured.
- *
- * We also set GIT_LFS_SKIP_SMUDGE=1 (belt + suspenders) and disable
- * `core.hooksPath` so post-checkout/post-merge hooks (which often call
- * git-lfs directly) never run.
- */
-const GIT_ENV_LFS_SKIP: Record<string, string> = {
-  GIT_LFS_SKIP_SMUDGE: '1',
-  // REVERTED to 4: status.submodulesummary=0 and diff.submodule=short did NOT
-  // stop git from spawning `git config --file .gitmodules --get-regexp` on
-  // every git status call — they only control OUTPUT format, not whether git
-  // reads the file. The real fix is --ignore-submodules=all on the status
-  // command itself (see the status() function).
-  GIT_CONFIG_COUNT: '4',
-  GIT_CONFIG_KEY_0: 'core.hooksPath',
-  GIT_CONFIG_VALUE_0: '',
-  GIT_CONFIG_KEY_1: 'filter.lfs.process',
-  GIT_CONFIG_VALUE_1: '',
-  GIT_CONFIG_KEY_2: 'filter.lfs.smudge',
-  GIT_CONFIG_VALUE_2: '',
-  GIT_CONFIG_KEY_3: 'filter.lfs.clean',
-  GIT_CONFIG_VALUE_3: '',
-};
-
-/**
- * The simple-git options to use with every simpleGit() call.
- * Combines the env override with the unsafe flags that allow GIT_CONFIG_COUNT
- * and core.hooksPath override (both blocked by simple-git's safety plugin).
- */
-export const GIT_UNSAFE_OPTIONS = {
-  env: GIT_ENV_LFS_SKIP,
-  unsafe: {
-    allowUnsafeConfigEnvCount: true as const,
-    allowUnsafeHooksPath: true as const,
-  },
-};
-
-/**
- * GIT_UNSAFE_OPTIONS + permission to set GIT_SSH_COMMAND through .env() —
- * required for every SSH-transport network command (simple-git blocks
- * GIT_SSH_COMMAND without allowUnsafeSshCommand).
- */
-const GIT_SSH_UNSAFE_OPTIONS = {
-  ...GIT_UNSAFE_OPTIONS,
-  unsafe: {
-    allowUnsafeConfigEnvCount: true as const,
-    allowUnsafeHooksPath: true as const,
-    allowUnsafeSshCommand: true as const,
-  },
-};
 import type {
   StatusResult,
   LogEntry,

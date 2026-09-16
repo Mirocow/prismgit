@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../types/settings-api.js';
 import simpleGit from 'simple-git';
 import { SimpleStore } from './simpleStore.js';
+import { GIT_UNSAFE_OPTIONS } from './git-env.js';
 import {
   splitSettingSecrets,
   rehydrateSettingSecrets,
@@ -338,12 +339,8 @@ export function removeTag(repoPath: string, tag: string): void {
  */
 export async function refreshRepoStats(repoPath: string): Promise<Partial<RepositoryMetadata>> {
   try {
-    // Use the same LFS-skipping env as the main git service — without this,
-    // simpleGit creates a fresh instance WITHOUT GIT_LFS_SKIP_SMUDGE and
-    // GIT_CONFIG overrides, so git-lfs smudge filters run on EVERY file.
-    // This was a hidden cost: refreshRepoStats ran on repo open + every
-    // sidebar refresh, spawning git-lfs processes that took 5-10s each.
-    const { GIT_UNSAFE_OPTIONS } = await import('./git.js');
+    // Use GIT_UNSAFE_OPTIONS from git-env.ts (static import — no circular dep).
+    // Without these env overrides, git-lfs smudge filters run on every file.
     const git = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS });
 
     // Run all reads in parallel — they are independent.
