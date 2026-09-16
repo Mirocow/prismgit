@@ -346,6 +346,12 @@ const api = {
       ipcRenderer.invoke('github:createPullRequest', owner, repo, data),
     listPullRequests: (owner: string, repo: string, state?: 'open' | 'closed' | 'all') =>
       ipcRenderer.invoke('github:listPullRequests', owner, repo, state),
+    getPullRequest: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:getPullRequest', owner, repo, prNumber),
+    listPRFiles: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:listPRFiles', owner, repo, prNumber),
+    listPRIssueComments: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:listPRIssueComments', owner, repo, prNumber),
     getCheckRuns: (owner: string, repo: string, shas: string[]) =>
       ipcRenderer.invoke('github:getCheckRuns', owner, repo, shas),
     logout: () => ipcRenderer.invoke('github:logout'),

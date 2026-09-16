@@ -34,6 +34,8 @@ import type {
   GithubUser,
   GithubRepository,
   GithubPullRequest,
+  GithubPRFile,
+  GithubPRComment,
   CommitCheckStatus,
 } from '../../electron/types/github-api';
 import type {
@@ -82,6 +84,8 @@ export type {
   GithubUser,
   GithubRepository,
   GithubPullRequest,
+  GithubPRFile,
+  GithubPRComment,
   CommitCheckStatus,
   GitLabUser,
   GitLabProject,

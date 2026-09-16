@@ -4,7 +4,7 @@ import { URL } from 'url';
 import { SimpleStore } from './simpleStore.js';
 import { setSecret, getSecret, deleteSecret } from './secrets.js';
 import { NS_GITHUB } from './credentialKeys.js';
-import type { GithubUser, GithubRepository, GithubPullRequest } from '../types/github-api.js';
+import type { GithubUser, GithubRepository, GithubPullRequest, GithubPRFile, GithubPRComment } from '../types/github-api.js';
 
 interface AuthState {
   token?: string;
@@ -157,6 +157,70 @@ export async function listPullRequests(
   if (!token) return [];
   return httpsJson<GithubPullRequest[]>(
     `https://api.github.com/repos/${owner}/${repo}/pulls?state=${state}&per_page=100`,
+    { token }
+  );
+}
+
+/**
+ * Fetch a single PR with full metadata: body/description, comments count,
+ * additions/deletions/changed_files, mergeable status, draft flag, labels.
+ *
+ * The listPullRequests endpoint returns a slim version without these stats
+ * (they're expensive for GitHub to compute). When the user opens a PR in
+ * the detail view, we call this to get the full picture.
+ */
+export async function getPullRequest(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<GithubPullRequest> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  return httpsJson<GithubPullRequest>(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`,
+    { token }
+  );
+}
+
+/**
+ * Fetch the list of files changed in a PR — filename, status (added/modified/
+ * removed/renamed), additions/deletions, and the unified diff patch.
+ *
+ * Used by the PR detail view to show what files the PR touches. The patch
+ * field is optional because GitHub omits it for files >300 lines of diff
+ * (it returns a 406 if we ask, so we just don't show the inline diff for
+ * those — the user can click through to GitHub for the full diff).
+ */
+export async function listPRFiles(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<GithubPRFile[]> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  return httpsJson<GithubPRFile[]>(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`,
+    { token }
+  );
+}
+
+/**
+ * Fetch the issue-style discussion comments on a PR — top-level thread,
+ * NOT line-by-line review comments (those come from listPRComments).
+ *
+ * GitHub treats every PR as an issue, so this hits the issues comments
+ * endpoint. Combined with listPRComments (review-side comments), the UI
+ * can render the full discussion thread.
+ */
+export async function listPRIssueComments(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<GithubPRComment[]> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  return httpsJson<GithubPRComment[]>(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${prNumber}/comments?per_page=100`,
     { token }
   );
 }

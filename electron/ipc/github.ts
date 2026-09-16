@@ -19,6 +19,17 @@ export function registerGithubIpc(): void {
   ipcMain.handle('github:listPullRequests', (_e, owner: string, repo: string, state?: 'open' | 'closed' | 'all') =>
     github.listPullRequests(owner, repo, state)
   );
+  // PR detail — fetches single PR with full body + stats (additions/deletions/
+  // changed_files/mergeable/draft/labels). Used by the PR detail view.
+  ipcMain.handle('github:getPullRequest', (_e, owner: string, repo: string, prNumber: number) =>
+    github.getPullRequest(owner, repo, prNumber)
+  );
+  ipcMain.handle('github:listPRFiles', (_e, owner: string, repo: string, prNumber: number) =>
+    github.listPRFiles(owner, repo, prNumber)
+  );
+  ipcMain.handle('github:listPRIssueComments', (_e, owner: string, repo: string, prNumber: number) =>
+    github.listPRIssueComments(owner, repo, prNumber)
+  );
   ipcMain.handle('github:getCheckRuns', (_e, owner: string, repo: string, shas: string[]) =>
     github.getCheckRuns(owner, repo, shas)
   );

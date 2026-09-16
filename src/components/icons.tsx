@@ -782,3 +782,9 @@ export const Send = (p: IconProps) => (
     <polygon points="22 2 15 22 11 13 2 9 22 2" />
   </Icon>
 );
+
+export const MessageSquare = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </Icon>
+);

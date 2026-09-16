@@ -7,12 +7,13 @@ import { useAuthStore } from '../stores/authStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useProviderStore } from '../stores/providerStore';
-import { api, type GithubPullRequest, type GitLabMergeRequest } from '../lib/api';
+import { api, type GithubPullRequest, type GithubPRFile, type GithubPRComment, type GitLabMergeRequest } from '../lib/api';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { cn, formatDate } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 import { Avatar } from '../components/Avatar';
 import { ProviderChip } from '../components/ProviderChip';
+import { PRDetail } from '../components/PRDetail';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog } from '../components/ConfirmDialog';
@@ -79,6 +80,12 @@ export function PullRequestsPage() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeKey(showCreate, () => setShowCreate(false));
+  // Selected PR for the detail view — when set, PRDetail modal opens.
+  // The PR stored here is the lightweight version from the list; PRDetail
+  // will fetch the full version (with body + stats + files + comments) on
+  // open via api.github.getPullRequest.
+  const [selectedPR, setSelectedPR] = useState<UnifiedPR | null>(null);
+  useEscapeKey(!!selectedPR, () => setSelectedPR(null));
 
   // ─── Single source of truth for provider/owner/repo ──────────────────
   // The provider store is shared across PullRequests, Reviews, and Toolbar.
@@ -319,12 +326,22 @@ export function PullRequestsPage() {
 
   // Request fresh data from the remote server — plain git operations, they work
   // regardless of GitHub auth (this is what the tool was missing entirely).
+  //
+  // IMPORTANT: after `git fetch` succeeds we ALSO reload the PR list from the
+  // GitHub/GitLab API. The user's complaint was "fetch went through but no
+  // new PRs showed up" — that's because git fetch only updates local refs;
+  // the PR list comes from the provider's REST API, which is a separate call.
+  // Tying them together makes the Fetch button do what the user expects.
   const handleFetchAll = async () => {
     setSyncing('fetch');
     try {
       await api.git.fetchAll(repo.path, true);
       await refreshStatus(repo.path);
       toast.success(t('pages.fetchedAllRemotes'));
+      // Refresh the PR list too — fetch updated the refs, but the PR list
+      // comes from the GitHub/GitLab API, which has nothing to do with the
+      // git fetch. Without this, the user sees stale PRs after a fetch.
+      void loadPRs();
     } catch (e) {
       toast.error(t('pages.fetchFailed'), String(e));
     } finally {
@@ -569,7 +586,7 @@ export function PullRequestsPage() {
             <div
               key={pr.number}
               className="group flex items-start gap-3 px-3 py-3 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
-              onClick={() => api.app.openExternal(pr.html_url)}
+              onClick={() => setSelectedPR(pr)}
             >
               <GitPullRequest
                 size={16}
@@ -665,6 +682,20 @@ export function PullRequestsPage() {
           ))
         )}
       </div>
+
+      {/* PR detail modal — opened when user clicks a PR row.
+          Shows description, comments, changed files, and action buttons. */}
+      {selectedPR && repoInfo.owner && repoInfo.repo && (
+        <PRDetail
+          pr={selectedPR as unknown as GithubPullRequest}
+          owner={repoInfo.owner}
+          repo={repoInfo.repo}
+          provider={repoInfo.provider as 'github' | 'gitlab'}
+          gitlabProjectId={gitlabProjectId}
+          onClose={() => setSelectedPR(null)}
+          onActionComplete={() => void loadPRs()}
+        />
+      )}
 
       {/* Create PR dialog */}
       {showCreate && (

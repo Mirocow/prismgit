@@ -41,6 +41,42 @@ export interface GithubPullRequest {
   body?: string;
   /** LAR-2 — when the PR was merged (null if open or closed without merge). */
   merged_at?: string | null;
+  /** PR detail-only fields — populated by getPullRequest (not listPullRequests). */
+  comments?: number;
+  review_comments?: number;
+  commits?: number;
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
+  mergeable?: boolean | null;
+  draft?: boolean;
+  labels?: Array<{ name: string; color: string }>;
+}
+
+/** A file changed in a PR — returned by listPRFiles. */
+export interface GithubPRFile {
+  sha: string;
+  filename: string;
+  status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged';
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch?: string;
+  blob_url: string;
+  raw_url: string;
+  contents_url: string;
+  previous_filename?: string;
+}
+
+/** Issue-style comment on a PR (top-level discussion, not tied to a diff line). */
+export interface GithubPRComment {
+  id: number;
+  body: string;
+  user: { login: string; avatar_url?: string };
+  created_at: string;
+  updated_at: string;
+  html_url?: string;
+  author_association?: string;
 }
 
 export interface GithubApi {
@@ -56,6 +92,12 @@ export interface GithubApi {
     body?: string;
   }) => Promise<GithubPullRequest>;
   listPullRequests: (owner: string, repo: string, state?: 'open' | 'closed' | 'all') => Promise<GithubPullRequest[]>;
+  /** Fetch a single PR with its full body/description + stats (additions/deletions/changed_files). */
+  getPullRequest: (owner: string, repo: string, prNumber: number) => Promise<GithubPullRequest>;
+  /** Fetch the list of files changed in a PR (with optional patch). */
+  listPRFiles: (owner: string, repo: string, prNumber: number) => Promise<GithubPRFile[]>;
+  /** Fetch issue-style discussion comments (top-level PR thread, not line-by-line review comments). */
+  listPRIssueComments: (owner: string, repo: string, prNumber: number) => Promise<GithubPRComment[]>;
   getCheckRuns: (owner: string, repo: string, shas: string[]) => Promise<Record<string, CommitCheckStatus>>;
   logout: () => Promise<void>;
   getAuthState: () => Promise<{ authenticated: boolean; user?: GithubUser }>;
