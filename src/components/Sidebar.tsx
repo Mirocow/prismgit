@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type { RemoteCheckSummary } from '../lib/api';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
-import { loadGlobalCollapsedGroups, loadProjectPrefs, saveGlobalCollapsedGroups, saveProjectPrefs } from '../lib/projectPrefs';
+import { loadProjectPrefs, saveProjectPrefs, loadGlobalCollapsedGroups, saveGlobalCollapsedGroups } from '../lib/projectPrefs';
 import {
   buildRepoTree, canMoveGroup, flattenGroupOptions,
   type RepoGroupNode, type RepoItemNode,
@@ -511,18 +511,6 @@ export function Sidebar() {
 
   // ============= Tree rendering =============
 
-  /**
-   * Compact relative time formatter for the repo row's "last commit" hint.
-   * Mirrors timeAgo() but is co-located here so the row's stats line stays
-   * self-contained (no extra import churn when this file is edited).
-   */
-  const formatLastCommit = (isoDate: string | undefined): string => {
-    if (!isoDate) return '';
-    const ts = new Date(isoDate).getTime();
-    if (!ts || isNaN(ts)) return '';
-    return timeAgo(ts);
-  };
-
   const renderRepoRow = (node: RepoItemNode) => {
     const repo = node.repo;
     const meta = metadata[repo.path];
@@ -532,19 +520,6 @@ export function Sidebar() {
     const showBisectBadge = isActive && currentBisecting;
     const showDetachedBadge = isActive && currentDetached;
     const isFavorite = Boolean(meta?.favorite);
-    // Compact stats line — branch count, commit count, last commit time.
-    // These are EXACTLY the values the user reported as "cached / stale".
-    // Rendering them on the row makes the refresh visible: after a refresh,
-    // the numbers actually change instead of staying frozen.
-    const statsBits: string[] = [];
-    if (typeof meta?.branchCount === 'number' && meta.branchCount > 0) {
-      statsBits.push(`${meta.branchCount}b`);
-    }
-    if (typeof meta?.commitCount === 'number' && meta.commitCount > 0) {
-      statsBits.push(`${meta.commitCount}c`);
-    }
-    const lastCommit = formatLastCommit(meta?.lastCommitDate);
-    if (lastCommit) statsBits.push(lastCommit);
     const providerLabel = meta?.provider && meta.provider !== 'unknown'
       ? meta.provider.charAt(0).toUpperCase() + meta.provider.slice(1)
       : '';
@@ -653,19 +628,12 @@ export function Sidebar() {
             <X size={10} />
           </button>
         </div>
-        {/* Stats line — branch count, commit count, last commit (relative).
-            Rendered only when there's something to show AND the row has
-            enough width to display it without truncating the repo name.
-            This is the line that previously never updated because the
-            refresh button only re-checked remotes, not metadata. */}
-        {(statsBits.length > 0 || providerLabel) && (
+        {providerLabel && (
           <div
             className="flex items-center gap-1.5 pl-[21px] text-2xs text-text-tertiary tabular-nums min-w-0"
             onClick={(e) => e.stopPropagation()}
           >
-            {providerLabel && (
-              <span className="px-1 rounded bg-bg-tertiary text-text-secondary">{providerLabel}</span>
-            )}
+            <span className="px-1 rounded bg-bg-tertiary text-text-secondary">{providerLabel}</span>
           </div>
         )}
       </div>

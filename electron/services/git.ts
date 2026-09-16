@@ -158,28 +158,34 @@ function getGit(repoPath: string): SimpleGit {
 }
 
 /**
- * Remove a stale .git/index.lock file if it exists. A previous git
- * operation (crash, force-quit, killed process) may have left it behind,
- * making ALL subsequent git commands fail with "Unable to create
- * index.lock: File exists."
+ * Remove a stale .git/index.lock file if it exists AND is not actively
+ * being held by another git process.
  *
- * This is called before write operations (add, restore, resetFile,
- * commit, checkout, etc.) so the user doesn't have to manually delete
- * the lock file.
+ * RACE FIX: the previous code blindly deleted .git/index.lock before every
+ * write operation. If two write operations ran concurrently (e.g. user
+ * clicks "Stage All" while a background fetch is committing):
+ *   Op A: removeStaleIndexLock → git add (creates lock)
+ *   Op B: removeStaleIndexLock (DELETES A's lock!) → git add (fails: race)
  *
- * Safety: if another git process is ACTIVELY running (lock file is
- * being held), the unlinkSync will fail with EPERM/EBUSY on Windows
- * or succeed silently on Unix (where locks are advisory). On Unix,
- * removing an active lock can cause the running git process to fail —
- * but this is rare (maxConcurrentProcesses=2) and the alternative
- * (leaving the lock) is worse (blocks ALL git operations).
+ * Now we check the lock file's age — if it was created within the last
+ * 5 seconds, it's probably an active lock from a concurrent operation
+ * and we DON'T delete it. Only stale locks (older than 5s) are removed.
  */
 function removeStaleIndexLock(repoPath: string): void {
   const lockPath = path.join(repoPath, '.git', 'index.lock');
   try {
-    if (fs.existsSync(lockPath)) {
-      fs.unlinkSync(lockPath);
+    if (!fs.existsSync(lockPath)) return;
+    // Check the lock's age — if it's younger than 5 seconds, it's likely
+    // an active lock from a concurrent git operation. Don't delete it.
+    const stat = fs.statSync(lockPath);
+    const ageMs = Date.now() - stat.mtimeMs;
+    if (ageMs < 5000) {
+      // Lock is fresh — another git process is probably holding it.
+      // The git command will wait for it or fail with a clear error.
+      return;
     }
+    // Lock is stale (older than 5s) — safe to remove.
+    fs.unlinkSync(lockPath);
   } catch {
     // Can't remove — either permission issue or another process is
     // actively holding it. The git command will fail with a clear
@@ -2238,13 +2244,42 @@ function getBackgroundFetchRemotes(repoPath: string): string[] {
  * computations of incoming/outgoing commit counters and the working-tree
  * change count. NEVER throws — all failures land in `error`.
  */
+// Cache for pollRemoteSummary results. Each repo is polled at most once
+// per POLL_CACHE_TTL_MS, regardless of how many times pollRemoteSummaries
+// is called. This was the #2 source of git command spam: the sidebar
+// polled ALL repos every 30s (boost) / 120s (baseline), and EACH repo
+// ran 6-7 git commands. With 10 repos = 60-70 commands per poll cycle.
+const POLL_CACHE_TTL_MS = 60_000; // 1 minute — results are cached for 60s
+const pollCache = new Map<string, { summary: RemoteCheckSummary; expiresAt: number }>();
+// In-flight promises: prevents the race where two pollRemoteSummary calls
+// for the SAME repo both see a cache miss and both start computing.
+// Call A starts computing → sets inFlight. Call B sees inFlight → awaits
+// the same promise instead of spawning a duplicate set of git commands.
+const pollInFlight = new Map<string, Promise<RemoteCheckSummary>>();
+
 export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSummary> {
-  const summary = emptyRemoteCheckSummary(repoPath);
-  if (!fs.existsSync(path.join(repoPath, '.git'))) {
-    return summary;
+  // Check cache first — if we polled this repo recently, return the cached result.
+  const cached = pollCache.get(repoPath);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.summary;
   }
 
-  const git = getGit(repoPath);
+  // RACE FIX: if a poll for this repo is already in flight, await the same
+  // promise instead of spawning a duplicate set of git commands.
+  const inFlight = pollInFlight.get(repoPath);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  // Create the promise and store it BEFORE starting any async work so
+  // that subsequent calls see it immediately.
+  const promise = (async (): Promise<RemoteCheckSummary> => {
+    const summary = emptyRemoteCheckSummary(repoPath);
+    if (!fs.existsSync(path.join(repoPath, '.git'))) {
+      return summary;
+    }
+
+    const git = getGit(repoPath);
 
   // 1. Remotes
   try {
@@ -2307,13 +2342,17 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
     }
   }
 
-  // 3. Current branch — use --verify to avoid exit 128 on unborn HEAD
+  // 3. Current branch — SKIP on unborn HEAD repos to avoid the exit-128
+  //    spam in the command log. We check HEAD exists first (cheap), then
+  //    only call rev-parse if HEAD is valid. On unborn HEAD, branch=null.
   try {
+    // Cheap check: does HEAD exist? If not, this is a fresh repo with no
+    // commits — skip the rev-parse call entirely (it would exit 128).
+    await git.raw(['rev-parse', '--verify', '-q', 'HEAD']);
     const name = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
     summary.branch = name === 'HEAD' ? null : name; // detached HEAD
   } catch {
-    // Unborn HEAD (fresh repo, no commits) — rev-parse --abbrev-ref HEAD
-    // exits 128. Not an error, just means there's no branch yet.
+    // Unborn HEAD (fresh repo, no commits) — no branch to report.
     summary.branch = null;
   }
 
@@ -2336,7 +2375,22 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
   } catch { /* keep 0 */ }
 
   summary.checkedAt = Date.now();
+  // Cache the result so the next poll within POLL_CACHE_TTL_MS returns
+  // instantly without spawning any git subprocesses.
+  pollCache.set(repoPath, { summary, expiresAt: Date.now() + POLL_CACHE_TTL_MS });
   return summary;
+  })(); // end of promise IIFE
+
+  // Store the in-flight promise so concurrent calls can await it.
+  pollInFlight.set(repoPath, promise);
+
+  try {
+    return await promise;
+  } finally {
+    // Clean up the in-flight entry — subsequent calls will either hit the
+    // cache (just set) or start a fresh computation.
+    pollInFlight.delete(repoPath);
+  }
 }
 
 /**
