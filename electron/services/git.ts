@@ -2308,13 +2308,17 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
     }
   }
 
-  // 3. Current branch — use --verify to avoid exit 128 on unborn HEAD
+  // 3. Current branch — SKIP on unborn HEAD repos to avoid the exit-128
+  //    spam in the command log. We check HEAD exists first (cheap), then
+  //    only call rev-parse if HEAD is valid. On unborn HEAD, branch=null.
   try {
+    // Cheap check: does HEAD exist? If not, this is a fresh repo with no
+    // commits — skip the rev-parse call entirely (it would exit 128).
+    await git.raw(['rev-parse', '--verify', '-q', 'HEAD']);
     const name = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
     summary.branch = name === 'HEAD' ? null : name; // detached HEAD
   } catch {
-    // Unborn HEAD (fresh repo, no commits) — rev-parse --abbrev-ref HEAD
-    // exits 128. Not an error, just means there's no branch yet.
+    // Unborn HEAD (fresh repo, no commits) — no branch to report.
     summary.branch = null;
   }
 
