@@ -155,33 +155,39 @@ export function PullRequestsPage() {
         const result = await api.github.listPullRequests(repoInfo.owner!, repoInfo.repo!, state);
         setPRs(result.map(githubToUnified));
       } else if (repoInfo.provider === 'gitlab') {
-        // Resolve the GitLab project ID from the owner/repo path.
-        // We do this by listing the user's projects and finding the one
-        // whose path_with_namespace matches owner/repo.
+        // Resolve the GitLab project ID by URL-encoded path_with_namespace.
         //
-        // Paginate beyond page 1 if needed — for self-hosted GitLab with
-        // many groups, the first 100 projects may not contain the one
-        // we're looking for. The previous code gave up after page 1 and
-        // reported 'project not found' — the user saw a 404 in the log
-        // ('gitlab:listMergeRequests: 404 Project Not Found').
+        // The previous approach listed projects page-by-page and matched by
+        // path_with_namespace — flaky on self-hosted GitLab with many groups
+        // (the user's setup: 178.140.10.58:8082, group 'web' / subgroup 'git').
+        //
+        // GitLab's official API supports:
+        //   GET /projects/:id  where :id = URL-encoded path_with_namespace
+        // which is a single round-trip and works for any nesting depth.
         if (gitlabProjectId == null) {
           const fullPath = `${repoInfo.owner}/${repoInfo.repo}`;
-          let found: { id: number; path_with_namespace: string } | undefined;
-          // Try up to 5 pages (500 projects). Most users have < 100.
-          for (let page = 1; page <= 5 && !found; page++) {
-            const projects = await api.gitlab.listProjects(page, 100);
-            if (projects.length === 0) break; // no more pages
-            found = projects.find((p) => p.path_with_namespace === fullPath);
-          }
-          if (!found) {
-            toast.error(
-              t('pages.prLoadFailed'),
-              `GitLab project "${fullPath}" not found in your accessible projects (searched 500 projects). Check that your GitLab token has access to this project.`
-            );
+          try {
+            const project = await api.gitlab.getProjectByPath(fullPath);
+            setGitlabProjectId(project.id);
+            // Continue with the freshly-resolved project ID below.
+            const glState0 = state === 'open' ? 'opened' : state === 'closed' ? 'closed' : 'all';
+            const result0 = await api.gitlab.listMergeRequests(project.id, glState0 as 'opened' | 'closed' | 'merged' | 'all');
+            setPRs(result0.map(gitlabToUnified));
+            return;
+          } catch (e) {
+            const eMsg = String(e);
+            // 404 = project doesn't exist OR token lacks access.
+            if (eMsg.includes('404') || eMsg.toLowerCase().includes('not found')) {
+              toast.error(
+                t('pages.prLoadFailed'),
+                `GitLab project "${fullPath}" not found. Check that the GitLab token has access to this project (Settings → Integrations → GitLab).`
+              );
+            } else {
+              toast.error(t('pages.prLoadFailed'), eMsg);
+            }
             setPRs([]);
             return;
           }
-          setGitlabProjectId(found.id);
         }
         const glState = state === 'open' ? 'opened' : state === 'closed' ? 'closed' : 'all';
         const result = await api.gitlab.listMergeRequests(gitlabProjectId ?? 0, glState as 'opened' | 'closed' | 'merged' | 'all');

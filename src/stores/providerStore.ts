@@ -105,20 +105,49 @@ interface ProviderState extends ProviderInfo {
 }
 
 /** Parse owner/repo from SSH or HTTPS remote URL. Returns the parsed
- *  components plus the cleaned-up web URL. */
+ *  components plus the cleaned-up web URL.
+ *
+ *  Strips embedded credentials (https://user:token@host/...) before parsing —
+ *  otherwise the regex captures 'user:token@host' as the host, leading to
+ *  garbage owner/repo (the user's actual repo had this form and produced 404s).
+ *  Multi-segment GitLab paths (e.g. 'web/git/gitclient' under group 'web',
+ *  subgroup 'git') are handled by treating everything between host and
+ *  '.git' as the full path — owner = first segment, repo = rest joined by '/'.
+ */
 function parseRemoteUrl(url: string): { host?: string; owner?: string; repo?: string; webUrl?: string } {
-  const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
-  const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
+  // Strip embedded credentials: https://user:token@host/... → https://host/...
+  const cleanUrl = url.replace(/^(https?:\/\/)[^@]+@/, '$1');
+  // SSH form: git@host:path/to/repo(.git)
+  const sshMatch = cleanUrl.match(/git@([^:]+):(.+?)(?:\.git)?$/);
+  // HTTP(S) form: http(s)://host/path/to/repo(.git)
+  // Capture everything after host as one group so 'web/git/gitclient' works.
+  const httpsMatch = cleanUrl.match(/https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/);
   const match = sshMatch || httpsMatch;
   if (!match) return {};
-  const [, host, owner, repo] = match;
+  const [, host, fullPath] = match;
+  // For GitLab's nested paths (group/subgroup/repo), we keep the FULL path
+  // as both owner and repo segments. GitLab's MR API uses the URL-encoded
+  // path-with-namespace — the renderer encodes it before calling.
+  // Here we just split off the last segment as 'repo' and treat the rest
+  // as 'owner' (a group/subgroup path).
+  const segments = fullPath.split('/');
+  if (segments.length < 2) return { host, webUrl: `https://${host}/${fullPath}` };
+  const repo = segments[segments.length - 1];
+  const owner = segments.slice(0, -1).join('/');
   return { host, owner, repo, webUrl: `https://${host}/${owner}/${repo}` };
 }
 
 /** Smart suggestion: based on the URL host substring, return the provider
- *  that matches. Used by the UI to pre-highlight the suggested button. */
+ *  that matches. Used by the UI to pre-highlight the suggested button.
+ *
+ *  Strips embedded credentials first — without this, a URL like
+ *  http://mirocow:glpat-xxx@178.140.10.58:8082/... would have its host
+ *  captured as 'mirocow:glpat-xxx@178.140.10.58:8082', which doesn't
+ *  contain 'gitlab' or 'github' — so we'd never suggest a provider.
+ */
 export function suggestProviderFromUrl(url: string): 'github' | 'gitlab' | null {
-  const host = (url.match(/git@([^:]+):|https?:\/\/([^/]+)/) || [])
+  const cleanUrl = url.replace(/^(https?:\/\/)[^@]+@/, '$1');
+  const host = (cleanUrl.match(/git@([^:]+):|https?:\/\/([^/]+)/) || [])
     .filter(Boolean)
     .slice(1)
     .join('')
@@ -146,9 +175,32 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     set({ loading: true });
     try {
       const info = await api.git.extractRepoInfo(repoPath);
+      // ─── Self-hosted GitLab heuristic ─────────────────────────────────
+      // The user's setup was a self-hosted GitLab at 178.140.10.58:8082.
+      // The host substring doesn't contain 'gitlab', so extractRepoInfo
+      // returned provider='unknown'. We auto-detect by comparing the URL
+      // host with the configured GitLab baseUrl — if they match AND the
+      // user has a GitLab token, we treat it as a GitLab repo.
+      //
+      // This avoids the manual chip step for self-hosted GitLab users —
+      // they just need to set up GitLab in Settings → Integrations once.
+      let provider = info.provider;
+      if (provider === 'unknown' && info.url) {
+        try {
+          const glState = await api.gitlab.getAuthState();
+          if (glState.baseUrl && glState.token) {
+            // Strip credentials from both URLs so the host comparison is fair.
+            const urlHost = info.url.replace(/^https?:\/\/[^@]+@/, '').match(/^https?:\/\/([^/]+)/)?.[1]?.toLowerCase();
+            const baseUrlHost = glState.baseUrl.replace(/^https?:\/\/[^@]+@/, '').match(/^https?:\/\/([^/]+)/)?.[1]?.toLowerCase();
+            if (urlHost && baseUrlHost && (urlHost === baseUrlHost || urlHost.endsWith(baseUrlHost) || baseUrlHost.endsWith(urlHost))) {
+              provider = 'gitlab';
+            }
+          }
+        } catch { /* gitlab not configured */ }
+      }
       const next: ProviderInfo = {
         repoPath,
-        provider: info.provider,
+        provider,
         owner: info.owner,
         repo: info.repo,
         url: info.url,

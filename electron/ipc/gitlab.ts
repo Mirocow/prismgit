@@ -19,6 +19,9 @@ export function registerGitlabIpc(): void {
   ipcMain.handle('gitlab:listProjects', (_e, page?: number, perPage?: number) =>
     gitlab.listProjects(page || 1, perPage || 50)
   );
+  ipcMain.handle('gitlab:getProjectByPath', (_e, pathWithNamespace: string) =>
+    gitlab.getProjectByPath(pathWithNamespace)
+  );
 
   // === Merge requests (GitLab equivalent of pull requests) ===
   ipcMain.handle('gitlab:listMergeRequests', (_e, projectId: number, state?: 'opened' | 'closed' | 'merged' | 'all') =>

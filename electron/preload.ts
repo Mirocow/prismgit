@@ -388,6 +388,8 @@ const api = {
     getAuthState: () => ipcRenderer.invoke('gitlab:getAuthState'),
     listProjects: (page?: number, perPage?: number) =>
       ipcRenderer.invoke('gitlab:listProjects', page, perPage),
+    getProjectByPath: (pathWithNamespace: string) =>
+      ipcRenderer.invoke('gitlab:getProjectByPath', pathWithNamespace),
     listMergeRequests: (projectId: number, state?: 'opened' | 'closed' | 'merged' | 'all') =>
       ipcRenderer.invoke('gitlab:listMergeRequests', projectId, state),
     createMergeRequest: (projectId: number, data: { title: string; source_branch: string; target_branch: string; description?: string }) =>

@@ -2380,14 +2380,24 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
   // 3. Current branch — SKIP on unborn HEAD repos to avoid the exit-128
   //    spam in the command log. We check HEAD exists first (cheap), then
   //    only call rev-parse if HEAD is valid. On unborn HEAD, branch=null.
+  //
+  //    Optimization: use `git symbolic-ref --short -q HEAD` instead of
+  //    `rev-parse --verify` + `rev-parse --abbrev-ref`. symbolic-ref is
+  //    a SINGLE git invocation that:
+  //      - returns the branch name (e.g. 'main') when HEAD points at a
+  //        branch ref that exists
+  //      - returns exit=1 + NOTHING on stderr when HEAD is unborn or
+  //        detached (-q suppresses the error)
+  //    The previous two-step probe spawned TWO git subprocesses per poll
+  //    on every repo, and on unborn repos it produced the 'fatal: ambiguous
+  //    argument HEAD' noise the user reported in the command log.
   try {
-    // Cheap check: does HEAD exist? If not, this is a fresh repo with no
-    // commits — skip the rev-parse call entirely (it would exit 128).
-    await git.raw(['rev-parse', '--verify', '-q', 'HEAD']);
-    const name = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-    summary.branch = name === 'HEAD' ? null : name; // detached HEAD
+    const name = (await git.raw(['symbolic-ref', '--short', '-q', 'HEAD'])).trim();
+    summary.branch = name || null; // empty → detached
   } catch {
-    // Unborn HEAD (fresh repo, no commits) — no branch to report.
+    // Unborn HEAD (fresh repo, no commits) OR detached HEAD — no branch
+    // name to report. Detached is rare in the sidebar list (we only poll
+    // repos the user has opened), so we treat this as 'no branch'.
     summary.branch = null;
   }
 
@@ -4540,32 +4550,53 @@ export async function extractRepoInfo(
     const remotes = await git.getRemotes(true);
     const origin = remotes.find((r) => r.name === 'origin') || remotes[0];
     if (!origin) return { provider: 'unknown' };
-    const url = origin.refs.fetch;
+    const rawUrl = origin.refs.fetch;
+    // Strip embedded credentials from the URL before parsing — git allows
+    //   https://user:token@host/path/repo.git
+    // and the previous regex captured the whole 'user:token@host' as the
+    // host, leading to garbage owner/repo. The user's actual repo had
+    //   http://mirocow:glpat-xxx@178.140.10.58:8082/web/git/gitclient.git
+    // which the old code parsed as owner='web', repo='git/gitclient' →
+    // GitLab API 404 because the project path was wrong.
+    const url = rawUrl.replace(/^(https?:\/\/)[^@]+@/, '$1');
     let webUrl = url;
-    // We only auto-detect providers that actually have API integrations
-    // wired (GitHub + GitLab). Other providers (Bitbucket, Gitea, Gogs) are
-    // left as 'unknown' so the UI can prompt for manual selection — but
-    // the manual picker only offers providers we can actually talk to.
-    // Match by host substring so self-hosted instances are detected too:
-    //   github.com, github.company.com  → github
-    //   gitlab.com, gitlab.company.com  → gitlab
     let provider: 'github' | 'gitlab' | 'unknown' = 'unknown';
     let owner: string | undefined;
     let repo: string | undefined;
+    let host: string | undefined;
 
-    const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
-    const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
+    // SSH form: git@host:owner/repo(.git) — owner can be a multi-segment
+    // group path (e.g. 'group/sub/repo' on GitLab).
+    const sshMatch = url.match(/git@([^:]+):(.+?)(?:\.git)?$/);
+    // HTTP(S) form: http(s)://host/path/to/repo(.git) — same multi-segment
+    // path support.
+    const httpsMatch = url.match(/https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/);
 
+    let fullPath: string | undefined;
     if (sshMatch) {
-      const [, host, ownerName, repoName] = sshMatch;
-      webUrl = `https://${host}/${ownerName}/${repoName}`;
-      if (host.includes('github')) { provider = 'github'; owner = ownerName; repo = repoName; }
-      else if (host.includes('gitlab')) { provider = 'gitlab'; owner = ownerName; repo = repoName; }
+      [, host, fullPath] = sshMatch;
     } else if (httpsMatch) {
-      const [, host, ownerName, repoName] = httpsMatch;
-      webUrl = `https://${host}/${ownerName}/${repoName}`;
-      if (host.includes('github')) { provider = 'github'; owner = ownerName; repo = repoName; }
-      else if (host.includes('gitlab')) { provider = 'gitlab'; owner = ownerName; repo = repoName; }
+      [, host, fullPath] = httpsMatch;
+    }
+
+    if (host && fullPath) {
+      // Split into segments — for nested GitLab groups (group/sub/repo),
+      // owner = all but last segment (joined by '/'), repo = last segment.
+      const segments = fullPath.split('/');
+      if (segments.length >= 2) {
+        owner = segments.slice(0, -1).join('/');
+        repo = segments[segments.length - 1];
+      } else if (segments.length === 1) {
+        // Single-segment path (e.g. 'repo') — uncommon but defensive.
+        repo = segments[0];
+      }
+      webUrl = `https://${host}/${owner ?? ''}/${repo ?? ''}`.replace(/\/+$/, '');
+    }
+
+    if (host) {
+      const h = host.toLowerCase();
+      if (h.includes('github')) { provider = 'github'; }
+      else if (h.includes('gitlab')) { provider = 'gitlab'; }
     }
     return { provider, owner, repo, url, webUrl };
   } catch {

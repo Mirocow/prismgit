@@ -152,6 +152,28 @@ export async function listProjects(
   return apiJson<GitLabProject[]>(`/projects?membership=true&page=${page}&per_page=${perPage}&order_by=last_activity_at`);
 }
 
+/**
+ * Look up a single project by its path_with_namespace (e.g. "group/sub/repo").
+ *
+ * This is the GitLab-recommended way to resolve a project from a clone URL:
+ *   GET /projects/:id  where :id is the URL-encoded path_with_namespace.
+ *
+ * For "group/subgroup/repo" the encoded form is "%2Fgroup%2Fsubgroup%2Frepo".
+ * encodeURIComponent doesn't encode forward slashes, so we replace them
+ * manually with %2F.
+ *
+ * This replaces the previous 'page through listProjects and match
+ * path_with_namespace' approach — that could need 5+ pages for users with
+ * many groups, and on a self-hosted GitLab at a private IP, the lookup was
+ * flaky and produced '404 Project Not Found' on listMergeRequests.
+ */
+export async function getProjectByPath(
+  pathWithNamespace: string
+): Promise<GitLabProject> {
+  const encoded = encodeURIComponent(pathWithNamespace).replace(/%2F/gi, '%2F').replace(/\//g, '%2F');
+  return apiJson<GitLabProject>(`/projects/${encoded}`);
+}
+
 export async function listMergeRequests(
   projectId: number,
   state: 'opened' | 'closed' | 'merged' | 'all' = 'opened'

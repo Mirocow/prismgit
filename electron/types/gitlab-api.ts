@@ -63,6 +63,10 @@ export interface GitLabApi {
   getAuthState: () => Promise<{ token?: string; user?: GitLabUser; baseUrl?: string }>;
   // === Projects (clone source list) ===
   listProjects: (page?: number, perPage?: number) => Promise<GitLabProject[]>;
+  /** Look up a single project by its URL-encoded path_with_namespace
+   *  (e.g. "group/subgroup/repo" → "%2Fgroup%2Fsubgroup%2Frepo"). Avoids
+   *  paginating through listProjects when we already know the path. */
+  getProjectByPath: (pathWithNamespace: string) => Promise<GitLabProject>;
   // === Merge requests (GitLab equivalent of pull requests) ===
   listMergeRequests: (projectId: number, state?: 'opened' | 'closed' | 'merged' | 'all') => Promise<GitLabMergeRequest[]>;
   createMergeRequest: (projectId: number, data: {
