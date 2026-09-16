@@ -259,7 +259,7 @@ export function StatusBar({
         {vis('updatedAt') && lastRefresh > 0 && (
           <button
             className="text-text-tertiary hover:text-text-primary transition-colors cursor-pointer"
-            onClick={() => currentRepo && useGitStore.getState().refreshStatus(currentRepo.path)}
+            /*onClick={() => currentRepo && useGitStore.getState().refreshStatus(currentRepo.path)}*/
             title={t('shell.refreshStatusTooltip')}
           >
             {t('shell.updatedAt', { time: new Date(lastRefresh).toLocaleTimeString() })}

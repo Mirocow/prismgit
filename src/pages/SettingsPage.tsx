@@ -330,37 +330,6 @@ export function SettingsPage() {
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.appearance')}</div>
           <div className="p-5 space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium">{t('settings.theme')}</div>
-                <div className="text-xs text-text-tertiary">
-                  {t('settings.themeDescription')}
-                </div>
-              </div>
-              <button
-                className="btn btn-secondary"
-                onClick={toggleTheme}
-              >
-                {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-                {theme === 'dark' ? t('settings.lightMode') : t('settings.darkMode')}
-              </button>
-            </div>
-            {/* 4.2 — SmartGit "Automatically select light/dark": follow the
-                OS preference; resolves the light/dark pair of the chosen
-                theme family (e.g. github-light ↔ github-dark). */}
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={themeMode === 'auto'}
-                onChange={(e) => void setThemeMode(e.target.checked ? 'auto' : 'manual')}
-              />
-              <div className="flex-1">
-                <div>{t('settings.themeAuto')}</div>
-                <div className="text-2xs text-text-tertiary mt-0.5">
-                  {t('settings.themeAutoHint')}
-                </div>
-              </div>
-            </label>
             {/* Language selector */}
             <div className="flex items-center justify-between">
               <div>
@@ -771,56 +740,8 @@ export function SettingsPage() {
         </section>
         )}
 
-        {/* Repositories */}
-        {showProject && (
-        <section className="panel mb-4">
-          <div className="panel-header">
-            <span>{t('settings.knownRepositories', { count: repos.length })}</span>
-            <button
-              className="icon-btn !w-6 !h-6"
-              title={t('common.refresh')}
-              onClick={() => loadRepos()}
-            >
-              <RefreshCw size={12} />
-            </button>
-          </div>
-          <div className="p-2">
-            {repos.length === 0 ? (
-              <div className="p-6 text-center text-sm text-text-tertiary">
-                <Folder size={24} className="mx-auto mb-2 opacity-40" />
-                {t('settings.noReposAdded')}
-              </div>
-            ) : (
-              repos.map((r) => (
-                <div
-                  key={r.path}
-                  className="group flex items-center gap-3 px-3 py-2 hover:bg-bg-hover rounded-md transition-colors"
-                >
-                  <div className="w-7 h-7 rounded-md bg-bg-tertiary border border-border-default flex items-center justify-center flex-shrink-0">
-                    <Folder size={13} className="text-text-tertiary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{r.name}</div>
-                    <div className="text-xs text-text-tertiary font-mono truncate">
-                      {r.path}
-                    </div>
-                  </div>
-                  <button
-                    className="opacity-0 group-hover:opacity-100 icon-btn !w-6 !h-6 hover:!text-status-deleted transition-opacity"
-                    title={t('common.remove')}
-                    onClick={() => removeRepo(r.path)}
-                  >
-                    <Plus size={12} className="rotate-45" />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-        )}
-
         {/* External Tools */}
-        {showProject && (
+        {showIntegrations && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.externalTools')}</div>
           <div className="p-5 space-y-4">
@@ -1145,6 +1066,54 @@ export function SettingsPage() {
               </div>
             </div>
           </section>
+        )}
+
+        {/* Repositories */}
+        {showProject && (
+        <section className="panel mb-4">
+          <div className="panel-header">
+            <span>{t('settings.knownRepositories', { count: repos.length })}</span>
+            <button
+              className="icon-btn !w-6 !h-6"
+              title={t('common.refresh')}
+              onClick={() => loadRepos()}
+            >
+              <RefreshCw size={12} />
+            </button>
+          </div>
+          <div className="p-2">
+            {repos.length === 0 ? (
+              <div className="p-6 text-center text-sm text-text-tertiary">
+                <Folder size={24} className="mx-auto mb-2 opacity-40" />
+                {t('settings.noReposAdded')}
+              </div>
+            ) : (
+              repos.map((r) => (
+                <div
+                  key={r.path}
+                  className="group flex items-center gap-3 px-3 py-2 hover:bg-bg-hover rounded-md transition-colors"
+                >
+                  <div className="w-7 h-7 rounded-md bg-bg-tertiary border border-border-default flex items-center justify-center flex-shrink-0">
+                    <Folder size={13} className="text-text-tertiary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">{r.name}</div>
+                    <div className="text-xs text-text-tertiary font-mono truncate">
+                      {r.path}
+                    </div>
+                  </div>
+                  <button
+                    className="opacity-0 group-hover:opacity-100 icon-btn !w-6 !h-6 hover:!text-status-deleted transition-opacity"
+                    title={t('common.remove')}
+                    onClick={() => removeRepo(r.path)}
+                  >
+                    <Plus size={12} className="rotate-45" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
         )}
 
         {/* SmartGit Manual: Preferences → Commands */}
@@ -1691,6 +1660,27 @@ smartgit.refresh.inspectEol=true
               </span>
             </div>
             <div className="p-5">
+
+              {/* */}
+              <div className="flex items-center justify-between mb-4 pb-4">
+                {/* 4.2 — SmartGit "Automatically select light/dark": follow the
+                    OS preference; resolves the light/dark pair of the chosen
+                    theme family (e.g. github-light ↔ github-dark). */}
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={themeMode === 'auto'}
+                    onChange={(e) => void setThemeMode(e.target.checked ? 'auto' : 'manual')}
+                  />
+                  <div className="flex-1">
+                    <div>{t('settings.themeAuto')}</div>
+                    <div className="text-2xs text-text-tertiary mt-0.5">
+                      {t('settings.themeAutoHint')}
+                    </div>
+                  </div>
+                </label>
+              </div>
+
               {/* Quick light/dark toggle button — kept for users who just
                   want to flip between the two defaults without picking a
                   specific palette. */}
