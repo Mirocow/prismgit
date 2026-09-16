@@ -14,6 +14,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
+import appLogo from '../assets/app-logo.png';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, Sun, Terminal, Trash, Upload } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
@@ -207,9 +208,7 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
       {/* App name + repo management buttons (left) */}
       <div className="flex items-center gap-2 px-3 flex-shrink-0">
         <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-purple) 100%)' }}>
-            <GitBranch size={11} className="text-white" strokeWidth={2.5} />
-          </div>
+          <img src={appLogo} alt="PrismGit" className="w-5 h-5 rounded-md" />
           <span className="text-xs font-bold text-text-primary tracking-tight">PrismGit</span>
         </div>
         {currentRepo && (

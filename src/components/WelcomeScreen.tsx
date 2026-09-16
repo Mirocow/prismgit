@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Folder, Plus, Github, BookOpen, Star, ChevronRight, GitBranch, FileText, History, Download, Search, X } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useI18n } from '../lib/i18n';
+import appLogo from '../assets/app-logo.png';
 
 export function WelcomeScreen({
   onClone,
@@ -87,15 +88,12 @@ export function WelcomeScreen({
 
         <div className="relative max-w-2xl mx-auto px-6 pt-16 pb-10 text-center">
           <div className="mb-6 flex justify-center">
-            <div
-              className="w-20 h-20 rounded-2xl flex items-center justify-center shadow-lg relative"
-              style={{
-                background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-purple) 100%)',
-                boxShadow: '0 10px 30px rgba(57, 158, 230, 0.3)',
-              }}
-            >
-              <GitBranch size={42} className="text-white" strokeWidth={2.5} />
-            </div>
+            <img
+              src={appLogo}
+              alt="PrismGit"
+              className="w-20 h-20 rounded-2xl shadow-lg"
+              style={{ boxShadow: '0 10px 30px rgba(57, 158, 230, 0.3)' }}
+            />
           </div>
           <h1 className="text-3xl font-bold text-text-primary mb-3 tracking-tight">
             {t('welcome.title')}
