@@ -666,8 +666,8 @@ export function Sidebar() {
             {providerLabel && (
               <span className="px-1 rounded bg-bg-tertiary text-text-secondary">{providerLabel}</span>
             )}
-            {statsBits.map((bit, i) => (
-              <span key={i} className="text-text-tertiary">
+            {statsBits.map((bit) => (
+              <span key={bit} className="text-text-tertiary">
                 {bit}
               </span>
             ))}
