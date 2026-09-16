@@ -802,6 +802,52 @@ export function SettingsPage() {
                   </div>
                 </div>
               )}
+              {/* Changes page journal — `git log -N` cadence + commit count.
+                  User asked for this in: "Сделать настраиваемым из Setting
+                  частоту обращения к 'git log -20' сейчас летит огромное
+                  кол-во запросов". Two knobs:
+                    - commit count (5..100, default 20)
+                    - debounce interval (0..300s, default 5) */}
+              <div className="flex items-center justify-between mt-3 border-t border-border-subtle pt-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.changesJournalCount', { defaultValue: 'Changes journal — commit count' })}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.changesJournalCountHint', { defaultValue: 'How many commits the recent-commits list on the Changes page fetches (git log -N). Lower = faster and fewer bytes parsed.' })}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <input
+                    type="number"
+                    min={5}
+                    max={100}
+                    step={5}
+                    value={settings.changesJournalCount ?? 20}
+                    onChange={(e) => setSetting('changesJournalCount', Math.min(100, Math.max(5, Number(e.target.value))))}
+                    className="w-20 text-sm"
+                  />
+                  <span className="text-xs text-text-tertiary">{t('settings.commitsUnit', { defaultValue: 'commits' })}</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between mt-2">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.changesJournalInterval', { defaultValue: 'Changes journal — refresh interval' })}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.changesJournalIntervalHint', { defaultValue: 'Minimum seconds between journal reloads. Higher = fewer git log calls (file-watcher ticks + commits + stage ops all coalesce). 0 = reload on every event (not recommended).' })}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <input
+                    type="number"
+                    min={0}
+                    max={300}
+                    step={1}
+                    value={settings.changesJournalIntervalSec ?? 5}
+                    onChange={(e) => setSetting('changesJournalIntervalSec', Math.max(0, Number(e.target.value)))}
+                    className="w-20 text-sm"
+                  />
+                  <span className="text-xs text-text-tertiary">{t('settings.secUnit')}</span>
+                </div>
+              </div>
               {/* Auto-push to origin — opt-in periodic push of the current
                   branch's outgoing commits. Disabled by default. */}
               <label className="flex items-center justify-between cursor-pointer mt-3 border-t border-border-subtle pt-3" data-testid="auto-push-setting">

@@ -370,7 +370,12 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const loadJournal = useCallback(async () => {
     setJournalLoading(true);
     try {
-      const result = await api.git.log(repo.path, { maxCount: 20 });
+      // User-configurable journal size (Settings → Git → "Changes journal
+      // commit count"). Default 20; clamp to [5, 100] so a misconfigured
+      // value can't nuke the UI with 1000-row logs or break with 0.
+      const rawCount = (settings as { changesJournalCount?: number }).changesJournalCount;
+      const count = Math.min(100, Math.max(5, rawCount ?? 20));
+      const result = await api.git.log(repo.path, { maxCount: count });
       setJournal(result);
     } catch (e) {
       // Previously this was a silent catch — but it hid real bugs (the most
@@ -382,25 +387,30 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     } finally {
       setJournalLoading(false);
     }
-  }, [repo.path, toast, t]);
+  }, [repo.path, settings, toast, t]);
 
   // ─── Debounced journal loading ─────────────────────────────────────────
-  // The journal (last 20 commits) was being reloaded on EVERY status refresh
-  // (file-watcher tick, commit, stage, etc.) — which spawned a `git log -20`
+  // The journal (last N commits) was being reloaded on EVERY status refresh
+  // (file-watcher tick, commit, stage, etc.) — which spawned a `git log -N`
   // subprocess each time. On a repo with LFS, each git invocation takes
   // 1-5 seconds, so the journal was the #1 source of git subprocess spam.
   //
-  // Now: debounce the journal load to once per 5 seconds. The journal only
-  // needs to be fresh when the user LOOKS at it (after a commit), not on
-  // every file-watcher tick.
+  // The user explicitly asked for this to be configurable from Settings
+  // ('Сделать настраиваемым из Setting частоту обращения к "git log -20"
+  // сейчас летит огромное кол-во запросов'). We read the debounce interval
+  // from settings.changesJournalIntervalSec (default 5s).
+  //
+  // 0 = reload on every event (NOT recommended — restores the spam bug).
   const journalLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadJournalDebounced = useCallback(() => {
     if (journalLoadTimerRef.current) clearTimeout(journalLoadTimerRef.current);
+    const intervalSec = (settings as { changesJournalIntervalSec?: number }).changesJournalIntervalSec ?? 5;
+    const intervalMs = Math.max(0, intervalSec) * 1000;
     journalLoadTimerRef.current = setTimeout(() => {
       journalLoadTimerRef.current = null;
       void loadJournal();
-    }, 5000); // 5 seconds — the journal is a "recent commits" list, not real-time
-  }, [loadJournal]);
+    }, intervalMs);
+  }, [loadJournal, settings]);
 
   // Load diff when selected file changes — debounced to avoid multiple calls
   // when status refreshes or multiple events fire simultaneously.

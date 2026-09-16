@@ -407,6 +407,25 @@ export interface AppSettings {
   /** Master switch for History page auto-refresh. Default: false (opt-in). */
   autoRefreshHistory?: boolean;
   /**
+   * Changes page "journal" — the recent-commits list shown at the bottom of
+   * the Changes page. Two knobs the user asked for in 'Сделать настраиваемым
+   * из Setting частоту обращения к "git log -20" сейчас летит огромное
+   * кол-во запросов':
+   *
+   *   changesJournalCount   — how many commits to fetch (default 20, max 100,
+   *                           min 5). Lower = fewer bytes parsed + smaller
+   *                           git log output.
+   *   changesJournalIntervalSec — minimum seconds between journal reloads
+   *                                (default 5). Higher = fewer `git log`
+   *                                invocations even when many events fire
+   *                                (file-watcher ticks, commits, stage
+   *                                operations, etc.). 0 = reload on every
+   *                                event (NOT recommended — restores the
+   *                                'огромное кол-во запросов' bug).
+   */
+  changesJournalCount?: number;
+  changesJournalIntervalSec?: number;
+  /**
    * Git performance settings — applied globally via GIT_CONFIG env override.
    * All default to true (enabled). The user can disable them in Settings → Git.
    */

@@ -15,7 +15,7 @@ import { useToastActions } from '../stores/toastStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
 import appLogo from '../assets/app-logo.png';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, Sun, Terminal, Trash, Upload } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, StashPop, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -1134,10 +1134,12 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
                     toast.success(t('toast.stash.saved')); refreshStatus(currentRepo.path);
                   }).catch((e) => toast.error(t('toast.stash.failed'), String(e)));
                 }} disabled={disabled} title={t('action.title.saveStash')} />
-                {/* Pop stash icon: was GitPullRequest (PR icon, misleading).
-                    Now Upload — an upward-pointing arrow that visually
-                    communicates "lift changes back out of the stash". */}
-                <LabeledButton icon={Upload} label={t('action.button.pop')} iconColor={COLOR_PURPLE} onClick={() => {
+                {/* Pop stash icon: a box with an upward arrow coming out of it
+                    (custom StashPop icon). Previously GitPullRequest (PR icon,
+                    misleading), then Upload (just an arrow, ambiguous).
+                    StashPop clearly communicates "lift changes back out of the
+                    stash box into the working tree". */}
+                <LabeledButton icon={StashPop} label={t('action.button.pop')} iconColor={COLOR_PURPLE} onClick={() => {
                   if (!currentRepo) return;
                   api.git.stashList(currentRepo.path).then(stashes => {
                     if (stashes.length === 0) { toast.info(t('toast.stash.none')); return; }
@@ -1164,7 +1166,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           case 'workflows':
             return (
               <div key={key} className="flex items-center">
-                <LabeledButton icon={GitMerge} label="Git-Flow" iconColor={COLOR_ORANGE} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title={t('action.title.gitFlow')} />
+                <LabeledButton icon={GitMerge} label={t('nav.gitflow', { defaultValue: 'Git-Flow' })} iconColor={COLOR_ORANGE} onClick={() => onGitFlow && onGitFlow()} disabled={disabled} title={t('action.title.gitFlow')} />
                 <LabeledButton icon={RotateCcw} label={t('action.button.rebase')} iconColor={COLOR_ORANGE} onClick={() => onInteractiveRebase && onInteractiveRebase()} disabled={disabled} title={t('action.title.interactiveRebase')} />
               </div>
             );

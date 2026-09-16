@@ -286,6 +286,11 @@ export const en: Record<string, string> = {
   'settings.autoPushHint': 'Push the current branch’s outgoing commits to its upstream on origin on a timer. Off by default — opt-in only.',
   'settings.autoPushInterval': 'Auto-push interval',
   'settings.autoPushIntervalHint': 'How often to push outgoing commits. Min 60s.',
+  'settings.changesJournalCount': 'Changes journal — commit count',
+  'settings.changesJournalCountHint': 'How many commits the recent-commits list on the Changes page fetches (git log -N). Lower = faster and fewer bytes parsed.',
+  'settings.changesJournalInterval': 'Changes journal — refresh interval',
+  'settings.changesJournalIntervalHint': 'Minimum seconds between journal reloads. Higher = fewer git log calls (file-watcher ticks + commits + stage ops all coalesce). 0 = reload on every event (not recommended).',
+  'settings.commitsUnit': 'commits',
   'settings.secUnit': 'sec',
 
   // GitHub Integration
@@ -741,6 +746,11 @@ export const ru: Record<string, string> = {
   'settings.autoPushHint': 'Периодически отправлять исходящие коммиты текущей ветки в её upstream на origin по таймеру. По умолчанию выключено — только по явному включению.',
   'settings.autoPushInterval': 'Интервал авто-push',
   'settings.autoPushIntervalHint': 'Как часто отправлять исходящие коммиты. Минимум 60 с.',
+  'settings.changesJournalCount': 'Журнал Changes — кол-во коммитов',
+  'settings.changesJournalCountHint': 'Сколько коммитов загружать в список недавних коммитов на странице Changes (git log -N). Меньше = быстрее и меньше данных.',
+  'settings.changesJournalInterval': 'Журнал Changes — интервал обновления',
+  'settings.changesJournalIntervalHint': 'Минимум секунд между перезагрузками журнала. Больше = меньше вызовов git log (тики file-watcher + коммиты + stage-операции сливаются). 0 = перезагружать на каждое событие (не рекомендуется).',
+  'settings.commitsUnit': 'коммитов',
   'settings.secUnit': 'с',
 
   // GitHub Integration
@@ -1195,6 +1205,11 @@ export const zh: Record<string, string> = {
   'settings.autoPushHint': '按计时器将当前分支的传出提交推送到 origin 上的上游。默认关闭——仅可选择加入。',
   'settings.autoPushInterval': '自动推送间隔',
   'settings.autoPushIntervalHint': '推送传出提交的频率。最小 60 秒。',
+  'settings.changesJournalCount': 'Changes 日志 — 提交数量',
+  'settings.changesJournalCountHint': '在 Changes 页面的最近提交列表中获取多少条提交（git log -N）。越小越快，数据越少。',
+  'settings.changesJournalInterval': 'Changes 日志 — 刷新间隔',
+  'settings.changesJournalIntervalHint': '日志重新加载之间的最小秒数。越大 = git log 调用越少（file-watcher 通知 + 提交 + 暂存操作都会合并）。0 = 每个事件都重新加载（不推荐）。',
+  'settings.commitsUnit': '提交',
   'settings.secUnit': '秒',
 
   // GitHub Integration
@@ -1649,6 +1664,11 @@ export const de: Record<string, string> = {
   'settings.autoPushHint': 'Ausgehende Commits des aktuellen Branches nach einem Timer in seinen Upstream auf origin pushen. Standardmäßig aus — nur opt-in.',
   'settings.autoPushInterval': 'Auto-Push-Intervall',
   'settings.autoPushIntervalHint': 'Wie oft ausgehende Commits gepusht werden. Mindestens 60 s.',
+  'settings.changesJournalCount': 'Changes-Journal — Commit-Anzahl',
+  'settings.changesJournalCountHint': 'Wie viele Commits die Liste der letzten Commits auf der Changes-Seite abruft (git log -N). Weniger = schneller und weniger Bytes geparst.',
+  'settings.changesJournalInterval': 'Changes-Journal — Aktualisierungsintervall',
+  'settings.changesJournalIntervalHint': 'Mindestsekunden zwischen Journal-Neuladungen. Höher = weniger git log-Aufrufe (File-Watcher-Ticks + Commits + Stage-Operationen werden zusammengefasst). 0 = bei jedem Event neu laden (nicht empfohlen).',
+  'settings.commitsUnit': 'Commits',
   'settings.secUnit': 'Sek.',
 
   // GitHub Integration
