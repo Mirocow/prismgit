@@ -1,18 +1,18 @@
-import simpleGit, { type SimpleGit } from 'simple-git';
+import { spawn } from 'child_process';
+import { BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
-import { getSetting } from './storage.js';
+import simpleGit, { type SimpleGit } from 'simple-git';
+import type { PushRefStatus, PushResult, PushVerification } from '../types/git-api.js';
+import type { RemoteCredential } from '../types/settings-api.js';
+import type { SshEnvResult } from '../types/ssh-api.js';
 import {
   GIT_ENV_LFS_SKIP,
-  GIT_UNSAFE_OPTIONS,
   GIT_SSH_UNSAFE_OPTIONS,
+  GIT_UNSAFE_OPTIONS,
 } from './git-env.js';
-import type { RemoteCredential } from '../types/settings-api.js';
 import { buildSshEnv } from './ssh.js';
-import type { SshEnvResult } from '../types/ssh-api.js';
-import type { PushRefStatus, PushResult, PushVerification } from '../types/git-api.js';
-import { BrowserWindow } from 'electron';
+import { getSetting } from './storage.js';
 
 /**
  * Global environment overrides — see git-env.ts for the actual constants.
@@ -21,34 +21,33 @@ import { BrowserWindow } from 'electron';
  */
 
 import type {
-  StatusResult,
-  LogEntry,
+  BidirectionalBlameResult,
+  BlameLine,
+  BlameResult,
   BranchInfo,
+  BugtraqConfig,
+  CommitFile,
+  CommitNote,
+  DiffHunk,
+  DiffResult,
+  DirNode,
+  GitConfigEntry,
+  LfsLock,
+  LfsLockInfo,
+  LogEntry,
+  NoteCategory,
+  RecyclableCommit,
+  ReflogEntry,
+  RemoteCheckSummary,
   RemoteInfo,
   RemoteProperties,
   StashEntry,
-  TagInfo,
+  StatusResult,
   SubmoduleInfo,
-  DiffResult,
-  DiffHunk,
-  DiffLine,
-  WorktreeInfo,
-  ReflogEntry,
-  CommitFile,
-  BlameLine,
-  BlameResult,
-  GitConfigEntry,
-  DirNode,
-  NoteCategory,
-  CommitNote,
   SubtreeInfo,
-  LfsLock,
-  LfsLockInfo,
-  RecyclableCommit,
-  BidirectionalBlameResult,
+  TagInfo,
   UnreachableCommit,
-  BugtraqConfig,
-  RemoteCheckSummary,
+  WorktreeInfo
 } from '../types/git-api.js';
 
 const gitCache = new Map<string, SimpleGit>();

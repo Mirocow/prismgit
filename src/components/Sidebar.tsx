@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type { RemoteCheckSummary } from '../lib/api';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
-import { loadProjectPrefs, saveProjectPrefs, loadGlobalCollapsedGroups, saveGlobalCollapsedGroups } from '../lib/projectPrefs';
+import { loadGlobalCollapsedGroups, loadProjectPrefs, saveGlobalCollapsedGroups, saveProjectPrefs } from '../lib/projectPrefs';
 import {
   buildRepoTree, canMoveGroup, flattenGroupOptions,
   type RepoGroupNode, type RepoItemNode,
@@ -666,11 +666,6 @@ export function Sidebar() {
             {providerLabel && (
               <span className="px-1 rounded bg-bg-tertiary text-text-secondary">{providerLabel}</span>
             )}
-            {statsBits.map((bit, i) => (
-              <span key={i} className="text-text-tertiary">
-                {bit}
-              </span>
-            ))}
           </div>
         )}
       </div>
