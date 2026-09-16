@@ -26,34 +26,23 @@
  *   - We show a clear error panel: 'Repository not found on GitHub/GitLab'
  *     + the API endpoint that 404'd, so the user can debug.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
-  api,
-  type GithubPRComment,
-  type GithubPRCommit,
-  type GithubPRFile,
-  type GithubPullRequest,
-} from '../lib/api';
-import { useI18n } from '../lib/i18n';
-import { cn, formatDate, shortHash } from '../lib/utils';
-import type { SelectedPR } from '../stores/providerStore';
-import { useToastActions } from '../stores/toastStore';
-import { Avatar } from './Avatar';
-import { confirmDialog } from './ConfirmDialog';
-import {
-  AlertCircle,
-  ArrowRight,
-  Check,
-  ExternalLink,
-  FileText,
-  GitCommit,
-  GitPullRequest,
-  Loader,
-  MessageSquare,
-  RefreshCw,
-  X
+  GitPullRequest, GitCommit, X, ExternalLink, Loader, Check, FileText,
+  MessageSquare, Plus, Minus, ArrowRight, RefreshCw, AlertCircle,
 } from './icons';
+import { useI18n } from '../lib/i18n';
+import { useToastActions } from '../stores/toastStore';
+import {
+  api, type GithubPullRequest, type GithubPRFile, type GithubPRComment,
+  type GithubPRCommit, type GitLabMergeRequestDetail, type GitLabMRFile,
+  type GitLabMRNote, type GitLabMRCommit,
+} from '../lib/api';
+import { Avatar } from './Avatar';
 import MarkdownRenderer from './MarkdownRenderer';
+import { cn, formatDate, shortHash } from '../lib/utils';
+import { confirmDialog } from './ConfirmDialog';
+import type { SelectedPR } from '../stores/providerStore';
 
 type Tab = 'overview' | 'commits' | 'files' | 'discussion';
 
@@ -112,8 +101,102 @@ export function PRReview({
         setComments(prComments);
         setCommits(prCommits);
         setSelectedFile((cur) => cur ?? prFiles[0] ?? null);
+      } else if (provider === 'gitlab') {
+        // GitLab MR review — uses the project ID resolved by PullRequestsPage
+        // and stored in the providerStore. Without it we can't call the
+        // GitLab API (it requires the numeric project ID, not owner/repo).
+        if (gitlabProjectId == null) {
+          setLoadError(
+            t('pages.prReviewNoProjectId', {
+              defaultValue: 'GitLab project ID not resolved. Go back to Pull Requests and re-select the MR — the project ID is resolved on first load.'
+            })
+          );
+          setLoading(false);
+          return;
+        }
+        // Fetch MR detail + changes + notes + commits in parallel.
+        // GitLab's API returns shapes that differ from GitHub's, so we
+        // normalize each response to match the GitHub types the rest of
+        // this component expects (GithubPullRequest / GithubPRFile /
+        // GithubPRComment / GithubPRCommit). This lets us share the same
+        // JSX between the two providers.
+        const [mrDetail, mrFiles, mrNotes, mrCommits] = await Promise.all([
+          api.gitlab.getMergeRequest(gitlabProjectId, pr.number),
+          api.gitlab.listMRChanges(gitlabProjectId, pr.number),
+          api.gitlab.listMRNotes(gitlabProjectId, pr.number),
+          api.gitlab.listMRCommits(gitlabProjectId, pr.number),
+        ]);
+        // Map MR detail → GithubPullRequest shape.
+        const normalizedPR: GithubPullRequest = {
+          id: mrDetail.id,
+          number: mrDetail.iid,
+          title: mrDetail.title,
+          state: mrDetail.state === 'opened' ? 'open' : (mrDetail.state === 'closed' ? 'closed' : 'closed'),
+          html_url: mrDetail.web_url,
+          user: {
+            login: mrDetail.author.username,
+            avatar_url: mrDetail.author.avatar_url ?? '',
+          },
+          head: { ref: mrDetail.source_branch, sha: '' },
+          base: { ref: mrDetail.target_branch, sha: '' },
+          created_at: mrDetail.created_at,
+          updated_at: mrDetail.updated_at,
+          body: mrDetail.body ?? mrDetail.description ?? '',
+          merged_at: mrDetail.merged_at ?? null,
+          draft: mrDetail.work_in_progress,
+          mergeable: mrDetail.mergeable ?? null,
+          additions: mrDetail.additions,
+          deletions: mrDetail.deletions,
+          changed_files: mrDetail.changed_files ?? mrFiles.length,
+          commits: mrCommits.length,
+          comments: mrNotes.filter((n) => !n.system).length,
+          review_comments: 0,
+        };
+        setFullPR(normalizedPR);
+        // Map MR files → GithubPRFile shape. GitLab returns `diff` (with
+        // @@ hunk headers), GitHub returns `patch` — same format.
+        const normalizedFiles: GithubPRFile[] = mrFiles.map((f: GitLabMRFile) => ({
+          sha: '',
+          filename: f.filename,
+          status: f.status === 'removed' ? 'removed' : f.status === 'renamed' ? 'renamed' : f.status === 'added' ? 'added' : 'modified',
+          additions: f.additions,
+          deletions: f.deletions,
+          changes: f.additions + f.deletions,
+          patch: f.diff,
+          blob_url: f.blob_url,
+          raw_url: f.blob_url,
+          contents_url: f.blob_url,
+          previous_filename: f.renamed_file ? f.old_path : undefined,
+        }));
+        setFiles(normalizedFiles);
+        // Map MR notes → GithubPRComment shape. Filter out system notes
+        // (auto-generated status changes — the user doesn't want to see
+        // "John changed the target branch" as a comment).
+        const normalizedComments: GithubPRComment[] = mrNotes
+          .filter((n: GitLabMRNote) => !n.system)
+          .map((n: GitLabMRNote) => ({
+            id: n.id,
+            body: n.body,
+            user: { login: n.user.login, avatar_url: n.user.avatar_url },
+            created_at: n.created_at,
+            updated_at: n.updated_at,
+            html_url: undefined,
+            author_association: 'NONE',
+          }));
+        setComments(normalizedComments);
+        // Map MR commits → GithubPRCommit shape.
+        const normalizedCommits: GithubPRCommit[] = mrCommits.map((c: GitLabMRCommit) => ({
+          sha: c.sha,
+          commit: {
+            message: c.commit.message,
+            author: c.commit.author,
+          },
+          html_url: c.web_url,
+        }));
+        setCommits(normalizedCommits);
+        setSelectedFile((cur) => cur ?? normalizedFiles[0] ?? null);
       } else {
-        // GitLab: detail endpoints not wired — only show what's in the list.
+        // Unknown provider — no detail endpoints available.
         setFullPR(null);
         setFiles([]);
         setComments([]);
@@ -138,7 +221,7 @@ export function PRReview({
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pr.number, owner, repo, provider]);
+  }, [pr.number, owner, repo, provider, gitlabProjectId]);
 
   useEffect(() => {
     void load();
@@ -339,7 +422,7 @@ export function PRReview({
       {displayPR.state === 'open' && !loadError && (
         <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border-subtle bg-bg-tertiary">
           <button
-            className="btn btn-primary text-xs flex items-center gap-1"
+            className="btn btn-secondary text-xs flex items-center gap-1"
             onClick={handleApprove}
             disabled={actionInProgress !== null}
           >

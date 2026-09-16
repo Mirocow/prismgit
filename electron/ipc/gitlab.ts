@@ -27,6 +27,19 @@ export function registerGitlabIpc(): void {
   ipcMain.handle('gitlab:listMergeRequests', (_e, projectId: number, state?: 'opened' | 'closed' | 'merged' | 'all') =>
     gitlab.listMergeRequests(projectId, state || 'opened')
   );
+  // MR detail — used by the PR review surface (Reviews page).
+  ipcMain.handle('gitlab:getMergeRequest', (_e, projectId: number, mrIid: number) =>
+    gitlab.getMergeRequest(projectId, mrIid)
+  );
+  ipcMain.handle('gitlab:listMRChanges', (_e, projectId: number, mrIid: number) =>
+    gitlab.listMRChanges(projectId, mrIid)
+  );
+  ipcMain.handle('gitlab:listMRNotes', (_e, projectId: number, mrIid: number) =>
+    gitlab.listMRNotes(projectId, mrIid)
+  );
+  ipcMain.handle('gitlab:listMRCommits', (_e, projectId: number, mrIid: number) =>
+    gitlab.listMRCommits(projectId, mrIid)
+  );
   ipcMain.handle(
     'gitlab:createMergeRequest',
     (_e, projectId: number, data: { title: string; source_branch: string; target_branch: string; description?: string }) =>

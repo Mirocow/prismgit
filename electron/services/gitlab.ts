@@ -9,6 +9,12 @@ import * as https from 'https';
 import * as http from 'http';
 import { URL } from 'url';
 import { SimpleStore } from './simpleStore.js';
+import type {
+  GitLabMergeRequestDetail,
+  GitLabMRFile,
+  GitLabMRNote,
+  GitLabMRCommit,
+} from '../types/gitlab-api.js';
 
 export interface GitLabUser {
   id: number;
@@ -179,6 +185,140 @@ export async function listMergeRequests(
   state: 'opened' | 'closed' | 'merged' | 'all' = 'opened'
 ): Promise<GitLabMergeRequest[]> {
   return apiJson<GitLabMergeRequest[]>(`/projects/${projectId}/merge_requests?state=${state}`);
+}
+
+/**
+ * Fetch a single MR with full detail (description, merge_status, changes
+ * count). The listMergeRequests endpoint returns a slim version.
+ *
+ * Used by the PR review surface (Reviews page) when the user opens a MR.
+ */
+export async function getMergeRequest(
+  projectId: number,
+  mrIid: number
+): Promise<GitLabMergeRequestDetail> {
+  const mr = await apiJson<GitLabMergeRequestDetail>(
+    `/projects/${projectId}/merge_requests/${mrIid}?include_diverged_commits_count=true`
+  );
+  // Normalize: the MR list uses `description`, the review UI uses `body`.
+  // Populate `body` so the PRReview component can read either field.
+  mr.body = mr.description ?? mr.body ?? '';
+  mr.mergeable = mr.merge_status === 'can_be_merged';
+  mr.draft = mr.work_in_progress;
+  return mr;
+}
+
+/**
+ * Fetch the changed files in a GitLab MR with their unified diff patches.
+ * Maps GitLab's response shape to the GitHub-style GithubPRFile shape so
+ * the renderer can use the same PRReview component for both providers.
+ *
+ * GitLab endpoint: GET /projects/:id/merge_requests/:iid/changes
+ * Returns: { changes: [{ old_path, new_path, diff, new_file, renamed_file, deleted_file }] }
+ */
+export async function listMRChanges(
+  projectId: number,
+  mrIid: number
+): Promise<GitLabMRFile[]> {
+  const resp = await apiJson<{ changes: Array<Record<string, unknown>> }>(
+    `/projects/${projectId}/merge_requests/${mrIid}/changes`
+  );
+  const baseUrl = getBaseUrl();
+  const projectPath = String(projectId); // numeric ID; renderer uses owner/repo for URLs anyway
+  return (resp.changes || []).map((c) => {
+    const newFile = !!c.new_file;
+    const renamedFile = !!c.renamed_file;
+    const deletedFile = !!c.deleted_file;
+    const oldPath = String(c.old_path || '');
+    const newPath = String(c.new_path || '');
+    const diff = String(c.diff || '');
+    // Parse +/- counts from the diff hunk lines.
+    let additions = 0;
+    let deletions = 0;
+    for (const line of diff.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+      else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+    }
+    const status: GitLabMRFile['status'] = newFile
+      ? 'added'
+      : deletedFile
+        ? 'removed'
+        : renamedFile
+          ? 'renamed'
+          : 'modified';
+    return {
+      old_path: oldPath,
+      new_path: newPath,
+      a_mode: String(c.a_mode || ''),
+      b_mode: String(c.b_mode || ''),
+      diff,
+      new_file: newFile,
+      renamed_file: renamedFile,
+      deleted_file: deletedFile,
+      status,
+      filename: deletedFile ? oldPath : newPath,
+      additions,
+      deletions,
+      blob_url: `${baseUrl}/${projectPath}/-/blob/${newPath}`,
+    } satisfies GitLabMRFile;
+  });
+}
+
+/**
+ * Fetch discussion notes (top-level MR thread). GitLab's notes API returns
+ * both user notes AND system notes (e.g. "John assigned this MR to Jane").
+ * We keep all of them here — the renderer can filter `system: true` notes
+ * if it wants to show only human-written comments.
+ *
+ * Mirrors the GitHub listPRIssueComments endpoint.
+ */
+export async function listMRNotes(
+  projectId: number,
+  mrIid: number
+): Promise<GitLabMRNote[]> {
+  const notes = await apiJson<Array<Omit<GitLabMRNote, 'user'>>>(
+    `/projects/${projectId}/merge_requests/${mrIid}/notes?per_page=100&sort=asc&order_by=created_at`
+  );
+  // Normalize: GitLab uses `author.username`, the renderer expects `user.login`.
+  return notes.map((n) => ({
+    ...n,
+    user: {
+      login: n.author.username,
+      avatar_url: n.author.avatar_url,
+    },
+  }));
+}
+
+/**
+ * Fetch the commits that make up the MR.
+ * Maps GitLab's response shape to the GitHub-style GithubPRCommit shape.
+ *
+ * GitLab endpoint: GET /projects/:id/merge_requests/:iid/commits
+ */
+export async function listMRCommits(
+  projectId: number,
+  mrIid: number
+): Promise<GitLabMRCommit[]> {
+  const commits = await apiJson<Array<Omit<GitLabMRCommit, 'sha' | 'commit' | 'author' | 'committer'>>>(
+    `/projects/${projectId}/merge_requests/${mrIid}/commits?per_page=100`
+  );
+  // Normalize to match the GithubPRCommit shape so the renderer can use
+  // the same PRReview component.
+  return commits.map((c) => ({
+    ...c,
+    sha: c.id,
+    commit: {
+      message: c.message || c.title,
+      author: {
+        name: c.author_name,
+        email: c.author_email,
+        date: c.created_at,
+      },
+    },
+    // GitLab's MR commits endpoint doesn't return a linked GitHub-style
+    // `author` object — leave undefined so the renderer falls back to
+    // showing the commit's author_name.
+  }));
 }
 
 export async function createMergeRequest(

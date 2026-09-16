@@ -392,6 +392,14 @@ const api = {
       ipcRenderer.invoke('gitlab:getProjectByPath', pathWithNamespace),
     listMergeRequests: (projectId: number, state?: 'opened' | 'closed' | 'merged' | 'all') =>
       ipcRenderer.invoke('gitlab:listMergeRequests', projectId, state),
+    getMergeRequest: (projectId: number, mrIid: number) =>
+      ipcRenderer.invoke('gitlab:getMergeRequest', projectId, mrIid),
+    listMRChanges: (projectId: number, mrIid: number) =>
+      ipcRenderer.invoke('gitlab:listMRChanges', projectId, mrIid),
+    listMRNotes: (projectId: number, mrIid: number) =>
+      ipcRenderer.invoke('gitlab:listMRNotes', projectId, mrIid),
+    listMRCommits: (projectId: number, mrIid: number) =>
+      ipcRenderer.invoke('gitlab:listMRCommits', projectId, mrIid),
     createMergeRequest: (projectId: number, data: { title: string; source_branch: string; target_branch: string; description?: string }) =>
       ipcRenderer.invoke('gitlab:createMergeRequest', projectId, data),
     approveMergeRequest: (projectId: number, mrIid: number) =>
