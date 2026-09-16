@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { GitPullRequest, Plus, RefreshCw, ExternalLink, Loader, X, CloudDownload, ArrowDown, Search, Github, GitBranch } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
@@ -84,7 +85,13 @@ export function PullRequestsPage() {
   // Detection runs once per repo switch; manual overrides persist across
   // page navigations. This replaces the per-page `repoInfo` state that
   // used to lose the user's choice whenever they switched tabs.
-  const providerInfo = useProviderStore((s) => ({
+  //
+  // useShallow is REQUIRED because the selector returns a new object
+  // literal on every call — without shallow comparison, useSyncExternalStore
+  // sees a new reference every time, treats it as a state change, and
+  // loops forever ("The result of getSnapshot should be cached to avoid
+  // an infinite loop").
+  const providerInfo = useProviderStore(useShallow((s) => ({
     provider: s.provider,
     owner: s.owner,
     repo: s.repo,
@@ -92,7 +99,7 @@ export function PullRequestsPage() {
     webUrl: s.webUrl,
     manualOverride: s.manualOverride,
     loading: s.loading,
-  }));
+  })));
   const gitlabProjectId = useProviderStore((s) => s.gitlabProjectId);
   const gitlabAuthed = useProviderStore((s) => s.gitlabAuthed);
   const detectProvider = useProviderStore((s) => s.detect);

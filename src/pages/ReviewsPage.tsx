@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { GitPullRequest, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText, ExternalLink } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -162,13 +163,17 @@ export function ReviewsPage() {
   // The provider info comes from the shared providerStore — same store that
   // PullRequests uses. So if the user manually picked GitLab on the PR
   // page, Reviews will already know about it.
+  //
+  // useShallow — see PullRequestsPage for why this is REQUIRED (otherwise
+  // the selector returns a new object every call and React's
+  // useSyncExternalStore loops forever).
   const { authenticated } = useAuthStore();
-  const providerInfo = useProviderStore((s) => ({
+  const providerInfo = useProviderStore(useShallow((s) => ({
     provider: s.provider,
     owner: s.owner,
     repo: s.repo,
     gitlabAuthed: s.gitlabAuthed,
-  }));
+  })));
   const detectProvider = useProviderStore((s) => s.detect);
   const [prNumberInput, setPrNumberInput] = useState('');
   const [showPrLoader, setShowPrLoader] = useState(false);
