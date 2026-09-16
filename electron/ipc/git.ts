@@ -489,5 +489,5 @@ export function registerGitIpc(): void {
   // previously the cache retained a SimpleGit instance (with its child
   // process pool) per repo ever opened for the entire session, leaking
   // memory on every repo switch.
-  ipcMain.handle('git:invalidateCache', (_e, p?: string) => gitService.invalidateCache(p));
+  ipcMain.handle('git:invalidateCache', (_e, p?: string) => { gitService.invalidateCache(p); });
 }
