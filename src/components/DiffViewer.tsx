@@ -66,10 +66,34 @@ function shouldShowLine(line: DiffLine, wsMode: WhitespaceMode): boolean {
  *
  * Falls back to plain text if the language is 'text' (unknown extension).
  */
+
+/**
+ * Syntax-highlight cache — keyed by `${lang}|${content}`. The tokenizer is
+ * O(n) per line, and a 1000-line diff with the same lang re-runs it 1000
+ * times per render. With this cache, repeated lines (common in diffs where
+ * only a few lines changed but context is shown) hit the cache.
+ *
+ * The cache is module-level (shared across all DiffViewer instances) and
+ * capped at 5000 entries (~250KB for typical code lines) — enough for a
+ * large diff without unbounded memory growth.
+ */
+const SYNTAX_CACHE = new Map<string, string>();
+const SYNTAX_CACHE_MAX = 5000;
+
 function highlightLine(content: string, lang: SupportedLang): React.ReactNode {
   if (lang === 'text' || !content) return content;
-  const tokens = tokenizeLine(content, lang);
-  const html = tokensToHtml(tokens);
+  const cacheKey = `${lang}|${content}`;
+  let html = SYNTAX_CACHE.get(cacheKey);
+  if (html === undefined) {
+    const tokens = tokenizeLine(content, lang);
+    html = tokensToHtml(tokens);
+    // Evict the oldest entry if the cache is full.
+    if (SYNTAX_CACHE.size >= SYNTAX_CACHE_MAX) {
+      const oldestKey = SYNTAX_CACHE.keys().next().value;
+      if (oldestKey !== undefined) SYNTAX_CACHE.delete(oldestKey);
+    }
+    SYNTAX_CACHE.set(cacheKey, html);
+  }
   return <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
@@ -140,30 +164,36 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
    * and allocates a Uint32Array up to 2MB per call. For a 1000-line diff this
    * was 1000 wordDiff() calls on every click = 1-5s of frozen UI.
    *
-   * Now: wordDiff is computed once and cached by line identity. Clicking a
-   * line only triggers a cheap JSX re-render (Set.has lookup) — no LCS.
+   * Now: wordDiff is computed LAZILY (on first access for each line) and
+   * cached by line identity. Only lines that are actually rendered pay the
+   * LCS cost — lines beyond MAX_LINES_PER_HUNK that are never shown don't
+   * get their word-diff computed at all.
    */
-  const wordDiffCache = useMemo(() => {
+  const wordDiffCacheRef = useRef<Map<string, { segs: WordSegment[]; isDel: boolean }>>(new Map());
+  // Clear the cache when the diff changes — otherwise stale word-diffs from
+  // the previous file's diff would leak into the new one.
+  const prevDiffRef = useRef(diff);
+  if (prevDiffRef.current !== diff) {
+    prevDiffRef.current = diff;
+    wordDiffCacheRef.current.clear();
+  }
+
+  const getWordDiff = useCallback((hunkIdx: number, lineIdx: number, line: DiffLine, paired: DiffLine): { segs: WordSegment[]; isDel: boolean } | null => {
     if (!diff || !useWordDiff) return null;
-    // Key: `${hunkIdx}:${lineIdx}` → WordSegment[] for that line
-    const cache = new Map<string, { segs: WordSegment[]; isDel: boolean }>();
-    diff.hunks.forEach((hunk, hi) => {
-      hunk.lines.forEach((line, li) => {
-        if (line.type !== 'add' && line.type !== 'del') return;
-        const paired = findPairedLine(hunk.lines, li);
-        if (!paired) return;
-        const content = line.content || '';
-        const oldContent = line.type === 'del' ? content : (paired.content || '');
-        const newContent = line.type === 'add' ? content : (paired.content || '');
-        const { old: oldSegs, new: newSegs } = wordDiff(oldContent, newContent);
-        cache.set(`${hi}:${li}`, {
-          segs: line.type === 'del' ? oldSegs : newSegs,
-          isDel: line.type === 'del',
-        });
-      });
-    });
-    return cache;
-  }, [diff, useWordDiff, findPairedLine]);
+    const key = `${hunkIdx}:${lineIdx}`;
+    const cached = wordDiffCacheRef.current.get(key);
+    if (cached) return cached;
+    const content = line.content || '';
+    const oldContent = line.type === 'del' ? content : (paired.content || '');
+    const newContent = line.type === 'add' ? content : (paired.content || '');
+    const { old: oldSegs, new: newSegs } = wordDiff(oldContent, newContent);
+    const result = {
+      segs: line.type === 'del' ? oldSegs : newSegs,
+      isDel: line.type === 'del',
+    };
+    wordDiffCacheRef.current.set(key, result);
+    return result;
+  }, [diff, useWordDiff]);
 
   /**
    * Render a diff line with word-level highlighting.
@@ -182,14 +212,18 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       if (!useWordDiff || !pairedLine) {
         return lang ? highlightLine(content, lang) : content;
       }
-      const cached = wordDiffCache?.get(`${hunkIdx}:${lineIdx}`);
+      // Lazy word-diff: compute on first access, then cache. This avoids
+      // the O(m·n) LCS cost for lines that are never rendered (e.g. lines
+      // beyond MAX_LINES_PER_HUNK that the user hasn't expanded).
+      const cached = getWordDiff(hunkIdx, lineIdx, line, pairedLine);
       if (!cached) {
         return lang ? highlightLine(content, lang) : content;
       }
       return cached.segs.map((seg, i) => {
         if (seg.kind === 'equal') {
           // Apply syntax highlighting to 'equal' segments so keywords/strings
-          // keep their colors even when word-diff is active.
+          // keep their colors even when word-diff is active. Uses the same
+          // SYNTAX_CACHE as highlightLine() so repeated segments hit the cache.
           if (lang) {
             return <span key={i} dangerouslySetInnerHTML={{ __html: tokensToHtml(tokenizeLine(seg.text, lang)) }} />;
           }
@@ -206,7 +240,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
         return <span key={i} className={highlightClass} style={highlightStyle}>{seg.text}</span>;
       });
     },
-    [useWordDiff, lang, wordDiffCache]
+    [useWordDiff, lang, getWordDiff]
   );
 
   const toggleHunk = useCallback((idx: number) => {

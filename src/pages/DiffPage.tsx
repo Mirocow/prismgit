@@ -139,6 +139,76 @@ export function DiffPage() {
   const selectedFileInListRef = useRef<string | null>(selectedFileInList);
   selectedFileInListRef.current = selectedFileInList;
 
+  // ─── LRU diff cache ────────────────────────────────────────────────────
+  // The user complaint: switching between files in the file list was slow
+  // because each click re-ran `git diff` (a subprocess spawn + parse).
+  // On a repo with 50 changed files, clicking through them took ~200ms
+  // each = 10s of cumulative waiting.
+  //
+  // This cache stores the last N (default 20) computed diffs keyed by
+  // `${baseRef}|${compareMode}|${compareRef}|${file}`. A hit returns the
+  // cached DiffResult instantly — no IPC, no subprocess, no parse.
+  //
+  // The cache is invalidated when:
+  //   - The repo changes (different repo.path)
+  //   - A git mutation happens (commit/stage/checkout) — detected via
+  //     the `status` object's `lastRefresh` bump from gitStore.
+  //
+  // We use a Map (insertion-ordered) + a size cap — the oldest entry is
+  // evicted when the cap is exceeded. This is a simple LRU without the
+  // move-to-front overhead (we don't need strict LRU; FIFO-with-cap is
+  // good enough for the file-list-click pattern).
+  const DIFF_CACHE_SIZE = 20;
+  const diffCacheRef = useRef<Map<string, DiffResult>>(new Map());
+  const diffCacheRepoRef = useRef<string>(repo.path);
+
+  /** Build the cache key for a given file + comparison context. */
+  const diffCacheKey = (file: string): string => {
+    return `${baseRef}|${compareMode}|${compareRef}|${stashHash || ''}|${file}`;
+  };
+
+  /** Read from cache, or undefined if miss. */
+  const readDiffCache = (file: string): DiffResult | undefined => {
+    // Invalidate the whole cache if the repo changed.
+    if (diffCacheRepoRef.current !== repo.path) {
+      diffCacheRef.current.clear();
+      diffCacheRepoRef.current = repo.path;
+      return undefined;
+    }
+    return diffCacheRef.current.get(diffCacheKey(file));
+  };
+
+  /** Write to cache, evicting the oldest entry if the cap is exceeded. */
+  const writeDiffCache = (file: string, result: DiffResult): void => {
+    const cache = diffCacheRef.current;
+    const key = diffCacheKey(file);
+    // If the cache is full AND this is a new key, evict the oldest entry
+    // (the first key in insertion order — Map maintains insertion order).
+    if (cache.size >= DIFF_CACHE_SIZE && !cache.has(key)) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey !== undefined) cache.delete(oldestKey);
+    }
+    cache.set(key, result);
+  };
+
+  /** Invalidate the entire diff cache — called when a git mutation happens
+   *  (commit/stage/checkout/etc.) so stale diffs don't show. */
+  const invalidateDiffCache = (): void => {
+    diffCacheRef.current.clear();
+  };
+
+  // Invalidate the cache whenever the git status changes (a mutation
+  // happened — the working tree / index is different now, so all cached
+  // diffs are stale).
+  const lastRefresh = useGitStore((s) => s.lastRefresh);
+  const prevLastRefreshRef = useRef(lastRefresh);
+  useEffect(() => {
+    if (prevLastRefreshRef.current !== lastRefresh) {
+      prevLastRefreshRef.current = lastRefresh;
+      invalidateDiffCache();
+    }
+  }, [lastRefresh]);
+
   const computeDiff = useCallback(async () => {
     if (!repo) return;
     setLoading(true);
@@ -219,16 +289,25 @@ export function DiffPage() {
       } else {
         // Single file diff
         setChangedFiles([]);
+        const fileToDiff = filePath || '.';
+        // Check the cache BEFORE spawning a git subprocess — this is the
+        // hot path when the user is flipping between files in the list.
+        const cached = readDiffCache(fileToDiff);
+        if (cached) {
+          setDiff(cached);
+          return;
+        }
         let result: DiffResult;
         if (compareMode === 'working') {
-          result = await api.git.diff(repo.path, filePath || '.', { ref: baseRef });
+          result = await api.git.diff(repo.path, fileToDiff, { ref: baseRef });
         } else if (compareMode === 'staged') {
-          result = await api.git.diff(repo.path, filePath || '.', { staged: true, ref: baseRef });
+          result = await api.git.diff(repo.path, fileToDiff, { staged: true, ref: baseRef });
         } else {
           // Same `..` rationale here — direct ref comparison, not merge-base.
-          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', filePath || '.']);
-          result = parseRawDiff(rawDiff, filePath);
+          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', fileToDiff]);
+          result = parseRawDiff(rawDiff, fileToDiff);
         }
+        writeDiffCache(fileToDiff, result);
         setDiff(result);
       }
     } catch (e) {
@@ -258,6 +337,13 @@ export function DiffPage() {
     // Cross-tool write-back: the file shown in Diff is the app-wide selection,
     // so Blame/Changes/History follow the file the user is looking at.
     useSelectionStore.getState().selectFile(file);
+    // Check the cache FIRST — if the user already viewed this file, we skip
+    // the git subprocess entirely and show the cached diff instantly.
+    const cached = readDiffCache(file);
+    if (cached) {
+      setDiff(cached);
+      return;
+    }
     setLoading(true);
     try {
       let result: DiffResult;
@@ -270,6 +356,7 @@ export function DiffPage() {
       } else {
         result = await api.git.diff(repo.path, file, { ref: baseRef, staged: compareMode === 'staged' });
       }
+      writeDiffCache(file, result);
       setDiff(result);
     } catch (e) {
       toast.error(t('diff.loadFileFailed'), String(e));
