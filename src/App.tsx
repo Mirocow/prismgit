@@ -115,6 +115,29 @@ export default function App() {
   const loadRepos = useRepositoryStore((s) => s.loadRepos);
   const loadMetadata = useRepositoryStore((s) => s.loadMetadata);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
+  // Custom theme overrides — CSS variables injected live via a <style> tag.
+  // When the user edits the JSON textarea in Settings → Advanced → Custom
+  // Theme Overrides, this effect re-runs and updates the injected CSS.
+  const customThemeOverrides = useSettingsStore((s) => s.settings.customThemeOverrides);
+  useEffect(() => {
+    const id = 'prismgit-custom-theme-overrides';
+    let style = document.getElementById(id) as HTMLStyleElement | null;
+    if (!customThemeOverrides || Object.keys(customThemeOverrides).length === 0) {
+      // No overrides — remove the injected style tag if it exists.
+      style?.remove();
+      return;
+    }
+    if (!style) {
+      style = document.createElement('style');
+      style.id = id;
+      document.head.appendChild(style);
+    }
+    // Build CSS: :root { --var1: val1; --var2: val2; ... }
+    const cssVars = Object.entries(customThemeOverrides)
+      .map(([k, v]) => `  ${k}: ${v};`)
+      .join('\n');
+    style.textContent = `:root {\n${cssVars}\n}`;
+  }, [customThemeOverrides]);
   const loadAuth = useAuthStore((s) => s.loadAuthState);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const status = useGitStore((s) => s.status);

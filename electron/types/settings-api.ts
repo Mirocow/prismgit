@@ -437,6 +437,33 @@ export interface AppSettings {
   gitWriteCommitGraph?: boolean;
   /** Max number of commands shown in the Output panel (default 20). */
   commandLogLimit?: number;
+  // === Advanced / Low-level Properties (Settings → Advanced) ===
+  /** Commit message line length guide 1 (default 50 — conventional commits
+   *  subject line limit). 0 = disabled. */
+  commitLineLimit1?: number;
+  /** Commit message line length guide 2 (default 72 — git's hard wrap). 0 = disabled. */
+  commitLineLimit2?: number;
+  /** Maximum file size (bytes) for inline diff preview. Files larger than
+   *  this show a "too large" message instead of a potentially multi-MB diff.
+   *  Default: 1,000,000 (1 MB). */
+  maxDiffFileSize?: number;
+  /** Default branch name for new repos (git init). Default: 'main'. */
+  defaultBranchName?: string;
+  /** Commit message encoding. 'utf-8' (default) or 'system'. */
+  commitEncoding?: 'utf-8' | 'system';
+  /** Max loose objects before auto-gc triggers. Default: 2000. */
+  cleanupMaxLooseObjects?: number;
+  /** Allow creating empty commits (git commit --allow-empty). Default: false. */
+  allowEmptyCommits?: boolean;
+  /** Show line numbers in diff viewer. Default: true. */
+  diffShowLineNumbers?: boolean;
+  /** Word-level diff highlighting in the diff viewer. Default: true. */
+  diffWordHighlight?: boolean;
+  /** Custom CSS variables to override the active theme (power-user theme
+   *  customization). JSON object of CSS variable → color value pairs,
+   *  e.g. { "--accent": "#ff6b35", "--bg-primary": "#1a1a2e" }.
+   *  Applied via a <style> tag injected into the document root. */
+  customThemeOverrides?: Record<string, string>;
   // === Per-remote authorization (Repository Settings → Remotes) ===
   /**
    * HTTP(S) credentials used for push/pull/fetch per remote.

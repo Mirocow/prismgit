@@ -57,13 +57,14 @@ export function SettingsPage() {
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
   // Top-level tab: Application Settings vs Project Settings vs Themes
-  const [activeTab, setActiveTab] = useState<'application' | 'git' | 'project' | 'themes' | 'ai' | 'security' | 'show-integrations'>('application');
+  const [activeTab, setActiveTab] = useState<'application' | 'git' | 'project' | 'themes' | 'ai' | 'security' | 'advanced' | 'show-integrations'>('application');
   const showApp = activeTab === 'application';
   const showGit = activeTab === 'git';
   const showProject = activeTab === 'project' && !!currentRepo;
   const showThemes = activeTab === 'themes';
   const showAi = activeTab === 'ai';
   const showSecurity = activeTab === 'security';
+  const showAdvanced = activeTab === 'advanced';
   const showIntegrations = activeTab === 'show-integrations';
 
   // === Git Config section state ===
@@ -415,6 +416,18 @@ export function SettingsPage() {
           >
             <Sparkles size={14} />
             {t('settings.ai')}
+          </button>
+          <button
+            className={cn(
+              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              showAdvanced
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            )}
+            onClick={() => setActiveTab('advanced')}
+          >
+            <SettingsIcon size={14} />
+            {t('settings.advanced', { defaultValue: 'Advanced' })}
           </button>
         </div>
 
@@ -936,6 +949,215 @@ export function SettingsPage() {
                     onChange={(e) => setSetting('gitWriteCommitGraph', e.target.checked)}
                   />
                 </label>
+              </div>
+            </div>
+          </div>
+        </section>
+        )}
+
+        {/* Advanced / Low-level Properties */}
+        {showAdvanced && (
+        <section className="panel mb-4">
+          <div className="panel-header">{t('settings.advancedTitle', { defaultValue: 'Advanced Properties' })}</div>
+          <div className="p-5 space-y-5">
+            <div className="text-xs text-text-tertiary p-3 bg-bg-tertiary rounded">
+              {t('settings.advancedWarning', { defaultValue: 'These properties affect low-level behavior. Changes apply immediately.' })}
+            </div>
+
+            {/* Commit message line length guides */}
+            <div className="border-t border-border-subtle pt-4">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-3">
+                {t('settings.commitMessageGuides', { defaultValue: 'Commit Message Line Guides' })}
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.commitLineLimit1', { defaultValue: 'Subject line limit' })}</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={200}
+                      value={settings.commitLineLimit1 ?? 50}
+                      onChange={(e) => setSetting('commitLineLimit1', Math.max(0, Number(e.target.value)))}
+                      className="w-20 text-sm"
+                    />
+                    <span className="text-xs text-text-tertiary">{t('settings.charsUnit', { defaultValue: 'chars' })}</span>
+                    <span className="text-2xs text-text-tertiary ml-2">0 = {t('settings.disabled', { defaultValue: 'disabled' })}</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.commitLineLimit2', { defaultValue: 'Body wrap limit' })}</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={200}
+                      value={settings.commitLineLimit2 ?? 72}
+                      onChange={(e) => setSetting('commitLineLimit2', Math.max(0, Number(e.target.value)))}
+                      className="w-20 text-sm"
+                    />
+                    <span className="text-xs text-text-tertiary">{t('settings.charsUnit', { defaultValue: 'chars' })}</span>
+                    <span className="text-2xs text-text-tertiary ml-2">0 = {t('settings.disabled', { defaultValue: 'disabled' })}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Diff settings */}
+            <div className="border-t border-border-subtle pt-4">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-3">
+                {t('settings.diffSettings', { defaultValue: 'Diff Viewer' })}
+              </div>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.maxDiffFileSize', { defaultValue: 'Max file size for diff' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.maxDiffFileSizeHint', { defaultValue: 'Files larger than this show a "too large" message instead of inline diff.' })}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={10000}
+                    max={50000000}
+                    step={100000}
+                    value={settings.maxDiffFileSize ?? 1000000}
+                    onChange={(e) => setSetting('maxDiffFileSize', Math.max(10000, Number(e.target.value)))}
+                    className="w-24 text-sm"
+                  />
+                  <span className="text-xs text-text-tertiary">{t('settings.bytesUnit', { defaultValue: 'bytes' })}</span>
+                </div>
+              </label>
+              <label className="flex items-center justify-between cursor-pointer mt-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.diffShowLineNumbers', { defaultValue: 'Show line numbers in diff' })}</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.diffShowLineNumbers ?? true}
+                  onChange={(e) => setSetting('diffShowLineNumbers', e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between cursor-pointer mt-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.diffWordHighlight', { defaultValue: 'Word-level highlighting' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.diffWordHighlightHint', { defaultValue: 'Highlight changed words within a line, not just the whole line.' })}</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.diffWordHighlight ?? true}
+                  onChange={(e) => setSetting('diffWordHighlight', e.target.checked)}
+                />
+              </label>
+            </div>
+
+            {/* Git defaults */}
+            <div className="border-t border-border-subtle pt-4">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-3">
+                {t('settings.gitDefaults', { defaultValue: 'Git Defaults' })}
+              </div>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.defaultBranchName', { defaultValue: 'Default branch name' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.defaultBranchNameHint', { defaultValue: 'Branch name for new repos (git init).' })}</div>
+                </div>
+                <input
+                  type="text"
+                  value={settings.defaultBranchName ?? 'main'}
+                  onChange={(e) => setSetting('defaultBranchName', e.target.value)}
+                  className="w-32 text-sm font-mono"
+                />
+              </label>
+              <label className="flex items-center justify-between cursor-pointer mt-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.commitEncoding', { defaultValue: 'Commit message encoding' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.commitEncodingHint', { defaultValue: 'UTF-8 is recommended. System uses the OS default encoding.' })}</div>
+                </div>
+                <select
+                  value={settings.commitEncoding ?? 'utf-8'}
+                  onChange={(e) => setSetting('commitEncoding', e.target.value as 'utf-8' | 'system')}
+                  className="w-32 text-sm"
+                >
+                  <option value="utf-8">UTF-8</option>
+                  <option value="system">{t('settings.systemEncoding', { defaultValue: 'System' })}</option>
+                </select>
+              </label>
+              <label className="flex items-center justify-between cursor-pointer mt-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.allowEmptyCommits', { defaultValue: 'Allow empty commits' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.allowEmptyCommitsHint', { defaultValue: 'Enable git commit --allow-empty.' })}</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.allowEmptyCommits ?? false}
+                  onChange={(e) => setSetting('allowEmptyCommits', e.target.checked)}
+                />
+              </label>
+            </div>
+
+            {/* Maintenance */}
+            <div className="border-t border-border-subtle pt-4">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-3">
+                {t('settings.maintenance', { defaultValue: 'Maintenance' })}
+              </div>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.cleanupMaxLooseObjects', { defaultValue: 'Max loose objects before auto-gc' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.cleanupMaxLooseObjectsHint', { defaultValue: 'When loose objects exceed this count, a gc is recommended.' })}</div>
+                </div>
+                <input
+                  type="number"
+                  min={100}
+                  max={100000}
+                  step={100}
+                  value={settings.cleanupMaxLooseObjects ?? 2000}
+                  onChange={(e) => setSetting('cleanupMaxLooseObjects', Math.max(100, Number(e.target.value)))}
+                  className="w-24 text-sm"
+                />
+              </label>
+            </div>
+
+            {/* Custom Theme Overrides */}
+            <div className="border-t border-border-subtle pt-4">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-3">
+                {t('settings.customThemeOverrides', { defaultValue: 'Custom Theme Overrides' })}
+              </div>
+              <div className="text-xs text-text-tertiary mb-2">
+                {t('settings.customThemeOverridesHint', { defaultValue: 'Override CSS variables for the active theme. JSON format: { "--accent": "#ff6b35", "--bg-primary": "#1a1a2e" }. Changes apply live.' })}
+              </div>
+              <textarea
+                className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded p-2 resize-none"
+                rows={6}
+                placeholder='{\n  "--accent": "#ff6b35",\n  "--bg-primary": "#1a1a2e"\n}'
+                value={(() => {
+                  const overrides = settings.customThemeOverrides;
+                  if (!overrides || Object.keys(overrides).length === 0) return '';
+                  return JSON.stringify(overrides, null, 2);
+                })()}
+                onChange={(e) => {
+                  const text = e.target.value.trim();
+                  if (!text) {
+                    setSetting('customThemeOverrides', undefined);
+                    return;
+                  }
+                  try {
+                    const parsed = JSON.parse(text);
+                    if (typeof parsed === 'object' && parsed !== null) {
+                      setSetting('customThemeOverrides', parsed);
+                    }
+                  } catch {
+                    // Invalid JSON — don't update, let the user keep typing
+                  }
+                }}
+              />
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  className="btn btn-secondary text-xs"
+                  onClick={() => setSetting('customThemeOverrides', undefined)}
+                >
+                  {t('settings.resetThemeOverrides', { defaultValue: 'Reset' })}
+                </button>
+                <span className="text-2xs text-text-tertiary">
+                  {t('settings.themeOverridesNote', { defaultValue: 'Requires CSS variable knowledge. See theme.css for available variables.' })}
+                </span>
               </div>
             </div>
           </div>
