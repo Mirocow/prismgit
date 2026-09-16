@@ -3,6 +3,7 @@
  */
 import { ipcMain } from 'electron';
 import simpleGit from 'simple-git';
+import { GIT_UNSAFE_OPTIONS } from '../services/git-env.js';
 import {
   detectVsCodeCached,
   openInVsCode,
@@ -17,6 +18,11 @@ import {
   removeVsCodeDiffMergeTool,
 } from '../services/vscode.js';
 
+/** Create a SimpleGit instance with the correct unsafe options. */
+function sg(repoPath: string) {
+  return simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS });
+}
+
 export function registerVscodeIpc(): void {
   ipcMain.handle('vscode:detect', (_e, force?: boolean) => detectVsCodeCached(!!force));
 
@@ -24,19 +30,19 @@ export function registerVscodeIpc(): void {
     openInVsCode(repoPath, target));
 
   ipcMain.handle('vscode:openFileDiff', (_e, repoPath: string, file: string) =>
-    openFileDiffVsHead(simpleGit(repoPath), repoPath, file));
+    openFileDiffVsHead(sg(repoPath), repoPath, file));
 
   ipcMain.handle('vscode:openMerge', (_e, repoPath: string, file: string) =>
-    openMergeInVsCode(simpleGit(repoPath), repoPath, file));
+    openMergeInVsCode(sg(repoPath), repoPath, file));
 
   ipcMain.handle('vscode:openFileVersion', (_e, repoPath: string, sha: string, file: string) =>
-    openFileVersionInVsCode(simpleGit(repoPath), repoPath, sha, file));
+    openFileVersionInVsCode(sg(repoPath), repoPath, sha, file));
 
   ipcMain.handle('vscode:openCommitFileDiff', (_e, repoPath: string, sha: string, file: string) =>
-    openCommitFileDiffInVsCode(simpleGit(repoPath), repoPath, sha, file));
+    openCommitFileDiffInVsCode(sg(repoPath), repoPath, sha, file));
 
   ipcMain.handle('vscode:openCommitPatch', (_e, repoPath: string, sha: string) =>
-    openCommitPatchInVsCode(simpleGit(repoPath), repoPath, sha));
+    openCommitPatchInVsCode(sg(repoPath), repoPath, sha));
 
   ipcMain.handle('vscode:openWorkspace', (_e, name: string, folderPaths: string[]) =>
     openWorkspaceInVsCode(name, folderPaths));
