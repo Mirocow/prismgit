@@ -6,6 +6,7 @@ import {
   ChevronDown, ChevronRight, AlertCircle, GitBranch, X, Filter,
 } from '../components/icons';
 import { RefBadges } from '../lib/refBadge';
+import { Avatar } from '../components/Avatar';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -493,6 +494,7 @@ export function InvestigatePage() {
                         )}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
+                        <Avatar name={entry.author.name} email={entry.author.email} size={14} />
                         <span className="font-medium text-text-secondary">{entry.author.name}</span>
                         <span>·</span>
                         <span>{formatDate(entry.author.date)}</span>

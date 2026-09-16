@@ -25,17 +25,30 @@ export const Avatar = memo(function Avatar({
   email,
   size = 24,
   className = '',
+  avatarUrl,
 }: {
   name: string;
   email?: string;
   size?: number;
   className?: string;
+  /** Direct avatar URL from GitHub/GitLab API (takes priority over Gravatar). */
+  avatarUrl?: string;
 }) {
-  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [imgUrl, setImgUrl] = useState<string | null>(avatarUrl || null);
   const [imgOk, setImgOk] = useState(false);
-  // Compute the async Gravatar URL when the email changes.
+
+  // If avatarUrl is provided directly (GitHub/GitLab API), use it.
+  // Otherwise, compute the Gravatar URL from the email.
   useEffect(() => {
     let cancelled = false;
+
+    // Direct URL from provider API (GitHub avatar_url, GitLab avatar_url)
+    if (avatarUrl) {
+      if (!cancelled) { setImgUrl(avatarUrl); setImgOk(false); }
+      return () => { cancelled = true; };
+    }
+
+    // Gravatar from email
     if (!email || !likelyHasGravatar(email)) {
       setImgUrl(null);
       setImgOk(false);
@@ -45,7 +58,7 @@ export const Avatar = memo(function Avatar({
       if (!cancelled) setImgUrl(url);
     }).catch(() => { if (!cancelled) setImgUrl(null); });
     return () => { cancelled = true; };
-  }, [email, size]);
+  }, [email, size, avatarUrl]);
 
   const initials = getInitials(name);
   const { bg, text } = getAuthorColor(name);

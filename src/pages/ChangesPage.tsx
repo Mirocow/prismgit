@@ -14,7 +14,8 @@ import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, generat
 import { buildProviderFromActiveEntry } from '../lib/aiProviders';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { findCommentLines, resolveCommentChar, stripCommitComments } from '../lib/commitMessage';
-import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
+import { formatTime } from '../lib/authorBadges';
+import { Avatar } from '../components/Avatar';
 import { buildFileMenu, getIndexFlagsAsync, invalidateIndexFlagsCache, runFileAction, type IndexFlags } from '../lib/fileContextMenu';
 import { useI18n } from '../lib/i18n';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
@@ -2554,8 +2555,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                         </div>
                       )}
                       {grp.entries.map((entry) => {
-                        const initials = getInitials(entry.author.name);
-                        const color = getAuthorColor(entry.author.name);
                         return (
                           <div
                             key={entry.hash}
@@ -2566,12 +2565,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                             }}
                             title={t('changes.viewInHistoryTitle')}
                           >
-                            <span
-                              className="flex-shrink-0 rounded author-badge text-center"
-                              style={{ backgroundColor: color.bg, width: 24, height: 18, fontSize: 9, lineHeight: '18px' }}
-                            >
-                              {initials}
-                            </span>
+                            <Avatar name={entry.author.name} email={entry.author.email} size={18} />
                             <RefBadges refs={entry.refs} max={3} hash={entry.hash} onChanged={loadJournal} />
                             <span className="flex-1 truncate font-medium text-text-primary">{entry.subject}</span>
                             <CommitHashLink hash={entry.hash} />

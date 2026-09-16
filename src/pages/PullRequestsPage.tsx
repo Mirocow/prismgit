@@ -9,6 +9,7 @@ import { api, type GithubPullRequest, type GitLabMergeRequest } from '../lib/api
 import { resolveDefaultRemote } from '../lib/remotes';
 import { cn, formatDate } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
+import { Avatar } from '../components/Avatar';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog } from '../components/ConfirmDialog';
@@ -508,7 +509,7 @@ export function PullRequestsPage() {
                   <span className="text-2xs text-text-tertiary flex-shrink-0">#{pr.number}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
-                  {pr.author.avatar_url && <img src={pr.author.avatar_url} alt="" className="w-4 h-4 rounded-full" />}
+                  <Avatar name={pr.author.login} email={undefined} size={14} avatarUrl={pr.author.avatar_url} />
                   <span>{pr.author.login}</span>
                   <span>·</span>
                   <button
