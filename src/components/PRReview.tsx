@@ -54,10 +54,15 @@ interface PRReviewProps {
   gitlabProjectId?: number | null;
   onActionComplete: () => void;
   onClose: () => void;
+  /** Called when PRReview resolves a GitLab project ID on-demand
+   *  (when gitlabProjectId was null on mount). The caller can store
+   *  it in providerStore so subsequent visits skip the resolution. */
+  onGitlabProjectIdResolved?: (projectId: number) => void;
 }
 
 export function PRReview({
   pr, owner, repo, provider, gitlabProjectId, onActionComplete, onClose,
+  onGitlabProjectIdResolved,
 }: PRReviewProps) {
   const { t } = useI18n();
   const toast = useToastActions();
@@ -102,29 +107,47 @@ export function PRReview({
         setCommits(prCommits);
         setSelectedFile((cur) => cur ?? prFiles[0] ?? null);
       } else if (provider === 'gitlab') {
-        // GitLab MR review — uses the project ID resolved by PullRequestsPage
-        // and stored in the providerStore. Without it we can't call the
-        // GitLab API (it requires the numeric project ID, not owner/repo).
-        if (gitlabProjectId == null) {
-          setLoadError(
-            t('pages.prReviewNoProjectId', {
-              defaultValue: 'GitLab project ID not resolved. Go back to Pull Requests and re-select the MR — the project ID is resolved on first load.'
-            })
-          );
-          setLoading(false);
-          return;
+        // GitLab MR review — requires the numeric project ID.
+        // The PullRequestsPage normally resolves it via getProjectByPath
+        // when the MR list loads, and stores it in providerStore.
+        // But if the user navigated directly to Reviews (e.g. via URL),
+        // refreshed the page, or switched repos, the cached ID may be
+        // null. We resolve it on-demand here using owner/repo from the
+        // PR info, so the review surface works regardless of how the
+        // user arrived here.
+        let projectId = gitlabProjectId ?? null;
+        if (projectId == null) {
+          // Resolve now via the GitLab API. owner/repo together form the
+          // path_with_namespace (e.g. 'web/git/prismgit').
+          const fullPath = `${owner}/${repo}`;
+          try {
+            const project = await api.gitlab.getProjectByPath(fullPath);
+            projectId = project.id;
+            // Cache the resolved ID in the providerStore via the callback
+            // so subsequent visits skip this API call.
+            onGitlabProjectIdResolved?.(project.id);
+          } catch (e) {
+            const eMsg = String(e);
+            if (eMsg.includes('404') || eMsg.toLowerCase().includes('not found')) {
+              setLoadError(
+                t('pages.prReviewGitLabProjectNotFound', {
+                  defaultValue: 'GitLab project "{path}" not found. Check that your GitLab token (Settings → Integrations) has access to this project.',
+                  path: fullPath,
+                })
+              );
+            } else {
+              setLoadError(eMsg);
+            }
+            setLoading(false);
+            return;
+          }
         }
         // Fetch MR detail + changes + notes + commits in parallel.
-        // GitLab's API returns shapes that differ from GitHub's, so we
-        // normalize each response to match the GitHub types the rest of
-        // this component expects (GithubPullRequest / GithubPRFile /
-        // GithubPRComment / GithubPRCommit). This lets us share the same
-        // JSX between the two providers.
         const [mrDetail, mrFiles, mrNotes, mrCommits] = await Promise.all([
-          api.gitlab.getMergeRequest(gitlabProjectId, pr.number),
-          api.gitlab.listMRChanges(gitlabProjectId, pr.number),
-          api.gitlab.listMRNotes(gitlabProjectId, pr.number),
-          api.gitlab.listMRCommits(gitlabProjectId, pr.number),
+          api.gitlab.getMergeRequest(projectId, pr.number),
+          api.gitlab.listMRChanges(projectId, pr.number),
+          api.gitlab.listMRNotes(projectId, pr.number),
+          api.gitlab.listMRCommits(projectId, pr.number),
         ]);
         // Map MR detail → GithubPullRequest shape.
         const normalizedPR: GithubPullRequest = {
@@ -221,7 +244,7 @@ export function PRReview({
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pr.number, owner, repo, provider, gitlabProjectId]);
+  }, [pr.number, owner, repo, provider, gitlabProjectId, onGitlabProjectIdResolved]);
 
   useEffect(() => {
     void load();

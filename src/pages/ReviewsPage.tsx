@@ -69,6 +69,7 @@ export function ReviewsPage() {
     gitlabAuthed: s.gitlabAuthed,
   })));
   const gitlabProjectId = useProviderStore((s) => s.gitlabProjectId);
+  const setGitlabProjectId = useProviderStore((s) => s.setGitlabProjectId);
   const selectedPR = useProviderStore((s) => s.selectedPR);
   const selectPR = useProviderStore((s) => s.selectPR);
   const detectProvider = useProviderStore((s) => s.detect);
@@ -294,6 +295,7 @@ export function ReviewsPage() {
           gitlabProjectId={gitlabProjectId}
           onActionComplete={() => {/* PR list will refresh on next PullRequests visit */}}
           onClose={() => selectPR(null)}
+          onGitlabProjectIdResolved={(id) => setGitlabProjectId(id)}
         />
       </div>
     );
