@@ -325,6 +325,8 @@ export const en: Record<string, string> = {
   'pages.prDescriptionLabel': 'Description (optional)',
   'pages.prDescriptionPlaceholder': 'Describe your changes...',
   'pages.prCreateButton': 'Create PR',
+  'pages.prApprove': 'Approve',
+  'pages.prClose': 'Close',
 
   // ===== Recyclable Commits =====
   'pages.recyclableTitle': 'Recyclable Commits',

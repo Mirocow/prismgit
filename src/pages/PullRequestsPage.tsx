@@ -1,21 +1,21 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { GitPullRequest, Plus, RefreshCw, ExternalLink, Loader, X, CloudDownload, ArrowDown, Search, Github, GitBranch } from '../components/icons';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
-import { useAuthStore } from '../stores/authStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
-import { useSelectionStore } from '../stores/selectionStore';
-import { useProviderStore } from '../stores/providerStore';
+import { Avatar } from '../components/Avatar';
+import { ArrowDown, CloudDownload, ExternalLink, GitPullRequest, Loader, Plus, RefreshCw, Search, X } from '../components/icons';
+import { ProviderChip } from '../components/ProviderChip';
 import { api, type GithubPullRequest, type GitLabMergeRequest } from '../lib/api';
+import { useI18n } from '../lib/i18n';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { cn, formatDate } from '../lib/utils';
-import { useI18n } from '../lib/i18n';
-import { Avatar } from '../components/Avatar';
-import { ProviderChip } from '../components/ProviderChip';
+import { useAuthStore } from '../stores/authStore';
+import { useGitStore } from '../stores/gitStore';
+import { useProviderStore } from '../stores/providerStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useSelectionStore } from '../stores/selectionStore';
+import { useToastActions } from '../stores/toastStore';
 
-import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog } from '../components/ConfirmDialog';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 /**
  * Normalized MR/PR shape — GitHub PRs and GitLab MRs are mapped into this
@@ -693,7 +693,7 @@ export function PullRequestsPage() {
                   mergePR / closePR / reopenPR). Buttons are shown only
                   for OPEN PRs in a GitHub repo where the user is
                   authenticated. */}
-              {pr.state === 'open' && isSupportedRepo && isAuthed && (
+              {/* {pr.state === 'open' && isSupportedRepo && isAuthed && (
                 <div className="flex items-center gap-1 ml-2" onClick={(e) => e.stopPropagation()}>
                   <button
                     className="text-2xs px-2 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 border border-status-added/30"
@@ -724,8 +724,8 @@ export function PullRequestsPage() {
                     ⊘
                   </button>
                 </div>
-              )}
-              {pr.state === 'closed' && isSupportedRepo && isAuthed && !pr.merged_at && (
+              )} */}
+              {/* {pr.state === 'closed' && isSupportedRepo && isAuthed && !pr.merged_at && (
                 <button
                   className="text-2xs px-2 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 border border-status-added/30 ml-2"
                   onClick={(e) => { e.stopPropagation(); handleReopen(pr.number); }}
@@ -733,7 +733,7 @@ export function PullRequestsPage() {
                 >
                   ↻
                 </button>
-              )}
+              )} */}
             </div>
           ))
         )}

@@ -26,22 +26,34 @@
  *   - We show a clear error panel: 'Repository not found on GitHub/GitLab'
  *     + the API endpoint that 404'd, so the user can debug.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  GitPullRequest, GitCommit, X, ExternalLink, Loader, Check, FileText,
-  MessageSquare, Plus, Minus, ArrowRight, RefreshCw, AlertCircle,
-} from './icons';
-import { useI18n } from '../lib/i18n';
-import { useToastActions } from '../stores/toastStore';
-import {
-  api, type GithubPullRequest, type GithubPRFile, type GithubPRComment,
+  api,
+  type GithubPRComment,
   type GithubPRCommit,
+  type GithubPRFile,
+  type GithubPullRequest,
 } from '../lib/api';
-import { Avatar } from './Avatar';
-import MarkdownRenderer from './MarkdownRenderer';
+import { useI18n } from '../lib/i18n';
 import { cn, formatDate, shortHash } from '../lib/utils';
-import { confirmDialog } from './ConfirmDialog';
 import type { SelectedPR } from '../stores/providerStore';
+import { useToastActions } from '../stores/toastStore';
+import { Avatar } from './Avatar';
+import { confirmDialog } from './ConfirmDialog';
+import {
+  AlertCircle,
+  ArrowRight,
+  Check,
+  ExternalLink,
+  FileText,
+  GitCommit,
+  GitPullRequest,
+  Loader,
+  MessageSquare,
+  RefreshCw,
+  X
+} from './icons';
+import MarkdownRenderer from './MarkdownRenderer';
 
 type Tab = 'overview' | 'commits' | 'files' | 'discussion';
 
@@ -327,7 +339,7 @@ export function PRReview({
       {displayPR.state === 'open' && !loadError && (
         <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border-subtle bg-bg-tertiary">
           <button
-            className="btn btn-secondary text-xs flex items-center gap-1"
+            className="btn btn-primary text-xs flex items-center gap-1"
             onClick={handleApprove}
             disabled={actionInProgress !== null}
           >
