@@ -12,7 +12,7 @@ import { useI18n } from '../lib/i18n';
  * Tag-Grouping (the same tabs as SmartGit's Repository Settings dialog).
  */
 
-const TABS = ['User', 'Fetch and Pull', 'Push', 'Signing', 'Encoding', 'Tag-Grouping'] as const;
+const TABS = ['User', 'Fetch and Pull', 'Push', 'Signing', 'Encoding', 'Tag-Grouping', 'Performance'] as const;
 type Tab = (typeof TABS)[number];
 
 export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => void; remoteName?: string }) {
@@ -39,13 +39,17 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
   const [encoding, setEncoding] = useState('UTF-8');
   const [tagGroupPattern, setTagGroupPattern] = useState('');
   const [tagGroupOrder, setTagGroupOrder] = useState('');
+  // Performance tab — per-repo git config (local scope)
+  const [repoManyFiles, setRepoManyFiles] = useState('');
+  const [repoFsmonitor, setRepoFsmonitor] = useState('');
+  const [repoCommitGraph, setRepoCommitGraph] = useState('');
 
   const load = useCallback(async () => {
     setBusy(true);
     const p = repo.path;
     const get = (k: string, def = '') => api.git.configGet(p, k).then((v) => v ?? def).catch(() => def);
     try {
-      const [n, e, pr, fp, frs, prs, sc, sk, gp, enc, tgp, tgo] = await Promise.all([
+      const [n, e, pr, fp, frs, prs, sc, sk, gp, enc, tgp, tgo, mf, fsm, wcg] = await Promise.all([
         get('user.name'), get('user.email'),
         get('pull.rebase', 'false'), get('fetch.prune', 'false'),
         get('fetch.recurseSubmodules', 'on-demand'),
@@ -53,6 +57,7 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
         get('commit.gpgsign', 'false'), get('user.signingkey'), get('gpg.program'),
         get('gui.encoding', 'UTF-8'),
         get('smartgit.tag-grouping.pattern'), get('smartgit.tag-grouping.order'),
+        get('feature.manyFiles'), get('core.fsmonitor'), get('fetch.writeCommitGraph'),
       ]);
       setUserName(n); setUserEmail(e);
       setPullRebase(pr === 'true' || pr === 'input' ? pr : 'false');
@@ -62,6 +67,7 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
       setSignCommits(sc); setSigningKey(sk); setGpgProgram(gp);
       setEncoding(enc);
       setTagGroupPattern(tgp); setTagGroupOrder(tgo);
+      setRepoManyFiles(mf); setRepoFsmonitor(fsm); setRepoCommitGraph(wcg);
     } catch (e) {
       toast.error(t('toast.repo.settingsLoadFailed'), String(e));
     } finally {
@@ -102,6 +108,10 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
         await api.git.configUnset(p, 'smartgit.tag-grouping.pattern').catch(() => {});
         await api.git.configUnset(p, 'smartgit.tag-grouping.order').catch(() => {});
       }
+      // Performance — per-repo overrides (local scope)
+      await setOrUnset('feature.manyFiles', repoManyFiles);
+      await setOrUnset('core.fsmonitor', repoFsmonitor);
+      await setOrUnset('fetch.writeCommitGraph', repoCommitGraph);
       toast.success(t('toast.repo.settingsSaved'));
       onClose();
     } catch (e) {
@@ -246,6 +256,30 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
                   <option value="ascending">{t('action.label.ascending')}</option>
                   <option value="descending">{t('action.label.descending')}</option>
                 </select>
+              </label>
+            </div>
+          )}
+
+          {tab === 'Performance' && (
+            <div className="grid grid-cols-1 gap-3">
+              <p className="text-text-tertiary">
+                Per-repo git performance settings. Empty = inherit from global/app settings.
+                Set to 'true' or 'false' to override for this repo only.
+              </p>
+              <label className="flex flex-col gap-1 text-text-secondary">
+                feature.manyFiles
+                <input value={repoManyFiles} onChange={(e) => setRepoManyFiles(e.target.value)} className={inputCls} placeholder="true / false / (empty = inherit)" />
+                <span className="text-text-tertiary text-2xs">Optimize index for repos with many files</span>
+              </label>
+              <label className="flex flex-col gap-1 text-text-secondary">
+                core.fsmonitor
+                <input value={repoFsmonitor} onChange={(e) => setRepoFsmonitor(e.target.value)} className={inputCls} placeholder="true / false / (empty = inherit)" />
+                <span className="text-text-tertiary text-2xs">FileSystem Monitor — track changed files without scanning the whole tree</span>
+              </label>
+              <label className="flex flex-col gap-1 text-text-secondary">
+                fetch.writeCommitGraph
+                <input value={repoCommitGraph} onChange={(e) => setRepoCommitGraph(e.target.value)} className={inputCls} placeholder="true / false / (empty = inherit)" />
+                <span className="text-text-tertiary text-2xs">Write commit-graph cache after fetch — speeds up log/blame</span>
               </label>
             </div>
           )}

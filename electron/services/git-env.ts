@@ -33,26 +33,62 @@
  * hierarchy), they apply to ALL repos without modifying the user's
  * --global config. The user's git CLI is unaffected.
  */
-export const GIT_ENV_LFS_SKIP: Record<string, string> = {
-  GIT_LFS_SKIP_SMUDGE: '1',
-  GIT_CONFIG_COUNT: '7',
-  // LFS bypass (4 entries)
-  GIT_CONFIG_KEY_0: 'core.hooksPath',
-  GIT_CONFIG_VALUE_0: '',
-  GIT_CONFIG_KEY_1: 'filter.lfs.process',
-  GIT_CONFIG_VALUE_1: '',
-  GIT_CONFIG_KEY_2: 'filter.lfs.smudge',
-  GIT_CONFIG_VALUE_2: '',
-  GIT_CONFIG_KEY_3: 'filter.lfs.clean',
-  GIT_CONFIG_VALUE_3: '',
-  // Performance optimizations (3 entries)
-  GIT_CONFIG_KEY_4: 'feature.manyFiles',
-  GIT_CONFIG_VALUE_4: 'true',
-  GIT_CONFIG_KEY_5: 'core.fsmonitor',
-  GIT_CONFIG_VALUE_5: 'true',
-  GIT_CONFIG_KEY_6: 'fetch.writeCommitGraph',
-  GIT_CONFIG_VALUE_6: 'true',
-};
+/**
+ * Build the GIT_CONFIG env override dynamically based on the user's
+ * Settings → Git → Performance checkboxes. Called from getGit() and
+ * any place that creates a simpleGit instance.
+ *
+ * If settings say feature.manyFiles=false, we DON'T include it in the
+ * env override → git falls back to its default (disabled).
+ * If settings say feature.manyFiles=true (or unset → default true),
+ * we include it → git enables the optimization.
+ */
+export function buildGitEnv(settings?: {
+  gitManyFiles?: boolean;
+  gitFsmonitor?: boolean;
+  gitWriteCommitGraph?: boolean;
+}): Record<string, string> {
+  const manyFiles = settings?.gitManyFiles ?? true;
+  const fsmonitor = settings?.gitFsmonitor ?? true;
+  const writeCommitGraph = settings?.gitWriteCommitGraph ?? true;
+
+  // Count how many config overrides we need.
+  // Always: 4 LFS entries (hooksPath + 3 filter.lfs)
+  // Conditional: up to 3 performance entries
+  const perfEntries: [string, string][] = [];
+  if (manyFiles) perfEntries.push(['feature.manyFiles', 'true']);
+  if (fsmonitor) perfEntries.push(['core.fsmonitor', 'true']);
+  if (writeCommitGraph) perfEntries.push(['fetch.writeCommitGraph', 'true']);
+
+  const count = 4 + perfEntries.length;
+
+  const env: Record<string, string> = {
+    GIT_LFS_SKIP_SMUDGE: '1',
+    GIT_CONFIG_COUNT: String(count),
+    // LFS bypass (always 4 entries)
+    GIT_CONFIG_KEY_0: 'core.hooksPath',
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: 'filter.lfs.process',
+    GIT_CONFIG_VALUE_1: '',
+    GIT_CONFIG_KEY_2: 'filter.lfs.smudge',
+    GIT_CONFIG_VALUE_2: '',
+    GIT_CONFIG_KEY_3: 'filter.lfs.clean',
+    GIT_CONFIG_VALUE_3: '',
+  };
+
+  // Performance optimizations (conditional)
+  perfEntries.forEach(([key, value], i) => {
+    env[`GIT_CONFIG_KEY_${4 + i}`] = key;
+    env[`GIT_CONFIG_VALUE_${4 + i}`] = value;
+  });
+
+  return env;
+}
+
+/**
+ * Default env (all optimizations ON) — used before settings are loaded.
+ */
+export const GIT_ENV_LFS_SKIP: Record<string, string> = buildGitEnv();
 
 /**
  * The simple-git options to use with every simpleGit() call.

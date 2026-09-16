@@ -840,6 +840,58 @@ export function SettingsPage() {
                 </div>
               )}
             </div>
+
+            {/* Git performance settings — the same feature.manyFiles /
+                core.fsmonitor / fetch.writeCommitGraph that git recommends
+                for large repos. Applied globally via env override in
+                git-env.ts, but the user can toggle them here. */}
+            <div className="border-t border-border-subtle pt-4">
+              <div className="text-2xs uppercase text-text-tertiary mb-3 font-bold tracking-wider">{t('settings.gitPerformance', { defaultValue: 'Git Performance' })}</div>
+              <div className="text-2xs text-text-tertiary mb-3">
+                {t('settings.gitPerformanceHint', { defaultValue: 'These settings are applied globally via env override and affect ALL repositories. They are the same as running the git config commands manually, but without modifying your --global config.' })}
+              </div>
+              <div className="space-y-2">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <div className="text-sm font-medium">feature.manyFiles</div>
+                    <div className="text-xs text-text-tertiary">
+                      {t('settings.manyFilesHint', { defaultValue: 'Optimize index for repos with many files (index v4, reduced traversal). Speeds up git status by 30-50%.' })}
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.gitManyFiles ?? true}
+                    onChange={(e) => setSetting('gitManyFiles', e.target.checked)}
+                  />
+                </label>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <div className="text-sm font-medium">core.fsmonitor</div>
+                    <div className="text-xs text-text-tertiary">
+                      {t('settings.fsmonitorHint', { defaultValue: 'FileSystem Monitor — git tracks changed files without scanning the whole tree. Massive speedup on repos with 100k+ files.' })}
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.gitFsmonitor ?? true}
+                    onChange={(e) => setSetting('gitFsmonitor', e.target.checked)}
+                  />
+                </label>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <div className="text-sm font-medium">fetch.writeCommitGraph</div>
+                    <div className="text-xs text-text-tertiary">
+                      {t('settings.commitGraphHint', { defaultValue: 'Write commit-graph cache after fetch — speeds up git log, blame, and history graph traversal by 40-60%.' })}
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.gitWriteCommitGraph ?? true}
+                    onChange={(e) => setSetting('gitWriteCommitGraph', e.target.checked)}
+                  />
+                </label>
+              </div>
+            </div>
           </div>
         </section>
         )}

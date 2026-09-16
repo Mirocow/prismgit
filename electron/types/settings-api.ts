@@ -406,6 +406,16 @@ export interface AppSettings {
   historyAutoRefreshIntervalSec?: number;
   /** Master switch for History page auto-refresh. Default: false (opt-in). */
   autoRefreshHistory?: boolean;
+  /**
+   * Git performance settings — applied globally via GIT_CONFIG env override.
+   * All default to true (enabled). The user can disable them in Settings → Git.
+   */
+  /** feature.manyFiles — optimize index for repos with many files. */
+  gitManyFiles?: boolean;
+  /** core.fsmonitor — FileSystem Monitor for fast git status on large repos. */
+  gitFsmonitor?: boolean;
+  /** fetch.writeCommitGraph — commit-graph cache for faster log/blame. */
+  gitWriteCommitGraph?: boolean;
   /** Max number of commands shown in the Output panel (default 20). */
   commandLogLimit?: number;
   // === Per-remote authorization (Repository Settings → Remotes) ===
