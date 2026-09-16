@@ -65,14 +65,12 @@ import { BrowserWindow } from 'electron';
  */
 const GIT_ENV_LFS_SKIP: Record<string, string> = {
   GIT_LFS_SKIP_SMUDGE: '1',
-  // GIT_CONFIG_COUNT=6 (was 4): also override status.submodulesummary=0 and
-  // diff.submodule=short to stop git from spawning `git config --file
-  // .gitmodules --get-regexp ^submodule\..*\.path$` on EVERY git status call.
-  // On repos without .gitmodules this is wasted subprocess time (the user
-  // saw it every 5 seconds in the command log). Disabling the submodule
-  // summary in status/diff output eliminates the check entirely — PrismGit
-  // has its own Submodules page that reads .gitmodules directly via fs.
-  GIT_CONFIG_COUNT: '6',
+  // REVERTED to 4: status.submodulesummary=0 and diff.submodule=short did NOT
+  // stop git from spawning `git config --file .gitmodules --get-regexp` on
+  // every git status call — they only control OUTPUT format, not whether git
+  // reads the file. The real fix is --ignore-submodules=all on the status
+  // command itself (see the status() function).
+  GIT_CONFIG_COUNT: '4',
   GIT_CONFIG_KEY_0: 'core.hooksPath',
   GIT_CONFIG_VALUE_0: '',
   GIT_CONFIG_KEY_1: 'filter.lfs.process',
@@ -81,10 +79,6 @@ const GIT_ENV_LFS_SKIP: Record<string, string> = {
   GIT_CONFIG_VALUE_2: '',
   GIT_CONFIG_KEY_3: 'filter.lfs.clean',
   GIT_CONFIG_VALUE_3: '',
-  GIT_CONFIG_KEY_4: 'status.submodulesummary',
-  GIT_CONFIG_VALUE_4: '0',
-  GIT_CONFIG_KEY_5: 'diff.submodule',
-  GIT_CONFIG_VALUE_5: 'short',
 };
 
 /**
@@ -341,79 +335,68 @@ export async function isRepo(targetPath: string): Promise<boolean> {
 
 export async function status(repoPath: string): Promise<StatusResult> {
   const git = getGit(repoPath);
-  // On a fresh repo with NO commits, `git status` internally runs
-  // `git rev-parse --abbrev-ref HEAD` which exits 128 with:
-  //   "fatal: ambiguous argument 'HEAD': unknown revision or path not
-  //    in the working tree."
-  // simple-git treats this as an error and throws. We catch it and
-  // construct a minimal StatusResult for the unborn-HEAD case so the
-  // UI doesn't show an error toast on every file-watcher refresh.
-  let s: Awaited<ReturnType<SimpleGit['status']>>;
+  // ─── Fast unborn-HEAD check ────────────────────────────────────────────
+  // On a fresh repo with NO commits, simple-git's `.status()` throws because
+  // git internally runs `rev-parse --abbrev-ref HEAD` which exits 128.
+  // Previously we tried to catch that error AFTER `.status()` was called —
+  // but that meant git had ALREADY done the expensive status work (including
+  // LFS smudge checks, submodule discovery, index refresh) before throwing.
+  // On a repo with LFS this was 5-10s wasted PER failed status call.
+  //
+  // Now we check for unborn HEAD FIRST with a cheap `rev-parse --verify HEAD`.
+  // If HEAD doesn't exist, we go directly to the porcelain path — ONE git
+  // call total, not two.
+  let hasHead = true;
   try {
-    s = await git.status();
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/ambiguous argument|unknown revision|not in the working tree/i.test(msg)) {
-      // Unborn HEAD — construct a minimal status result.
-      // We still need the file list (untracked files in the fresh repo).
-      try {
-        const rawFiles = await git.raw(['status', '--porcelain', '-z']);
-        const files: { path: string; index: string; working_dir: string }[] = [];
-        for (const entry of rawFiles.split('\u0000').filter(Boolean)) {
-          const index = entry[0] || '?';
-          const workingDir = entry[1] || ' ';
-          const filePath = entry.slice(3);
-          files.push({ path: filePath, index, working_dir: workingDir });
-        }
-        const notAdded = files.filter(f => f.index === '?').map(f => f.path);
-        return {
-          not_added: notAdded,
-          conflicted: [],
-          created: [],
-          deleted: [],
-          modified: [],
-          renamed: [],
-          staged: [],
-          files: files as any,
-          ahead: 0,
-          behind: 0,
-          current: 'main', // unborn HEAD — default branch name
-          tracking: null,
-          detached: false,
-          isMerging: false,
-          isRebasing: false,
-          isCherryPicking: false,
-          isReverting: false,
-          isBisecting: false,
-          isClean: () => files.length === 0,
-        } as unknown as StatusResult;
-      } catch {
-        // If even `git status --porcelain` fails, return an empty status.
-        return {
-          not_added: [],
-          conflicted: [],
-          created: [],
-          deleted: [],
-          modified: [],
-          renamed: [],
-          staged: [],
-          files: [],
-          ahead: 0,
-          behind: 0,
-          current: 'main',
-          tracking: null,
-          detached: false,
-          isMerging: false,
-          isRebasing: false,
-          isCherryPicking: false,
-          isReverting: false,
-          isBisecting: false,
-          isClean: () => true,
-        } as unknown as StatusResult;
-      }
-    }
-    throw e;
+    await git.raw(['rev-parse', '--verify', '-q', 'HEAD']);
+  } catch {
+    hasHead = false;
   }
+
+  if (!hasHead) {
+    // Unborn HEAD — repo was just `git init`'d with no commits.
+    // Use `--ignore-submodules=all` to skip the `.gitmodules` check
+    // (git checks for submodules even on repos without .gitmodules).
+    const rawFiles = await git.raw(['status', '--porcelain', '-z', '--ignore-submodules=all']);
+    const files: { path: string; index: string; working_dir: string }[] = [];
+    for (const entry of rawFiles.split('\u0000').filter(Boolean)) {
+      const index = entry[0] || '?';
+      const workingDir = entry[1] || ' ';
+      const filePath = entry.slice(3);
+      files.push({ path: filePath, index, working_dir: workingDir });
+    }
+    const notAdded = files.filter(f => f.index === '?').map(f => f.path);
+    return {
+      not_added: notAdded,
+      conflicted: [],
+      created: [],
+      deleted: [],
+      modified: [],
+      renamed: [],
+      staged: [],
+      files: files as any,
+      ahead: 0,
+      behind: 0,
+      current: 'main',
+      tracking: null,
+      detached: false,
+      isMerging: false,
+      isRebasing: false,
+      isCherryPicking: false,
+      isReverting: false,
+      isBisecting: false,
+      isClean: () => files.length === 0,
+    } as unknown as StatusResult;
+  }
+
+  // Normal repo with commits — use simple-git's status with
+  // --ignore-submodules=all to skip the `.gitmodules` check that git
+  // does on EVERY status call (even on repos without .gitmodules).
+  // This was the #1 source of command-log spam: `git config --file
+  // .gitmodules --get-regexp ^submodule\..*\.path$` running every 5
+  // seconds. PrismGit has its own Submodules page that reads
+  // .gitmodules directly via fs.
+  const s = await git.status(['--ignore-submodules=all']);
   const state = await detectRepoState(repoPath, git);
   const gitDir = await resolveGitDir(repoPath, git);
   // Cherry-pick details — which commit is being picked and whether the pick has
