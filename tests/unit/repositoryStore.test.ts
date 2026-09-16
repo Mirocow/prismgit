@@ -45,6 +45,7 @@ vi.mock('../../src/lib/api', () => ({
 
 import { api } from '../../src/lib/api';
 import { useRepositoryStore } from '../../src/stores/repositoryStore';
+import { useToastStore } from '../../src/stores/toastStore';
 
 describe('repositoryStore', () => {
   beforeEach(() => {
@@ -107,16 +108,19 @@ describe('repositoryStore', () => {
       });
     });
 
-    it('throws for non-repository directory', async () => {
+    it('does NOT open a non-repository directory (sets error, no throw)', async () => {
       vi.mocked(api.git.isRepo).mockResolvedValue(false);
-
-      await expect(
-        useRepositoryStore.getState().openRepository('/not/a/repo')
-      ).rejects.toThrow('not a Git repository');
+      // Show a friendly toast instead of throwing — this is intentional:
+      // throwing would propagate to callers that don't .catch() and trigger
+      // a second generic "unhandled" toast. The function resolves with
+      // undefined and leaves currentRepo null.
+      await useRepositoryStore.getState().openRepository('/not/a/repo');
 
       const state = useRepositoryStore.getState();
       expect(state.currentRepo).toBeNull();
-      expect(state.error).toBeTruthy();
+      expect(state.loading).toBe(false);
+      // The toast is shown via useToastStore — verified separately.
+      expect(useToastStore.getState().toasts.length).toBeGreaterThan(0);
     });
   });
 

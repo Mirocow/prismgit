@@ -106,6 +106,14 @@ export const GIT_UNSAFE_OPTIONS = {
     allowUnsafeConfigEnvCount: true as const,
     allowUnsafeHooksPath: true as const,
     allowUnsafeFilter: true as const,
+    // The GIT_CONFIG env override sets `core.fsmonitor=true` and
+    // `feature.manyFiles=true`. simple-git blocks config writes for these
+    // without the corresponding allowUnsafe* flag, even though we're
+    // setting them via env (not via `git config`). Without these flags,
+    // git fetch/pull/clone fail with:
+    //   "Configuring core.fsmonitor is not permitted without enabling allowUnsafeFsMonitor"
+    allowUnsafeFsMonitor: true as const,
+    allowUnsafeProtocolOverride: true as const,
   },
 };
 
@@ -117,9 +125,7 @@ export const GIT_UNSAFE_OPTIONS = {
 export const GIT_SSH_UNSAFE_OPTIONS = {
   ...GIT_UNSAFE_OPTIONS,
   unsafe: {
-    allowUnsafeConfigEnvCount: true as const,
-    allowUnsafeHooksPath: true as const,
-    allowUnsafeFilter: true as const,
+    ...GIT_UNSAFE_OPTIONS.unsafe,
     allowUnsafeSshCommand: true as const,
   },
 };

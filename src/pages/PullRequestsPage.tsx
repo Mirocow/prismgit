@@ -5,7 +5,7 @@ import { useGitStore } from '../stores/gitStore';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
-import { useProviderStore, suggestProviderFromUrl } from '../stores/providerStore';
+import { useProviderStore } from '../stores/providerStore';
 import { api, type GithubPullRequest, type GitLabMergeRequest } from '../lib/api';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { cn, formatDate } from '../lib/utils';
@@ -96,7 +96,6 @@ export function PullRequestsPage() {
   const gitlabProjectId = useProviderStore((s) => s.gitlabProjectId);
   const gitlabAuthed = useProviderStore((s) => s.gitlabAuthed);
   const detectProvider = useProviderStore((s) => s.detect);
-  const selectProviderAction = useProviderStore((s) => s.selectProvider);
   const setManualOwnerRepo = useProviderStore((s) => s.setManualOwnerRepo);
   const setGitlabProjectId = useProviderStore((s) => s.setGitlabProjectId);
 
@@ -389,24 +388,17 @@ export function PullRequestsPage() {
   }
 
   if (!isSupportedRepo) {
-    // Provider not detected (or owner/repo not parseable from the remote URL).
-    // Only GitHub and GitLab actually have API integrations wired — Bitbucket,
-    // Gitea, Gogs are NOT shown because clicking them would lead to a dead end.
-    // We smart-suggest one of GitHub/GitLab based on the URL host substring,
-    // and let the user override via the second button if the guess is wrong.
+    // Provider not detected, or owner/repo not parseable.
     //
-    // The selection goes through the shared providerStore — so the choice
-    // persists across navigation to Reviews and back. No more re-picking.
+    // The user picks a provider via the ProviderChip dropdown in the header
+    // (same control as AI Assistant's provider switcher). When provider is
+    // 'unknown', we show a hint pointing them at the chip. Once they pick
+    // GitHub or GitLab there, isSupportedRepo becomes true and this branch
+    // is no longer hit.
+    //
+    // Manual owner/repo entry is shown ONLY when a provider IS set but
+    // owner/repo couldn't be parsed from the URL (e.g. unusual remote URL).
     const url = repoInfo.url || '';
-    const suggested = suggestProviderFromUrl(url);
-    const providers = [
-      { id: 'github', label: 'GitHub', desc: 'github.com or GitHub Enterprise' },
-      { id: 'gitlab', label: 'GitLab', desc: 'gitlab.com or self-hosted GitLab' },
-    ];
-
-    const selectProvider = (providerId: 'github' | 'gitlab') => {
-      selectProviderAction(providerId);
-    };
 
     return (
       <div className="flex flex-col flex-1 overflow-hidden">
@@ -414,100 +406,62 @@ export function PullRequestsPage() {
           <div className="flex items-center gap-2">
             <GitPullRequest size={14} />
             <span className="text-sm font-medium">{t('nav.pulls')}</span>
+            <ProviderChip />
           </div>
           {syncButtons}
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary gap-4 p-4">
           <GitPullRequest size={32} className="opacity-50" />
-          <div className="text-sm">{t('pages.prProviderNotDetected', { defaultValue: 'Repository provider not detected' })}</div>
-          <div className="text-xs text-center max-w-md">
-            {t('pages.prProviderNotDetectedHint', { defaultValue: 'Select your hosting provider to enable Pull Requests and Code Review.' })}
-          </div>
-          {url && (
-            <div className="text-2xs text-text-tertiary font-mono bg-bg-tertiary px-2 py-1 rounded max-w-full truncate" title={url}>
-              {url}
-            </div>
-          )}
-          <div className="flex items-center justify-center gap-2">
-            {providers.map((p) => {
-              const isSuggested = p.id === suggested;
-              return (
+          {repoInfo.provider === 'unknown' ? (
+            <>
+              <div className="text-sm">{t('pages.prProviderNotDetected', { defaultValue: 'Repository provider not detected' })}</div>
+              <div className="text-xs text-center max-w-md">
+                {t('pages.prProviderNotDetectedHint', { defaultValue: 'Click the provider chip in the header (top-left) and choose GitHub or GitLab. Only those two have API integrations wired.' })}
+              </div>
+              {url && (
+                <div className="text-2xs text-text-tertiary font-mono bg-bg-tertiary px-2 py-1 rounded max-w-full truncate" title={url}>
+                  {url}
+                </div>
+              )}
+              <div className="text-2xs text-text-tertiary text-center max-w-md">
+                Bitbucket, Gitea, Gogs are not yet supported — only GitHub and GitLab have API integrations.
+              </div>
+            </>
+          ) : (
+            // Provider is set, but owner/repo couldn't be auto-parsed.
+            <>
+              <div className="text-sm">{t('pages.prManualEntry', { defaultValue: 'Enter repository path' })}</div>
+              <div className="text-xs text-center max-w-md">
+                {t('pages.prManualEntryHint', { defaultValue: 'Could not auto-detect owner/repo from the remote URL. Enter them manually (e.g. myorg/myrepo).' })}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  className="text-sm font-mono w-64 px-2 py-1 bg-bg-tertiary border border-border-default rounded"
+                  placeholder="owner/repo"
+                  defaultValue={`${repoInfo.owner || ''}/${repoInfo.repo || ''}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const val = (e.target as HTMLInputElement).value.trim();
+                      const [o, r] = val.split('/');
+                      if (o && r) setManualOwnerRepo(o, r);
+                    }
+                  }}
+                />
                 <button
-                  key={p.id}
-                  className={cn(
-                    'btn text-sm flex flex-col items-center gap-0.5 py-3 px-5 min-w-[140px] relative',
-                    isSuggested ? 'btn-primary' : 'btn-secondary'
-                  )}
-                  onClick={() => selectProvider(p.id as 'github' | 'gitlab')}
-                  title={p.desc}
+                  className="btn btn-primary text-xs"
+                  onClick={(e) => {
+                    const input = (e.target as HTMLElement).previousElementSibling as HTMLInputElement;
+                    const val = input.value.trim();
+                    const [o, r] = val.split('/');
+                    if (o && r) setManualOwnerRepo(o, r);
+                  }}
                 >
-                  {isSuggested && (
-                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-2xs bg-accent-primary text-white px-1.5 py-0.5 rounded-full whitespace-nowrap">
-                      detected
-                    </span>
-                  )}
-                  <span className="font-medium">{p.label}</span>
-                  <span className="text-2xs opacity-70">{p.desc}</span>
+                  {t('common.ok', { defaultValue: 'OK' })}
                 </button>
-              );
-            })}
-          </div>
-          {!suggested && (
-            <div className="text-2xs text-text-tertiary text-center max-w-md">
-              Bitbucket, Gitea, Gogs are not yet supported — only GitHub and GitLab have API integrations.
-            </div>
+              </div>
+            </>
           )}
-        </div>
-      </div>
-    );
-  }
-
-  // If owner/repo couldn't be auto-parsed, show manual input.
-  if (!repoInfo.owner || !repoInfo.repo) {
-    return (
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
-          <div className="flex items-center gap-2">
-            <GitPullRequest size={14} />
-            <span className="text-sm font-medium">{t('nav.pulls')}</span>
-            <span className="text-2xs text-text-tertiary">
-              {repoInfo.provider === 'gitlab' ? 'GitLab' : 'GitHub'}
-            </span>
-          </div>
-          {syncButtons}
-        </div>
-        <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary gap-4">
-          <GitPullRequest size={32} className="opacity-50" />
-          <div className="text-sm">{t('pages.prManualEntry', { defaultValue: 'Enter repository path' })}</div>
-          <div className="text-xs text-center max-w-md">
-            {t('pages.prManualEntryHint', { defaultValue: 'Could not auto-detect owner/repo from the remote URL. Enter them manually (e.g. myorg/myrepo).' })}
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              className="text-sm font-mono w-64 px-2 py-1 bg-bg-tertiary border border-border-default rounded"
-              placeholder="owner/repo"
-              defaultValue={`${repoInfo.owner || ''}/${repoInfo.repo || ''}`}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  const val = (e.target as HTMLInputElement).value.trim();
-                  const [o, r] = val.split('/');
-                  if (o && r) setManualOwnerRepo(o, r);
-                }
-              }}
-            />
-            <button
-              className="btn btn-primary text-xs"
-              onClick={(e) => {
-                const input = (e.target as HTMLElement).previousElementSibling as HTMLInputElement;
-                const val = input.value.trim();
-                const [o, r] = val.split('/');
-                if (o && r) setManualOwnerRepo(o, r);
-              }}
-            >
-              {t('common.ok', { defaultValue: 'OK' })}
-            </button>
-          </div>
         </div>
       </div>
     );

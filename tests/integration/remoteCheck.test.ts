@@ -12,7 +12,7 @@
  * settings, key backgroundFetchRemotes). Without the checkbox the check is
  * network-free: fetched=false and counters reflect the last fetch.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -89,6 +89,13 @@ describe('git service — remote check (fetch + incoming/outgoing)', () => {
 
   afterAll(() => {
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  // Clear the poll cache between tests — otherwise a 60s TTL returns the
+  // result of the previous test (which saw an older git state) and the
+  // incoming/outgoing/dirty counts come back stale.
+  beforeEach(() => {
+    gitService.clearPollCache();
   });
 
   it('reports hasRemote=false for a repo without remotes (never throws)', async () => {

@@ -2429,6 +2429,21 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
 }
 
 /**
+ * Clear the poll cache for a specific repo (or all repos when no path
+ * given). Used by tests so each `pollRemoteSummary` call sees fresh git
+ * state instead of the cached result from a prior test. In production
+ * callers should NOT call this — the cache is the whole point of the
+ * background poll throttling.
+ */
+export function clearPollCache(repoPath?: string): void {
+  if (repoPath) {
+    pollCache.delete(repoPath);
+  } else {
+    pollCache.clear();
+  }
+}
+
+/**
  * Batch remote check over several repositories with bounded concurrency
  * (network-bound work — keep it gentle). Returns a map keyed by repo path;
  * every entry is a valid summary even if that repo failed.
@@ -3589,6 +3604,16 @@ export async function clone(
 export async function init(targetPath: string, bare = false): Promise<void> {
   const git = simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS });
   await git.init(bare);
+  // Ensure the initial branch is `main` — modern git default since 2.28,
+  // but git only uses it when init.defaultBranch is set globally. We force
+  // it locally on every fresh init so repositories created by PrismGit are
+  // consistent regardless of the user's git config. This also matches what
+  // every test in tests/integration/ expects (they all check out `main`).
+  try {
+    await git.raw(['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  } catch {
+    /* pre-init HEAD — ignore */
+  }
   invalidateCache();
   if (!bare) await applyGitIdentity(targetPath);
 }

@@ -20,7 +20,7 @@ export default defineConfig({
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
     ],
-    exclude: ['node_modules', 'dist', 'dist-electron', 'release'],
+    exclude: ['node_modules', 'dist', 'dist-electron', 'release', 'tests/e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
