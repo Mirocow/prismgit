@@ -10,6 +10,7 @@ import { registerSettingsIpc } from './ipc/settings.js';
 import { registerCommandLogIpc } from './ipc/commandLog.js';
 import { registerVscodeIpc } from './ipc/vscode.js';
 import { registerSshIpc } from './ipc/ssh.js';
+import { registerAvatarIpc } from './ipc/avatar.js';
 import { cleanupTempCopies } from './services/vscode.js';
 import { installGitCommandLogger } from './services/commandLog.js';
 import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
@@ -288,6 +289,7 @@ app.whenReady().then(() => {
   registerContextMenuIpc();
   registerVscodeIpc();
   registerSshIpc();
+  registerAvatarIpc();
   // Stale VS Code temp copies (HEAD/stage snapshots for --diff/--merge) from
   // previous sessions — new ones are written on demand.
   cleanupTempCopies();

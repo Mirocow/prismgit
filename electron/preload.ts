@@ -602,6 +602,14 @@ const api = {
   },
 
   // Menu events (one-way from main to renderer)
+  // Avatar cache — downloads + caches avatar images on disk.
+  // Renderer calls api.avatar.get(url) or api.avatar.getByEmail(email).
+  // Returns a data URI string (or null) — no network in renderer.
+  avatar: {
+    get: (url: string) => ipcRenderer.invoke('avatar:get', url),
+    getByEmail: (email: string, size?: number) => ipcRenderer.invoke('avatar:getByEmail', email, size),
+  },
+
   events: {
     on: (channel: string, cb: (...args: unknown[]) => void) => {
       const listener = (_: unknown, ...args: unknown[]) => cb(...args);
