@@ -26,7 +26,7 @@
  *   - We show a clear error panel: 'Repository not found on GitHub/GitLab'
  *     + the API endpoint that 404'd, so the user can debug.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   GitPullRequest, GitCommit, X, ExternalLink, Loader, Check, FileText,
   MessageSquare, Plus, Minus, ArrowRight, RefreshCw, AlertCircle,
@@ -72,6 +72,21 @@ export function PRReview({
   const [comments, setComments] = useState<GithubPRComment[]>([]);
   const [commits, setCommits] = useState<GithubPRCommit[]>([]);
   const [loading, setLoading] = useState(true);
+  // Anti-spam: deduplicate concurrent loads. Without this, the load()
+  // effect fires multiple times when:
+  //   1. gitlabProjectId transitions from null → number (after on-demand
+  //      resolution via getProjectByPath). The deps array changes →
+  //      useEffect re-runs → load() fires AGAIN with the now-resolved ID.
+  //   2. Inline arrow props like onGitlabProjectIdResolved get a new
+  //      identity on every parent render. (We use a ref to dodge this.)
+  //   3. providerInfo useShallow selector returns a new object literal
+  //      when any field changes — even unrelated fields like gitlabAuthed.
+  // The result was 4x duplicate API calls per MR open (visible in the
+  // Output panel as 4 identical 'api gitlab GET .../merge_requests/5/...' rows).
+  const loadingRef = useRef(false);
+  const lastLoadKeyRef = useRef<string>('');
+  const onGitlabProjectIdResolvedRef = useRef(onGitlabProjectIdResolved);
+  onGitlabProjectIdResolvedRef.current = onGitlabProjectIdResolved;
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<GithubPRFile | null>(null);
@@ -79,6 +94,34 @@ export function PRReview({
   const [postingComment, setPostingComment] = useState(false);
 
   const load = useCallback(async () => {
+    // Anti-spam guard: skip if a load with the SAME PR+provider already
+    // completed OR is in flight. The key is intentionally COARSE — it
+    // does NOT include gitlabProjectId, because that transitions from
+    // null → number during on-demand resolution, and we don't want
+    // the resolution to trigger a SECOND wave of API calls.
+    //
+    // Why this is needed: PRReview re-renders multiple times in quick
+    // succession when opening a MR:
+    //   1. Mount with gitlabProjectId=null → load fires → resolves ID
+    //      via getProjectByPath → fires 4 MR API calls.
+    //   2. onGitlabProjectIdResolved updates the store → gitlabProjectId
+    //      prop becomes the resolved number → load is re-created with a
+    //      new identity → useEffect re-runs → WITHOUT the guard this
+    //      would fire 4 MORE duplicate API calls.
+    //   3. providerInfo useShallow selector returns a new object literal
+    //      when gitlabAuthed changes after refreshAuth() → same cycle.
+    // The user saw 4× duplicate rows in the Output panel.
+    //
+    // To force a refresh (e.g. after approve/merge/comment), use
+    // forceReload() which clears lastLoadKeyRef before calling load().
+    const loadKey = `${pr.number}|${provider}|${owner}/${repo}`;
+    if (lastLoadKeyRef.current === loadKey) {
+      // Either a load is currently in flight with this key, OR a load
+      // already completed with this key. Either way, don't re-fetch.
+      return;
+    }
+    loadingRef.current = true;
+    lastLoadKeyRef.current = loadKey;
     setLoading(true);
     setLoadError(null);
     try {
@@ -93,6 +136,7 @@ export function PRReview({
             })
           );
           setLoading(false);
+          loadingRef.current = false;
           return;
         }
         const [prDetail, prFiles, prComments, prCommits] = await Promise.all([
@@ -125,7 +169,9 @@ export function PRReview({
             projectId = project.id;
             // Cache the resolved ID in the providerStore via the callback
             // so subsequent visits skip this API call.
-            onGitlabProjectIdResolved?.(project.id);
+            // Use the ref to avoid re-triggering load() when the parent
+            // passes a new onGitlabProjectIdResolved identity.
+            onGitlabProjectIdResolvedRef.current?.(project.id);
           } catch (e) {
             const eMsg = String(e);
             if (eMsg.includes('404') || eMsg.toLowerCase().includes('not found')) {
@@ -139,6 +185,7 @@ export function PRReview({
               setLoadError(eMsg);
             }
             setLoading(false);
+            loadingRef.current = false;
             return;
           }
         }
@@ -242,11 +289,20 @@ export function PRReview({
       }
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pr.number, owner, repo, provider, gitlabProjectId, onGitlabProjectIdResolved]);
+  }, [pr.number, owner, repo, provider, gitlabProjectId]);
 
   useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Force-reload when the user clicks the Refresh button — bypasses the
+  // dedup guard by clearing lastLoadKeyRef first.
+  const forceReload = useCallback(() => {
+    lastLoadKeyRef.current = '';
+    loadingRef.current = false;
     void load();
   }, [load]);
 
@@ -274,7 +330,7 @@ export function PRReview({
       }
       toast.success(t('pages.prApproved', { n: pr.number }));
       onActionComplete();
-      void load();
+      forceReload();
     } catch (e) {
       toast.error(t('pages.prApproveFailed'), String(e));
     } finally {
@@ -331,7 +387,7 @@ export function PRReview({
         await api.github.addPRComment(owner, repo, pr.number, commentText);
         toast.success(t('pages.commentAdded'));
         setCommentText('');
-        void load();
+        forceReload();
       } else if (provider === 'gitlab' && gitlabProjectId != null) {
         await api.gitlab.addMRComment(gitlabProjectId, pr.number, commentText);
         toast.success(t('pages.commentAdded'));
@@ -431,7 +487,7 @@ export function PRReview({
           <button
             className="icon-btn"
             title={t('common.refresh')}
-            onClick={() => void load()}
+            onClick={() => forceReload()}
           >
             <RefreshCw size={13} />
           </button>
@@ -531,7 +587,7 @@ export function PRReview({
             </div>
             <button
               className="btn btn-secondary text-xs mt-2 flex items-center gap-1"
-              onClick={() => void load()}
+              onClick={() => forceReload()}
             >
               <RefreshCw size={11} />
               {t('common.retry', { defaultValue: 'Retry' })}
