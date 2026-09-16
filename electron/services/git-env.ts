@@ -94,12 +94,18 @@ export const GIT_ENV_LFS_SKIP: Record<string, string> = buildGitEnv();
  * The simple-git options to use with every simpleGit() call.
  * Combines the env override with the unsafe flags that allow GIT_CONFIG_COUNT
  * and core.hooksPath override (both blocked by simple-git's safety plugin).
+ *
+ * allowUnsafeFilter is needed because we override filter.lfs.smudge/clean/process
+ * via GIT_CONFIG — simple-git blocks filter config writes without this flag.
+ * Without it, git fetch/pull/checkout fail with:
+ *   "Configuring filter.smudge is not permitted without enabling allowUnsafeFilter"
  */
 export const GIT_UNSAFE_OPTIONS = {
   env: GIT_ENV_LFS_SKIP,
   unsafe: {
     allowUnsafeConfigEnvCount: true as const,
     allowUnsafeHooksPath: true as const,
+    allowUnsafeFilter: true as const,
   },
 };
 
@@ -113,6 +119,7 @@ export const GIT_SSH_UNSAFE_OPTIONS = {
   unsafe: {
     allowUnsafeConfigEnvCount: true as const,
     allowUnsafeHooksPath: true as const,
+    allowUnsafeFilter: true as const,
     allowUnsafeSshCommand: true as const,
   },
 };
