@@ -71,7 +71,9 @@ export interface GithubApi {
   closePR: (owner: string, repo: string, prNumber: number) => Promise<void>;
   reopenPR: (owner: string, repo: string, prNumber: number) => Promise<void>;
   listPRComments: (owner: string, repo: string, prNumber: number) => Promise<Array<{
-    id: number; body: string; path?: string; line?: number; user: { login: string }; created_at: string;
+    id: number; body: string; path?: string; line?: number; user: { login: string; avatar_url?: string }; created_at: string;
+    /** SHA of the commit the comment was left on (for importing as a local review comment). */
+    commit_id?: string;
   }>>;
 }
 

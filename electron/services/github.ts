@@ -382,8 +382,9 @@ export async function listPRComments(
   body: string;
   path?: string;
   line?: number;
-  user: { login: string };
+  user: { login: string; avatar_url?: string };
   created_at: string;
+  commit_id?: string;
 }>> {
   const { token } = getAuthState();
   if (!token) throw new Error('Not authenticated with GitHub');

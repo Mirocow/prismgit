@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { GitPullRequest, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText } from '../components/icons';
+import { GitPullRequest, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText, ExternalLink } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useAuthStore } from '../stores/authStore';
 import { api, type LogEntry } from '../lib/api';
 import {
   loadReviews,
@@ -148,6 +149,83 @@ export function ReviewsPage() {
     }
   };
 
+  // ─── Load PR comments from GitHub/GitLab ──────────────────────────────
+  // The previous Reviews page only showed LOCAL review comments (stored in
+  // git notes). This new action pulls PR review comments from the hosting
+  // provider so the user can see inline code review feedback without leaving
+  // the app. Comments are imported as local review comments (severity:
+  // 'info', author: the GitHub/GitLab username) so they integrate with the
+  // existing resolve/delete/push workflow.
+  const { authenticated } = useAuthStore();
+  const [repoInfo, setRepoInfo] = useState<{ owner?: string; repo?: string; provider?: string }>({});
+  const [prNumberInput, setPrNumberInput] = useState('');
+  const [showPrLoader, setShowPrLoader] = useState(false);
+
+  useEffect(() => {
+    api.git.extractRepoInfo(repo.path).then(setRepoInfo).catch(() => {});
+  }, [repo.path]);
+
+  const handleLoadFromPR = async () => {
+    if (!repoInfo.owner || !repoInfo.repo) {
+      toast.warning(t('pages.reviewsNoProvider', { defaultValue: 'Repository is not hosted on GitHub/GitLab' }));
+      return;
+    }
+    const prNumStr = prNumberInput.trim() || await promptDialog({
+      title: t('pages.reviewsLoadFromPRTitle', { defaultValue: 'Load review comments from Pull Request' }),
+      message: t('pages.reviewsLoadFromPRMessage', { defaultValue: 'Enter the PR/MR number:' }),
+      input: { placeholder: '#123' },
+      confirmLabel: t('common.load', { defaultValue: 'Load' }),
+    });
+    if (prNumStr == null || !prNumStr.trim()) return;
+    const prNum = parseInt(prNumStr.replace(/^#/, '').trim(), 10);
+    if (!Number.isFinite(prNum) || prNum <= 0) {
+      toast.error(t('pages.reviewsInvalidPRNumber', { defaultValue: 'Invalid PR number' }));
+      return;
+    }
+    setBusy('pr-load');
+    setShowPrLoader(false);
+    try {
+      let imported = 0;
+      if (repoInfo.provider === 'github') {
+        if (!authenticated) {
+          toast.warning(t('pages.reviewsGithubNotAuthed', { defaultValue: 'Connect to GitHub first (Settings → Integrations)' }));
+          return;
+        }
+        const comments = await api.github.listPRComments(repoInfo.owner, repoInfo.repo, prNum);
+        // Import each GitHub PR comment as a local review comment on the
+        // commit it was left on (commit_id field).
+        for (const c of comments) {
+          if (!c.commit_id || !c.path) continue;
+          await addReviewComment(repo.path, {
+            commitHash: c.commit_id,
+            filePath: c.path,
+            lineNumber: c.line ?? 0,
+            author: c.user?.login || 'github',
+            body: c.body,
+            severity: 'info',
+            resolved: false,
+          });
+          imported++;
+        }
+      } else if (repoInfo.provider === 'gitlab') {
+        // GitLab MR notes/comments — we'd need a listMRNotes API call.
+        // The current gitlab.ts service exposes addMRComment but not list.
+        // For now, show a hint that GitLab MR note import is coming.
+        toast.info(t('pages.reviewsGitlabNotesUnsupported', { defaultValue: 'GitLab MR note import is not yet available — use the GitLab web UI to view MR comments' }));
+        return;
+      } else {
+        toast.warning(t('pages.reviewsNoProvider', { defaultValue: 'Repository is not hosted on GitHub/GitLab' }));
+        return;
+      }
+      toast.success(t('pages.reviewsImported', { defaultValue: 'Imported {count} review comments from PR #{pr}', count: imported, pr: prNum }));
+      await load();
+    } catch (e) {
+      toast.error(t('pages.reviewsImportFailed', { defaultValue: 'Failed to import PR comments' }), String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const totalComments = reviews.reduce((acc, r) => acc + r.comments.length, 0);
   const unresolvedCount = reviews.reduce(
     (acc, r) => acc + r.comments.filter(c => !c.resolved).length,
@@ -190,6 +268,21 @@ export function ReviewsPage() {
             {busy === 'push' ? <Loader size={12} className="spin" /> : <Upload size={12} />}
             {t('remotes.push')}
           </button>
+          {/* Load PR comments from GitHub/GitLab — pulls inline review comments
+              from the hosting provider so the user can see code review
+              feedback without leaving the app. Disabled when the repo isn't
+              on GitHub/GitLab or the user isn't authenticated. */}
+          {repoInfo.provider === 'github' || repoInfo.provider === 'gitlab' ? (
+            <button
+              className="btn btn-secondary text-xs"
+              onClick={handleLoadFromPR}
+              disabled={!!busy}
+              title={t('pages.reviewsLoadFromPRTitle', { defaultValue: 'Load review comments from a Pull Request/Merge Request' })}
+            >
+              {busy === 'pr-load' ? <Loader size={12} className="spin" /> : <ExternalLink size={12} />}
+              {t('pages.reviewsLoadFromPR', { defaultValue: 'From PR' })}
+            </button>
+          ) : null}
           <button
             className="btn btn-primary text-xs"
             onClick={() => {
