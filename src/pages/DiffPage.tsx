@@ -200,14 +200,31 @@ export function DiffPage() {
   // Invalidate the cache whenever the git status changes (a mutation
   // happened — the working tree / index is different now, so all cached
   // diffs are stale).
+  // RACE FIX: the previous code cleared the ENTIRE cache on every lastRefresh
+  // bump (every 5s from the file watcher). This meant the user's diff cache
+  // was never useful — every time they clicked a file, it was a cache miss
+  // because the watcher had just fired. Now we only invalidate if the
+  // status's file list actually changed (different set of files or different
+  // file states), not just because the timer fired.
   const lastRefresh = useGitStore((s) => s.lastRefresh);
-  const prevLastRefreshRef = useRef(lastRefresh);
+  const gitStatus = useGitStore((s) => s.status);
+  const prevFilesKeyRef = useRef<string>('');
   useEffect(() => {
-    if (prevLastRefreshRef.current !== lastRefresh) {
-      prevLastRefreshRef.current = lastRefresh;
+    if (!gitStatus) return;
+    // Build a compact signature of the current file states: for each file,
+    // its path + index flag + working_dir flag. If this signature changed,
+    // the working tree really changed → invalidate diff cache. If it's
+    // the same, the lastRefresh was just a timer tick — keep the cache.
+    const filesKey = (gitStatus.files || [])
+      .map((f: { path: string; index: string; working_dir: string }) => `${f.path}:${f.index}${f.working_dir}`)
+      .sort()
+      .join('|');
+    if (prevFilesKeyRef.current !== filesKey) {
+      prevFilesKeyRef.current = filesKey;
       invalidateDiffCache();
     }
-  }, [lastRefresh]);
+    void lastRefresh; // keep the dependency so the effect runs on refresh
+  }, [lastRefresh, gitStatus]);
 
   const computeDiff = useCallback(async () => {
     if (!repo) return;

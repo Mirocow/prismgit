@@ -6,6 +6,10 @@ import { useOperationLogStore } from './operationLogStore';
 import { useRepositoryStore } from './repositoryStore';
 import { useToastStore } from './toastStore';
 
+// In-flight promise for refreshStatus — prevents concurrent status() calls
+// on the same repo from spawning multiple `git status` subprocesses.
+let refreshInFlight: Promise<void> | null = null;
+
 interface GitState {
   status: StatusResult | null;
   loading: boolean;
@@ -28,13 +32,31 @@ export const useGitStore = create<GitState>((set, get) => ({
   lastRefresh: 0,
 
   refreshStatus: async (repoPath: string) => {
-    set({ loading: true, error: null });
-    try {
-      const status = await api.git.status(repoPath);
-      set({ status, loading: false, lastRefresh: Date.now() });
-    } catch (e) {
-      set({ error: String(e), loading: false });
+    // RACE FIX: if a status refresh is already in flight for this repo,
+    // don't start a second one — return the existing promise. This was
+    // the #1 cause of UI freezes: the file watcher (5s), commit/push
+    // handlers, and the repo-open useEffect could all call refreshStatus
+    // simultaneously, spawning 3-4 concurrent `git status` processes on
+    // the same repo. simple-git queues them (maxConcurrentProcesses=4),
+    // but each `git status` on a large/LFS repo takes 1-5s → 4 × 5s = 20s
+    // of queued git processes → UI frozen.
+    if (refreshInFlight) {
+      return refreshInFlight;
     }
+
+    set({ loading: true, error: null });
+    const promise = (async () => {
+      try {
+        const status = await api.git.status(repoPath);
+        set({ status, loading: false, lastRefresh: Date.now() });
+      } catch (e) {
+        set({ error: String(e), loading: false });
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+    refreshInFlight = promise;
+    return promise;
   },
 
   stageFiles: async (repoPath, files) => {

@@ -159,28 +159,34 @@ function getGit(repoPath: string): SimpleGit {
 }
 
 /**
- * Remove a stale .git/index.lock file if it exists. A previous git
- * operation (crash, force-quit, killed process) may have left it behind,
- * making ALL subsequent git commands fail with "Unable to create
- * index.lock: File exists."
+ * Remove a stale .git/index.lock file if it exists AND is not actively
+ * being held by another git process.
  *
- * This is called before write operations (add, restore, resetFile,
- * commit, checkout, etc.) so the user doesn't have to manually delete
- * the lock file.
+ * RACE FIX: the previous code blindly deleted .git/index.lock before every
+ * write operation. If two write operations ran concurrently (e.g. user
+ * clicks "Stage All" while a background fetch is committing):
+ *   Op A: removeStaleIndexLock → git add (creates lock)
+ *   Op B: removeStaleIndexLock (DELETES A's lock!) → git add (fails: race)
  *
- * Safety: if another git process is ACTIVELY running (lock file is
- * being held), the unlinkSync will fail with EPERM/EBUSY on Windows
- * or succeed silently on Unix (where locks are advisory). On Unix,
- * removing an active lock can cause the running git process to fail —
- * but this is rare (maxConcurrentProcesses=2) and the alternative
- * (leaving the lock) is worse (blocks ALL git operations).
+ * Now we check the lock file's age — if it was created within the last
+ * 5 seconds, it's probably an active lock from a concurrent operation
+ * and we DON'T delete it. Only stale locks (older than 5s) are removed.
  */
 function removeStaleIndexLock(repoPath: string): void {
   const lockPath = path.join(repoPath, '.git', 'index.lock');
   try {
-    if (fs.existsSync(lockPath)) {
-      fs.unlinkSync(lockPath);
+    if (!fs.existsSync(lockPath)) return;
+    // Check the lock's age — if it's younger than 5 seconds, it's likely
+    // an active lock from a concurrent git operation. Don't delete it.
+    const stat = fs.statSync(lockPath);
+    const ageMs = Date.now() - stat.mtimeMs;
+    if (ageMs < 5000) {
+      // Lock is fresh — another git process is probably holding it.
+      // The git command will wait for it or fail with a clear error.
+      return;
     }
+    // Lock is stale (older than 5s) — safe to remove.
+    fs.unlinkSync(lockPath);
   } catch {
     // Can't remove — either permission issue or another process is
     // actively holding it. The git command will fail with a clear
@@ -2246,6 +2252,11 @@ function getBackgroundFetchRemotes(repoPath: string): string[] {
 // ran 6-7 git commands. With 10 repos = 60-70 commands per poll cycle.
 const POLL_CACHE_TTL_MS = 60_000; // 1 minute — results are cached for 60s
 const pollCache = new Map<string, { summary: RemoteCheckSummary; expiresAt: number }>();
+// In-flight promises: prevents the race where two pollRemoteSummary calls
+// for the SAME repo both see a cache miss and both start computing.
+// Call A starts computing → sets inFlight. Call B sees inFlight → awaits
+// the same promise instead of spawning a duplicate set of git commands.
+const pollInFlight = new Map<string, Promise<RemoteCheckSummary>>();
 
 export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSummary> {
   // Check cache first — if we polled this repo recently, return the cached result.
@@ -2254,12 +2265,22 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
     return cached.summary;
   }
 
-  const summary = emptyRemoteCheckSummary(repoPath);
-  if (!fs.existsSync(path.join(repoPath, '.git'))) {
-    return summary;
+  // RACE FIX: if a poll for this repo is already in flight, await the same
+  // promise instead of spawning a duplicate set of git commands.
+  const inFlight = pollInFlight.get(repoPath);
+  if (inFlight) {
+    return inFlight;
   }
 
-  const git = getGit(repoPath);
+  // Create the promise and store it BEFORE starting any async work so
+  // that subsequent calls see it immediately.
+  const promise = (async (): Promise<RemoteCheckSummary> => {
+    const summary = emptyRemoteCheckSummary(repoPath);
+    if (!fs.existsSync(path.join(repoPath, '.git'))) {
+      return summary;
+    }
+
+    const git = getGit(repoPath);
 
   // 1. Remotes
   try {
@@ -2359,6 +2380,18 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
   // instantly without spawning any git subprocesses.
   pollCache.set(repoPath, { summary, expiresAt: Date.now() + POLL_CACHE_TTL_MS });
   return summary;
+  })(); // end of promise IIFE
+
+  // Store the in-flight promise so concurrent calls can await it.
+  pollInFlight.set(repoPath, promise);
+
+  try {
+    return await promise;
+  } finally {
+    // Clean up the in-flight entry — subsequent calls will either hit the
+    // cache (just set) or start a fresh computation.
+    pollInFlight.delete(repoPath);
+  }
 }
 
 /**

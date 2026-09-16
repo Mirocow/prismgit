@@ -150,15 +150,18 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
 
       const repo: RepositoryEntry = { path, name, lastOpened: Date.now() };
       // Set currentRepo IMMEDIATELY — don't wait for loadMetadata().
-      // Previously this awaited loadMetadata() which does an IPC round-trip
-      // + re-sorts the repo list. On a repo with LFS, loadMetadata triggers
-      // refreshRepoStats which spawns 5 git subprocesses — that's 5-10s
-      // of waiting BEFORE the repo UI appeared. Now we set currentRepo
-      // first (the UI shows immediately), and loadMetadata runs in the
-      // background to update sidebar stats.
       set({ currentRepo: repo, currentMetadata: null, loading: false });
       // Load metadata in the background — non-blocking.
-      void get().loadMetadata();
+      // RACE FIX: capture the path so if the user switches to repo B
+      // before this completes, we don't overwrite B's metadata with A's.
+      const targetPath = path;
+      void get().loadMetadata().then(() => {
+        // Only update currentMetadata if we're STILL on the same repo.
+        if (get().currentRepo?.path === targetPath) {
+          const metadata = get().metadata[targetPath] || null;
+          set({ currentMetadata: metadata });
+        }
+      });
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       set({ error: errMsg, loading: false });
