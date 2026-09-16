@@ -155,8 +155,15 @@ export function ReviewsPage() {
   const handlePush = async () => {
     setBusy('push');
     try {
-      await pushReviews(repo.path);
-      toast.success(t('pages.reviewsPushed'));
+      const result = await pushReviews(repo.path);
+      if (result === 'nothing-to-push') {
+        toast.info(
+          t('pages.reviewsNothingToPush', { defaultValue: 'No reviews to push' }),
+          t('pages.reviewsNothingToPushHint', { defaultValue: 'Add a review comment first, then push to share it with your team.' })
+        );
+      } else {
+        toast.success(t('pages.reviewsPushed'));
+      }
     } catch (e) {
       toast.error(t('pages.pushFailed'), String(e));
     } finally {
@@ -167,9 +174,16 @@ export function ReviewsPage() {
   const handleFetch = async () => {
     setBusy('fetch');
     try {
-      await fetchReviews(repo.path);
-      toast.success(t('pages.reviewsFetched'));
-      await load();
+      const result = await fetchReviews(repo.path);
+      if (result === 'no-remote-reviews') {
+        toast.info(
+          t('pages.reviewsNoRemoteReviews', { defaultValue: 'No reviews on remote yet' }),
+          t('pages.reviewsNoRemoteReviewsHint', { defaultValue: 'The remote repository has no review notes. Push your local reviews first to share them.' })
+        );
+      } else {
+        toast.success(t('pages.reviewsFetched'));
+        await load();
+      }
     } catch (e) {
       toast.error(t('pages.fetchFailed'), String(e));
     } finally {

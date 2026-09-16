@@ -140,14 +140,57 @@ export async function setCommentResolved(
 
 /**
  * Push reviews to remote so they can be shared with team.
+ *
+ * Handles the two common failure cases gracefully:
+ *  - 'src refspec does not match any' — the local repo has no reviews yet
+ *    (refs/notes/reviews doesn't exist). We check first with rev-parse;
+ *    if the ref is missing, we return 'nothing-to-push' instead of erroring.
+ *  - Network/auth errors — re-thrown so the caller can show a toast.
+ *
+ * Returns: 'pushed' | 'nothing-to-push'
  */
-export async function pushReviews(repoPath: string, remote = 'origin'): Promise<void> {
+export async function pushReviews(
+  repoPath: string,
+  remote = 'origin'
+): Promise<'pushed' | 'nothing-to-push'> {
+  // Check if the local notes ref exists. If not, there's nothing to push.
+  try {
+    await api.git.raw(repoPath, ['rev-parse', '--verify', '-q', NOTES_REF]);
+  } catch {
+    // Local ref doesn't exist — no reviews have been added yet.
+    return 'nothing-to-push';
+  }
   await api.git.raw(repoPath, ['push', remote, NOTES_REF]);
+  return 'pushed';
 }
 
 /**
  * Fetch reviews from remote.
+ *
+ * Handles 'couldn't find remote ref refs/notes/reviews' gracefully — that
+ * just means the remote has no reviews yet (the ref was never pushed).
+ * We treat it as 'no reviews on remote' rather than an error.
+ *
+ * Returns: 'fetched' | 'no-remote-reviews'
  */
-export async function fetchReviews(repoPath: string, remote = 'origin'): Promise<void> {
-  await api.git.raw(repoPath, ['fetch', remote, NOTES_REF]);
+export async function fetchReviews(
+  repoPath: string,
+  remote = 'origin'
+): Promise<'fetched' | 'no-remote-reviews'> {
+  try {
+    // Use refspec form so the fetched notes land in the right local ref.
+    // Without ':refs/notes/reviews', git would fetch into FETCH_HEAD only.
+    await api.git.raw(repoPath, ['fetch', remote, `${NOTES_REF}:${NOTES_REF}`]);
+    return 'fetched';
+  } catch (e) {
+    const msg = String(e);
+    // 'couldn't find remote ref' = remote has no reviews ref yet.
+    // This is NOT an error — it's the normal state for a repo that has
+    // never had reviews pushed to it.
+    if (msg.includes("couldn't find remote ref") || msg.includes('no such remote ref')) {
+      return 'no-remote-reviews';
+    }
+    // Real network/auth error — re-throw so the caller shows a toast.
+    throw e;
+  }
 }
