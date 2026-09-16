@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { GitPullRequest, Plus, RefreshCw, ExternalLink, Loader, X, CloudDownload, ArrowDown, Search } from '../components/icons';
+import { GitPullRequest, Plus, RefreshCw, ExternalLink, Loader, X, CloudDownload, ArrowDown, Search, Github, GitBranch } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useAuthStore } from '../stores/authStore';
@@ -81,7 +81,7 @@ export function PullRequestsPage() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeKey(showCreate, () => setShowCreate(false));
-  const [repoInfo, setRepoInfo] = useState<{ owner?: string; repo?: string; provider?: string; webUrl?: string }>({});
+  const [repoInfo, setRepoInfo] = useState<{ owner?: string; repo?: string; provider?: string; webUrl?: string; url?: string }>({});
 
   // Create PR form — head/base prefill from the app-wide branch selection
   // (Branches/History/Toolbar): the PR grows out of the branch you picked.
@@ -379,7 +379,9 @@ export function PullRequestsPage() {
     );
   }
 
-  if (!isGitHubRepo) {
+  if (!isSupportedRepo) {
+    // Provider not detected (self-hosted GitLab, GitHub Enterprise, etc.)
+    // Let the user manually select which provider to use.
     return (
       <div className="flex flex-col flex-1 overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
@@ -389,11 +391,122 @@ export function PullRequestsPage() {
           </div>
           {syncButtons}
         </div>
-        <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary">
-          <GitPullRequest size={32} className="mb-2 opacity-50" />
-          <div className="text-sm">{t('pages.notGithubRepo')}</div>
-          <div className="text-xs mt-1">{t('pages.notGithubHint')}</div>
-          <div className="text-xs mt-1">{t('pages.notGithubHint2')}</div>
+        <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary gap-4">
+          <GitPullRequest size={32} className="opacity-50" />
+          <div className="text-sm">{t('pages.prProviderNotDetected', { defaultValue: 'Repository provider not detected' })}</div>
+          <div className="text-xs text-center max-w-md">
+            {t('pages.prProviderNotDetectedHint', { defaultValue: 'The remote URL does not match a known provider (GitHub/GitLab). Select your provider manually to enable Pull Requests and Code Review.' })}
+          </div>
+          {repoInfo.url && (
+            <div className="text-2xs text-text-quaternary font-mono bg-bg-tertiary px-2 py-1 rounded">
+              {repoInfo.url}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              className="btn btn-primary text-xs"
+              onClick={() => {
+                // Try to parse owner/repo from the remote URL manually.
+                const url = repoInfo.url || '';
+                // Handle SSH: git@host:owner/repo.git
+                const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
+                // Handle HTTP(S): https://host/owner/repo.git
+                const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
+                const match = sshMatch || httpsMatch;
+                if (match) {
+                  const [, host, ownerName, repoName] = match;
+                  setRepoInfo({
+                    ...repoInfo,
+                    provider: 'github',
+                    owner: ownerName,
+                    repo: repoName,
+                    webUrl: `https://${host}/${ownerName}/${repoName}`,
+                  });
+                } else {
+                  // Can't parse — set owner/repo to empty so the user can type them.
+                  setRepoInfo({ ...repoInfo, provider: 'github', owner: '', repo: '' });
+                }
+              }}
+            >
+              <Github size={12} />
+              {t('pages.prUseGithub', { defaultValue: 'Use GitHub' })}
+            </button>
+            <button
+              className="btn btn-primary text-xs"
+              onClick={() => {
+                const url = repoInfo.url || '';
+                const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
+                const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
+                const match = sshMatch || httpsMatch;
+                if (match) {
+                  const [, host, ownerName, repoName] = match;
+                  setRepoInfo({
+                    ...repoInfo,
+                    provider: 'gitlab',
+                    owner: ownerName,
+                    repo: repoName,
+                    webUrl: `https://${host}/${ownerName}/${repoName}`,
+                  });
+                } else {
+                  setRepoInfo({ ...repoInfo, provider: 'gitlab', owner: '', repo: '' });
+                }
+              }}
+            >
+              <GitBranch size={12} />
+              {t('pages.prUseGitlab', { defaultValue: 'Use GitLab' })}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If owner/repo couldn't be auto-parsed, show manual input.
+  if (!repoInfo.owner || !repoInfo.repo) {
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
+          <div className="flex items-center gap-2">
+            <GitPullRequest size={14} />
+            <span className="text-sm font-medium">{t('nav.pulls')}</span>
+            <span className="text-2xs text-text-tertiary">
+              {repoInfo.provider === 'gitlab' ? 'GitLab' : 'GitHub'}
+            </span>
+          </div>
+          {syncButtons}
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary gap-4">
+          <GitPullRequest size={32} className="opacity-50" />
+          <div className="text-sm">{t('pages.prManualEntry', { defaultValue: 'Enter repository path' })}</div>
+          <div className="text-xs text-center max-w-md">
+            {t('pages.prManualEntryHint', { defaultValue: 'Could not auto-detect owner/repo from the remote URL. Enter them manually (e.g. myorg/myrepo).' })}
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              className="text-sm font-mono w-64 px-2 py-1 bg-bg-tertiary border border-border-default rounded"
+              placeholder="owner/repo"
+              defaultValue={`${repoInfo.owner || ''}/${repoInfo.repo || ''}`}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const val = (e.target as HTMLInputElement).value.trim();
+                  const [o, r] = val.split('/');
+                  if (o && r) setRepoInfo({ ...repoInfo, owner: o, repo: r });
+                }
+              }}
+            />
+            <button
+              className="btn btn-primary text-xs"
+              onClick={(e) => {
+                const input = (e.target as HTMLElement).previousElementSibling as HTMLInputElement;
+                const val = input.value.trim();
+                const [o, r] = val.split('/');
+                if (o && r) setRepoInfo({ ...repoInfo, owner: o, repo: r });
+              }}
+            >
+              {t('common.ok', { defaultValue: 'OK' })}
+            </button>
+          </div>
         </div>
       </div>
     );
