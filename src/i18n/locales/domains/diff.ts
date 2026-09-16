@@ -72,6 +72,17 @@ export const en: Record<string, string> = {
   'diff.selectionCount': 'Selection ({count})',
   'diff.noChanges': 'No changes',
   'diff.showMoreLines': 'Show {count} more lines',
+  'diff.editOpenFailed': 'Failed to open file for editing',
+  'diff.editOpened': 'File opened for editing',
+  'diff.editOpenedHint': 'Save your changes in the editor, then return here to stage them.',
+  'diff.stagedAfterEdit': 'Staged {file}',
+  'diff.stageFailed': 'Failed to stage file',
+  'diff.editFileTooltip': 'Edit this file in your editor. After saving, you\'ll be prompted to stage the changes.',
+  'diff.editFile': 'Edit',
+  'diff.stageAfterEditTitle': 'Stage edited changes?',
+  'diff.stageAfterEditBody': 'You edited {file} in your editor. Stage the changes now?',
+  'diff.stageAfterEditHint': 'Staging adds the file to the index so it can be committed. You can also stage later from the Changes page.',
+
 };
 
 export const ru: Record<string, string> = {
@@ -143,6 +154,17 @@ export const ru: Record<string, string> = {
   'diff.selectionCount': 'Выбрано: {count}',
   'diff.noChanges': 'Нет изменений',
   'diff.showMoreLines': 'Показать ещё {count} строк',
+  'diff.editOpenFailed': 'Не удалось открыть файл для редактирования',
+  'diff.editOpened': 'Файл открыт для редактирования',
+  'diff.editOpenedHint': 'Сохраните изменения в редакторе, затем вернитесь сюда, чтобы добавить их в индекс.',
+  'diff.stagedAfterEdit': '{file} добавлен в индекс',
+  'diff.stageFailed': 'Не удалось добавить файл в индекс',
+  'diff.editFileTooltip': 'Отредактируйте файл в вашем редакторе. После сохранения вам будет предложено добавить изменения в индекс.',
+  'diff.editFile': 'Изменить',
+  'diff.stageAfterEditTitle': 'Добавить изменённые файлы в индекс?',
+  'diff.stageAfterEditBody': 'Вы отредактировали {file} в редакторе. Добавить изменения в индекс сейчас?',
+  'diff.stageAfterEditHint': 'Добавление в индекс позволяет закоммитить файл. Вы также можете добавить позже на странице Changes.',
+
 };
 
 export const zh: Record<string, string> = {
@@ -214,6 +236,17 @@ export const zh: Record<string, string> = {
   'diff.selectionCount': '已选 {count} 行',
   'diff.noChanges': '无更改',
   'diff.showMoreLines': '显示更多 {count} 行',
+  'diff.editOpenFailed': '打开文件进行编辑失败',
+  'diff.editOpened': '文件已打开进行编辑',
+  'diff.editOpenedHint': '在编辑器中保存更改，然后返回此处暂存它们。',
+  'diff.stagedAfterEdit': '已暂存 {file}',
+  'diff.stageFailed': '暂存文件失败',
+  'diff.editFileTooltip': '在编辑器中编辑此文件。保存后，系统会提示您暂存更改。',
+  'diff.editFile': '编辑',
+  'diff.stageAfterEditTitle': '暂存已编辑的更改？',
+  'diff.stageAfterEditBody': '您在编辑器中编辑了 {file}。现在暂存更改吗？',
+  'diff.stageAfterEditHint': '暂存将文件添加到索引以便提交。您也可以稍后从 Changes 页面暂存。',
+
 };
 
 export const de: Record<string, string> = {
@@ -285,4 +318,15 @@ export const de: Record<string, string> = {
   'diff.selectionCount': 'Auswahl ({count})',
   'diff.noChanges': 'Keine Änderungen',
   'diff.showMoreLines': '{count} weitere Zeilen anzeigen',
+  'diff.editOpenFailed': 'Datei konnte nicht zum Bearbeiten geöffnet werden',
+  'diff.editOpened': 'Datei zum Bearbeiten geöffnet',
+  'diff.editOpenedHint': 'Speichern Sie Ihre Änderungen im Editor und kehren Sie dann hierher zurück, um sie zu stagen.',
+  'diff.stagedAfterEdit': '{file} gestaged',
+  'diff.stageFailed': 'Datei konnte nicht gestaged werden',
+  'diff.editFileTooltip': 'Diese Datei in Ihrem Editor bearbeiten. Nach dem Speichern werden Sie aufgefordert, die Änderungen zu stagen.',
+  'diff.editFile': 'Bearbeiten',
+  'diff.stageAfterEditTitle': 'Bearbeitete Änderungen stagen?',
+  'diff.stageAfterEditBody': 'Sie haben {file} im Editor bearbeitet. Änderungen jetzt stagen?',
+  'diff.stageAfterEditHint': 'Staging fügt die Datei zum Index hinzu, damit sie committet werden kann. Sie können auch später auf der Changes-Seite stagen.',
+
 };
