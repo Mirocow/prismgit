@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { GitPullRequest, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText, ExternalLink } from '../components/icons';
+import { GitPullRequest, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText, ExternalLink, ArrowLeft } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -8,6 +8,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useProviderStore } from '../stores/providerStore';
 import { api, type LogEntry } from '../lib/api';
 import { ProviderChip } from '../components/ProviderChip';
+import { PRReview } from '../components/PRReview';
 import {
   loadReviews,
   addReviewComment,
@@ -55,6 +56,28 @@ export function ReviewsPage() {
   const [newComment, setNewComment] = useState<Partial<ReviewComment>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
+  // ─── Single source of truth: shared with PullRequestsPage via providerStore
+  // The user's explicit request: 'Зачем делали тогда инструмент Reviews — в
+  // нем и должен происходить кодревью, он и должен быть синхронизирован с
+  // пулреквест'. So when a PR is selected from PullRequests (or anywhere
+  // else that calls selectPR), Reviews shows the PR review surface instead
+  // of the local-review mode.
+  const providerInfo = useProviderStore(useShallow((s) => ({
+    provider: s.provider,
+    owner: s.owner,
+    repo: s.repo,
+    gitlabAuthed: s.gitlabAuthed,
+  })));
+  const gitlabProjectId = useProviderStore((s) => s.gitlabProjectId);
+  const selectedPR = useProviderStore((s) => s.selectedPR);
+  const selectPR = useProviderStore((s) => s.selectPR);
+  const detectProvider = useProviderStore((s) => s.detect);
+  const [prNumberInput, setPrNumberInput] = useState('');
+
+  useEffect(() => {
+    detectProvider(repo.path);
+  }, [repo.path, detectProvider]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -72,8 +95,10 @@ export function ReviewsPage() {
   }, [repo.path, toast]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    // Only load local reviews when we're NOT in PR review mode — PR review
+    // fetches its own data via the GitHub/GitLab API.
+    if (!selectedPR) load();
+  }, [load, selectedPR]);
 
   const handleAdd = async () => {
     if (!newComment.commitHash || !newComment.filePath || !newComment.body) {
@@ -152,36 +177,6 @@ export function ReviewsPage() {
     }
   };
 
-  // ─── Load PR comments from GitHub/GitLab ──────────────────────────────
-  // The previous Reviews page only showed LOCAL review comments (stored in
-  // git notes). This new action pulls PR review comments from the hosting
-  // provider so the user can see inline code review feedback without leaving
-  // the app. Comments are imported as local review comments (severity:
-  // 'info', author: the GitHub/GitLab username) so they integrate with the
-  // existing resolve/delete/push workflow.
-  //
-  // The provider info comes from the shared providerStore — same store that
-  // PullRequests uses. So if the user manually picked GitLab on the PR
-  // page, Reviews will already know about it.
-  //
-  // useShallow — see PullRequestsPage for why this is REQUIRED (otherwise
-  // the selector returns a new object every call and React's
-  // useSyncExternalStore loops forever).
-  const { authenticated } = useAuthStore();
-  const providerInfo = useProviderStore(useShallow((s) => ({
-    provider: s.provider,
-    owner: s.owner,
-    repo: s.repo,
-    gitlabAuthed: s.gitlabAuthed,
-  })));
-  const detectProvider = useProviderStore((s) => s.detect);
-  const [prNumberInput, setPrNumberInput] = useState('');
-  const [showPrLoader, setShowPrLoader] = useState(false);
-
-  useEffect(() => {
-    detectProvider(repo.path);
-  }, [repo.path, detectProvider]);
-
   const handleLoadFromPR = async () => {
     if (!providerInfo.owner || !providerInfo.repo) {
       toast.warning(t('pages.reviewsNoProvider', { defaultValue: 'Repository is not hosted on GitHub/GitLab' }));
@@ -200,17 +195,15 @@ export function ReviewsPage() {
       return;
     }
     setBusy('pr-load');
-    setShowPrLoader(false);
     try {
       let imported = 0;
       if (providerInfo.provider === 'github') {
+        const { authenticated } = useAuthStore.getState();
         if (!authenticated) {
           toast.warning(t('pages.reviewsGithubNotAuthed', { defaultValue: 'Connect to GitHub first (Settings → Integrations)' }));
           return;
         }
         const comments = await api.github.listPRComments(providerInfo.owner, providerInfo.repo, prNum);
-        // Import each GitHub PR comment as a local review comment on the
-        // commit it was left on (commit_id field).
         for (const c of comments) {
           if (!c.commit_id || !c.path) continue;
           await addReviewComment(repo.path, {
@@ -225,9 +218,6 @@ export function ReviewsPage() {
           imported++;
         }
       } else if (providerInfo.provider === 'gitlab') {
-        // GitLab MR notes/comments — we'd need a listMRNotes API call.
-        // The current gitlab.ts service exposes addMRComment but not list.
-        // For now, show a hint that GitLab MR note import is coming.
         toast.info(t('pages.reviewsGitlabNotesUnsupported', { defaultValue: 'GitLab MR note import is not yet available — use the GitLab web UI to view MR comments' }));
         return;
       } else {
@@ -253,6 +243,51 @@ export function ReviewsPage() {
     ? reviews.filter(r => r.commitHash.startsWith(selectedCommit))
     : reviews;
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // PR REVIEW MODE — when a PR is selected (via PullRequests page click),
+  // the Reviews page becomes the code review surface for that PR.
+  // The local-review mode (git-notes comments) is shown when no PR is
+  // selected.
+  // ═══════════════════════════════════════════════════════════════════════
+  if (selectedPR && providerInfo.owner && providerInfo.repo &&
+      (providerInfo.provider === 'github' || providerInfo.provider === 'gitlab')) {
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden">
+        {/* PR review header — shows the selected PR + a "back to local reviews" button */}
+        <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-secondary">
+          <div className="flex items-center gap-2">
+            <GitPullRequest size={14} />
+            <span className="text-sm font-medium">{t('pages.reviewsTitle')}</span>
+            <ProviderChip />
+            <span className="text-2xs text-text-tertiary">
+              · PR review · #{selectedPR.number}
+            </span>
+          </div>
+          <button
+            className="btn btn-secondary text-xs flex items-center gap-1"
+            onClick={() => selectPR(null)}
+            title={t('pages.reviewsBackToLocal', { defaultValue: 'Back to local review comments' })}
+          >
+            <ArrowLeft size={12} />
+            {t('pages.reviewsExitPR', { defaultValue: 'Exit PR review' })}
+          </button>
+        </div>
+        <PRReview
+          pr={selectedPR}
+          owner={providerInfo.owner}
+          repo={providerInfo.repo}
+          provider={providerInfo.provider as 'github' | 'gitlab'}
+          gitlabProjectId={gitlabProjectId}
+          onActionComplete={() => {/* PR list will refresh on next PullRequests visit */}}
+          onClose={() => selectPR(null)}
+        />
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // LOCAL REVIEW MODE — git-notes based review (no PR selected).
+  // ═══════════════════════════════════════════════════════════════════════
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
@@ -419,6 +454,15 @@ export function ReviewsPage() {
               <GitPullRequest size={32} className="mb-2 opacity-50" />
               <div className="text-sm">{t('pages.selectCommitForReviews')}</div>
               <div className="text-xs mt-1">{t('pages.addCommentHint')}</div>
+              {/* Hint pointing the user at Pull Requests when a provider is set */}
+              {providerInfo.provider === 'github' || providerInfo.provider === 'gitlab' ? (
+                <button
+                  className="btn btn-secondary text-xs mt-4"
+                  onClick={() => { window.location.hash = '#/pulls'; }}
+                >
+                  {t('pages.reviewsGoToPRs', { defaultValue: 'Open Pull Requests to review a PR' })}
+                </button>
+              ) : null}
             </div>
           )}
         </div>

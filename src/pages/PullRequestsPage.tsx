@@ -7,13 +7,12 @@ import { useAuthStore } from '../stores/authStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useProviderStore } from '../stores/providerStore';
-import { api, type GithubPullRequest, type GithubPRFile, type GithubPRComment, type GitLabMergeRequest } from '../lib/api';
+import { api, type GithubPullRequest, type GitLabMergeRequest } from '../lib/api';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { cn, formatDate } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 import { Avatar } from '../components/Avatar';
 import { ProviderChip } from '../components/ProviderChip';
-import { PRDetail } from '../components/PRDetail';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog } from '../components/ConfirmDialog';
@@ -80,12 +79,12 @@ export function PullRequestsPage() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeKey(showCreate, () => setShowCreate(false));
-  // Selected PR for the detail view — when set, PRDetail modal opens.
-  // The PR stored here is the lightweight version from the list; PRDetail
-  // will fetch the full version (with body + stats + files + comments) on
-  // open via api.github.getPullRequest.
-  const [selectedPR, setSelectedPR] = useState<UnifiedPR | null>(null);
-  useEscapeKey(!!selectedPR, () => setSelectedPR(null));
+  // The selected PR is held in providerStore (not local state) so it survives
+  // navigation to Reviews — that's where the code review surface lives.
+  // Clicking a PR row here calls selectPR(pr); the Reviews page reads
+  // selectedPR and renders the full review (files, diff, comments, actions).
+  const selectPRAction = useProviderStore((s) => s.selectPR);
+  const selectedPRNumber = useProviderStore((s) => s.selectedPR?.number ?? null);
 
   // ─── Single source of truth for provider/owner/repo ──────────────────
   // The provider store is shared across PullRequests, Reviews, and Toolbar.
@@ -585,8 +584,31 @@ export function PullRequestsPage() {
           filteredPRs.map(pr => (
             <div
               key={pr.number}
-              className="group flex items-start gap-3 px-3 py-3 border-b border-border-subtle hover:bg-bg-hover cursor-pointer"
-              onClick={() => setSelectedPR(pr)}
+              className={cn(
+                'group flex items-start gap-3 px-3 py-3 border-b border-border-subtle hover:bg-bg-hover cursor-pointer',
+                selectedPRNumber === pr.number && 'bg-bg-selected border-l-2 border-l-accent'
+              )}
+              onClick={() => {
+                // Select the PR in the shared store, then navigate to Reviews
+                // — that's where the code review surface lives. The user's
+                // explicit feedback: 'Зачем делали тогда инструмент Reviews
+                // в нем и должен происходить кодревью он и должен быть
+                // синхронизирован с пулреквест'. So we DON'T open a modal
+                // here anymore — we hand off to Reviews.
+                selectPRAction({
+                  number: pr.number,
+                  title: pr.title,
+                  state: pr.state,
+                  html_url: pr.html_url,
+                  author: { login: pr.author.login, avatar_url: pr.author.avatar_url },
+                  head: { ref: pr.head.ref, sha: pr.head.sha },
+                  base: { ref: pr.base.ref, sha: pr.base.sha },
+                  created_at: pr.created_at,
+                  updated_at: pr.updated_at,
+                  merged_at: pr.merged_at,
+                });
+                window.location.hash = '#/reviews';
+              }}
             >
               <GitPullRequest
                 size={16}
@@ -682,20 +704,6 @@ export function PullRequestsPage() {
           ))
         )}
       </div>
-
-      {/* PR detail modal — opened when user clicks a PR row.
-          Shows description, comments, changed files, and action buttons. */}
-      {selectedPR && repoInfo.owner && repoInfo.repo && (
-        <PRDetail
-          pr={selectedPR as unknown as GithubPullRequest}
-          owner={repoInfo.owner}
-          repo={repoInfo.repo}
-          provider={repoInfo.provider as 'github' | 'gitlab'}
-          gitlabProjectId={gitlabProjectId}
-          onClose={() => setSelectedPR(null)}
-          onActionComplete={() => void loadPRs()}
-        />
-      )}
 
       {/* Create PR dialog */}
       {showCreate && (

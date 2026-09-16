@@ -47,6 +47,23 @@ export interface ProviderInfo {
   manualOverride?: boolean;
 }
 
+/** Minimal PR shape stored in the providerStore. We only keep what's needed
+ *  to display the row in the PR list + jump into the Reviews page for the
+ *  full review (description, files, comments). The Reviews page fetches the
+ *  full version via api.github.getPullRequest. */
+export interface SelectedPR {
+  number: number;
+  title: string;
+  state: 'open' | 'closed' | 'merged';
+  html_url: string;
+  author: { login: string; avatar_url?: string };
+  head: { ref: string; sha: string };
+  base: { ref: string; sha: string };
+  created_at: string;
+  updated_at: string;
+  merged_at?: string | null;
+}
+
 interface ProviderState extends ProviderInfo {
   /** GitLab project ID — resolved from owner/repo via the GitLab API.
    *  Cached because the lookup is a round-trip. Reset on repo change. */
@@ -56,6 +73,14 @@ interface ProviderState extends ProviderInfo {
   gitlabAuthed: boolean;
   /** True while `detect()` is in flight (initial load). */
   loading: boolean;
+
+  /** The PR currently selected for code review. Shared between PullRequests
+   *  (where the user clicks a row to select) and Reviews (where the review
+   *  surface is rendered). Null when no PR is selected — Reviews then falls
+   *  back to its legacy local-review mode (git-notes comments).
+   *
+   *  Set by PullRequestsPage's row onClick. Cleared by selecting null. */
+  selectedPR: SelectedPR | null;
 
   /** Scan the given repo's remote URL and populate provider/owner/repo/url.
    *  Skips re-detection if the repo path is unchanged and a manual override
@@ -73,6 +98,8 @@ interface ProviderState extends ProviderInfo {
   setGitlabProjectId: (id: number | null) => void;
   /** Refresh auth state for both GitHub and GitLab. Cheap (two IPC calls). */
   refreshAuth: () => Promise<void>;
+  /** Select a PR for code review (shared with Reviews page). Pass null to clear. */
+  selectPR: (pr: SelectedPR | null) => void;
   /** Clear everything (e.g. when the user closes the repo). */
   reset: () => void;
 }
@@ -109,6 +136,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   githubAuthed: false,
   gitlabAuthed: false,
   loading: false,
+  selectedPR: null,
 
   detect: async (repoPath, opts) => {
     const st = get();
@@ -165,6 +193,8 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   setGitlabProjectId: (id) => set({ gitlabProjectId: id }),
 
+  selectPR: (pr) => set({ selectedPR: pr }),
+
   refreshAuth: async () => {
     // GitHub auth
     try {
@@ -190,5 +220,6 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     githubAuthed: false,
     gitlabAuthed: false,
     loading: false,
+    selectedPR: null,
   }),
 }));
