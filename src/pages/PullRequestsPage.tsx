@@ -380,19 +380,21 @@ export function PullRequestsPage() {
   }
 
   if (!isSupportedRepo) {
-    // Provider not detected (self-hosted GitLab, GitHub Enterprise, Gitea, etc.)
-    // Let the user manually select which provider to use.
-    // A dropdown covers ALL providers — not just GitHub/GitLab.
+    // Provider not detected (or owner/repo not parseable from the remote URL).
+    // Only GitHub and GitLab actually have API integrations wired — Bitbucket,
+    // Gitea, Gogs are NOT shown because clicking them would lead to a dead end.
+    // We smart-suggest one of GitHub/GitLab based on the URL host substring,
+    // and let the user override via the second button if the guess is wrong.
+    const url = repoInfo.url || '';
+    const hostMatch = url.match(/git@([^:]+):|https?:\/\/([^/]+)/);
+    const host = hostMatch ? (hostMatch[1] || hostMatch[2] || '').toLowerCase() : '';
+    const suggested = host.includes('gitlab') ? 'gitlab' : host.includes('github') ? 'github' : '';
     const providers = [
       { id: 'github', label: 'GitHub', desc: 'github.com or GitHub Enterprise' },
       { id: 'gitlab', label: 'GitLab', desc: 'gitlab.com or self-hosted GitLab' },
-      { id: 'bitbucket', label: 'Bitbucket', desc: 'bitbucket.org or self-hosted' },
-      { id: 'gitea', label: 'Gitea', desc: 'self-hosted Gitea instance' },
-      { id: 'gogs', label: 'Gogs', desc: 'self-hosted Gogs instance' },
     ];
 
-    const selectProvider = (providerId: string) => {
-      const url = repoInfo.url || '';
+    const selectProvider = (providerId: 'github' | 'gitlab') => {
       // Parse owner/repo from SSH or HTTPS URL.
       const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
       const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
@@ -426,24 +428,40 @@ export function PullRequestsPage() {
           <div className="text-xs text-center max-w-md">
             {t('pages.prProviderNotDetectedHint', { defaultValue: 'Select your hosting provider to enable Pull Requests and Code Review.' })}
           </div>
-          {repoInfo.url && (
-            <div className="text-2xs text-text-tertiary font-mono bg-bg-tertiary px-2 py-1 rounded max-w-full truncate">
-              {repoInfo.url}
+          {url && (
+            <div className="text-2xs text-text-tertiary font-mono bg-bg-tertiary px-2 py-1 rounded max-w-full truncate" title={url}>
+              {url}
             </div>
           )}
-          <div className="flex flex-wrap items-center justify-center gap-2 max-w-lg">
-            {providers.map((p) => (
-              <button
-                key={p.id}
-                className="btn btn-secondary text-xs flex flex-col items-center gap-0.5 py-2 px-3 min-w-[100px]"
-                onClick={() => selectProvider(p.id)}
-                title={p.desc}
-              >
-                <span className="font-medium">{p.label}</span>
-                <span className="text-2xs text-text-tertiary">{p.desc}</span>
-              </button>
-            ))}
+          <div className="flex items-center justify-center gap-2">
+            {providers.map((p) => {
+              const isSuggested = p.id === suggested;
+              return (
+                <button
+                  key={p.id}
+                  className={cn(
+                    'btn text-sm flex flex-col items-center gap-0.5 py-3 px-5 min-w-[140px] relative',
+                    isSuggested ? 'btn-primary' : 'btn-secondary'
+                  )}
+                  onClick={() => selectProvider(p.id as 'github' | 'gitlab')}
+                  title={p.desc}
+                >
+                  {isSuggested && (
+                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-2xs bg-accent-primary text-white px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                      detected
+                    </span>
+                  )}
+                  <span className="font-medium">{p.label}</span>
+                  <span className="text-2xs opacity-70">{p.desc}</span>
+                </button>
+              );
+            })}
           </div>
+          {!suggested && (
+            <div className="text-2xs text-text-tertiary text-center max-w-md">
+              Bitbucket, Gitea, Gogs are not yet supported — only GitHub and GitLab have API integrations.
+            </div>
+          )}
         </div>
       </div>
     );

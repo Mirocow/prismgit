@@ -373,9 +373,14 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
       if (match) {
         const [, host, ownerName, repoName] = match;
         webUrl = `https://${host}/${ownerName}/${repoName}`;
-        if (host.includes('github.com')) { provider = 'github'; owner = ownerName; repo = repoName; }
+        // Match by host substring so self-hosted instances are detected too:
+        //   github.com, github.company.com  → github
+        //   gitlab.com, gitlab.company.com  → gitlab
+        // We no longer classify bitbucket/gitea/gogs because there is no API
+        // integration for them — they will be 'unknown' and the UI will offer
+        // manual GitHub/GitLab selection.
+        if (host.includes('github')) { provider = 'github'; owner = ownerName; repo = repoName; }
         else if (host.includes('gitlab')) { provider = 'gitlab'; owner = ownerName; repo = repoName; }
-        else if (host.includes('bitbucket.org')) { provider = 'bitbucket'; owner = ownerName; repo = repoName; }
       }
     }
 

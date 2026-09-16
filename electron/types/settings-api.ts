@@ -42,7 +42,7 @@ export interface RepositoryMetadata {
   branchCount?: number;
   commitCount?: number;
   remoteUrl?: string;
-  provider?: 'github' | 'gitlab' | 'bitbucket' | 'unknown';
+  provider?: 'github' | 'gitlab' | 'unknown';
   owner?: string;
   repo?: string;
   webUrl?: string;

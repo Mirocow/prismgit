@@ -4509,7 +4509,7 @@ export async function clean(
 
 export async function extractRepoInfo(
   repoPath: string
-): Promise<{ provider: 'github' | 'gitlab' | 'bitbucket' | 'unknown'; owner?: string; repo?: string; url?: string; webUrl?: string }> {
+): Promise<{ provider: 'github' | 'gitlab' | 'unknown'; owner?: string; repo?: string; url?: string; webUrl?: string }> {
   const git = getGit(repoPath);
   try {
     const remotes = await git.getRemotes(true);
@@ -4517,7 +4517,14 @@ export async function extractRepoInfo(
     if (!origin) return { provider: 'unknown' };
     const url = origin.refs.fetch;
     let webUrl = url;
-    let provider: 'github' | 'gitlab' | 'bitbucket' | 'unknown' = 'unknown';
+    // We only auto-detect providers that actually have API integrations
+    // wired (GitHub + GitLab). Other providers (Bitbucket, Gitea, Gogs) are
+    // left as 'unknown' so the UI can prompt for manual selection — but
+    // the manual picker only offers providers we can actually talk to.
+    // Match by host substring so self-hosted instances are detected too:
+    //   github.com, github.company.com  → github
+    //   gitlab.com, gitlab.company.com  → gitlab
+    let provider: 'github' | 'gitlab' | 'unknown' = 'unknown';
     let owner: string | undefined;
     let repo: string | undefined;
 
@@ -4527,15 +4534,13 @@ export async function extractRepoInfo(
     if (sshMatch) {
       const [, host, ownerName, repoName] = sshMatch;
       webUrl = `https://${host}/${ownerName}/${repoName}`;
-      if (host.includes('github.com')) { provider = 'github'; owner = ownerName; repo = repoName; }
+      if (host.includes('github')) { provider = 'github'; owner = ownerName; repo = repoName; }
       else if (host.includes('gitlab')) { provider = 'gitlab'; owner = ownerName; repo = repoName; }
-      else if (host.includes('bitbucket.org')) { provider = 'bitbucket'; owner = ownerName; repo = repoName; }
     } else if (httpsMatch) {
       const [, host, ownerName, repoName] = httpsMatch;
       webUrl = `https://${host}/${ownerName}/${repoName}`;
-      if (host.includes('github.com')) { provider = 'github'; owner = ownerName; repo = repoName; }
+      if (host.includes('github')) { provider = 'github'; owner = ownerName; repo = repoName; }
       else if (host.includes('gitlab')) { provider = 'gitlab'; owner = ownerName; repo = repoName; }
-      else if (host.includes('bitbucket.org')) { provider = 'bitbucket'; owner = ownerName; repo = repoName; }
     }
     return { provider, owner, repo, url, webUrl };
   } catch {

@@ -495,7 +495,7 @@ export interface GitApi {
   clean: (repoPath: string, paths: string[], dryRun?: boolean, force?: boolean, directories?: boolean) => Promise<string[]>;
 
   // GitHub-related utility
-  extractRepoInfo: (repoPath: string) => Promise<{ provider: 'github' | 'gitlab' | 'bitbucket' | 'unknown'; owner?: string; repo?: string; url?: string; webUrl?: string }>;
+  extractRepoInfo: (repoPath: string) => Promise<{ provider: 'github' | 'gitlab' | 'unknown'; owner?: string; repo?: string; url?: string; webUrl?: string }>;
 
   // File system integration
   revealInFileManager: (fullPath: string) => Promise<boolean>;
