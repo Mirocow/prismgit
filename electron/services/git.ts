@@ -2239,7 +2239,21 @@ function getBackgroundFetchRemotes(repoPath: string): string[] {
  * computations of incoming/outgoing commit counters and the working-tree
  * change count. NEVER throws — all failures land in `error`.
  */
+// Cache for pollRemoteSummary results. Each repo is polled at most once
+// per POLL_CACHE_TTL_MS, regardless of how many times pollRemoteSummaries
+// is called. This was the #2 source of git command spam: the sidebar
+// polled ALL repos every 30s (boost) / 120s (baseline), and EACH repo
+// ran 6-7 git commands. With 10 repos = 60-70 commands per poll cycle.
+const POLL_CACHE_TTL_MS = 60_000; // 1 minute — results are cached for 60s
+const pollCache = new Map<string, { summary: RemoteCheckSummary; expiresAt: number }>();
+
 export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSummary> {
+  // Check cache first — if we polled this repo recently, return the cached result.
+  const cached = pollCache.get(repoPath);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.summary;
+  }
+
   const summary = emptyRemoteCheckSummary(repoPath);
   if (!fs.existsSync(path.join(repoPath, '.git'))) {
     return summary;
@@ -2341,6 +2355,9 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
   } catch { /* keep 0 */ }
 
   summary.checkedAt = Date.now();
+  // Cache the result so the next poll within POLL_CACHE_TTL_MS returns
+  // instantly without spawning any git subprocesses.
+  pollCache.set(repoPath, { summary, expiresAt: Date.now() + POLL_CACHE_TTL_MS });
   return summary;
 }
 
