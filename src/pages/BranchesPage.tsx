@@ -1442,12 +1442,20 @@ export function BranchesPage() {
               </span>
             )}
             {/* "gone" — upstream branch was deleted on the remote. Pull would
-                fail; Push is the recovery. Surface this so the user understands
-                why Pull is unavailable on this branch. */}
+                fail; Push is the recovery. Surface with a warning triangle icon
+                and orange/red coloring to indicate the problem severity. */}
             {b.gone && (
-              <span className="text-2xs px-1 py-0.5 rounded bg-status-deleted/15 text-status-deleted font-medium"
-                title="The upstream branch was deleted on the remote. Pull is unavailable — Push to recreate it, or set a new tracked branch.">
-                gone
+              <span className="text-2xs px-1 py-0.5 rounded bg-status-warning/20 text-status-warning flex items-center gap-0.5 font-medium"
+                title="⚠ Upstream branch was deleted on the remote. Pull will fail — Push to recreate it, or set a new tracked branch.">
+                ⚠ gone
+              </span>
+            )}
+            {/* No upstream at all — local-only branch, never pushed.
+                Shown as info (blue) — less severe than 'gone'. */}
+            {!b.gone && !b.remote && !b.tracking && !b.upstream && (
+              <span className="text-2xs px-1 py-0.5 rounded bg-status-info/15 text-status-info flex items-center gap-0.5 font-medium"
+                title="Local-only branch — no upstream configured. Push with -u to publish.">
+                local
               </span>
             )}
             {b.ahead !== undefined && b.ahead > 0 && (

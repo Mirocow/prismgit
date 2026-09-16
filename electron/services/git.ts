@@ -1918,7 +1918,7 @@ export async function branches(repoPath: string): Promise<BranchInfo[]> {
 
   const result: BranchInfo[] = [];
 
-  const parseBlock = (raw: string, isRemote: boolean) => {
+  const parseBlock = async (raw: string, isRemote: boolean) => {
     if (!raw.trim()) return;
     for (const line of raw.split('\n').filter(Boolean)) {
       const parts = line.split('\t');
@@ -1950,16 +1950,31 @@ export async function branches(repoPath: string): Promise<BranchInfo[]> {
         branchInfo.tracking = current.tracking || undefined;
         branchInfo.ahead = current.ahead;
         branchInfo.behind = current.behind;
+        // Detect 'gone' upstream — the tracking ref was deleted on the remote
+        // (e.g. the PR was merged and the branch deleted). `git status` sets
+        // this as tracking but the ref no longer exists in refs/remotes/.
+        // We check if the upstream ref exists in the remote refs list.
+        if (current.tracking) {
+          const remoteRefs = await git.raw(['rev-parse', '--verify', '-q', `refs/remotes/${current.tracking}`]).catch(() => '');
+          if (!remoteRefs.trim()) {
+            branchInfo.gone = true;
+          }
+        }
       } else if (!isRemote && upstream) {
         branchInfo.upstream = upstream;
+        // Same gone check for non-current branches with upstream.
+        const remoteRefs = await git.raw(['rev-parse', '--verify', '-q', `refs/remotes/${upstream}`]).catch(() => '');
+        if (!remoteRefs.trim()) {
+          branchInfo.gone = true;
+        }
       }
 
       result.push(branchInfo);
     }
   };
 
-  parseBlock(rawLocal, false);
-  parseBlock(rawRemote, true);
+  await parseBlock(rawLocal, false);
+  await parseBlock(rawRemote, true);
 
   return result;
 }
