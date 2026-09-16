@@ -491,7 +491,7 @@ export async function restore(repoPath: string, files: string[], staged = false)
     // the real binary), but the REST of the files are restored correctly.
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes('git-lfs') || msg.includes('filter-process')) {
-      const gitNoLfs = simpleGit({ baseDir: repoPath, binary: 'git' })
+      const gitNoLfs = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS })
         .env({ GIT_LFS_SKIP_SMUDGE: '1' });
       await gitNoLfs.raw(args);
     } else {
@@ -1775,8 +1775,28 @@ export async function log(
   // `git log ref1 ref2 ref3` shows the union of all commits reachable from any of these refs,
   // in topological order — perfect for multi-branch history view.
   if (branches && branches.length > 0) {
-    // Don't use --all when explicit branches are given
-    for (const b of branches) rawArgs.push(b);
+    // Validate each ref BEFORE passing it to `git log`. If a ref doesn't
+    // exist (e.g. a deleted branch, or a remote-tracking ref that was pruned),
+    // `git log` exits 128 with "fatal: ambiguous argument". This spammed
+    // the command log with errors on every History page load.
+    // We use `git rev-parse --verify -q <ref>` to check each ref; invalid
+    // refs are silently skipped (not included in the git log args).
+    const validBranches: string[] = [];
+    for (const b of branches) {
+      try {
+        await git.raw(['rev-parse', '--verify', '-q', b]);
+        validBranches.push(b);
+      } catch {
+        // Ref doesn't exist — skip it. Don't log the error (it's expected
+        // when a branch was deleted or a remote ref was pruned).
+      }
+    }
+    if (validBranches.length === 0) {
+      // No valid refs — return empty instead of running git log with no refs
+      // (which would show HEAD, confusing the user).
+      return [];
+    }
+    for (const b of validBranches) rawArgs.push(b);
   } else if (all) {
     rawArgs.push('--all');
   } else if (branch) {
@@ -3660,7 +3680,7 @@ export async function raw(repoPath: string, args: string[]): Promise<string> {
     // git-lfs is not installed on the user's machine.
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes('git-lfs') || msg.includes('filter-process')) {
-      const gitNoLfs = simpleGit({ baseDir: repoPath, binary: 'git' })
+      const gitNoLfs = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS })
         .env({ GIT_LFS_SKIP_SMUDGE: '1' });
       return await gitNoLfs.raw(args);
     }
@@ -4169,7 +4189,7 @@ export async function editCommitMessage(
       // simple-git blocks `-c core.editor` on the default instance — the
       // non-HEAD reword path silently always failed. An unsafe instance is
       // required for interactive-rebase automation.
-      const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true, allowUnsafeConfigEnvCount: true, allowUnsafeHooksPath: true } }).env(GIT_ENV_LFS_SKIP);
+      const gitUnsafe = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
       // Rewording the ROOT commit: rebase needs --root there (same parent-
       // counting probe as squashCommits — rev-parse --quiet never throws).
       let rootCase = false;
@@ -4774,7 +4794,7 @@ export async function splitCommit(repoPath: string, hash: string): Promise<{ sta
   // Dedicated instance with unsafe.allowUnsafeEditor: simple-git blocks
   // `-c sequence.editor=...` on the default instance, which made splitCommit
   // fail silently (always {started:false}) despite valid git commands.
-  const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true, allowUnsafeConfigEnvCount: true, allowUnsafeHooksPath: true } }).env(GIT_ENV_LFS_SKIP);
+  const gitUnsafe = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
   // Start an interactive rebase with "edit" for the target commit
   // This will stop at the commit, allowing the user to split it
   try {
@@ -6197,7 +6217,7 @@ export async function setupCredentialHelper(repoPath: string): Promise<void> {
   // ("Configuring credential.helper is not permitted without enabling
   // allowUnsafeCredentialHelper") — the old code swallowed that error, so this
   // function silently did nothing. Use an unsafe instance and actually set it.
-  const git = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeCredentialHelper: true, allowUnsafeConfigEnvCount: true, allowUnsafeHooksPath: true } }).env(GIT_ENV_LFS_SKIP);
+  const git = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeCredentialHelper: true } }).env(GIT_ENV_LFS_SKIP);
   try {
     await git.addConfig('credential.helper', 'store', false /* replace-all */, 'local');
   } catch {
@@ -6395,7 +6415,7 @@ export async function squashCommits(
     // pitfall splitCommit documents) — an unsafe instance is MANDATORY here,
     // otherwise the rebase always fails with "Configuring core.editor is not
     // permitted without enabling allowUnsafeEditor".
-    const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true, allowUnsafeConfigEnvCount: true, allowUnsafeHooksPath: true } }).env(GIT_ENV_LFS_SKIP);
+    const gitUnsafe = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
     // fromHash may be the ROOT commit — rebase needs --root there. NOTE: a
     // `rev-parse --verify --quiet <hash>^` probe does NOT work: it exits 1
     // with EMPTY output and simple-git resolves that (no stderr → no throw).
