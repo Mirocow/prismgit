@@ -158,12 +158,26 @@ export function PullRequestsPage() {
         // Resolve the GitLab project ID from the owner/repo path.
         // We do this by listing the user's projects and finding the one
         // whose path_with_namespace matches owner/repo.
+        //
+        // Paginate beyond page 1 if needed — for self-hosted GitLab with
+        // many groups, the first 100 projects may not contain the one
+        // we're looking for. The previous code gave up after page 1 and
+        // reported 'project not found' — the user saw a 404 in the log
+        // ('gitlab:listMergeRequests: 404 Project Not Found').
         if (gitlabProjectId == null) {
-          const projects = await api.gitlab.listProjects(1, 100);
           const fullPath = `${repoInfo.owner}/${repoInfo.repo}`;
-          const found = projects.find((p) => p.path_with_namespace === fullPath);
+          let found: { id: number; path_with_namespace: string } | undefined;
+          // Try up to 5 pages (500 projects). Most users have < 100.
+          for (let page = 1; page <= 5 && !found; page++) {
+            const projects = await api.gitlab.listProjects(page, 100);
+            if (projects.length === 0) break; // no more pages
+            found = projects.find((p) => p.path_with_namespace === fullPath);
+          }
           if (!found) {
-            toast.error(t('pages.prLoadFailed'), `GitLab project "${fullPath}" not found in your accessible projects`);
+            toast.error(
+              t('pages.prLoadFailed'),
+              `GitLab project "${fullPath}" not found in your accessible projects (searched 500 projects). Check that your GitLab token has access to this project.`
+            );
             setPRs([]);
             return;
           }
@@ -175,7 +189,21 @@ export function PullRequestsPage() {
       }
     } catch (e) {
       const msg = String(e);
-      if (!msg.includes('Not authenticated')) {
+      // GitHub/GitLab return 404 when the owner/repo doesn't exist OR the
+      // token lacks access. Show a specific message so the user knows what
+      // to fix — and clear the PR list so they don't see stale data.
+      if (msg.includes('Not authenticated')) {
+        // Silent — auth gate state is shown in the UI.
+      } else if (msg.includes('404') || msg.toLowerCase().includes('not found')) {
+        setPRs([]);
+        toast.error(
+          t('pages.prLoadFailed'),
+          t('pages.prLoadNotFound', {
+            defaultValue: 'Repository not found on {provider}. Check the provider chip in the header — it may not match your remote URL. Owner/repo: {owner}/{repo}',
+            provider: repoInfo.provider, owner: repoInfo.owner, repo: repoInfo.repo,
+          })
+        );
+      } else {
         toast.error(t('pages.prLoadFailed'), msg);
       }
     } finally {

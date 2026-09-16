@@ -4,7 +4,7 @@ import { URL } from 'url';
 import { SimpleStore } from './simpleStore.js';
 import { setSecret, getSecret, deleteSecret } from './secrets.js';
 import { NS_GITHUB } from './credentialKeys.js';
-import type { GithubUser, GithubRepository, GithubPullRequest, GithubPRFile, GithubPRComment } from '../types/github-api.js';
+import type { GithubUser, GithubRepository, GithubPullRequest, GithubPRFile, GithubPRComment, GithubPRCommit } from '../types/github-api.js';
 
 interface AuthState {
   token?: string;
@@ -221,6 +221,26 @@ export async function listPRIssueComments(
   if (!token) throw new Error('Not authenticated with GitHub');
   return httpsJson<GithubPRComment[]>(
     `https://api.github.com/repos/${owner}/${repo}/issues/${prNumber}/comments?per_page=100`,
+    { token }
+  );
+}
+
+/**
+ * Fetch the commits that make up a PR — message, author, date, SHA.
+ *
+ * Useful for the PR review surface so the user can see WHAT was done in
+ * the PR, not just the file-level diff. Each commit links back to GitHub
+ * for the full commit details.
+ */
+export async function listPRCommits(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<GithubPRCommit[]> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  return httpsJson<GithubPRCommit[]>(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=250`,
     { token }
   );
 }

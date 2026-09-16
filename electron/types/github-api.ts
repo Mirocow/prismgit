@@ -79,6 +79,19 @@ export interface GithubPRComment {
   author_association?: string;
 }
 
+/** A commit included in a PR — returned by listPRCommits. */
+export interface GithubPRCommit {
+  sha: string;
+  commit: {
+    message: string;
+    author: { name: string; email: string; date: string };
+    committer?: { name: string; email: string; date: string };
+  };
+  author?: { login: string; avatar_url?: string };
+  committer?: { login: string; avatar_url?: string };
+  html_url: string;
+}
+
 export interface GithubApi {
   authWithPAT: (token: string) => Promise<GithubUser>;
   authWithOAuth: () => Promise<GithubUser>;
@@ -98,6 +111,8 @@ export interface GithubApi {
   listPRFiles: (owner: string, repo: string, prNumber: number) => Promise<GithubPRFile[]>;
   /** Fetch issue-style discussion comments (top-level PR thread, not line-by-line review comments). */
   listPRIssueComments: (owner: string, repo: string, prNumber: number) => Promise<GithubPRComment[]>;
+  /** Fetch the commits that make up a PR — message, author, date, SHA. */
+  listPRCommits: (owner: string, repo: string, prNumber: number) => Promise<GithubPRCommit[]>;
   getCheckRuns: (owner: string, repo: string, shas: string[]) => Promise<Record<string, CommitCheckStatus>>;
   logout: () => Promise<void>;
   getAuthState: () => Promise<{ authenticated: boolean; user?: GithubUser }>;

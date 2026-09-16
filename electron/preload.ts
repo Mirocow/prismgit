@@ -352,6 +352,8 @@ const api = {
       ipcRenderer.invoke('github:listPRFiles', owner, repo, prNumber),
     listPRIssueComments: (owner: string, repo: string, prNumber: number) =>
       ipcRenderer.invoke('github:listPRIssueComments', owner, repo, prNumber),
+    listPRCommits: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:listPRCommits', owner, repo, prNumber),
     getCheckRuns: (owner: string, repo: string, shas: string[]) =>
       ipcRenderer.invoke('github:getCheckRuns', owner, repo, shas),
     logout: () => ipcRenderer.invoke('github:logout'),

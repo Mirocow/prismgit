@@ -1,60 +1,58 @@
 /**
  * PR review surface — the in-app code review experience for a selected PR.
  *
- * The user's explicit request: 'Зачем делали тогда инструмент Reviews —
- * в нем и должен происходить кодревью, он и должен быть синхронизирован
- * с пулреквест'. So this component is what Reviews page shows when a PR is
- * selected from Pull Requests (or anywhere else that calls selectPR).
+ * The user's explicit request: 'А где описание к мр а где комиты а где разница
+ * где полноценный интерфейс'. So this component is what Reviews page shows
+ * when a PR is selected. It has FOUR tabs:
  *
- * Layout:
- *   ┌─────────────────────────────────────────────┬──────────────────────┐
- *   │ Header: #123 Title [open] [⇪ merge] [⊘ close] │  Files changed (3)   │
- *   │ author · opened 2d ago · updated 1h ago       │  ─────────────────── │
- *   │ ─────────────────────────────────────────── │  ✓ src/foo.ts (+5/-2)│
- *   │ Description (markdown rendered)               │  ✓ README.md (+10)   │
- *   │ ...                                           │  ⚠ src/bar.ts (+50)  │
- *   │ ─────────────────────────────────────────── │                      │
- *   │ Comments (3)                                 │  Selected file diff: │
- *   │ user1 · 2h ago                                │  (patch rendered)    │
- *   │ comment text                                  │                      │
- *   │ user2 · 1h ago                                 │                      │
- *   │ ...                                           │                      │
- *   │ ─────────────────────────────────────────── │                      │
- *   │ [Add comment...] [Post]                       │                      │
- *   └─────────────────────────────────────────────┴──────────────────────┘
+ *   ┌──────────────────────────────────────────────────────────────────────┐
+ *   │ Header: #123 Title [open] [⇪ merge] [⊘ close]  stats + Open external │
+ *   │ author · opened 2d ago · head → base                                 │
+ *   │ ─────────────────────────────────────────────────────────────────── │
+ *   │ [Overview] [Commits] [Files (3)] [Discussion (2)]                    │
+ *   │ ─────────────────────────────────────────────────────────────────── │
+ *   │ TAB CONTENT                                                          │
+ *   │                                                                      │
+ *   │   Overview   = description (markdown) + stats + meta                  │
+ *   │   Commits    = list of commits in the PR (sha, msg, author, date)    │
+ *   │   Files      = changed files with status + +/- counts + diff patch   │
+ *   │   Discussion = issue-style comments + comment input                 │
+ *   └──────────────────────────────────────────────────────────────────────┘
  *
- * Data sources (GitHub API):
- *   - getPullRequest: full PR with body, stats, mergeable, labels
- *   - listPRFiles: changed files with patches
- *   - listPRIssueComments: top-level discussion thread
- *
- * For GitLab MRs, only the basic info from the list is shown — GitLab
- * doesn't have these detail endpoints wired yet.
+ * Error handling for 404s:
+ *   - GitHub/GitLab return 404 when owner/repo is wrong (user manually
+ *     picked a provider via the chip dropdown, but the URL parse didn't
+ *     produce the right owner/repo, OR the token doesn't have access).
+ *   - We show a clear error panel: 'Repository not found on GitHub/GitLab'
+ *     + the API endpoint that 404'd, so the user can debug.
  */
 import { useState, useEffect, useCallback } from 'react';
 import {
-  GitPullRequest, X, ExternalLink, Loader, Check, FileText, MessageSquare,
-  GitCommit, Plus, Minus, ArrowRight, RefreshCw,
+  GitPullRequest, GitCommit, X, ExternalLink, Loader, Check, FileText,
+  MessageSquare, Plus, Minus, ArrowRight, RefreshCw, AlertCircle,
 } from './icons';
 import { useI18n } from '../lib/i18n';
 import { useToastActions } from '../stores/toastStore';
-import { api, type GithubPullRequest, type GithubPRFile, type GithubPRComment } from '../lib/api';
+import {
+  api, type GithubPullRequest, type GithubPRFile, type GithubPRComment,
+  type GithubPRCommit,
+} from '../lib/api';
 import { Avatar } from './Avatar';
 import MarkdownRenderer from './MarkdownRenderer';
-import { cn, formatDate } from '../lib/utils';
+import { cn, formatDate, shortHash } from '../lib/utils';
 import { confirmDialog } from './ConfirmDialog';
 import type { SelectedPR } from '../stores/providerStore';
 
+type Tab = 'overview' | 'commits' | 'files' | 'discussion';
+
 interface PRReviewProps {
-  /** The selected PR from providerStore — has the basic fields. */
   pr: SelectedPR;
   owner: string;
   repo: string;
   provider: 'github' | 'gitlab';
-  /** GitLab project ID — only set for GitLab MRs. */
   gitlabProjectId?: number | null;
-  onActionComplete: () => void;  // refresh PR list after merge/close/etc
-  onClose: () => void;            // clear the PR selection
+  onActionComplete: () => void;
+  onClose: () => void;
 }
 
 export function PRReview({
@@ -62,10 +60,13 @@ export function PRReview({
 }: PRReviewProps) {
   const { t } = useI18n();
   const toast = useToastActions();
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [fullPR, setFullPR] = useState<GithubPullRequest | null>(null);
   const [files, setFiles] = useState<GithubPRFile[]>([]);
   const [comments, setComments] = useState<GithubPRComment[]>([]);
+  const [commits, setCommits] = useState<GithubPRCommit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<GithubPRFile | null>(null);
   const [commentText, setCommentText] = useState('');
@@ -73,25 +74,54 @@ export function PRReview({
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       if (provider === 'github') {
-        const [prDetail, prFiles, prComments] = await Promise.all([
+        // Validate owner/repo before hitting the API — a manual provider
+        // override via the chip can leave owner/repo empty, in which case
+        // GitHub returns 404 (the user's error log was full of these).
+        if (!owner || !repo) {
+          setLoadError(
+            t('pages.prReviewNoOwnerRepo', {
+              defaultValue: 'Repository owner/name not detected from the remote URL. Open the provider chip in the header to re-detect or switch providers.'
+            })
+          );
+          setLoading(false);
+          return;
+        }
+        const [prDetail, prFiles, prComments, prCommits] = await Promise.all([
           api.github.getPullRequest(owner, repo, pr.number),
           api.github.listPRFiles(owner, repo, pr.number),
           api.github.listPRIssueComments(owner, repo, pr.number),
+          api.github.listPRCommits(owner, repo, pr.number),
         ]);
         setFullPR(prDetail);
         setFiles(prFiles);
         setComments(prComments);
+        setCommits(prCommits);
         setSelectedFile((cur) => cur ?? prFiles[0] ?? null);
       } else {
-        // GitLab: detail endpoint not wired — show what we have from the list.
+        // GitLab: detail endpoints not wired — only show what's in the list.
         setFullPR(null);
         setFiles([]);
         setComments([]);
+        setCommits([]);
       }
     } catch (e) {
-      toast.error(t('pages.prLoadFailed'), String(e));
+      const msg = String(e);
+      // 404 is the most common case — user manually picked the wrong
+      // provider, or the repo is private and the token lacks access.
+      // Translate it to a friendly message.
+      if (msg.includes('404') || msg.toLowerCase().includes('not found')) {
+        setLoadError(
+          t('pages.prReviewNotFound', {
+            defaultValue: 'PR #{n} was not found on {provider}. Check that the provider chip in the header matches your repo, and that your token has access to {owner}/{repo}.',
+            n: pr.number, provider, owner, repo,
+          })
+        );
+      } else {
+        setLoadError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -102,9 +132,8 @@ export function PRReview({
     void load();
   }, [load]);
 
-  // The displayed PR — prefer the full version (has body + stats),
-  // fall back to the list version while loading.
-  // GithubPullRequest has `user`, SelectedPR has `author` — normalize here.
+  // Normalize GithubPullRequest.user → SelectedPR.author so the rest of the
+  // component reads one field.
   type DisplayPR = SelectedPR & {
     additions?: number; deletions?: number; changed_files?: number;
     commits?: number; comments?: number; review_comments?: number;
@@ -201,10 +230,17 @@ export function PRReview({
     additions: fullPR.additions ?? 0,
     deletions: fullPR.deletions ?? 0,
     changedFiles: fullPR.changed_files ?? files.length,
-    commits: fullPR.commits ?? 0,
+    commits: fullPR.commits ?? commits.length,
     comments: fullPR.comments ?? 0,
     reviewComments: fullPR.review_comments ?? 0,
   } : null;
+
+  const TABS: { id: Tab; label: string; count?: number }[] = [
+    { id: 'overview', label: t('pages.prTabOverview', { defaultValue: 'Overview' }) },
+    { id: 'commits', label: t('pages.prTabCommits', { defaultValue: 'Commits' }), count: commits.length },
+    { id: 'files', label: t('pages.prTabFiles', { defaultValue: 'Files' }), count: files.length },
+    { id: 'discussion', label: t('pages.prTabDiscussion', { defaultValue: 'Discussion' }), count: comments.length },
+  ];
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -258,6 +294,12 @@ export function PRReview({
             >
               {displayPR.base.ref}
             </button>
+            {stats && (
+              <>
+                <span className="ml-2 text-status-added">+{stats.additions}</span>
+                <span className="text-status-deleted">-{stats.deletions}</span>
+              </>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
@@ -282,7 +324,7 @@ export function PRReview({
       </div>
 
       {/* Action bar — Approve / Merge / Close (only for open PRs) */}
-      {displayPR.state === 'open' && (
+      {displayPR.state === 'open' && !loadError && (
         <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border-subtle bg-bg-tertiary">
           <button
             className="btn btn-secondary text-xs flex items-center gap-1"
@@ -315,122 +357,154 @@ export function PRReview({
                 <FileText size={10} />
                 {stats.changedFiles} {t('pages.prFiles', { defaultValue: 'files' })}
               </span>
-              <span className="flex items-center gap-1 text-status-added">
-                <Plus size={10} />{stats.additions}
-              </span>
-              <span className="flex items-center gap-1 text-status-deleted">
-                <Minus size={10} />{stats.deletions}
-              </span>
               <span className="flex items-center gap-1">
                 <GitCommit size={10} />
-                {stats.commits}
+                {stats.commits} {t('pages.prCommits', { defaultValue: 'commits' })}
               </span>
             </div>
           )}
         </div>
       )}
 
-      {/* Body — description + comments on the left, files on the right */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left: description + comments */}
-        <div className="flex-1 flex flex-col overflow-hidden border-r border-border-subtle">
-          <div className="flex-1 overflow-y-auto">
-            {loading ? (
-              <div className="p-8 text-center text-text-tertiary text-sm flex items-center justify-center gap-2">
-                <Loader size={14} className="animate-spin" />
-                {t('common.loading')}
+      {/* Tabs */}
+      {!loadError && (
+        <div className="flex items-center border-b border-border-subtle bg-bg-secondary">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              className={cn(
+                'px-3 py-1.5 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5',
+                activeTab === tab.id
+                  ? 'border-accent text-accent'
+                  : 'border-transparent text-text-secondary hover:text-text-primary'
+              )}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+              {tab.count != null && tab.count > 0 && (
+                <span className={cn(
+                  'text-3xs px-1 rounded',
+                  activeTab === tab.id ? 'bg-accent text-text-inverse' : 'bg-bg-tertiary text-text-tertiary'
+                )}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center h-full text-text-tertiary text-sm gap-2">
+            <Loader size={14} className="animate-spin" />
+            {t('common.loading')}
+          </div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center justify-center h-full text-text-tertiary p-8 gap-3">
+            <AlertCircle size={32} className="text-status-deleted opacity-60" />
+            <div className="text-sm text-text-primary font-medium max-w-md text-center">
+              {t('pages.prReviewLoadFailed', { defaultValue: 'Failed to load PR review' })}
+            </div>
+            <div className="text-xs max-w-lg text-center whitespace-pre-wrap">{loadError}</div>
+            <div className="text-2xs text-text-tertiary font-mono mt-2 px-3 py-1 bg-bg-tertiary rounded">
+              {provider} / {owner}/{repo} / #{pr.number}
+            </div>
+            <button
+              className="btn btn-secondary text-xs mt-2 flex items-center gap-1"
+              onClick={() => void load()}
+            >
+              <RefreshCw size={11} />
+              {t('common.retry', { defaultValue: 'Retry' })}
+            </button>
+          </div>
+        ) : activeTab === 'overview' ? (
+          <div className="overflow-y-auto h-full">
+            {displayPR.body ? (
+              <div className="px-4 py-3">
+                <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                  {t('pages.prDescription', { defaultValue: 'Description' })}
+                </div>
+                <MarkdownRenderer text={displayPR.body} />
               </div>
             ) : (
-              <>
-                {/* Description */}
-                {displayPR.body ? (
-                  <div className="px-4 py-3 border-b border-border-subtle">
-                    <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                      {t('pages.prDescription', { defaultValue: 'Description' })}
-                    </div>
-                    <MarkdownRenderer text={displayPR.body} />
-                  </div>
-                ) : (
-                  <div className="px-4 py-3 border-b border-border-subtle text-text-tertiary text-xs italic">
-                    {t('pages.prNoDescription', { defaultValue: 'No description provided.' })}
-                  </div>
-                )}
-
-                {/* Comments */}
-                <div className="px-4 py-3">
-                  <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2 flex items-center gap-1">
-                    <MessageSquare size={11} />
-                    {t('pages.prComments', { defaultValue: 'Comments' })} ({comments.length})
-                  </div>
-                  {comments.length === 0 ? (
-                    <div className="text-text-tertiary text-xs italic mb-3">
-                      {t('pages.prNoComments', { defaultValue: 'No comments yet.' })}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {comments.map((c) => (
-                        <div key={c.id} className="flex gap-2 p-2 bg-bg-tertiary rounded">
-                          <Avatar name={c.user.login} email={undefined} size={18} avatarUrl={c.user.avatar_url} />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 text-xs">
-                              <span className="font-medium text-text-primary">{c.user.login}</span>
-                              <span className="text-text-tertiary text-2xs">{formatDate(c.created_at)}</span>
-                              {c.author_association && c.author_association !== 'NONE' && (
-                                <span className="text-3xs px-1 rounded bg-bg-secondary text-text-tertiary">{c.author_association}</span>
-                              )}
-                            </div>
-                            <div className="text-xs text-text-secondary mt-0.5">
-                              <MarkdownRenderer text={c.body} />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+              <div className="px-4 py-3 text-text-tertiary text-xs italic">
+                {t('pages.prNoDescription', { defaultValue: 'No description provided.' })}
+              </div>
+            )}
+            {/* Meta summary */}
+            {stats && (
+              <div className="px-4 py-3 border-t border-border-subtle">
+                <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
+                  {t('pages.prMeta', { defaultValue: 'Summary' })}
                 </div>
-              </>
+                <div className="grid grid-cols-3 gap-3 text-xs">
+                  <div className="bg-bg-tertiary p-2 rounded">
+                    <div className="text-2xs text-text-tertiary uppercase">{t('pages.prFiles', { defaultValue: 'files' })}</div>
+                    <div className="text-sm font-medium">{stats.changedFiles}</div>
+                  </div>
+                  <div className="bg-bg-tertiary p-2 rounded">
+                    <div className="text-2xs text-text-tertiary uppercase">{t('pages.prCommits', { defaultValue: 'commits' })}</div>
+                    <div className="text-sm font-medium">{stats.commits}</div>
+                  </div>
+                  <div className="bg-bg-tertiary p-2 rounded">
+                    <div className="text-2xs text-text-tertiary uppercase">{t('pages.prComments', { defaultValue: 'comments' })}</div>
+                    <div className="text-sm font-medium">{stats.comments + stats.reviewComments}</div>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
-
-          {/* Comment box */}
-          {provider === 'github' && !loading && (
-            <div className="border-t border-border-subtle px-4 py-2 bg-bg-secondary">
-              <textarea
-                className="w-full text-sm bg-bg-tertiary border border-border-default rounded p-2 resize-none"
-                rows={2}
-                placeholder={t('pages.prCommentPlaceholder', { defaultValue: 'Leave a comment...' })}
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                    void handlePostComment();
-                  }
-                }}
-              />
-              <div className="flex items-center justify-between mt-1">
-                <span className="text-2xs text-text-tertiary">
-                  {t('pages.prCommentHint', { defaultValue: 'Cmd/Ctrl+Enter to post' })}
-                </span>
-                <button
-                  className="btn btn-primary text-xs flex items-center gap-1"
-                  onClick={handlePostComment}
-                  disabled={!commentText.trim() || postingComment}
-                >
-                  {postingComment ? <Loader size={11} className="animate-spin" /> : <MessageSquare size={11} />}
-                  {t('pages.prPostComment', { defaultValue: 'Comment' })}
-                </button>
+        ) : activeTab === 'commits' ? (
+          <div className="overflow-y-auto h-full">
+            {commits.length === 0 ? (
+              <div className="p-8 text-center text-text-tertiary text-xs italic">
+                {t('pages.prNoCommits', { defaultValue: 'No commits found.' })}
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right: changed files + selected file's diff */}
-        {files.length > 0 && (
-          <div className="w-1/2 flex flex-col overflow-hidden">
-            <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 py-1.5 border-b border-border-subtle bg-bg-tertiary">
-              {t('pages.prChangedFiles', { defaultValue: 'Changed files' })} ({files.length})
-            </div>
-            <div className="flex-1 overflow-y-auto">
+            ) : (
+              commits.map((c) => (
+                <div
+                  key={c.sha}
+                  className="px-4 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer flex items-start gap-2"
+                  onClick={() => api.app.openExternal(c.html_url)}
+                  title={t('common.openExternal', { defaultValue: 'Open commit in browser' })}
+                >
+                  <GitCommit size={12} className="mt-0.5 text-text-tertiary flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-text-primary whitespace-pre-wrap break-words">
+                      {c.commit.message.split('\n')[0]}
+                    </div>
+                    {c.commit.message.includes('\n') && (
+                      <div className="text-2xs text-text-tertiary mt-0.5 whitespace-pre-wrap break-words opacity-70">
+                        {c.commit.message.split('\n').slice(1).join('\n').trim()}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 mt-1 text-2xs text-text-tertiary">
+                      {c.author && (
+                        <>
+                          <Avatar name={c.author.login} email={undefined} size={10} avatarUrl={c.author.avatar_url} />
+                          <span className="text-text-secondary">{c.author.login}</span>
+                          <span>·</span>
+                        </>
+                      )}
+                      <span>{formatDate(c.commit.author.date)}</span>
+                      <span>·</span>
+                      <code className="mono text-text-tertiary">{shortHash(c.sha)}</code>
+                    </div>
+                  </div>
+                  <ExternalLink size={10} className="text-text-tertiary opacity-0 group-hover:opacity-100 mt-1" />
+                </div>
+              ))
+            )}
+          </div>
+        ) : activeTab === 'files' ? (
+          <div className="flex h-full">
+            {/* Files list */}
+            <div className="w-1/3 border-r border-border-subtle overflow-y-auto flex-shrink-0">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 py-1.5 border-b border-border-subtle bg-bg-tertiary sticky top-0">
+                {t('pages.prChangedFiles', { defaultValue: 'Changed files' })} ({files.length})
+              </div>
               {files.map((f) => (
                 <button
                   key={f.sha + f.filename}
@@ -457,26 +531,109 @@ export function PRReview({
                 </button>
               ))}
             </div>
-            {selectedFile?.patch && (
-              <div className="border-t border-border-default flex-shrink-0 max-h-[45%] overflow-y-auto bg-bg-secondary">
-                <div className="px-3 py-1 text-2xs font-mono text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary">
-                  {selectedFile.filename}
-                </div>
-                <pre className="text-2xs font-mono p-2 overflow-x-auto leading-tight">
-                  {selectedFile.patch.split('\n').map((line: string, i: number) => (
-                    <div
-                      key={i}
-                      className={cn(
-                        'px-1',
-                        line.startsWith('+') && !line.startsWith('+++') && 'bg-status-added/15 text-status-added',
-                        line.startsWith('-') && !line.startsWith('---') && 'bg-status-deleted/15 text-status-deleted',
-                        line.startsWith('@@') && 'text-accent'
-                      )}
+            {/* Diff view */}
+            <div className="flex-1 overflow-y-auto bg-bg-secondary">
+              {selectedFile?.patch ? (
+                <>
+                  <div className="px-3 py-1.5 text-xs font-mono text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary flex items-center justify-between">
+                    <span className="truncate">{selectedFile.filename}</span>
+                    <span className="flex items-center gap-2 text-2xs">
+                      <span className="text-status-added">+{selectedFile.additions}</span>
+                      <span className="text-status-deleted">-{selectedFile.deletions}</span>
+                    </span>
+                  </div>
+                  <pre className="text-2xs font-mono p-2 overflow-x-auto leading-tight">
+                    {selectedFile.patch.split('\n').map((line: string, i: number) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          'px-1',
+                          line.startsWith('+') && !line.startsWith('+++') && 'bg-status-added/15 text-status-added',
+                          line.startsWith('-') && !line.startsWith('---') && 'bg-status-deleted/15 text-status-deleted',
+                          line.startsWith('@@') && 'text-accent'
+                        )}
+                      >
+                        {line || ' '}
+                      </div>
+                    ))}
+                  </pre>
+                </>
+              ) : selectedFile ? (
+                <div className="p-4 text-center text-text-tertiary text-xs italic">
+                  {t('pages.prDiffTooBig', { defaultValue: 'Diff for this file is too large to display inline. Open it on GitHub.' })}
+                  <div className="mt-2">
+                    <button
+                      className="text-accent hover:underline text-xs"
+                      onClick={() => api.app.openExternal(selectedFile.blob_url)}
                     >
-                      {line || ' '}
+                      {t('pages.prOpenFileExternal', { defaultValue: 'Open on GitHub' })}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 text-center text-text-tertiary text-xs italic">
+                  {t('pages.prSelectFile', { defaultValue: 'Select a file to view its diff' })}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          // discussion tab
+          <div className="flex flex-col h-full">
+            <div className="flex-1 overflow-y-auto">
+              {comments.length === 0 ? (
+                <div className="p-8 text-center text-text-tertiary text-xs italic">
+                  {t('pages.prNoComments', { defaultValue: 'No comments yet.' })}
+                </div>
+              ) : (
+                <div className="px-4 py-3 space-y-2">
+                  {comments.map((c) => (
+                    <div key={c.id} className="flex gap-2 p-2 bg-bg-tertiary rounded">
+                      <Avatar name={c.user.login} email={undefined} size={18} avatarUrl={c.user.avatar_url} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-medium text-text-primary">{c.user.login}</span>
+                          <span className="text-text-tertiary text-2xs">{formatDate(c.created_at)}</span>
+                          {c.author_association && c.author_association !== 'NONE' && (
+                            <span className="text-3xs px-1 rounded bg-bg-secondary text-text-tertiary">{c.author_association}</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-text-secondary mt-0.5">
+                          <MarkdownRenderer text={c.body} />
+                        </div>
+                      </div>
                     </div>
                   ))}
-                </pre>
+                </div>
+              )}
+            </div>
+            {provider === 'github' && (
+              <div className="border-t border-border-subtle px-4 py-2 bg-bg-secondary">
+                <textarea
+                  className="w-full text-sm bg-bg-tertiary border border-border-default rounded p-2 resize-none"
+                  rows={2}
+                  placeholder={t('pages.prCommentPlaceholder', { defaultValue: 'Leave a comment...' })}
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      void handlePostComment();
+                    }
+                  }}
+                />
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-2xs text-text-tertiary">
+                    {t('pages.prCommentHint', { defaultValue: 'Cmd/Ctrl+Enter to post' })}
+                  </span>
+                  <button
+                    className="btn btn-primary text-xs flex items-center gap-1"
+                    onClick={handlePostComment}
+                    disabled={!commentText.trim() || postingComment}
+                  >
+                    {postingComment ? <Loader size={11} className="animate-spin" /> : <MessageSquare size={11} />}
+                    {t('pages.prPostComment', { defaultValue: 'Comment' })}
+                  </button>
+                </div>
               </div>
             )}
           </div>
