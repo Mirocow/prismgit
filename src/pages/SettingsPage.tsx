@@ -187,6 +187,110 @@ export function SettingsPage() {
     toast.info(t('settings.loggedOutGithub'));
   };
 
+  // ─── GitLab integration state ──────────────────────────────────────────
+  // Separate from GitHub auth — the user can be connected to both at once.
+  // The PAT is stored in the encrypted vault (electron/services/gitlab.ts
+  // uses setSecret/getSecret), NOT in plaintext settings JSON.
+  const [gitlabPat, setGitlabPat] = useState('');
+  const [gitlabBaseUrl, setGitlabBaseUrl] = useState('https://gitlab.com');
+  const [gitlabAuthLoading, setGitlabAuthLoading] = useState(false);
+  const [gitlabAuthed, setGitlabAuthed] = useState(false);
+  const [gitlabUser, setGitlabUser] = useState<{ username?: string; name?: string; avatar_url?: string } | null>(null);
+  // GitHub + GitLab "Test connection" button state — shows a spinner while
+  // the test IPC call is in flight, then a success/fail toast.
+  const [testingGithub, setTestingGithub] = useState(false);
+  const [testingGitlab, setTestingGitlab] = useState(false);
+
+  // Load GitLab auth state on mount + when the Integrations tab is opened.
+  useEffect(() => {
+    if (!showIntegrations) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const state = await api.gitlab.getAuthState();
+        if (cancelled) return;
+        setGitlabAuthed(!!state.token);
+        setGitlabUser(state.user ? { username: state.user.username, name: state.user.name, avatar_url: state.user.avatar_url } : null);
+        if (state.baseUrl) setGitlabBaseUrl(state.baseUrl);
+      } catch {
+        // GitLab not configured — that's fine, the form below lets the user
+        // authenticate.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showIntegrations]);
+
+  const handleGitlabLogin = async () => {
+    if (!gitlabPat.trim()) {
+      toast.warning(t('settings.gitlabTokenRequired', { defaultValue: 'GitLab personal access token is required' }));
+      return;
+    }
+    setGitlabAuthLoading(true);
+    try {
+      const user = await api.gitlab.authWithPAT(gitlabPat.trim(), gitlabBaseUrl.trim() || undefined);
+      setGitlabAuthed(true);
+      setGitlabUser({ username: user.username, name: user.name, avatar_url: user.avatar_url });
+      setGitlabPat('');
+      toast.success(t('settings.gitlabConnected', { defaultValue: 'Connected to GitLab as {user}', user: user.username }));
+    } catch (e) {
+      toast.error(t('settings.gitlabAuthFailed', { defaultValue: 'GitLab authentication failed' }), String(e));
+    } finally {
+      setGitlabAuthLoading(false);
+    }
+  };
+
+  const handleGitlabLogout = async () => {
+    try {
+      await api.gitlab.logout();
+      setGitlabAuthed(false);
+      setGitlabUser(null);
+      toast.info(t('settings.gitlabDisconnected', { defaultValue: 'Disconnected from GitLab' }));
+    } catch { /* ignore */ }
+  };
+
+  // Test connection — verifies the token works WITHOUT persisting it. Useful
+  // when the user is unsure if their token has the right scopes or has expired.
+  const handleTestGithub = async () => {
+    if (!authenticated) {
+      toast.warning(t('settings.testConnectionNotAuthed', { defaultValue: 'Connect to GitHub first, then test the connection' }));
+      return;
+    }
+    setTestingGithub(true);
+    try {
+      const u = await api.github.getCurrentUser();
+      toast.success(
+        t('settings.testConnectionOk', { defaultValue: 'Connection OK' }),
+        t('settings.testConnectionGithubOk', { defaultValue: 'Authenticated as {login} ({name})', login: u.login, name: u.name || u.login })
+      );
+    } catch (e) {
+      toast.error(t('settings.testConnectionFailed', { defaultValue: 'Connection test failed' }), String(e));
+    } finally {
+      setTestingGithub(false);
+    }
+  };
+
+  const handleTestGitlab = async () => {
+    if (!gitlabAuthed) {
+      toast.warning(t('settings.testConnectionNotAuthed', { defaultValue: 'Connect to GitLab first, then test the connection' }));
+      return;
+    }
+    setTestingGitlab(true);
+    try {
+      // listProjects(1, 1) is the cheapest authenticated call — fetches
+      // exactly 1 project to verify the token works without pulling a
+      // huge list.
+      const projects = await api.gitlab.listProjects(1, 1);
+      toast.success(
+        t('settings.testConnectionOk', { defaultValue: 'Connection OK' }),
+        t('settings.testConnectionGitlabOk', { defaultValue: 'Authenticated — {count} projects accessible', count: projects.length })
+      );
+    } catch (e) {
+      toast.error(t('settings.testConnectionFailed', { defaultValue: 'Connection test failed' }), String(e));
+    } finally {
+      setTestingGitlab(false);
+    }
+  };
+
   const handleChooseCloneDir = async () => {
     const path = await api.fs.openDirectoryPicker();
     if (path) {
@@ -2071,6 +2175,15 @@ smartgit.refresh.inspectEol=true
                   <div className="text-sm font-medium">{user.name || user.login}</div>
                   <div className="text-xs text-text-tertiary">@{user.login}</div>
                 </div>
+                <button
+                  className="btn btn-secondary text-xs"
+                  onClick={handleTestGithub}
+                  disabled={testingGithub}
+                  title={t('settings.testConnectionTooltip', { defaultValue: 'Verify the GitHub token still works (calls /user)' })}
+                >
+                  {testingGithub ? <RefreshCw size={12} className="animate-spin" /> : <Github size={12} />}
+                  {t('settings.testConnection', { defaultValue: 'Test' })}
+                </button>
                 <button className="btn btn-danger text-xs" onClick={handleLogout}>
                   <LogOut size={12} />
                   {t('settings.logout')}
@@ -2117,6 +2230,93 @@ smartgit.refresh.inspectEol=true
                   </div>
                 </div>
               </>
+            )}
+          </div>
+        </section>
+        )}
+
+        {/* GitLab integration — separate from GitHub. The PAT is stored in
+            the encrypted vault (not plaintext settings). Used by the Clone
+            modal (GitLab projects tab) + Pull Requests page (GitLab MRs). */}
+        {showIntegrations && (
+        <section className="panel mb-4">
+          <div className="panel-header">
+            <span className="flex items-center gap-2">
+              <GitBranch size={12} />
+              {t('settings.gitlab', { defaultValue: 'GitLab' })}
+            </span>
+          </div>
+          <div className="p-5 space-y-4">
+            {gitlabAuthed && gitlabUser ? (
+              <div className="flex items-center gap-3 p-3 bg-bg-tertiary rounded">
+                {gitlabUser.avatar_url && <img src={gitlabUser.avatar_url} alt={gitlabUser.username} className="w-10 h-10 rounded-full" />}
+                <div className="flex-1">
+                  <div className="text-sm font-medium">{gitlabUser.name || gitlabUser.username}</div>
+                  <div className="text-xs text-text-tertiary">@{gitlabUser.username}</div>
+                </div>
+                <button
+                  className="btn btn-secondary text-xs"
+                  onClick={handleTestGitlab}
+                  disabled={testingGitlab}
+                  title={t('settings.testConnectionTooltip', { defaultValue: 'Verify the GitLab token still works (lists 1 project)' })}
+                >
+                  {testingGitlab ? <RefreshCw size={12} className="animate-spin" /> : <GitBranch size={12} />}
+                  {t('settings.testConnection', { defaultValue: 'Test' })}
+                </button>
+                <button className="btn btn-danger text-xs" onClick={handleGitlabLogout}>
+                  <LogOut size={12} />
+                  {t('settings.logout')}
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="text-sm mb-2">
+                  {t('settings.gitlabAuthenticatePat', { defaultValue: 'Authenticate with a GitLab Personal Access Token' })}
+                </div>
+                <div className="text-xs text-text-tertiary mb-3">
+                  {t('settings.gitlabCreateTokenAt', { defaultValue: 'Create a token at' })}{' '}
+                  <a
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      api.app.openExternal('https://gitlab.com/-/user_settings/personal_access_tokens?name=PrismGit&scopes=read_api,read_repository');
+                    }}
+                    className="text-accent hover:underline"
+                  >
+                    gitlab.com/-/user_settings/personal_access_tokens
+                  </a>{' '}
+                  {t('settings.gitlabWithScopes', { defaultValue: 'with scopes' })} <code className="font-mono">read_api</code>{' '}
+                  {t('settings.and')} <code className="font-mono">read_repository</code>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <input
+                    type="text"
+                    className="text-sm font-mono"
+                    placeholder="https://gitlab.com"
+                    value={gitlabBaseUrl}
+                    onChange={(e) => setGitlabBaseUrl(e.target.value)}
+                    title={t('settings.gitlabBaseUrlTitle', { defaultValue: 'GitLab instance URL — https://gitlab.com for cloud, or your self-hosted URL' })}
+                  />
+                  <input
+                    type="password"
+                    className="text-sm font-mono"
+                    placeholder="glpat-..."
+                    value={gitlabPat}
+                    onChange={(e) => setGitlabPat(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleGitlabLogin()}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="btn btn-primary text-xs"
+                    onClick={handleGitlabLogin}
+                    disabled={gitlabAuthLoading || !gitlabPat.trim()}
+                  >
+                    {gitlabAuthLoading ? <RefreshCw size={12} className="animate-spin" /> : <GitBranch size={12} />}
+                    {t('settings.connect')}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </section>
