@@ -126,6 +126,13 @@ export function isUserCommand(args: string[]): boolean {
   const cmd = positional[0];
   if (!cmd) return false;
 
+  // Synthetic 'api' entries — logged by github.ts / gitlab.ts for HTTP
+  // API calls (getMergeRequest, listMRChanges, etc.). These are ALWAYS
+  // user-initiated (the user opened a MR, clicked approve, etc.) — they
+  // should appear in the Output panel even when the 'System' filter is off.
+  // args shape: ['api', 'github'|'gitlab', 'GET'|'POST'|..., '/path']
+  if (cmd === 'api') return true;
+
   // Multi-word subcommand check (e.g. 'stash list', 'reflog show', 'lfs ls-files').
   // Two-word commands in ALWAYS_SYSTEM_MULTI override USER_COMMANDS.
   const sub = positional[1];
@@ -232,7 +239,14 @@ function CommandStatusDot({ entry }: { entry: CommandLogEntry }) {
 const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEntry }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
-  const cmdline = `git ${entry.args.join(' ')}`;
+  // Format the command line for display. Synthetic 'api' entries
+  // (GitHub/GitLab HTTP calls) get a special format:
+  //   api gitlab GET /projects/12/merge_requests/5
+  // instead of the misleading 'git api gitlab GET ...'.
+  const isApiCall = entry.args[0] === 'api';
+  const cmdline = isApiCall
+    ? entry.args.join(' ')  // 'api gitlab GET /path'
+    : `git ${entry.args.join(' ')}`;
   const failed = entry.exitCode !== 0;
   const hasDetails = Boolean(entry.stdout.trim() || entry.stderr.trim() || entry.repo);
   const isUser = isUserCommand(entry.args);
@@ -394,7 +408,8 @@ export function CommandLogPanel({
       .map((e) => {
         const lines = [
           `[${formatTime(e.timestamp)}] exit=${e.exitCode ?? 'signal'} ${formatDuration(e.durationMs)}`,
-          `$ git ${e.args.join(' ')}`,
+          // For 'api' entries, omit the misleading '$ git ' prefix.
+          (e.args[0] === 'api' ? e.args.join(' ') : `$ git ${e.args.join(' ')}`),
           `directory: ${e.repo}`,
         ];
         if (e.stdout.trim()) lines.push(e.stdout.trimEnd());

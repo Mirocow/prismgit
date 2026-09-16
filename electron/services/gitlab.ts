@@ -15,6 +15,7 @@ import type {
   GitLabMRNote,
   GitLabMRCommit,
 } from '../types/gitlab-api.js';
+import { startApiCall, finishApiCall, sanitizeApiPath } from './commandLog.js';
 
 export interface GitLabUser {
   id: number;
@@ -86,6 +87,11 @@ async function apiJson<T>(
   const baseUrl = getBaseUrl();
   const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}/api/v4${endpoint}`;
   const u = new URL(url);
+  // Log the GitLab API call to the Output panel — same pattern as github.ts.
+  // The path includes '/api/v4' so the user can see it's a GitLab API call.
+  const path = sanitizeApiPath(u.pathname + u.search);
+  const method = (options.method || 'GET').toUpperCase();
+  const handle = startApiCall({ provider: 'gitlab', method, path });
   const isHttps = u.protocol === 'https:';
   const lib = isHttps ? https : http;
   const headers: Record<string, string> = {
@@ -110,19 +116,26 @@ async function apiJson<T>(
         let data = '';
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          const status = res.statusCode ?? 0;
+          if (status >= 200 && status < 300) {
             try {
+              finishApiCall(handle, { status, body: data });
               resolve(data ? JSON.parse(data) : null);
             } catch (e) {
+              finishApiCall(handle, { status, error: `JSON parse error: ${e}` });
               reject(new Error(`JSON parse error: ${e}`));
             }
           } else {
-            reject(new Error(`GitLab API ${res.statusCode}: ${data}`));
+            finishApiCall(handle, { status, error: `GitLab API ${status}` });
+            reject(new Error(`GitLab API ${status}: ${data}`));
           }
         });
       }
     );
-    req.on('error', reject);
+    req.on('error', (e) => {
+      finishApiCall(handle, { status: 0, error: String(e) });
+      reject(e);
+    });
     if (options.body) {
       req.write(options.body);
     }

@@ -5,6 +5,7 @@ import { SimpleStore } from './simpleStore.js';
 import { setSecret, getSecret, deleteSecret } from './secrets.js';
 import { NS_GITHUB } from './credentialKeys.js';
 import type { GithubUser, GithubRepository, GithubPullRequest, GithubPRFile, GithubPRComment, GithubPRCommit } from '../types/github-api.js';
+import { startApiCall, finishApiCall, sanitizeApiPath } from './commandLog.js';
 
 interface AuthState {
   token?: string;
@@ -44,8 +45,14 @@ export function migrateLegacyGithubToken(): void {
 }
 
 async function httpsJson<T>(url: string, options: https.RequestOptions & { token?: string; body?: string } = {}): Promise<T> {
+  // Log the GitHub API call to the Output panel. The path is everything
+  // after the host (so '/repos/owner/repo/pulls/5?state=open' stays short
+  // and readable). Sanitize to redact any tokens that might be in the URL.
+  const u = new URL(url);
+  const path = sanitizeApiPath(u.pathname + u.search);
+  const method = (options.method || 'GET').toUpperCase();
+  const handle = startApiCall({ provider: 'github', method, path });
   return new Promise<T>((resolve, reject) => {
-    const u = new URL(url);
     const isHttps = u.protocol === 'https:';
     const lib = isHttps ? https : http;
     const headers: Record<string, string> = {
@@ -69,19 +76,26 @@ async function httpsJson<T>(url: string, options: https.RequestOptions & { token
         let data = '';
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          const status = res.statusCode ?? 0;
+          if (status >= 200 && status < 300) {
             try {
+              finishApiCall(handle, { status, body: data });
               resolve(data ? JSON.parse(data) : null);
             } catch (e) {
+              finishApiCall(handle, { status, error: `Failed to parse JSON: ${e}` });
               reject(new Error(`Failed to parse JSON: ${e}`));
             }
           } else {
-            reject(new Error(`GitHub API ${res.statusCode}: ${data}`));
+            finishApiCall(handle, { status, error: `GitHub API ${status}` });
+            reject(new Error(`GitHub API ${status}: ${data}`));
           }
         });
       }
     );
-    req.on('error', reject);
+    req.on('error', (e) => {
+      finishApiCall(handle, { status: 0, error: String(e) });
+      reject(e);
+    });
     if (options.body) req.write(options.body);
     req.end();
   });

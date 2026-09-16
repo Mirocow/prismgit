@@ -204,3 +204,109 @@ export function resetForTests(): void {
   entries.length = 0;
   nextId = 1;
 }
+
+// ─── API call logging (GitHub / GitLab HTTP requests) ─────────────────────
+//
+// The git command logger above only captures actual `git` child processes.
+// GitHub/GitLab REST API calls go through https.request / http.request —
+// they never spawn a process, so they were invisible in the Output panel.
+//
+// `logApiCall` lets the github.ts / gitlab.ts services record their HTTP
+// requests as synthetic CommandLogEntries. The entry uses:
+//   - args: ['api', '<provider>', '<METHOD>', '<path>'] (path is the API
+//     endpoint without the host — keeps the log row readable)
+//   - stdout: the raw response body (truncated by MAX_STREAM_CHARS)
+//   - stderr: the error message if the request failed
+//   - exitCode: 0 on HTTP 2xx, 1 on 4xx/5xx, null on network error
+//   - repo: '(api)' so the UI can distinguish these from real git commands
+//
+// This makes the Output panel show:
+//   [15:42:01] api  github  GET  /repos/web/git/pulls/5  200  142ms
+//   [15:42:01] api  gitlab  GET  /projects/12/merge_requests/5  200  89ms
+// So the user can see exactly which API calls fired when they opened a MR.
+
+let apiCallDepth = 0;  // reentrancy guard (currently unused, reserved for nesting)
+
+export interface ApiCallLogOptions {
+  /** Provider: 'github' | 'gitlab' — used as args[1]. */
+  provider: 'github' | 'gitlab';
+  /** HTTP method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'. */
+  method: string;
+  /** API endpoint path (without host). e.g. '/repos/owner/repo/pulls/5'. */
+  path: string;
+  /** Optional request body (truncated). Useful for POST/PATCH. */
+  requestBody?: string;
+}
+
+/**
+ * Record a GitHub/GitLab API call as a synthetic CommandLogEntry.
+ *
+ * Usage pattern (synchronous — call BEFORE the HTTP request fires):
+ *
+ *   const handle = startApiCall({ provider: 'gitlab', method: 'GET', path: `/projects/${id}/merge_requests/${iid}` });
+ *   try {
+ *     const result = await apiJson(url);
+ *     finishApiCall(handle, { status: 200, body: JSON.stringify(result) });
+ *     return result;
+ *   } catch (e) {
+ *     finishApiCall(handle, { status: 0, error: String(e) });
+ *     throw e;
+ *   }
+ *
+ * The split start/finish lets us measure duration accurately even when
+ * the request takes seconds (GitLab can be slow on large MRs).
+ */
+export interface ApiCallHandle {
+  id: number;
+  started: number;
+  options: ApiCallLogOptions;
+}
+
+export function startApiCall(opts: ApiCallLogOptions): ApiCallHandle {
+  apiCallDepth++;
+  const id = nextId++;
+  return { id, started: Date.now(), options: opts };
+}
+
+export function finishApiCall(
+  handle: ApiCallHandle,
+  result: { status: number; body?: string; error?: string },
+): void {
+  if (apiCallDepth > 0) apiCallDepth--;
+  const durationMs = Date.now() - handle.started;
+  // Truncate body to MAX_STREAM_CHARS so we don't blow memory on huge
+  // responses (e.g. listMRChanges on a MR that touches 200 files).
+  const body = (result.body ?? '').slice(0, MAX_STREAM_CHARS);
+  const bodyFinal = body.length < (result.body ?? '').length
+    ? body + TRUNCATED_MARKER
+    : body;
+  // Exit code mimics git: 0 on success (HTTP 2xx), 1 on HTTP error,
+  // null on network/transport failure (couldn't reach the server).
+  const exitCode = result.status === 0 ? null : (result.status >= 200 && result.status < 300 ? 0 : 1);
+  const stderr = result.error ?? (result.status >= 400 ? `HTTP ${result.status}` : '');
+  const entry: CommandLogEntry = {
+    id: handle.id,
+    timestamp: handle.started,
+    repo: '(api)',
+    args: ['api', handle.options.provider, handle.options.method, handle.options.path],
+    exitCode,
+    signal: null,
+    durationMs,
+    stdout: bodyFinal,
+    stderr,
+  };
+  entries.unshift(entry);
+  if (entries.length > MAX_ENTRIES) entries.length = MAX_ENTRIES;
+  try {
+    onEntryCb?.(entry);
+  } catch {
+    /* listener errors must not break the API call */
+  }
+}
+
+/** Sanitize an API path to redact credentials/tokens. */
+export function sanitizeApiPath(path: string): string {
+  // Redact query strings that might contain tokens (defensive — we don't
+  // usually pass tokens in the URL, but some legacy code might).
+  return path.replace(/([?&](token|access_token|private_token|key)=[^&]+)/gi, '$1=***');
+}
