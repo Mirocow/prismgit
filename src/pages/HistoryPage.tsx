@@ -1121,6 +1121,10 @@ export function HistoryPage() {
       { label: t('history.cherryPick'), clickId: 'cherry-pick' },
       { label: t('history.revertCommit'), clickId: 'revert' },
       { type: 'separator' },
+      // Bisect — mark this commit as good/bad for binary search
+      { label: '🔬 Mark Good (Bisect)', clickId: 'bisect-good' },
+      { label: '🐛 Mark Bad (Bisect)', clickId: 'bisect-bad' },
+      { type: 'separator' },
       { label: t('history.checkoutDetached'), clickId: 'checkout' },
       { type: 'separator' },
       { label: t('history.resetToThis'), clickId: 'reset-header' },
@@ -1170,7 +1174,7 @@ export function HistoryPage() {
       { label: t('history.formatPatch'), clickId: 'format-patch' },
       { label: t('history.openInBrowser'), clickId: 'browser' },
     );
-    showContextMenu(items, (action) => {
+    showContextMenu(items, async (action) => {
       // Tag actions — dynamic clickId with tag name encoded after ':'
       if (action.startsWith('edit-tag:')) {
         const tagName = action.slice('edit-tag:'.length);
@@ -1185,6 +1189,14 @@ export function HistoryPage() {
       switch (action) {
         case 'cherry-pick': handleCherryPick(entry); break;
         case 'revert': handleRevert(entry); break;
+        case 'bisect-good':
+          try { await api.git.bisectGood(repo.path, entry.hash); toast.success('Marked good — bisect continues'); await refreshStatus(repo.path); }
+          catch (e) { toast.error('Bisect failed', String(e)); }
+          break;
+        case 'bisect-bad':
+          try { await api.git.bisectBad(repo.path, entry.hash); toast.success('Marked bad — bisect continues'); await refreshStatus(repo.path); }
+          catch (e) { toast.error('Bisect failed', String(e)); }
+          break;
         case 'checkout': handleCheckout(entry.hash); break;
         case 'reset-soft': handleReset(entry.hash, 'soft'); break;
         case 'reset-mixed': handleReset(entry.hash, 'mixed'); break;
@@ -1435,6 +1447,19 @@ export function HistoryPage() {
           toast,
         )}
       />
+      {/* Bisect status banner — shown when bisect is in progress.
+          Shows the current commit being tested + remaining steps.
+          Right-click any commit → "Mark Good/Bad" to step through. */}
+      {status?.isBisecting && (
+        <div className="flex items-center gap-2 px-3 py-1 bg-status-info/10 border-b border-status-info/30 text-xs">
+          <span className="text-status-info font-medium">🔬 Bisecting</span>
+          <span className="text-text-tertiary">·</span>
+          <span className="text-text-secondary">
+            Right-click a commit → Mark Good/Bad to narrow down the bug.
+          </span>
+          <span className="text-text-tertiary ml-auto">Use Bisect page for full control</span>
+        </div>
+      )}
       {/* Activity Wave — visual timeline of commit sizes.
           Each bar = one commit, height = lines changed (sqrt-scaled).
           Click a spike to jump to that commit. */}

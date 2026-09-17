@@ -16,7 +16,7 @@ import {
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastActions } from '../stores/toastStore';
-import { api, type LogEntry, type DiffResult } from '../lib/api';
+import { api, type LogEntry, type DiffResult, type BlameResult } from '../lib/api';
 import { Avatar } from './Avatar';
 import MarkdownRenderer from './MarkdownRenderer';
 import { cn, formatDate, shortHash } from '../lib/utils';
@@ -50,6 +50,10 @@ export function FileHistoryViewer({ filePath, onClose }: FileHistoryViewerProps)
   const [diffLoading, setDiffLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'snapshot' | 'diff'>('snapshot');
   const [expandedHunks, setExpandedHunks] = useState<Set<number>>(new Set());
+  // Blame data for snapshot mode — shows age of each line.
+  const [blame, setBlame] = useState<BlameResult | null>(null);
+  const [blameLoading, setBlameLoading] = useState(false);
+  const [showBlame, setShowBlame] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEscapeKey(true, onClose);
@@ -80,11 +84,17 @@ export function FileHistoryViewer({ filePath, onClose }: FileHistoryViewerProps)
   const loadSnapshot = useCallback(async (hash: string) => {
     setSnapshotLoading(true);
     setSnapshot(null);
+    setBlame(null);
     try {
-      const content = await api.git.showFile(repo.path, hash, filePath);
+      const [content, blameResult] = await Promise.all([
+        api.git.showFile(repo.path, hash, filePath),
+        api.git.blame(repo.path, filePath, hash).catch(() => null),
+      ]);
       setSnapshot(content);
+      setBlame(blameResult);
     } catch {
       setSnapshot(null);
+      setBlame(null);
     } finally {
       setSnapshotLoading(false);
     }
@@ -371,18 +381,58 @@ export function FileHistoryViewer({ filePath, onClose }: FileHistoryViewerProps)
                       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-subtle sticky top-0 bg-bg-secondary z-10">
                         <span className="text-2xs text-text-tertiary font-mono">
                           {snapshot.split('\n').length} lines · {snapshot.length.toLocaleString()} bytes
+                          {blame && <span className="ml-2">· blame loaded</span>}
                         </span>
-                        <button className="icon-btn !w-5 !h-5" onClick={handleCopyContent} title="Copy file content">
-                          <Copy size={11} />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {/* Blame toggle — show/hide the age gutter */}
+                          {blame && (
+                            <button
+                              className={cn('icon-btn !w-5 !h-5', showBlame && '!text-accent')}
+                              onClick={() => setShowBlame(!showBlame)}
+                              title={showBlame ? 'Hide blame gutter' : 'Show blame gutter (line age + author)'}
+                            >
+                              <FileText size={11} />
+                            </button>
+                          )}
+                          <button className="icon-btn !w-5 !h-5" onClick={handleCopyContent} title="Copy file content">
+                            <Copy size={11} />
+                          </button>
+                        </div>
                       </div>
-                      <pre className="text-xs font-mono p-3 overflow-x-auto leading-relaxed">
-                        {snapshot.split('\n').map((line, i) => (
-                          <div key={i} className="flex hover:bg-bg-hover">
-                            <span className="text-text-tertiary text-2xs select-none w-10 text-right pr-2 flex-shrink-0">{i + 1}</span>
-                            <span className="whitespace-pre-wrap break-all">{line || ' '}</span>
-                          </div>
-                        ))}
+                      <pre className="text-xs font-mono overflow-x-auto leading-relaxed">
+                        {snapshot.split('\n').map((line, i) => {
+                          const blameLine = blame?.lines[i];
+                          const ageColor = blameLine ? getAgeColor(blameLine.authorTime, selectedCommit?.author.date) : '';
+                          const isBlameCommit = blameLine && commits.some(c => c.hash.startsWith(blameLine.hash));
+                          return (
+                            <div
+                              key={i}
+                              className={cn('flex hover:bg-bg-hover group', showBlame && blameLine && 'border-l-2')}
+                              style={showBlame && blameLine ? { borderColor: ageColor } : undefined}
+                            >
+                              {/* Blame gutter — age color bar + author */}
+                              {showBlame && blameLine && (
+                                <span
+                                  className="text-2xs select-none flex-shrink-0 flex items-center gap-1 px-1 cursor-pointer hover:bg-bg-hover"
+                                  style={{ width: 80 }}
+                                  title={`${blameLine.author} · ${formatDate(blameLine.authorTime)}\n${blameLine.summary}`}
+                                  onClick={() => {
+                                    if (!isBlameCommit) return;
+                                    const idx = commits.findIndex(c => c.hash.startsWith(blameLine.hash));
+                                    if (idx !== -1) setSelectedIdx(idx);
+                                  }}
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: ageColor }} />
+                                  <span className="truncate text-text-tertiary">{blameLine.author.split(' ')[0]}</span>
+                                </span>
+                              )}
+                              {/* Line number */}
+                              <span className="text-text-tertiary text-2xs select-none w-10 text-right pr-2 flex-shrink-0">{i + 1}</span>
+                              {/* Code */}
+                              <span className="whitespace-pre-wrap break-all">{line || ' '}</span>
+                            </div>
+                          );
+                        })}
                       </pre>
                     </>
                   )}
@@ -481,6 +531,34 @@ export function FileHistoryViewer({ filePath, onClose }: FileHistoryViewerProps)
 
 function e_shiftTitle(): string {
   return 'Click to select · Shift+click to set as compare base';
+}
+
+/**
+ * Compute a color for a blame line based on its age relative to the
+ * selected commit. Fresh lines (changed in the selected commit or
+ * shortly before) glow bright; old lines fade to gray.
+ *
+ * Color scale:
+ *   Same commit     → #4ade80 (bright green — "this is the change")
+ *   < 1 day before  → #84cc16 (lime)
+ *   < 7 days before → #eab308 (yellow)
+ *   < 30 days       → #f97316 (orange — getting stale)
+ *   > 30 days       → #6b7280 (gray — old, stable code)
+ */
+function getAgeColor(authorTime: string, selectedDate?: string): string {
+  const lineTs = new Date(authorTime).getTime();
+  if (isNaN(lineTs)) return '#6b7280';
+  // If no selected commit, just use age from now
+  const refTs = selectedDate ? new Date(selectedDate).getTime() : Date.now();
+  if (isNaN(refTs)) return '#6b7280';
+  const diffMs = refTs - lineTs;
+  const dayMs = 86400000;
+  if (diffMs < 0) return '#6b7280'; // future — shouldn't happen
+  if (diffMs < dayMs) return '#4ade80';    // same day — bright green
+  if (diffMs < 7 * dayMs) return '#84cc16'; // < 1 week — lime
+  if (diffMs < 30 * dayMs) return '#eab308'; // < 1 month — yellow
+  if (diffMs < 90 * dayMs) return '#f97316'; // < 3 months — orange
+  return '#6b7280'; // > 3 months — gray
 }
 
 /** Parse raw git diff output into DiffResult-like hunks. */
