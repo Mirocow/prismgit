@@ -74,6 +74,15 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
         api.settings.getRepos(),
         api.settings.getRepoGroups().catch(() => [] as RepoGroup[]),
       ]);
+      // If the currently-open repo is no longer in the list (deleted from
+      // disk by the OS file manager, then auto-removed by getRepos() in the
+      // backend), close it properly — stop watcher, clear git status,
+      // dispatch repo-closed event so App.tsx navigates to welcome screen.
+      // Without this, the UI keeps stale git status from the deleted repo.
+      const cur = get().currentRepo;
+      if (cur && !repos.some((r) => r.path === cur.path)) {
+        get().closeRepository();
+      }
       // Preserve locally-modified `expanded` state from the current store
       // so that optimistic UI updates (toggleGroupExpanded) don't get
       // overwritten when loadRepos() fires (e.g. from refreshAllStats()
@@ -219,11 +228,17 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     // Invalidate git cache for the removed repo — its SimpleGit instance
     // and child process pool are no longer needed.
     api.git.invalidateCache(path).catch(() => { /* ignore */ });
+    // If the removed repo was the current repo, close it properly —
+    // stop the file watcher, clear git status, dispatch the repo-closed
+    // event so App.tsx clears global selections and navigates to the
+    // welcome screen. Without this, the UI keeps stale git status
+    // (branches, commits, etc.) from the deleted repo, which causes
+    // errors when the user tries to interact with them.
+    if (get().currentRepo?.path === path) {
+      get().closeRepository();
+    }
     await get().loadRepos();
     await get().loadMetadata();
-    if (get().currentRepo?.path === path) {
-      set({ currentRepo: null, currentMetadata: null });
-    }
   },
 
   cloneRepository: async (url, targetPath, options) => {
