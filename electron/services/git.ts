@@ -2825,10 +2825,39 @@ export async function diffCommit(
     };
   }
 
-  const range = parentHash ? `${parentHash}..${hash}` : `${hash}^..${hash}`;
+  // Resolve the diff range.
+  // Bug fix: the previous code did `${hash}^..${hash}` when no parentHash
+  // was supplied. This breaks when `hash` is the ROOT commit (no parent):
+  // `git diff <root>^..<root>` throws
+  //   fatal: bad revision '<root>^..<root>'
+  // which surfaces to the user as an IPC error popup.
+  // We now check whether the commit has any parents. If it does (non-root),
+  // use `<first-parent>..<hash>` (same as before, but using the actual
+  // first parent instead of the syntactic `^`). If it doesn't (root),
+  // use `git diff --root <hash>` which shows the diff against the empty
+  // tree (i.e. all files in the commit are "new file").
+  let range: string;
+  let extraArgs: string[] = [];
+  if (parentHash) {
+    range = `${parentHash}..${hash}`;
+  } else {
+    // Get the actual parents of this commit. `git rev-list --parents -n 1`
+    // returns "<hash> <parent1> <parent2> ..." — the second+ tokens are
+    // the parents. For a root commit, only "<hash>" is returned.
+    const parentsRaw = await git.raw(['rev-list', '--parents', '-n', '1', hash]).catch(() => '');
+    const parents = parentsRaw.trim().split(/\s+/).filter(Boolean).slice(1);
+    if (parents.length === 0) {
+      // Root commit — use --root flag, no range.
+      range = hash;
+      extraArgs = ['--root'];
+    } else {
+      // Non-root, no explicit parent supplied — diff against the first parent.
+      range = `${parents[0]}..${hash}`;
+    }
+  }
   let rawDiff: string;
   try {
-    rawDiff = await git.raw(['diff', '--no-color', range]);
+    rawDiff = await git.raw(['diff', '--no-color', ...extraArgs, range]);
   } catch {
     // Race: commit may have been gc'd between the preflight and the diff.
     // Return an empty diff rather than propagating the error.
@@ -6036,12 +6065,20 @@ export async function editCommitAuthor(
     return;
   }
   const esc = (s: string) => s.replace(/'/g, `'\\''`);
+  // Bug fix: `${hash}^..HEAD` breaks when hash is the ROOT commit (no parent):
+  //   fatal: ambiguous argument '<root>^..HEAD': unknown revision
+  // We check if the commit has any parents first. If it does (non-root),
+  // use `<hash>^..HEAD` (same as before). If it doesn't (root), use
+  // `--root` so filter-branch starts from the actual root commit.
+  const parentsRaw = await git.raw(['rev-list', '--parents', '-n', '1', hash]).catch(() => '');
+  const parents = parentsRaw.trim().split(/\s+/).filter(Boolean).slice(1);
+  const rangeArg = parents.length > 0 ? `${hash}^..HEAD` : '--root';
   await git.raw([
     'filter-branch', '-f', '--env-filter',
     `if [ "$GIT_COMMIT" = "${hash}" ]; then ` +
     `export GIT_AUTHOR_NAME='${esc(name)}'; ` +
     `export GIT_AUTHOR_EMAIL='${esc(email)}'; fi`,
-    `${hash}^..HEAD`,
+    rangeArg,
   ]);
   invalidateCache(repoPath);
 }
