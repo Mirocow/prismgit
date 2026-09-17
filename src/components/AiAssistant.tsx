@@ -429,6 +429,21 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Listen for 'smartgit:ai-prompt' events from other components (e.g.
+  // PRReview's "AI Review" button). When received, set the input to
+  // the prompt — App.tsx opens the AI panel via its own listener.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { prompt?: string };
+      if (detail?.prompt) {
+        setInput(detail.prompt);
+      }
+    };
+    window.addEventListener('smartgit:ai-prompt', handler);
+    return () => window.removeEventListener('smartgit:ai-prompt', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setInput]);
+
   const switchProvider = useCallback(async (entryId: string) => {
     await activateAiProvider(settings, setSetting, entryId);
     setShowProviderMenu(false);

@@ -56,16 +56,22 @@ export function SettingsPage() {
 
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
-  // Top-level tab: Application Settings vs Project Settings vs Themes
-  const [activeTab, setActiveTab] = useState<'application' | 'git' | 'project' | 'themes' | 'ai' | 'security' | 'advanced' | 'show-integrations'>('application');
-  const showApp = activeTab === 'application';
+  // Top-level tab: grouped by semantic meaning
+  // - Appearance: theme picker + language + window style + startup prefs
+  // - Git: git config + performance + commit guides + diff + maintenance
+  // - AI: provider config + tool limits + AI guard
+  // - Security: SSH keys + credentials
+  // - Integrations: GitHub + GitLab + VS Code
+  // - Project: per-repo settings (only when a repo is open)
+  const [activeTab, setActiveTab] = useState<'appearance' | 'git' | 'ai' | 'security' | 'integrations' | 'project'>('appearance');
+  const showApp = activeTab === 'appearance';
   const showGit = activeTab === 'git';
   const showProject = activeTab === 'project' && !!currentRepo;
-  const showThemes = activeTab === 'themes';
+  const showThemes = activeTab === 'appearance';
   const showAi = activeTab === 'ai';
   const showSecurity = activeTab === 'security';
-  const showAdvanced = activeTab === 'advanced';
-  const showIntegrations = activeTab === 'show-integrations';
+  const showAdvanced = activeTab === 'git';
+  const showIntegrations = activeTab === 'integrations';
 
   // === Git Config section state ===
   const [configScope, setConfigScope] = useState<'local' | 'global' | 'system'>('local');
@@ -303,7 +309,7 @@ export function SettingsPage() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden bg-bg-primary">
       <div className="flex-1 flex overflow-hidden">
-        {/* Vertical sidebar — tabs on the left */}
+        {/* Vertical sidebar — tabs on the left, grouped by meaning */}
         <nav className="w-52 flex-shrink-0 border-r border-border-default bg-bg-secondary overflow-y-auto py-3 px-2">
           <button
             className={cn(
@@ -312,9 +318,9 @@ export function SettingsPage() {
                 ? 'bg-accent-muted text-accent'
                 : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
             )}
-            onClick={() => setActiveTab('application')}
+            onClick={() => setActiveTab('appearance')}
           >
-            {t('settings.application')}
+            {t('settings.appearance', { defaultValue: 'Appearance' })}
           </button>
           <button
             className={cn(
@@ -327,6 +333,41 @@ export function SettingsPage() {
           >
             <GitBranch size={14} />
             {t('settings.git')}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
+              showAi
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('ai')}
+          >
+            <Sparkles size={14} />
+            {t('settings.ai')}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
+              showSecurity
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('security')}
+          >
+            <Lock size={14} />
+            {t('settings.security')}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
+              showIntegrations
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('integrations')}
+          >
+            {t('settings.integrations', { defaultValue: 'Integrations' })}
           </button>
           <button
             className={cn(
@@ -346,64 +387,6 @@ export function SettingsPage() {
                 {currentRepo.name}
               </span>
             )}
-          </button>
-          <button
-            className={cn(
-              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
-              showThemes
-                ? 'bg-accent-muted text-accent'
-                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
-            )}
-            onClick={() => setActiveTab('themes')}
-          >
-            {t('settings.themes', { defaultValue: 'Themes' })}
-          </button>
-          <button
-            className={cn(
-              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
-              showSecurity
-                ? 'bg-accent-muted text-accent'
-                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
-            )}
-            onClick={() => setActiveTab('security')}
-          >
-            <Lock size={14} />
-            {t('settings.security')}
-          </button>
-          <button
-            className={cn(
-              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
-              showAi
-                ? 'bg-accent-muted text-accent'
-                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
-            )}
-            onClick={() => setActiveTab('ai')}
-          >
-            <Sparkles size={14} />
-            {t('settings.ai')}
-          </button>
-          <button
-            className={cn(
-              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
-              showAdvanced
-                ? 'bg-accent-muted text-accent'
-                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
-            )}
-            onClick={() => setActiveTab('advanced')}
-          >
-            <SettingsIcon size={14} />
-            {t('settings.advanced', { defaultValue: 'Advanced' })}
-          </button>
-          <button
-            className={cn(
-              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
-              showIntegrations
-                ? 'bg-accent-muted text-accent'
-                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
-            )}
-            onClick={() => setActiveTab('show-integrations')}
-          >
-            {t('settings.integrations', { defaultValue: 'Integrations' })}
           </button>
         </nav>
 

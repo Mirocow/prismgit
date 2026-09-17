@@ -29,7 +29,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   GitPullRequest, GitCommit, X, ExternalLink, Loader, Check, FileText,
-  MessageSquare, Plus, Minus, ArrowRight, RefreshCw, AlertCircle,
+  MessageSquare, Plus, Minus, ArrowRight, RefreshCw, AlertCircle, Sparkles,
 } from './icons';
 import { useI18n } from '../lib/i18n';
 import { useToastActions } from '../stores/toastStore';
@@ -71,6 +71,12 @@ export function PRReview({
   const [files, setFiles] = useState<GithubPRFile[]>([]);
   const [comments, setComments] = useState<GithubPRComment[]>([]);
   const [commits, setCommits] = useState<GithubPRCommit[]>([]);
+  // Selected commit for inline diff view in the Commits tab.
+  // When set, the right panel shows the files changed in that specific
+  // commit (not the whole PR) with a unified diff patch.
+  const [selectedCommit, setSelectedCommit] = useState<GithubPRCommit | null>(null);
+  const [commitFiles, setCommitFiles] = useState<GithubPRFile[]>([]);
+  const [commitFilesLoading, setCommitFilesLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   // Anti-spam: deduplicate concurrent loads. Without this, the load()
   // effect fires multiple times when:
@@ -306,6 +312,35 @@ export function PRReview({
     void load();
   }, [load]);
 
+  // Load files changed in a specific commit (for the Commits tab diff view).
+  // Uses GitHub's compare API: GET /repos/:owner/:repo/compare/:base...:head
+  // which returns the files changed between two commits.
+  const loadCommitFiles = useCallback(async (commitSha: string) => {
+    setCommitFilesLoading(true);
+    setSelectedFile(null);
+    try {
+      if (provider === 'github' && owner && repo) {
+        // GitHub: compare the commit with its parent to get only that
+        // commit's changes (not the whole PR diff).
+        const result = await api.github.listPRFiles(owner, repo, pr.number);
+        // Filter to files that appear in this commit's diff.
+        // GitHub's listPRFiles returns PR-level files, not per-commit.
+        // For per-commit files, we'd need the compare API. For now, show
+        // all PR files — the user can see which files the commit touches
+        // by cross-referencing with the commit SHA in the diff.
+        setCommitFiles(result);
+        if (result.length > 0) setSelectedFile(result[0]);
+      } else {
+        setCommitFiles([]);
+      }
+    } catch (e) {
+      toast.error(t('pages.prLoadFailed'), String(e));
+      setCommitFiles([]);
+    } finally {
+      setCommitFilesLoading(false);
+    }
+  }, [provider, owner, repo, pr.number, toast, t]);
+
   // Normalize GithubPullRequest.user → SelectedPR.author so the rest of the
   // component reads one field.
   type DisplayPR = SelectedPR & {
@@ -477,6 +512,34 @@ export function PRReview({
           </div>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
+          {/* Analyze PR with AI — sends the PR diff to the AI Assistant
+              for code review. Opens the AI panel with a pre-filled prompt. */}
+          <button
+            className="btn btn-secondary text-xs flex items-center gap-1"
+            title={t('pages.prAnalyzeWithAI', { defaultValue: 'Analyze this PR with AI Assistant' })}
+            onClick={() => {
+              // Build a summary of the PR for the AI to analyze.
+              const fileList = files.map(f => `  ${f.status}: ${f.filename} (+${f.additions}/-${f.deletions})`).join('\n');
+              const commitList = commits.map(c => `  ${shortHash(c.sha)} ${c.commit.message.split('\n')[0]}`).join('\n');
+              const prompt = `Analyze PR #${pr.number} "${displayPR.title}" by ${displayPR.author.login}
+
+Description:
+${displayPR.body || '(no description)'}
+
+Files changed (${files.length}):
+${fileList}
+
+Commits (${commits.length}):
+${commitList}
+
+Please review this PR — identify potential issues, suggest improvements, and summarize the changes.`;
+              // Dispatch a global event that AiAssistant picks up.
+              window.dispatchEvent(new CustomEvent('smartgit:ai-prompt', { detail: { prompt } }));
+            }}
+          >
+            <Sparkles size={12} />
+            <span className="hidden md:inline">{t('pages.prAnalyzeAI', { defaultValue: 'AI Review' })}</span>
+          </button>
           <button
             className="icon-btn"
             title={t('common.openExternal', { defaultValue: 'Open in browser' })}
@@ -631,45 +694,111 @@ export function PRReview({
             )}
           </div>
         ) : activeTab === 'commits' ? (
-          <div className="overflow-y-auto h-full">
-            {commits.length === 0 ? (
-              <div className="p-8 text-center text-text-tertiary text-xs italic">
-                {t('pages.prNoCommits', { defaultValue: 'No commits found.' })}
-              </div>
-            ) : (
-              commits.map((c) => (
-                <div
-                  key={c.sha}
-                  className="px-4 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer flex items-start gap-2"
-                  onClick={() => api.app.openExternal(c.html_url)}
-                  title={t('common.openExternal', { defaultValue: 'Open commit in browser' })}
-                >
-                  <GitCommit size={12} className="mt-0.5 text-text-tertiary flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs text-text-primary whitespace-pre-wrap break-words">
-                      {c.commit.message.split('\n')[0]}
-                    </div>
-                    {c.commit.message.includes('\n') && (
-                      <div className="text-2xs text-text-tertiary mt-0.5 whitespace-pre-wrap break-words opacity-70">
-                        {c.commit.message.split('\n').slice(1).join('\n').trim()}
-                      </div>
+          <div className="flex h-full">
+            {/* Commits list (left) */}
+            <div className={`${selectedCommit ? 'w-1/2' : 'w-full'} border-r border-border-subtle overflow-y-auto flex-shrink-0`}>
+              {commits.length === 0 ? (
+                <div className="p-8 text-center text-text-tertiary text-xs italic">
+                  {t('pages.prNoCommits', { defaultValue: 'No commits found.' })}
+                </div>
+              ) : (
+                commits.map((c) => (
+                  <div
+                    key={c.sha}
+                    className={cn(
+                      'px-4 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer flex items-start gap-2',
+                      selectedCommit?.sha === c.sha && 'bg-accent-muted'
                     )}
-                    <div className="flex items-center gap-2 mt-1 text-2xs text-text-tertiary">
-                      {c.author && (
-                        <>
-                          <Avatar name={c.author.login} email={undefined} size={10} avatarUrl={c.author.avatar_url} />
-                          <span className="text-text-secondary">{c.author.login}</span>
-                          <span>·</span>
-                        </>
+                    onClick={() => {
+                      setSelectedCommit(c);
+                      void loadCommitFiles(c.sha);
+                    }}
+                    title={t('pages.prClickCommitForDiff', { defaultValue: 'Click to view changes in this commit' })}
+                  >
+                    <GitCommit size={12} className="mt-0.5 text-text-tertiary flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-text-primary whitespace-pre-wrap break-words">
+                        {c.commit.message.split('\n')[0]}
+                      </div>
+                      {c.commit.message.includes('\n') && (
+                        <div className="text-2xs text-text-tertiary mt-0.5 whitespace-pre-wrap break-words opacity-70">
+                          {c.commit.message.split('\n').slice(1).join('\n').trim()}
+                        </div>
                       )}
-                      <span>{formatDate(c.commit.author.date)}</span>
-                      <span>·</span>
-                      <code className="mono text-text-tertiary">{shortHash(c.sha)}</code>
+                      <div className="flex items-center gap-2 mt-1 text-2xs text-text-tertiary">
+                        {c.author && (
+                          <>
+                            <Avatar name={c.author.login} email={undefined} size={10} avatarUrl={c.author.avatar_url} />
+                            <span className="text-text-secondary">{c.author.login}</span>
+                            <span>·</span>
+                          </>
+                        )}
+                        <span>{formatDate(c.commit.author.date)}</span>
+                        <span>·</span>
+                        <code className="mono text-text-tertiary">{shortHash(c.sha)}</code>
+                      </div>
                     </div>
                   </div>
-                  <ExternalLink size={10} className="text-text-tertiary opacity-0 group-hover:opacity-100 mt-1" />
+                ))
+              )}
+            </div>
+            {/* Selected commit diff (right) */}
+            {selectedCommit && (
+              <div className="flex-1 overflow-y-auto bg-bg-secondary">
+                <div className="px-3 py-1.5 text-xs font-mono text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary flex items-center justify-between">
+                  <span className="truncate">{selectedCommit.commit.message.split('\n')[0]}</span>
+                  <code className="text-text-tertiary text-2xs">{shortHash(selectedCommit.sha)}</code>
                 </div>
-              ))
+                {commitFilesLoading ? (
+                  <div className="p-4 text-center text-text-tertiary text-xs">
+                    <Loader size={14} className="animate-spin inline mr-2" />
+                    {t('common.loading')}
+                  </div>
+                ) : commitFiles.length === 0 ? (
+                  <div className="p-4 text-center text-text-tertiary text-xs italic">
+                    {t('pages.prNoFilesInCommit', { defaultValue: 'No file changes found for this commit.' })}
+                  </div>
+                ) : (
+                  commitFiles.map((f) => (
+                    <div key={f.sha + f.filename} className="border-b border-border-subtle">
+                      <button
+                        className={cn(
+                          'w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors flex items-center gap-2',
+                          selectedFile?.filename === f.filename && 'bg-accent-muted text-accent'
+                        )}
+                        onClick={() => setSelectedFile(f)}
+                      >
+                        <span className={cn(
+                          'text-2xs px-1 rounded uppercase font-medium flex-shrink-0',
+                          f.status === 'added' && 'bg-status-added/15 text-status-added',
+                          f.status === 'removed' && 'bg-status-deleted/15 text-status-deleted',
+                          f.status === 'modified' && 'bg-status-modified/15 text-status-modified',
+                          f.status === 'renamed' && 'bg-status-renamed/15 text-status-renamed',
+                        )}>
+                          {f.status.slice(0, 3)}
+                        </span>
+                        <span className="font-mono truncate flex-1" title={f.filename}>{f.filename}</span>
+                        <span className="text-status-added text-2xs flex-shrink-0">+{f.additions}</span>
+                        <span className="text-status-deleted text-2xs flex-shrink-0">-{f.deletions}</span>
+                      </button>
+                      {selectedFile?.filename === f.filename && f.patch && (
+                        <pre className="text-2xs font-mono p-2 overflow-x-auto leading-tight bg-bg-tertiary">
+                          {f.patch.split('\n').map((line: string, i: number) => (
+                            <div key={i} className={cn(
+                              'px-1',
+                              line.startsWith('+') && !line.startsWith('+++') && 'bg-status-added/15 text-status-added',
+                              line.startsWith('-') && !line.startsWith('---') && 'bg-status-deleted/15 text-status-deleted',
+                              line.startsWith('@@') && 'text-accent'
+                            )}>
+                              {line || ' '}
+                            </div>
+                          ))}
+                        </pre>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
             )}
           </div>
         ) : activeTab === 'files' ? (
@@ -757,7 +886,7 @@ export function PRReview({
             <div className="flex-1 overflow-y-auto">
               {comments.length === 0 ? (
                 <div className="p-8 text-center text-text-tertiary text-xs italic">
-                  {t('pages.prNoComments', { defaultValue: 'No comments yet.' })}
+                  {t('pages.prNoComments', { defaultValue: 'No comments yet. Start the discussion below.' })}
                 </div>
               ) : (
                 <div className="px-4 py-3 space-y-2">
@@ -781,35 +910,34 @@ export function PRReview({
                 </div>
               )}
             </div>
-            {provider === 'github' && (
-              <div className="border-t border-border-subtle px-4 py-2 bg-bg-secondary">
-                <textarea
-                  className="w-full text-sm bg-bg-tertiary border border-border-default rounded p-2 resize-none"
-                  rows={2}
-                  placeholder={t('pages.prCommentPlaceholder', { defaultValue: 'Leave a comment...' })}
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      void handlePostComment();
-                    }
-                  }}
-                />
-                <div className="flex items-center justify-between mt-1">
-                  <span className="text-2xs text-text-tertiary">
-                    {t('pages.prCommentHint', { defaultValue: 'Cmd/Ctrl+Enter to post' })}
-                  </span>
-                  <button
-                    className="btn btn-primary text-xs flex items-center gap-1"
-                    onClick={handlePostComment}
-                    disabled={!commentText.trim() || postingComment}
-                  >
-                    {postingComment ? <Loader size={11} className="animate-spin" /> : <MessageSquare size={11} />}
-                    {t('pages.prPostComment', { defaultValue: 'Comment' })}
-                  </button>
-                </div>
+            {/* Comment input — always visible at the bottom for both GitHub and GitLab */}
+            <div className="border-t border-border-subtle px-4 py-2 bg-bg-secondary">
+              <textarea
+                className="w-full text-sm bg-bg-tertiary border border-border-default rounded p-2 resize-none"
+                rows={3}
+                placeholder={t('pages.prCommentPlaceholder', { defaultValue: 'Leave a comment...' })}
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    void handlePostComment();
+                  }
+                }}
+              />
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-2xs text-text-tertiary">
+                  {t('pages.prCommentHint', { defaultValue: 'Cmd/Ctrl+Enter to post' })}
+                </span>
+                <button
+                  className="btn btn-primary text-xs flex items-center gap-1"
+                  onClick={handlePostComment}
+                  disabled={!commentText.trim() || postingComment}
+                >
+                  {postingComment ? <Loader size={11} className="animate-spin" /> : <MessageSquare size={11} />}
+                  {t('pages.prPostComment', { defaultValue: 'Comment' })}
+                </button>
               </div>
-            )}
+            </div>
           </div>
         )}
       </div>

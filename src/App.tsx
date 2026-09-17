@@ -330,6 +330,13 @@ export default function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   // LAR-3 — AI Assistant chat panel visibility (toggle via toolbar button).
   const [showAiAssistant, setShowAiAssistant] = useState(false);
+  // Listen for 'smartgit:ai-prompt' events (from PRReview's "AI Review"
+  // button). Open the AI panel so the user sees the pre-filled prompt.
+  useEffect(() => {
+    const handler = () => setShowAiAssistant(true);
+    window.addEventListener('smartgit:ai-prompt', handler);
+    return () => window.removeEventListener('smartgit:ai-prompt', handler);
+  }, []);
   const [showCommandLog, setShowCommandLog] = useState(false);
   const [commandLogHeight, setCommandLogHeight] = useState(260);
   /**
