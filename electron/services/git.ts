@@ -1908,43 +1908,107 @@ export async function branches(repoPath: string): Promise<BranchInfo[]> {
   // Use for-each-ref to get all branches in a single git call.
   // Note: simple-git passes args through to git as-is, so we use real tab characters,
   // not the %x09 placeholder (which only works in --pretty=format).
-  // Fields: refname, objectname, subject, committerdate, *objectname (for annotated), upstream, HEAD
-  const fmt = [
+  //
+  // Fields for LOCAL branches:
+  //   refname, objectname, subject, committerdate, *objectname (annotated tag target),
+  //   upstream:short, upstream:track, HEAD
+  //
+  // `%(upstream:track)` is the key — it returns "ahead N", "behind N",
+  // "ahead N, behind M", "gone", or empty in a SINGLE git call for ALL
+  // local branches. Without it, we'd have to do N `git rev-list --count
+  // --left-right <branch>...<upstream>` calls (one per non-current branch
+  // with an upstream) — slow on big repos.
+  //
+  // Bug fix: the previous implementation only set `ahead`/`behind` on the
+  // CURRENT branch (taken from `git status`). Non-current branches had
+  // undefined ahead/behind, so the BranchSyncIndicator UI treated them
+  // as "in sync" (green PlugConnected) even when they were actually
+  // ahead/behind/gone.
+  const localFmt = [
     '%(refname)',
     '%(objectname)',
     '%(contents:subject)',
     '%(committerdate:iso-strict)',
     '%(*objectname)',
     '%(upstream:short)',
+    '%(upstream:track)',
+    '%(HEAD)',
+  ].join('\t');
+  // Remote branches don't have an upstream — no track field needed.
+  const remoteFmt = [
+    '%(refname)',
+    '%(objectname)',
+    '%(contents:subject)',
+    '%(committerdate:iso-strict)',
+    '%(*objectname)',
     '%(HEAD)',
   ].join('\t');
   let rawLocal = '';
   let rawRemote = '';
   try {
-    rawLocal = await git.raw(['for-each-ref', `--format=${fmt}`, 'refs/heads/']);
+    rawLocal = await git.raw(['for-each-ref', `--format=${localFmt}`, 'refs/heads/']);
   } catch { /* empty repo */ }
   try {
-    rawRemote = await git.raw(['for-each-ref', `--format=${fmt}`, 'refs/remotes/']);
+    rawRemote = await git.raw(['for-each-ref', `--format=${remoteFmt}`, 'refs/remotes/']);
   } catch { /* no remotes */ }
 
   const result: BranchInfo[] = [];
+
+  // Parse `%(upstream:track)` into { ahead, behind, gone }.
+  // Possible raw values (per git docs + verified output):
+  //   "" (no upstream configured)
+  //   "[gone]" (upstream was deleted on remote — git wraps in brackets!)
+  //   "[ahead 2]"
+  //   "[behind 5]"
+  //   "[ahead 2, behind 5]"
+  // Note: git wraps the WHOLE track value in square brackets. We strip
+  // them first, then parse the inner string.
+  const parseTrack = (track: string): { ahead?: number; behind?: number; gone?: boolean } => {
+    // Strip the wrapping `[...]` that git adds, then trim whitespace.
+    let t = track.trim();
+    if (t.startsWith('[') && t.endsWith(']')) {
+      t = t.slice(1, -1).trim();
+    }
+    if (!t) return {};
+    if (t === 'gone') return { gone: true };
+    const out: { ahead?: number; behind?: number } = {};
+    const aheadMatch = t.match(/ahead\s+(\d+)/);
+    const behindMatch = t.match(/behind\s+(\d+)/);
+    if (aheadMatch) out.ahead = parseInt(aheadMatch[1], 10);
+    if (behindMatch) out.behind = parseInt(behindMatch[1], 10);
+    return out;
+  };
 
   const parseBlock = async (raw: string, isRemote: boolean) => {
     if (!raw.trim()) return;
     for (const line of raw.split('\n').filter(Boolean)) {
       const parts = line.split('\t');
       if (parts.length < 4) continue;
-      const [refname, objectname, subject, committerdate, targetHash, upstream, headMarker] = parts;
       let name: string;
+      let commitHash: string;
+      let isCurrent: boolean;
+      let upstream: string | undefined;
+      let trackInfo: { ahead?: number; behind?: number; gone?: boolean };
       if (isRemote) {
+        // Remote format: refname, objectname, subject, committerdate, *objectname, HEAD
+        const [refname, objectname, subject, committerdate, targetHash, headMarker] = parts;
         name = refname.replace(/^refs\/remotes\//, '');
+        commitHash = (targetHash || objectname) || '';
+        isCurrent = headMarker === '*';
+        upstream = undefined;
+        trackInfo = {};
       } else {
+        // Local format: refname, objectname, subject, committerdate, *objectname,
+        //              upstream:short, upstream:track, HEAD
+        const [refname, objectname, subject, committerdate, targetHash, upstreamShort, track, headMarker] = parts;
         name = refname.replace(/^refs\/heads\//, '');
+        commitHash = objectname || '';
+        isCurrent = headMarker === '*';
+        upstream = upstreamShort || undefined;
+        trackInfo = parseTrack(track || '');
       }
       // Skip symbolic refs like "origin/HEAD"
       if (name.endsWith('/HEAD')) continue;
-      const isCurrent = headMarker === '*';
-      const commitHash = (isRemote ? (targetHash || objectname) : objectname) || '';
 
       const branchInfo: BranchInfo = {
         name,
@@ -1952,32 +2016,43 @@ export async function branches(repoPath: string): Promise<BranchInfo[]> {
         remote: isRemote,
         lastCommit: {
           hash: commitHash.substring(0, 7),
-          date: committerdate || '',
-          message: subject || '',
+          date: parts[3] /* committerdate */ || '',
+          message: parts[2] /* subject */ || '',
         },
       };
 
       if (!isRemote && isCurrent) {
-        branchInfo.tracking = current.tracking || undefined;
-        branchInfo.ahead = current.ahead;
-        branchInfo.behind = current.behind;
-        // Detect 'gone' upstream — the tracking ref was deleted on the remote
-        // (e.g. the PR was merged and the branch deleted). `git status` sets
-        // this as tracking but the ref no longer exists in refs/remotes/.
-        // We check if the upstream ref exists in the remote refs list.
+        // For the CURRENT branch, keep the `tracking` field name in sync
+        // with git status (used elsewhere in the UI — Toolbar Pull/
+        // Push dropdowns, HistoryPage head+upstream resolution).
+        branchInfo.tracking = current.tracking || upstream;
+        // git status already computes ahead/behind for the current
+        // branch — use it (more authoritative than the for-each-ref
+        // track field, which doesn't account for an unborn HEAD or
+        // uncommitted index state).
+        branchInfo.ahead = current.ahead ?? trackInfo.ahead;
+        branchInfo.behind = current.behind ?? trackInfo.behind;
+        // 'gone' detection: prefer git status's view (tracking ref
+        // was deleted on remote). The track field also reports 'gone'
+        // when the upstream ref no longer exists — fall back to that.
         if (current.tracking) {
           const remoteRefs = await git.raw(['rev-parse', '--verify', '-q', `refs/remotes/${current.tracking}`]).catch(() => '');
           if (!remoteRefs.trim()) {
             branchInfo.gone = true;
           }
-        }
-      } else if (!isRemote && upstream) {
-        branchInfo.upstream = upstream;
-        // Same gone check for non-current branches with upstream.
-        const remoteRefs = await git.raw(['rev-parse', '--verify', '-q', `refs/remotes/${upstream}`]).catch(() => '');
-        if (!remoteRefs.trim()) {
+        } else if (trackInfo.gone) {
           branchInfo.gone = true;
         }
+      } else if (!isRemote && upstream) {
+        // Non-current local branch with an upstream.
+        // Use the for-each-ref track field for ahead/behind/gone —
+        // this is the fix. Previously these were left undefined, so
+        // the BranchSyncIndicator treated every non-current branch
+        // as "in sync" (incorrect).
+        branchInfo.upstream = upstream;
+        branchInfo.ahead = trackInfo.ahead;
+        branchInfo.behind = trackInfo.behind;
+        branchInfo.gone = trackInfo.gone;
       }
 
       result.push(branchInfo);
