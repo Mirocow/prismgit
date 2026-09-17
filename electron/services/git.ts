@@ -1578,7 +1578,18 @@ export async function pull(
 ): Promise<AutoStashResult> {
   const { git, cleanup } = await networkGit(repoPath, remote);
   const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'pull'];
-  if (rebase) args.push('--rebase');
+  // ── Explicit reconciliation strategy ──────────────────────────────────
+  // Git 2.27+ refuses to pull divergent branches when `pull.rebase` is
+  // not configured, exiting with the famous:
+  //   fatal: Need to specify how to reconcile divergent branches.
+  // We pass an explicit `--rebase` OR `--no-rebase` on every pull so git
+  // never asks the user to set a global config — the strategy is decided
+  // per call by the caller (Settings → "Pull strategy: Merge/Rebase").
+  //
+  // `--no-rebase` is the "merge" strategy (default git behaviour pre-2.27).
+  // `--rebase` rewrites local commits on top of the incoming branch.
+  // `--no-ff` forces a merge commit even when fast-forward is possible.
+  args.push(rebase ? '--rebase' : '--no-rebase');
   if (noFF) args.push('--no-ff');
   args.push(remote);
   if (branch) args.push(branch);

@@ -5,6 +5,7 @@ import { resolveDefaultRemote } from '../lib/remotes';
 import { useOperationLogStore } from './operationLogStore';
 import { useRepositoryStore } from './repositoryStore';
 import { useToastStore } from './toastStore';
+import { useSettingsStore } from './settingsStore';
 
 // In-flight promise for refreshStatus — prevents concurrent status() calls
 // on the same repo from spawning multiple `git status` subprocesses.
@@ -121,10 +122,18 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   pull: async (repoPath, remote, branch) => {
     const log = useOperationLogStore.getState();
-    const cmd = `git pull ${remote || 'origin'} ${branch || ''}`.trim();
-    const opId = log.startOp('Pull (Merge)', repoPath, cmd);
+    // Read the user's Pull strategy setting — Settings → Git →
+    // "When pulling: Merge / Rebase". Default is 'merge' when unset.
+    // This is forwarded as the `rebase` flag to api.git.pull, which in
+    // turn passes `--rebase` or `--no-rebase` to `git pull` so git
+    // never refuses with "Need to specify how to reconcile divergent
+    // branches" on repos without `pull.rebase` configured.
+    const pullStrategy = useSettingsStore.getState().settings.pullStrategy ?? 'merge';
+    const shouldRebase = pullStrategy === 'rebase';
+    const cmd = `git pull ${remote || 'origin'} ${branch || ''} ${shouldRebase ? '--rebase' : '--no-rebase'}`.trim();
+    const opId = log.startOp(shouldRebase ? 'Pull (Rebase)' : 'Pull (Merge)', repoPath, cmd);
     try {
-      const res = await api.git.pull(repoPath, remote, branch);
+      const res = await api.git.pull(repoPath, remote, branch, shouldRebase);
       await get().refreshStatus(repoPath);
       // Refresh repository metadata in the sidebar
       api.settings.refreshRepoStats(repoPath).then(() => {
