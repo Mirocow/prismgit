@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react';
 import { getInitials, getAuthorColor } from '../lib/authorBadges';
-import { gravatarUrlSync, likelyHasGravatar } from '../lib/gravatar';
+import { gravatarUrlSync, gravatarUrl, likelyHasGravatar } from '../lib/gravatar';
 
 /**
  * Avatar — shows a cached avatar image with a colored-initial fallback.
@@ -37,11 +37,31 @@ export const Avatar = memo(function Avatar({
   /** Direct avatar URL from GitHub/GitLab API (takes priority over Gravatar). */
   avatarUrl?: string;
 }) {
-  // Compute the source URL for the avatar.
-  const sourceUrl = avatarUrl
-    || (email && likelyHasGravatar(email)
-      ? gravatarUrlSync(email, Math.max(size * 2, 48))
-      : '');
+  // Start with a sync MD5 Gravatar URL (for immediate render), then upgrade
+  // to SHA-256 async (Gravatar's recommended hash since 2020). This avoids
+  // a blank avatar on first paint while ensuring the correct hash is used.
+  //
+  // WHY SHA-256: Gravatar has supported both MD5 and SHA-256 since 2020, but
+  // some users have avatars registered under SHA-256 only. Using MD5 for
+  // those users returns an identicon (auto-generated) instead of their real
+  // avatar. SHA-256 is Gravatar's recommended hash going forward.
+  const [sourceUrl, setSourceUrl] = useState<string>(() => {
+    if (avatarUrl) return avatarUrl;
+    if (email && likelyHasGravatar(email)) {
+      return gravatarUrlSync(email, Math.max(size * 2, 48));
+    }
+    return '';
+  });
+
+  // Upgrade to SHA-256 async (the correct hash for Gravatar).
+  useEffect(() => {
+    if (avatarUrl || !email || !likelyHasGravatar(email)) return;
+    let cancelled = false;
+    void gravatarUrl(email, Math.max(size * 2, 48)).then(url => {
+      if (!cancelled && url) setSourceUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [avatarUrl, email, size]);
 
   const [dataUri, setDataUri] = useState<string | null>(null);
 
@@ -51,8 +71,6 @@ export const Avatar = memo(function Avatar({
       return;
     }
     let cancelled = false;
-    // Call the main process to get the cached/downloaded avatar.
-    // This returns a data URI string (or null if the download failed).
     void window.smartgit.avatar.get(sourceUrl).then((uri: string | null) => {
       if (!cancelled) setDataUri(uri);
     }).catch(() => {
