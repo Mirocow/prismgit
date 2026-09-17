@@ -1459,6 +1459,28 @@ export function HistoryPage() {
               )}
             </div>
           )}
+          {/* Single-click selection chip — when the user single-clicks a branch
+              (in BranchesPage, GitFlow, Pull-Requests, etc.) `selectedBranch`
+              is set and `selectedBranches` is cleared. The filter is actually
+              applied via `branchFilter`, but the multi-select chip area above
+              would be empty — so the user thought the filter wasn't applied.
+              Show a chip for the single-click selection too. */}
+          {selectedBranches.size === 0 && globalSelectedBranch && branchFilter !== 'head+upstream' && branchFilter !== 'all' && (
+            <div className="flex items-center gap-1 ml-2">
+              <span className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1">
+                <GitBranch size={8} />{globalSelectedBranch}
+                <button
+                  onClick={() => {
+                    selectBranch(null);
+                    setBranchFilter('head+upstream');
+                  }}
+                  title="Remove"
+                >
+                  <X size={8} />
+                </button>
+              </span>
+            </div>
+          )}
           {globalPathFilter && (
             <span className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/40 bg-status-modified/10 text-status-modified flex items-center gap-1 ml-2">
               <FileText size={9} />{globalPathFilter}
@@ -1530,13 +1552,19 @@ export function HistoryPage() {
           <div className="relative">
             <button
               className={cn('text-xs px-2 py-0.5 border rounded flex items-center gap-1',
-                selectedBranches.size > 0
+                (selectedBranches.size > 0 || (globalSelectedBranch && branchFilter !== 'head+upstream' && branchFilter !== 'all'))
                   ? 'border-accent bg-accent-muted text-accent'
                   : 'border-border-default bg-bg-tertiary text-text-secondary')}
               onClick={() => setShowBranchPicker(!showBranchPicker)}
             >
               <GitBranch size={10} />
-              Branches: {selectedBranches.size > 0 ? `${selectedBranches.size} selected` : (branchFilter === 'all' ? 'All' : branchFilter === 'head+upstream' ? 'Head + Upstream' : branchFilter)}
+              Branches: {selectedBranches.size > 0
+                ? `${selectedBranches.size} selected`
+                : (branchFilter === 'all'
+                    ? 'All'
+                    : branchFilter === 'head+upstream'
+                      ? 'Head + Upstream'
+                      : branchFilter)}
               <ChevronDown size={9} />
             </button>
             {showBranchPicker && (
@@ -1576,37 +1604,83 @@ export function HistoryPage() {
                 {branches.filter(b => !b.remote).length > 0 && (
                   <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Local</div>
                 )}
-                {branches.filter(b => !b.remote).map(b => (
-                  <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
-                    <input
-                      type="checkbox"
-                      checked={selectedBranches.has(b.name)}
-                      onChange={() => {
-                        toggleBranch(b.name);
-                        // Reset single-branch filter when using multi-select
-                        if (selectedBranches.size > 0 || !selectedBranches.has(b.name)) setBranchFilter('all');
-                      }}
-                    />
-                    <span className={cn('truncate', b.current && 'text-accent font-medium')}>{b.name}</span>
-                    {b.current && <span className="text-2xs text-text-tertiary ml-auto">HEAD</span>}
-                  </label>
-                ))}
+                {branches.filter(b => !b.remote).map(b => {
+                  // A branch is "checked" if either:
+                  //   - it's in the multi-select set (Ctrl+click in BranchesPage
+                  //     or any checkbox tick), OR
+                  //   - it's the single-click selection (`selectedBranch` set
+                  //     via BranchesPage plain click, GitFlow, Pull-Requests,
+                  //     etc.) — `selectedBranches` is empty in that case, so
+                  //     without this fallback the user would see no checkbox
+                  //     checked and think the filter wasn't applied.
+                  const isMultiSelected = selectedBranches.has(b.name);
+                  const isSingleSelected = selectedBranches.size === 0 && globalSelectedBranch === b.name;
+                  const isChecked = isMultiSelected || isSingleSelected;
+                  return (
+                    <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (isSingleSelected) {
+                            // User clicked the checkbox for the currently
+                            // single-selected branch — clear that selection
+                            // and reset the filter to the default view.
+                            selectBranch(null);
+                            setBranchFilter('head+upstream');
+                          } else {
+                            // Multi-select path: toggle this branch in the
+                            // set. If the user is starting from a single-click
+                            // selection, `toggleBranch` will add the new
+                            // branch and clear `selectedBranch` (size > 0).
+                            // The previous single-selected branch is NOT
+                            // preserved in the multi-set — this matches
+                            // SmartGit behaviour where ticking a checkbox
+                            // replaces the single-click selection.
+                            if (selectedBranches.size === 0 && globalSelectedBranch && globalSelectedBranch !== b.name) {
+                              // Preserve the previous single-click selection
+                              // by adding it to the multi-select set first.
+                              toggleBranch(globalSelectedBranch);
+                            }
+                            toggleBranch(b.name);
+                            setBranchFilter('all');
+                          }
+                        }}
+                      />
+                      <span className={cn('truncate', b.current && 'text-accent font-medium')}>{b.name}</span>
+                      {b.current && <span className="text-2xs text-text-tertiary ml-auto">HEAD</span>}
+                    </label>
+                  );
+                })}
                 {branches.filter(b => b.remote).length > 0 && (
                   <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Remote</div>
                 )}
-                {branches.filter(b => b.remote).map(b => (
-                  <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
-                    <input
-                      type="checkbox"
-                      checked={selectedBranches.has(b.name)}
-                      onChange={() => {
-                        toggleBranch(b.name);
-                        if (selectedBranches.size > 0 || !selectedBranches.has(b.name)) setBranchFilter('all');
-                      }}
-                    />
-                    <span className="truncate">{b.name}</span>
-                  </label>
-                ))}
+                {branches.filter(b => b.remote).map(b => {
+                  const isMultiSelected = selectedBranches.has(b.name);
+                  const isSingleSelected = selectedBranches.size === 0 && globalSelectedBranch === b.name;
+                  const isChecked = isMultiSelected || isSingleSelected;
+                  return (
+                    <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (isSingleSelected) {
+                            selectBranch(null);
+                            setBranchFilter('head+upstream');
+                          } else {
+                            if (selectedBranches.size === 0 && globalSelectedBranch && globalSelectedBranch !== b.name) {
+                              toggleBranch(globalSelectedBranch);
+                            }
+                            toggleBranch(b.name);
+                            setBranchFilter('all');
+                          }
+                        }}
+                      />
+                      <span className="truncate">{b.name}</span>
+                    </label>
+                  );
+                })}
                 <div className="px-3 py-1 border-t border-border-subtle flex items-center justify-between">
                   <button className="text-2xs text-accent"
                     onClick={() => {
