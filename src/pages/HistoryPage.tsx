@@ -2285,11 +2285,19 @@ export function HistoryPage() {
                                 window.location.hash = '#/diff';
                               },
                             };
-                            showContextMenu(buildFileMenu(fileCtx), async (action) => {
-                              await runFileAction(action, fileCtx);
+                            showContextMenu([
+                              ...buildFileMenu(fileCtx),
+                              { type: 'separator' },
+                              { label: t('pages.viewFileHistory', { defaultValue: 'View file history...' }), clickId: 'view-file-history' },
+                            ], async (action) => {
+                              if (action === 'view-file-history') {
+                                setFileHistoryPath(f.path);
+                              } else {
+                                await runFileAction(action, fileCtx);
+                              }
                             });
                           }}
-                          title={isHighlighted ? `${f.path} — matches your file-history filter` : 'Click to view file history · Right-click for more actions'}
+                          title={isHighlighted ? `${f.path} — matches your file-history filter` : 'Click to filter history by this file · Right-click for more actions'}
                         >
                           <span className="font-mono font-bold w-3 text-center"
                             style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
