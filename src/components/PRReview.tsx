@@ -320,16 +320,18 @@ export function PRReview({
     setSelectedFile(null);
     try {
       if (provider === 'github' && owner && repo) {
-        // GitHub: compare the commit with its parent to get only that
-        // commit's changes (not the whole PR diff).
-        const result = await api.github.listPRFiles(owner, repo, pr.number);
-        // Filter to files that appear in this commit's diff.
-        // GitHub's listPRFiles returns PR-level files, not per-commit.
-        // For per-commit files, we'd need the compare API. For now, show
-        // all PR files — the user can see which files the commit touches
-        // by cross-referencing with the commit SHA in the diff.
+        // Use GitHub compare API to get files changed in THIS commit
+        // (comparing commit~1...commit), not the whole PR diff.
+        const result = await api.github.getCommitFiles(owner, repo, commitSha);
         setCommitFiles(result);
         if (result.length > 0) setSelectedFile(result[0]);
+      } else if (provider === 'gitlab' && gitlabProjectId != null) {
+        // GitLab: use the MR changes endpoint (shows all changed files
+        // in the MR, not per-commit — GitLab doesn't have a per-commit
+        // compare API exposed). Still better than nothing.
+        const mrFiles = await api.gitlab.listMRChanges(gitlabProjectId, pr.number);
+        setCommitFiles(mrFiles as unknown as GithubPRFile[]);
+        if (mrFiles.length > 0) setSelectedFile(mrFiles[0] as unknown as GithubPRFile);
       } else {
         setCommitFiles([]);
       }
@@ -339,7 +341,7 @@ export function PRReview({
     } finally {
       setCommitFilesLoading(false);
     }
-  }, [provider, owner, repo, pr.number, toast, t]);
+  }, [provider, owner, repo, gitlabProjectId, pr.number, toast, t]);
 
   // Normalize GithubPullRequest.user → SelectedPR.author so the rest of the
   // component reads one field.

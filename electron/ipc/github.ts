@@ -33,6 +33,9 @@ export function registerGithubIpc(): void {
   ipcMain.handle('github:listPRCommits', (_e, owner: string, repo: string, prNumber: number) =>
     github.listPRCommits(owner, repo, prNumber)
   );
+  ipcMain.handle('github:getCommitFiles', (_e, owner: string, repo: string, commitSha: string) =>
+    github.getCommitFiles(owner, repo, commitSha)
+  );
   ipcMain.handle('github:getCheckRuns', (_e, owner: string, repo: string, shas: string[]) =>
     github.getCheckRuns(owner, repo, shas)
   );

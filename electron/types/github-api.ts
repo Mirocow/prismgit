@@ -113,6 +113,11 @@ export interface GithubApi {
   listPRIssueComments: (owner: string, repo: string, prNumber: number) => Promise<GithubPRComment[]>;
   /** Fetch the commits that make up a PR — message, author, date, SHA. */
   listPRCommits: (owner: string, repo: string, prNumber: number) => Promise<GithubPRCommit[]>;
+  /** Fetch files changed in a specific commit (not the whole PR).
+   *  Uses GitHub compare API: GET /repos/:owner/:repo/compare/:base...:head
+   *  where base = commit~1 (parent) and head = commit.
+   *  Returns the same GithubPRFile shape as listPRFiles. */
+  getCommitFiles: (owner: string, repo: string, commitSha: string) => Promise<GithubPRFile[]>;
   getCheckRuns: (owner: string, repo: string, shas: string[]) => Promise<Record<string, CommitCheckStatus>>;
   logout: () => Promise<void>;
   getAuthState: () => Promise<{ authenticated: boolean; user?: GithubUser }>;

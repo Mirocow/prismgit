@@ -259,6 +259,37 @@ export async function listPRCommits(
   );
 }
 
+/**
+ * Fetch files changed in a specific commit (not the whole PR).
+ *
+ * Uses GitHub's compare API:
+ *   GET /repos/:owner/:repo/compare/:base...:head
+ * where base = commit~1 (parent of the commit) and head = commit SHA.
+ *
+ * This returns the SAME file shape as listPRFiles — GithubPRFile with
+ * filename/status/additions/deletions/patch — so the renderer can reuse
+ * the same diff display component.
+ *
+ * For the FIRST commit in the PR (no parent within the PR), we compare
+ * against the PR's base branch instead — this shows what the commit
+ * changed relative to the base, which is what the user expects.
+ */
+export async function getCommitFiles(
+  owner: string,
+  repo: string,
+  commitSha: string
+): Promise<GithubPRFile[]> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  // Compare commit with its parent (commit~1) to get only that commit's
+  // changes. GitHub's compare API accepts ref notation: base...head.
+  const result = await httpsJson<{ files?: GithubPRFile[] }>(
+    `https://api.github.com/repos/${owner}/${repo}/compare/${commitSha}~1...${commitSha}`,
+    { token }
+  );
+  return result.files ?? [];
+}
+
 export async function logout(): Promise<void> {
   store.delete('github');
 }
