@@ -14,6 +14,7 @@ import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useFavoritesStore } from '../stores/favoritesStore';
 import { useToastActions } from '../stores/toastStore';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
 import {
@@ -178,30 +179,13 @@ export function Sidebar() {
     const saved = loadProjectPrefs(currentRepo.path).collapsedSidebarGroups;
     setCollapsedGroups(saved ? new Set(saved) : new Set(loadGlobalCollapsedGroups()));
   }, [currentRepo?.path]);
-  // Favorites — GLOBAL (shared across all repositories), not per-repo.
-  // If the user has never toggled any favorite (no localStorage entry),
-  // show DEFAULT_FAVORITES. Once they add/remove any favorite, their
-  // custom set is persisted and used instead.
-  const FAVORITES_KEY = 'prismgit-favorite-tools';
-  const DEFAULT_FAVORITES = ['/changes', '/history', '/branches', '/diff'];
-  const [favoriteTools, setFavoriteTools] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(FAVORITES_KEY);
-      // If raw is null → user never interacted with favorites → show defaults.
-      // If raw exists (even '[]') → user has customized → use their set.
-      if (raw !== null) return JSON.parse(raw);
-    } catch { /* ignore */ }
-    return DEFAULT_FAVORITES;
-  });
-
-  // Save to global localStorage whenever favorites change
-  useEffect(() => {
-    try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(favoriteTools)); } catch { /* ignore */ }
-  }, [favoriteTools]);
-
-  const toggleFavorite = useCallback((path: string) => {
-    setFavoriteTools(prev => prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]);
-  }, []);
+  // Favorites — uses a GLOBAL Zustand store (not local useState) because
+  // the Sidebar component is rendered TWICE in App.tsx (no-repo + repo-open
+  // modes). Local state would cause race conditions on app restart where
+  // one Sidebar instance overwrites localStorage before the other reads it.
+  // The store reads localStorage ONCE on init and writes on every toggle.
+  const favoriteTools = useFavoritesStore((s) => s.favorites);
+  const toggleFavorite = useFavoritesStore((s) => s.toggleFavorite);
 
   // Repository tree DnD state. dragPayload is mirrored in a ref because
   // dataTransfer.getData() is unavailable during dragover in Chromium.
