@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '../components/Avatar';
 import { CommitFileTree } from '../components/CommitFileTree';
 import { DiffViewer } from '../components/DiffViewer';
+import { FileHistoryViewer } from '../components/FileHistoryViewer';
 import { FilterInput } from '../components/FilterInput';
 import {
   ArrowDown,
@@ -884,6 +885,9 @@ export function HistoryPage() {
   // Compare a commit with the current working tree — shows a diff dialog
   const [compareDiff, setCompareDiff] = useState<{ result: import('../lib/api').DiffResult; title: string } | null>(null);
   useEscapeKey(!!compareDiff, () => setCompareDiff(null));
+  // FileHistoryViewer — opens when user clicks "View file history" on a file
+  const [fileHistoryPath, setFileHistoryPath] = useState<string | null>(null);
+  useEscapeKey(!!fileHistoryPath, () => setFileHistoryPath(null));
 
   const handleRevert = async (entry: LogEntry) => {
     if (await blockedByRepoState()) return;
@@ -2189,8 +2193,16 @@ export function HistoryPage() {
                                 window.location.hash = '#/diff';
                               },
                             };
-                            showContextMenu(buildFileMenu(fileCtx), async (action) => {
-                              await runFileAction(action, fileCtx);
+                            showContextMenu([
+                              ...buildFileMenu(fileCtx),
+                              { type: 'separator' },
+                              { label: t('pages.viewFileHistory', { defaultValue: 'View file history...' }), clickId: 'view-file-history' },
+                            ], async (action) => {
+                              if (action === 'view-file-history') {
+                                setFileHistoryPath(f.path);
+                              } else {
+                                await runFileAction(action, fileCtx);
+                              }
                             });
                           }}
                         />
@@ -2346,6 +2358,11 @@ export function HistoryPage() {
           </div>
         </div>
       )}
+      {/* File History Viewer — shows commit graph + snapshot + diff + actions */}
+      {fileHistoryPath && (
+        <FileHistoryViewer filePath={fileHistoryPath} onClose={() => setFileHistoryPath(null)} />
+      )}
+
       {/* Split Off Files dialog */}
       {showSplitOff && splitOffEntry && (
         <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowSplitOff(false)}>
