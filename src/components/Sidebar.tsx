@@ -266,7 +266,19 @@ export function Sidebar() {
       let addedCount = 0;
       let skippedCount = 0;
       for (const f of files) {
-        const filePath = (f as File & { path?: string }).path;
+        // Resolve the real filesystem path.
+        // Since Electron 32, `file.path` is no longer defined in the
+        // renderer. Use the exposed `api.webUtils.getPathForFile()`
+        // helper instead. Fallback to the legacy `file.path` for
+        // backwards compatibility with Electron ≤31.
+        let filePath = '';
+        const wu = (api as unknown as { webUtils?: { getPathForFile?: (f: File) => string } }).webUtils;
+        if (wu?.getPathForFile) {
+          filePath = wu.getPathForFile(f);
+        }
+        if (!filePath) {
+          filePath = (f as File & { path?: string }).path ?? '';
+        }
         if (!filePath) continue;
         const name = filePath.split('/').pop() || filePath;
         try {

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { GitApi } from './types/git-api.js';
 import type { GithubApi } from './types/github-api.js';
 import type { GitLabApi } from './types/gitlab-api.js';
@@ -7,6 +7,28 @@ import type { SettingsApi } from './types/settings-api.js';
 import type { CommandLogEntry } from './types/command-log-api.js';
 import type { VsCodeApi } from './types/vscode-api.js';
 import type { SshApi, CredentialsApi } from './types/ssh-api.js';
+
+// Expose webUtils.getPathForFile to the renderer — Electron 32 removed
+// the non-standard `File.path` property in renderer context. Use this
+// helper to resolve the real filesystem path of dropped File objects.
+// (https://www.electronjs.org/blog/electron-32-0#removed-non-standard-filepath-property-on-file-objects)
+//
+// Exposed via contextBridge as window.smartgit.webUtils.getPathForFile
+// so it works under contextIsolation: true.
+const webUtilsApi = {
+  /**
+   * Resolve the real filesystem path of a File object received via
+   * drag-and-drop from the OS file manager. Returns '' for synthetic
+   * File objects (e.g. created by `new File([''], 'foo')` in tests).
+   */
+  getPathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return '';
+    }
+  },
+};
 
 const api = {
   // Git operations
@@ -649,6 +671,12 @@ const api = {
   },
 } as const;
 
-contextBridge.exposeInMainWorld('smartgit', api);
+contextBridge.exposeInMainWorld('smartgit', {
+  ...api,
+  // Expose webUtils.getPathForFile under api.webUtils so the renderer
+  // can resolve the filesystem path of dropped File objects. Required
+  // since Electron 32 — File.path is no longer defined in the renderer.
+  webUtils: webUtilsApi,
+});
 
 export type SmartGitApi = typeof api;

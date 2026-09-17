@@ -30,7 +30,10 @@ import { useI18n } from '../lib/i18n';
  * React-level handlers on their host elements.
  *
  * Electron provides dropped file paths via the HTML5 DragEvent API —
- * `e.dataTransfer.files` contains File objects with `.path` (Electron extension).
+ * `e.dataTransfer.files` contains File objects whose real filesystem
+ * path is resolved via `api.webUtils.getPathForFile()` (Electron 32+).
+ * For Electron ≤31, the legacy non-standard `file.path` property is
+ * used as a fallback.
  */
 
 interface DropResult {
@@ -199,11 +202,24 @@ export function DragDropHandler() {
       setResults(null);
 
       // Collect all dropped file paths.
-      // Electron exposes the real filesystem path via `file.path`.
+      // Since Electron 32, `file.path` is no longer defined in the
+      // renderer (with contextIsolation: true). Use the exposed
+      // `api.webUtils.getPathForFile()` helper to resolve the real
+      // filesystem path. Synthetic File objects (from tests) return ''.
       const files = Array.from(e.dataTransfer.files);
       const paths: string[] = [];
       for (const f of files) {
-        const filePath = (f as File & { path?: string }).path;
+        // Try the new webUtils API first (Electron 32+).
+        let filePath = '';
+        const wu = (api as unknown as { webUtils?: { getPathForFile?: (f: File) => string } }).webUtils;
+        if (wu?.getPathForFile) {
+          filePath = wu.getPathForFile(f);
+        }
+        // Fallback to the old `file.path` (Electron ≤31) for backwards
+        // compatibility with older builds still in use.
+        if (!filePath) {
+          filePath = (f as File & { path?: string }).path ?? '';
+        }
         if (filePath) paths.push(filePath);
       }
 
