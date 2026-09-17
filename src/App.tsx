@@ -1561,7 +1561,13 @@ export default function App() {
       <div className="flex flex-col h-screen">
         <Toolbar onFind={handleFind} onGlobalSearch={() => setShowGlobalSearch(true)} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onShowShortcuts={() => setShowShortcuts(true)} onShowClone={() => setShowClone(true)} onShowInit={() => setShowInit(true)} onToggleAiAssistant={() => setShowAiAssistant(v => !v)} />
         <div className="flex flex-1 overflow-hidden">
-          <Sidebar />
+          {/* NO separate Sidebar for no-repo mode — use the SAME
+              component as the repo-open mode below. The old code had
+              TWO Sidebar instances (one per branch of the if/else),
+              which caused a favorites persistence race condition:
+              both instances wrote to localStorage independently, and on
+              app restart one could overwrite the other's changes. */}
+          <Sidebar currentRepoOverride={null} />
           <div className="flex-1 overflow-hidden flex flex-col">
             <Suspense fallback={<PageLoader />}>
               <Routes>
@@ -1635,7 +1641,10 @@ export default function App() {
         onInteractiveRebase={() => setShowIRebase(true)}
       />
       <div className="flex flex-1 overflow-hidden no-drag">
-        {/* Sidebar always visible — navigation must be accessible */}
+        {/* Sidebar always visible — navigation must be accessible.
+            SINGLE Sidebar instance for both no-repo and repo-open modes.
+            The currentRepoOverride prop is omitted here so the Sidebar
+            reads currentRepo from the repository store naturally. */}
         <Sidebar />
         <main className="flex-1 overflow-hidden flex flex-col">
           <HelpBanner />

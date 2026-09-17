@@ -102,9 +102,14 @@ function RemoteBadges({ check }: { check: RemoteCheckSummary | undefined }) {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ currentRepoOverride }: { currentRepoOverride?: { path: string; name: string; lastOpened: number } | null }) {
   const navigate = useNavigate();
   const location = useLocation();
+  // Allow App.tsx to pass null to force no-repo mode in a SINGLE Sidebar
+  // instance. Previously App.tsx rendered TWO Sidebar instances (one per
+  // if/else branch), causing favorites persistence race conditions.
+  const repoFromStore = useRepositoryStore((s) => s.currentRepo);
+  const currentRepo = currentRepoOverride !== undefined ? currentRepoOverride : repoFromStore;
   // Granular selectors — previously the entire store was destructured, so any
   // state change (e.g. remoteChecks updated by the 2-min poll) re-rendered the
   // entire sidebar tree including all repo rows, drag handlers, badges, etc.
@@ -113,7 +118,6 @@ export function Sidebar() {
   const metadata = useRepositoryStore((s) => s.metadata);
   const remoteChecks = useRepositoryStore((s) => s.remoteChecks);
   const checkingRemotes = useRepositoryStore((s) => s.checkingRemotes);
-  const currentRepo = useRepositoryStore((s) => s.currentRepo);
   // Actions are stable references in zustand — selecting them via separate
   // calls doesn't cause re-renders on state changes.
   const openRepository = useRepositoryStore((s) => s.openRepository);
