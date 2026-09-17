@@ -665,14 +665,6 @@ export function Sidebar() {
             <X size={10} />
           </button>
         </div>
-        {providerLabel && (
-          <div
-            className="flex items-center gap-1.5 pl-[21px] text-2xs text-text-tertiary tabular-nums min-w-0"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <span className="px-1 rounded bg-bg-tertiary text-text-secondary">{providerLabel}</span>
-          </div>
-        )}
       </div>
     );
   };
