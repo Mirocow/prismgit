@@ -74,10 +74,22 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
         api.settings.getRepos(),
         api.settings.getRepoGroups().catch(() => [] as RepoGroup[]),
       ]);
+      // Preserve locally-modified `expanded` state from the current store
+      // so that optimistic UI updates (toggleGroupExpanded) don't get
+      // overwritten when loadRepos() fires (e.g. from refreshAllStats()
+      // or a background poll). Without this merge, the user clicks to
+      // expand a group → optimistic set() shows repos → loadRepos()
+      // overwrites groups from store (which still has expanded=false if
+      // the persist hasn't landed yet) → repos disappear → click again →
+      // now persist has landed → repos reappear. This was the "глючить"
+      // flicker the user reported.
+      const prevGroups = get().groups;
+      const prevExpanded = new Map(prevGroups.map((g) => [g.id, g.expanded]));
+      const mergedGroups = groups.map((g) => ({
+        ...g,
+        expanded: prevExpanded.has(g.id) ? prevExpanded.get(g.id) : g.expanded,
+      }));
       // Sort: favorites first, then pinned — but DON'T re-sort by lastOpened.
-      // The user complaint was that repos "jump around like a goat" every time
-      // they open one — because lastOpened changed and the list re-sorted.
-      // Now we keep stable insertion order (preserving the order repos were added).
       const sorted = [...repos].sort((a, b) => {
         const metaA = get().metadata[a.path];
         const metaB = get().metadata[b.path];
@@ -87,7 +99,7 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
         if (!a.pinned && b.pinned) return 1;
         return 0;
       });
-      set({ repos: sorted, groups, loading: false });
+      set({ repos: sorted, groups: mergedGroups, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
     }
