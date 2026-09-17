@@ -334,6 +334,10 @@ export interface GitApi {
   log: (repoPath: string, options?: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean }) => Promise<LogEntry[]>;
   /** Resolve a commit by full/abbreviated hash (prefix search) — null when not found. */
   findCommit: (repoPath: string, query: string) => Promise<LogEntry | null>;
+  /** Fetch commit stat summaries (additions/deletions per commit).
+   *  Used by the Activity Wave to size commit bars. */
+  commitStats: (repoPath: string, options?: { maxCount?: number; skip?: number; branch?: string }) =>
+    Promise<Record<string, { additions: number; deletions: number; files: number }>>;
   branches: (repoPath: string) => Promise<BranchInfo[]>;
   remotes: (repoPath: string) => Promise<RemoteInfo[]>;
   checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) => Promise<AutoStashResult>;

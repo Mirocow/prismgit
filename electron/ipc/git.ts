@@ -71,6 +71,9 @@ export function registerGitIpc(): void {
     wrap(gitService.log)(p, o || {})
   );
   ipcMain.handle('git:findCommit', (_e, p: string, q: string) => wrap(gitService.findCommit)(p, q));
+  ipcMain.handle('git:commitStats', (_e, p: string, o?: { maxCount?: number; skip?: number; branch?: string }) =>
+    wrap(gitService.commitStats)(p, o)
+  );
   ipcMain.handle('git:commitFiles', (_e, p: string, h: string) => wrap(gitService.commitFiles)(p, h));
   ipcMain.handle('git:mergeNestedCommits', (_e, p: string, h: string) => wrap(gitService.mergeNestedCommits)(p, h));
   ipcMain.handle('git:tagsAt', (_e, p: string, h: string) => wrap(gitService.tagsAt)(p, h));

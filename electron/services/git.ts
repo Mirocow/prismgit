@@ -1821,7 +1821,84 @@ export async function log(
   } catch {
     return [];
   }
-  return parseRawLog(out);
+  const entries = parseRawLog(out);
+
+  // If the user wants stat data (for the Activity Wave), fetch it
+  // in a separate lightweight call. We append the stat summary line
+  // to the body field so the renderer can parse it.
+  // Format: "N files changed, N insertions(+), N deletions(-)"
+  return entries;
+}
+
+/**
+ * Fetch commit stat summaries (additions/deletions per commit).
+ * Used by the Activity Wave to size commit bars.
+ * Returns a map of hash → { additions, deletions }.
+ */
+export async function commitStats(
+  repoPath: string,
+  options: { maxCount?: number; skip?: number; branch?: string } = {}
+): Promise<Record<string, { additions: number; deletions: number; files: number }>> {
+  const git = getGit(repoPath);
+  const { maxCount = 500, skip = 0, branch } = options;
+  const args = ['log', `-${maxCount}`, '--pretty=format:%H%x00', '--numstat', '--date=iso-strict'];
+  if (skip > 0) args.push(`--skip=${skip}`);
+  if (branch) args.push(branch);
+
+  let out: string;
+  try {
+    out = await git.raw(args);
+  } catch {
+    return {};
+  }
+
+  const result: Record<string, { additions: number; deletions: number; files: number }> = {};
+  // Parse: each commit starts with "hash\0" followed by numstat lines
+  // (additions\tdeletions\tpath), then a blank line separator.
+  const lines = out.split('\n');
+  let currentHash = '';
+  let currentAdd = 0, currentDel = 0, currentFiles = 0;
+
+  for (const line of lines) {
+    if (line.includes('\0')) {
+      // Save previous commit
+      if (currentHash) {
+        result[currentHash] = { additions: currentAdd, deletions: currentDel, files: currentFiles };
+      }
+      // Start new commit
+      const parts = line.split('\0');
+      currentHash = parts[0].trim();
+      // If there's data after \0 on the same line, it's the first numstat line
+      const rest = parts[1]?.trim();
+      currentAdd = 0; currentDel = 0; currentFiles = 0;
+      if (rest && /^\d+\t\d+\t/.test(rest)) {
+        const m = rest.match(/^(\d+|-)\t(\d+|-)\t/);
+        if (m) {
+          currentAdd += m[1] === '-' ? 0 : parseInt(m[1], 10);
+          currentDel += m[2] === '-' ? 0 : parseInt(m[2], 10);
+          currentFiles++;
+        }
+      }
+    } else if (line.trim() && /^\d+|-?\t\d+|-?\t/.test(line.trim())) {
+      // numstat line: additions\tdeletions\tpath
+      const m = line.trim().match(/^(\d+|-)\t(\d+|-)\t/);
+      if (m && currentHash) {
+        currentAdd += m[1] === '-' ? 0 : parseInt(m[1], 10);
+        currentDel += m[2] === '-' ? 0 : parseInt(m[2], 10);
+        currentFiles++;
+      }
+    } else if (!line.trim() && currentHash) {
+      // Blank line separator — save and reset
+      result[currentHash] = { additions: currentAdd, deletions: currentDel, files: currentFiles };
+      currentHash = '';
+      currentAdd = 0; currentDel = 0; currentFiles = 0;
+    }
+  }
+  // Don't forget the last commit
+  if (currentHash) {
+    result[currentHash] = { additions: currentAdd, deletions: currentDel, files: currentFiles };
+  }
+  return result;
 }
 function parseRawLog(raw: string): LogEntry[] {
   if (!raw.trim()) return [];

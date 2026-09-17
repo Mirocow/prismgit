@@ -3,6 +3,7 @@ import { Avatar } from '../components/Avatar';
 import { CommitFileTree } from '../components/CommitFileTree';
 import { DiffViewer } from '../components/DiffViewer';
 import { FileHistoryViewer } from '../components/FileHistoryViewer';
+import { ActivityWave } from '../components/ActivityWave';
 import { FilterInput } from '../components/FilterInput';
 import {
   ArrowDown,
@@ -87,6 +88,8 @@ export function HistoryPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  // Commit stats for Activity Wave — fetched lazily after entries load.
+  const [commitStatsMap, setCommitStatsMap] = useState<Record<string, { additions: number; deletions: number; files: number }>>({});
   const [search, setSearch] = useState('');
   // Debounced search — avoids re-filtering on every keystroke for large repos.
   // The filter runs on `debouncedSearch` (updated 250ms after typing stops).
@@ -269,6 +272,11 @@ export function HistoryPage() {
       }
       const result = await api.git.log(repo.path, logOpts);
       setEntries(result);
+      // Fetch commit stats for Activity Wave — non-blocking, runs after
+      // entries paint. The wave shows heights based on additions+deletions.
+      void api.git.commitStats(repo.path, { maxCount: result.length, branch: logOpts.branch }).then(stats => {
+        setCommitStatsMap(stats);
+      }).catch(() => { /* non-critical — wave just shows flat bars */ });
       // If we got fewer than PAGE_SIZE commits, there are no more to load.
       // Otherwise assume more exist (we'll discover the end on the next fetch).
       setHasMore(result.length >= PAGE_SIZE);
@@ -1426,6 +1434,19 @@ export function HistoryPage() {
           () => refreshStatus(repo.path),
           toast,
         )}
+      />
+      {/* Activity Wave — visual timeline of commit sizes.
+          Each bar = one commit, height = lines changed (sqrt-scaled).
+          Click a spike to jump to that commit. */}
+      <ActivityWave
+        commits={filtered}
+        selectedHash={selectedIdx !== null ? filtered[selectedIdx]?.hash : null}
+        onSelect={(hash) => {
+          const idx = filtered.findIndex(e => e.hash === hash);
+          if (idx !== -1) setSelectedIdx(idx);
+        }}
+        commitStats={commitStatsMap}
+        height={48}
       />
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default bg-bg-tertiary" style={{ height: 32 }}>
