@@ -9,6 +9,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { cn } from '../lib/utils';
+import { isSymbolicHead } from '../lib/branchFilter';
 import { useI18n } from '../lib/i18n';
 import { formatAbsoluteDate } from '../lib/formatDate';
 import { api, type LogEntry, type BranchInfo, type TagInfo, type StashEntry } from '../lib/api';
@@ -241,7 +242,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
     // branches. Selecting them in GlobalSearch would attempt to
     // checkout/merge a non-existent ref.
     for (const b of branches) {
-      if (b.name === 'HEAD' || b.name.endsWith('/HEAD')) continue;
+      if (isSymbolicHead(b.name)) continue;
       const s = matchScore(b.name, q);
       if (s >= 0) {
         out.push({

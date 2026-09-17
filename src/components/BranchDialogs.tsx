@@ -3,6 +3,7 @@ import { Loader, Check, Settings as SettingsIcon, Search } from './icons';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
+import { filterSymbolicHeadNames } from '../lib/branchFilter';
 import { useI18n } from '../lib/i18n';
 import { useSettingsStore } from '../stores/settingsStore';
 import type { RemoteProperties } from '../../electron/types/git-api';
@@ -169,9 +170,8 @@ export function SetTrackedDialog({
   const filtered = useMemo(
     // Filter out symbolic HEAD refs like "origin/HEAD" — they point to
     // the remote's default branch and are not real branches.
-    () => remoteBranches.filter(
-      (b) => b !== 'HEAD' && !b.endsWith('/HEAD') && b.toLowerCase().includes(filter.toLowerCase()),
-    ),
+    () => filterSymbolicHeadNames(remoteBranches)
+      .filter((b) => b.toLowerCase().includes(filter.toLowerCase())),
     [remoteBranches, filter]
   );
 
@@ -313,8 +313,8 @@ export function PushToDialog({
   // Exclude symbolic HEAD refs like "origin/HEAD" — they are pointers
   // to the default branch, not real branches.
   const suggestions = useMemo(
-    () => remoteBranches
-      .filter((b) => b.startsWith(`${remote}/`) && !b.endsWith('/HEAD'))
+    () => filterSymbolicHeadNames(remoteBranches)
+      .filter((b) => b.startsWith(`${remote}/`))
       .map((b) => b.slice(remote.length + 1)),
     [remoteBranches, remote]
   );

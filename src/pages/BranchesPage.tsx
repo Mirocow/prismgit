@@ -30,6 +30,7 @@ import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/back
 import { describePushResult } from '../lib/pushResult';
 import { getRepoInProgressState } from '../lib/repoState';
 import { resolveDefaultRemote } from '../lib/remotes';
+import { filterSymbolicHeads, filterSymbolicHeadNames } from '../lib/branchFilter';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { confirmWithRemember, CONFIRMATION_IDS } from '../lib/confirmations';
 import { useI18n } from '../lib/i18n';
@@ -1292,11 +1293,9 @@ export function BranchesPage() {
   // builds the branch list from `git for-each-ref` directly) slips
   // through, the user would see "origin/HEAD" rows that look like
   // real branches but cannot be pushed, merged, or checked out.
-  const isSymbolicHead = (name: string): boolean =>
-    name === 'HEAD' || name.endsWith('/HEAD');
-  const localBranches = filtered.filter(b => !b.remote && !isSymbolicHead(b.name));
+  const localBranches = filterSymbolicHeads(filtered.filter(b => !b.remote));
   const remoteGroups: Record<string, BranchInfo[]> = {};
-  for (const b of filtered.filter(b => b.remote && !isSymbolicHead(b.name))) {
+  for (const b of filterSymbolicHeads(filtered.filter(b => b.remote))) {
     const remoteName = b.name.split('/')[0];
     if (!remoteGroups[remoteName]) remoteGroups[remoteName] = [];
     remoteGroups[remoteName].push(b);
@@ -2122,7 +2121,7 @@ export function BranchesPage() {
       {setTrackedTarget && (
         <SetTrackedDialog
           branchName={setTrackedTarget.branch}
-          remoteBranches={branches.filter((b) => b.remote).map((b) => b.name)}
+          remoteBranches={filterSymbolicHeadNames(branches.filter((b) => b.remote).map((b) => b.name))}
           current={setTrackedTarget.current}
           busy={setTrackedBusy}
           onSubmit={executeSetTracking}
@@ -2136,7 +2135,7 @@ export function BranchesPage() {
           branchName={pushToTarget.branch}
           remotes={Object.keys(remotesMap)}
           defaultRemote={pushToTarget.defaultRemote}
-          remoteBranches={branches.filter((b) => b.remote).map((b) => b.name)}
+          remoteBranches={filterSymbolicHeadNames(branches.filter((b) => b.remote).map((b) => b.name))}
           hasUpstream={pushToTarget.hasUpstream}
           busy={pushToBusy}
           onSubmit={executePushTo}

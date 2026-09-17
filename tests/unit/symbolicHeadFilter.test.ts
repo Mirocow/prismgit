@@ -11,11 +11,11 @@
  * a cached list slips through.
  */
 import { describe, it, expect } from 'vitest';
-
-// Mirror the helper we added to BranchesPage.
-function isSymbolicHead(name: string): boolean {
-  return name === 'HEAD' || name.endsWith('/HEAD');
-}
+import {
+  isSymbolicHead,
+  filterSymbolicHeads,
+  filterSymbolicHeadNames,
+} from '../../src/lib/branchFilter';
 
 describe('Symbolic HEAD ref filter (origin/HEAD, github/HEAD)', () => {
   it('filters out "origin/HEAD"', () => {
@@ -43,7 +43,7 @@ describe('Symbolic HEAD ref filter (origin/HEAD, github/HEAD)', () => {
     expect(isSymbolicHead('origin/my-head-branch')).toBe(false);
   });
 
-  it('filters a list of branches correctly', () => {
+  it('filterSymbolicHeads() filters a list of branch objects', () => {
     const branches = [
       { name: 'main', remote: false },
       { name: 'origin/main', remote: true },
@@ -53,9 +53,32 @@ describe('Symbolic HEAD ref filter (origin/HEAD, github/HEAD)', () => {
       { name: 'feature/x', remote: false },
       { name: 'HEAD', remote: false }, // bare detached HEAD ref
     ];
-    const filtered = branches.filter(b => !isSymbolicHead(b.name));
-    expect(filtered.map(b => b.name).sort()).toEqual(
+    const filtered = filterSymbolicHeads(branches);
+    expect(filtered.map((b) => b.name).sort()).toEqual(
       ['feature/x', 'github/main', 'main', 'origin/main'].sort(),
     );
+  });
+
+  it('filterSymbolicHeadNames() filters a list of branch-name strings', () => {
+    const names = [
+      'main',
+      'origin/main',
+      'origin/HEAD',
+      'github/main',
+      'github/HEAD',
+      'HEAD',
+      'feature/x',
+    ];
+    const filtered = filterSymbolicHeadNames(names);
+    expect(filtered.sort()).toEqual(
+      ['feature/x', 'github/main', 'main', 'origin/main'].sort(),
+    );
+  });
+
+  it('does not mutate the input array', () => {
+    const input = [{ name: 'main' }, { name: 'origin/HEAD' }];
+    const inputCopy = [...input];
+    filterSymbolicHeads(input);
+    expect(input).toEqual(inputCopy);
   });
 });

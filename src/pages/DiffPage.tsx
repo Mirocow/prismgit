@@ -6,6 +6,7 @@ import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { api, type BranchInfo, type CommitFile, type DiffResult, type LogEntry } from '../lib/api';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
+import { filterSymbolicHeads } from '../lib/branchFilter';
 import { useI18n } from '../lib/i18n';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { buildRepoStateHandlers } from '../lib/repoState';
@@ -457,10 +458,10 @@ export function DiffPage() {
             title={t('diff.baseTooltip')}
           >
             <option value="HEAD">HEAD</option>
-            {branches.filter(b => !b.remote).map(b => (
+            {filterSymbolicHeads(branches.filter(b => !b.remote)).map(b => (
               <option key={b.name} value={b.name}>{b.name}</option>
             ))}
-            {branches.filter(b => b.remote).map(b => (
+            {filterSymbolicHeads(branches.filter(b => b.remote)).map(b => (
               <option key={b.name} value={b.name}>{b.name}</option>
             ))}
             {recentCommits.map(c => (
@@ -520,7 +521,7 @@ export function DiffPage() {
             title={t('diff.compareTooltip')}
           >
             <option value="">{t('diff.selectRef')}</option>
-            {branches.filter(b => !b.remote).map(b => (
+            {filterSymbolicHeads(branches.filter(b => !b.remote)).map(b => (
               <option key={b.name} value={b.name}>{b.name}</option>
             ))}
             {recentCommits.map(c => (

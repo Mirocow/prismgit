@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { X, Search, Loader } from './icons';
 import { BranchSyncIndicator } from './BranchSyncIndicator';
+import { filterSymbolicHeads } from '../lib/branchFilter';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -85,13 +86,12 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = branches;
     // Defense-in-depth: never show symbolic HEAD refs like "origin/HEAD"
     // or "github/HEAD" — they are pointers to the default branch of the
     // remote, not real branches. Backend branches() already strips them,
     // but if a different code path slips through, the user could pick a
     // symbolic ref and the operation would fail.
-    list = list.filter((b) => b.name !== 'HEAD' && !b.name.endsWith('/HEAD'));
+    let list = filterSymbolicHeads(branches);
     if (action === 'checkout') list = list; // remote branches can be checked out too (creates local tracking)
     if (meta.branchOnly) list = list.filter((b) => !b.remote);
     if (!q) return list.slice(0, 200);
