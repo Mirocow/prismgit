@@ -529,10 +529,35 @@ export function Sidebar() {
         draggable
         onDragStart={(e) => handleDragStart(e, { kind: 'repo', path: repo.path })}
         onDragEnd={handleDragEnd}
-        // Repo rows are not drop targets: stop propagation so the root zone
-        // doesn't light up, but no preventDefault → the browser shows the
-        // "no-drop" cursor and no drop event fires here.
-        onDragOver={(e) => e.stopPropagation()}
+        // Repo rows ARE drop targets — accept drops so the user can drag
+        // a repo row onto another repo row to move it into the SAME
+        // parent group. The drop is then handled by handleDrop() with
+        // the target group resolved from the row's parent.
+        // Without preventDefault on dragover, the browser shows the
+        // "no-drop" cursor and the drop event never fires.
+        onDragOver={(e) => {
+          // Accept both internal drags (repo/group) and external OS file
+          // drags — same as the root zone.
+          const isInternal = !!dragPayloadRef.current;
+          const isExternal = Array.from(e.dataTransfer?.types || []).some(
+            (t) => t.toLowerCase() === 'files'
+          );
+          if (!isInternal && !isExternal) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer!.dropEffect = isExternal ? 'copy' : 'move';
+          // Light up the row's parent group, not the root — gives the
+          // user feedback about which group will receive the drop.
+          const parentGroup = repo.groupId;
+          setDragOverId(parentGroup ?? 'root');
+        }}
+        onDrop={(e) => {
+          // Forward to handleDrop with the parent group as target.
+          // Without this, dropping a repo row on another repo row would
+          // not trigger any action — the root zone's onDrop would only
+          // fire if the drop lands on the root element itself.
+          void handleDrop(e, repo.groupId ?? null);
+        }}
         onContextMenu={(e) => showRepoMenu(e, repo.path, repo.groupId)}
         className={cn(
           'group flex flex-col gap-0.5 py-1.5 pr-2 cursor-pointer text-xs transition-colors hover:bg-bg-hover',
