@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AiProvidersGrid } from '../components/AiProvidersGrid';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { Folder, GitBranch, Github, Loader, Lock, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
+import { ExternalLink, Folder, GitBranch, Github, Loader, Lock, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
 import { SecuritySettings } from '../components/settings/SecuritySettings';
 import { api, type GitConfigEntry } from '../lib/api';
 import { restoreAllConfirmations } from '../lib/confirmations';
@@ -51,7 +51,7 @@ export function SettingsPage() {
   const { user, authenticated, loginWithPAT, logout, loadAuthState } = useAuthStore();
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastActions();
-  const { repos, removeRepo, loadRepos } = useRepositoryStore();
+  const { repos, removeRepo, loadRepos, openRepository } = useRepositoryStore();
   const { t, locale, setLocale } = useI18n();
 
   const [pat, setPat] = useState('');
@@ -1455,8 +1455,12 @@ export function SettingsPage() {
           </section>
         )}
 
-        {/* Repositories */}
-        {showProject && (
+        {/* Repositories — shown in Appearance tab (not Project) because the
+            user needs to manage known repos even when no repo is open.
+            Was: showProject (only visible with a repo open) — that made it
+            impossible to open/remove repos from Settings when the user
+            had just launched the app with no repo. */}
+        {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">
             <span>{t('settings.knownRepositories', { count: repos.length })}</span>
@@ -1478,7 +1482,8 @@ export function SettingsPage() {
               repos.map((r) => (
                 <div
                   key={r.path}
-                  className="group flex items-center gap-3 px-3 py-2 hover:bg-bg-hover rounded-md transition-colors"
+                  className="group flex items-center gap-3 px-3 py-2 hover:bg-bg-hover rounded-md transition-colors cursor-pointer"
+                  onClick={() => openRepository(r.path)}
                 >
                   <div className="w-7 h-7 rounded-md bg-bg-tertiary border border-border-default flex items-center justify-center flex-shrink-0">
                     <Folder size={13} className="text-text-tertiary" />
@@ -1490,9 +1495,16 @@ export function SettingsPage() {
                     </div>
                   </div>
                   <button
+                    className="opacity-0 group-hover:opacity-100 icon-btn !w-6 !h-6 hover:!text-accent transition-opacity"
+                    title={t('shell.openRepoShortcut')}
+                    onClick={(e) => { e.stopPropagation(); openRepository(r.path); }}
+                  >
+                    <ExternalLink size={12} />
+                  </button>
+                  <button
                     className="opacity-0 group-hover:opacity-100 icon-btn !w-6 !h-6 hover:!text-status-deleted transition-opacity"
                     title={t('common.remove')}
-                    onClick={() => removeRepo(r.path)}
+                    onClick={(e) => { e.stopPropagation(); removeRepo(r.path); }}
                   >
                     <Plus size={12} className="rotate-45" />
                   </button>
