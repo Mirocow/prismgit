@@ -841,14 +841,16 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-2 scrollbar-thin" role="navigation" aria-label={t('shell.mainNavigation')}>
-        {currentRepo ? (
-          <>
-          {/* Favorites section — user-pinned tools at the top */}
-          {favoriteTools.length > 0 && (
-            <div className="mb-3">
-              <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary flex items-center gap-1">
-                <Star size={9} className="text-status-modified fill-current" />
-                {t('nav.favorites')}
+        {/* Favorites section — user-pinned tools at the top.
+            Shown ALWAYS (even without a repo open) so the user can
+            quickly jump to their favorite tools. Settings and AI Chat
+            work without a repo; Changes/History/etc. will prompt to
+            open a repo when clicked. */}
+        {favoriteTools.length > 0 && (
+          <div className="mb-3">
+            <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary flex items-center gap-1">
+              <Star size={9} className="text-status-modified fill-current" />
+              {t('nav.favorites')}
               </div>
               {favoriteTools.map(path => {
                 const item = NAV_ITEMS.find(n => n.path === path);
@@ -916,7 +918,12 @@ export function Sidebar() {
             </div>
           )}
 
-          {/* Regular navigation groups */}
+        {/* Regular navigation groups — only when a repo is open.
+            These show Changes, History, Branches, Tags, etc. — all
+            require an active repository to work. Without a repo, the
+            user sees a prompt to open one. */}
+        {currentRepo ? (
+          <>
           {Object.entries(groups_).map(([groupName, items]) => {
             // Hide the entire group if all its items are favorited (moved
             // to the Favorites section above). Avoids empty group headers.
