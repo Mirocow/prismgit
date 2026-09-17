@@ -36,6 +36,17 @@ import {
 import { NAV_DESCRIPTIONS, NAV_ITEMS, NAV_SHORTCUTS, type NavItem } from './navItems';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from './ResizableSplitter';
 
+/** Navigation paths that work WITHOUT an open repository.
+ *  These are shown in Favorites even when no repo is open.
+ *  Everything else (Changes, History, Branches, Diff, Tags, etc.)
+ *  requires an active repo and is hidden from Favorites until one is opened. */
+const NO_REPO_PATHS = new Set([
+  '/settings',    // Settings page — always accessible
+  '/ai-chat',     // AI Chat — works in no-repo mode
+  '/pulls',       // Pull Requests — shows provider picker / empty state
+  '/reviews',     // Reviews — shows local review mode
+]);
+
 /**
  * Drag-and-drop payload for the repository tree. Chromium lowercases custom
  * MIME types, so the type itself is lowercase and the JSON is parsed
@@ -843,16 +854,24 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto py-2 scrollbar-thin" role="navigation" aria-label={t('shell.mainNavigation')}>
         {/* Favorites section — user-pinned tools at the top.
             Shown ALWAYS (even without a repo open) so the user can
-            quickly jump to their favorite tools. Settings and AI Chat
-            work without a repo; Changes/History/etc. will prompt to
-            open a repo when clicked. */}
+            quickly jump to their favorite tools. When no repo is open,
+            only tools that work without a repo are shown (Settings, AI Chat,
+            Pull Requests, Reviews) — repo-dependent tools (Changes, History,
+            Branches, Diff, etc.) are hidden until a repo is opened. */}
         {favoriteTools.length > 0 && (
           <div className="mb-3">
             <div className="px-3 py-1 text-2xs font-bold uppercase tracking-wider text-text-tertiary flex items-center gap-1">
               <Star size={9} className="text-status-modified fill-current" />
               {t('nav.favorites')}
               </div>
-              {favoriteTools.map(path => {
+              {favoriteTools
+                // When no repo is open, hide favorites that require a repo.
+                // These paths work without a repo: /settings, /ai-chat,
+                // /pulls, /reviews (they have their own no-repo fallbacks).
+                // Everything else (Changes, History, Branches, Diff, Blame,
+                // Tags, Remotes, Stashes, Submodules, LFS, etc.) needs a repo.
+                .filter(path => currentRepo || NO_REPO_PATHS.has(path))
+                .map(path => {
                 const item = NAV_ITEMS.find(n => n.path === path);
                 if (!item) return null;
                 const Icon = item.icon;
