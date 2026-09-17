@@ -202,4 +202,67 @@ describe('DragDropHandler — zone-restricted drop behavior', () => {
     const overlays = container.querySelectorAll('.fixed.inset-0');
     expect(overlays.length).toBe(0);
   });
+
+  // ── Regression: child drop targets (group rows, repo rows) must not
+  // be intercepted by the window-level DragDropHandler ────────────────
+  // The Sidebar registers its own onDrop on group rows and the root
+  // repo-tree element. Our window-level handler must ONLY act when the
+  // drop target IS the root repo-tree, not when it's a descendant.
+  // Otherwise, dragging a repo row into a group would not call the
+  // Sidebar's drop handler — the group would never receive the repo.
+
+  it('does NOT show the drop highlight when drag enters a CHILD of the repo list (group row, repo row, etc.)', async () => {
+    render(<DragDropHandler />);
+
+    // Create a child element INSIDE the repo-tree (simulating a group
+    // header div). Dragging onto the group should NOT trigger the
+    // global DragDropHandler's highlight — the Sidebar's own group
+    // row onDragOver handler manages its own highlight (via dragOverId).
+    const childRow = document.createElement('div');
+    childRow.setAttribute('data-testid', 'repo-group-main');
+    childRow.textContent = 'main';
+    repoTreeEl.appendChild(childRow);
+
+    act(() => {
+      dispatchDragEvent('dragenter', childRow, createDataTransferWithFiles());
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // The global highlight label should NOT be visible — child rows
+    // have their own React DnD handlers and must not be intercepted.
+    const label = screen.queryByText('shell.dropReposTitle');
+    expect(label).toBeNull();
+
+    // Cleanup
+    if (childRow.parentNode) childRow.parentNode.removeChild(childRow);
+  });
+
+  it('does NOT call preventDefault on dragover over a child element (lets the child handle its own DnD)', async () => {
+    const { container } = render(<DragDropHandler />);
+
+    // Create a child element INSIDE the repo-tree.
+    const childRow = document.createElement('div');
+    childRow.setAttribute('data-testid', 'repo-row-my-repo');
+    childRow.textContent = 'my-repo';
+    repoTreeEl.appendChild(childRow);
+
+    // Spy on the event to check if preventDefault was called.
+    const dt = createDataTransferWithFiles();
+    let preventDefaultCalled = false;
+    const event = new MockDragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+    const origPreventDefault = event.preventDefault.bind(event);
+    event.preventDefault = () => { preventDefaultCalled = true; };
+
+    act(() => {
+      childRow.dispatchEvent(event);
+    });
+
+    // The global handler should NOT have called preventDefault on the
+    // child-row dragover — the Sidebar's own row onDragOver does that.
+    expect(preventDefaultCalled).toBe(false);
+
+    // Cleanup
+    if (childRow.parentNode) childRow.parentNode.removeChild(childRow);
+  });
 });

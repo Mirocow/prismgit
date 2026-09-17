@@ -66,11 +66,24 @@ export function DragDropHandler() {
   const isFileDrag = (e: DragEvent): boolean =>
     !!e.dataTransfer && Array.from(e.dataTransfer.types).some((t) => t.toLowerCase() === 'files');
 
-  // Resolve the drop-zone element (the Sidebar's repo list).
+  // Resolve the drop-zone element (the Sidebar's repo list ROOT — not
+  // a child group or repo row). Children register their own React-level
+  // onDrop handlers and call e.stopPropagation(), so this window-level
+  // handler must NOT match when the drop target is INSIDE a child drop
+  // target — otherwise we'd steal the event before the child gets it.
+  //
+  // We do this by checking that `e.target` is the root repo-tree element
+  // itself, not a descendant. A simpler check (closest) would match
+  // children too and break the Sidebar's group/repo row DnD handlers.
   const getZone = (e: DragEvent): HTMLElement | null => {
-    const target = e.target as Node | null;
+    const target = e.target as HTMLElement | null;
     if (!target || !(target instanceof Element)) return null;
-    return target.closest<HTMLElement>(REPO_LIST_SELECTOR);
+    // Only match the root repo-tree element. Children (group rows, repo
+    // rows, the empty-state hint) have their own React DnD handlers and
+    // would not get a chance to process the drop if we matched them too.
+    const root = document.querySelector<HTMLElement>(REPO_LIST_SELECTOR);
+    if (!root) return null;
+    return target === root ? root : null;
   };
 
   // Process dropped paths: add valid repos, optionally open the first one.
