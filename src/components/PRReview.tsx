@@ -320,8 +320,10 @@ export function PRReview({
     setSelectedFile(null);
     try {
       if (provider === 'github' && owner && repo) {
-        // Use GitHub compare API to get files changed in THIS commit
-        // (comparing commit~1...commit), not the whole PR diff.
+        // Use GitHub commits API: GET /repos/:owner/:repo/commits/:sha
+        // Returns the commit object with a `files` array containing
+        // filename, status, additions, deletions, and patch for each
+        // file changed in that specific commit.
         const result = await api.github.getCommitFiles(owner, repo, commitSha);
         setCommitFiles(result);
         if (result.length > 0) setSelectedFile(result[0]);
@@ -336,7 +338,13 @@ export function PRReview({
         setCommitFiles([]);
       }
     } catch (e) {
-      toast.error(t('pages.prLoadFailed'), String(e));
+      const msg = String(e);
+      // Show the actual error so the user can debug (404, 422, etc.)
+      // instead of a misleading "No file changes found".
+      toast.error(
+        t('pages.prCommitFilesLoadFailed', { defaultValue: 'Failed to load commit files' }),
+        msg
+      );
       setCommitFiles([]);
     } finally {
       setCommitFilesLoading(false);

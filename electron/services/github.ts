@@ -262,17 +262,20 @@ export async function listPRCommits(
 /**
  * Fetch files changed in a specific commit (not the whole PR).
  *
- * Uses GitHub's compare API:
- *   GET /repos/:owner/:repo/compare/:base...:head
- * where base = commit~1 (parent of the commit) and head = commit SHA.
+ * Uses GitHub's commit API:
+ *   GET /repos/:owner/:repo/commits/:sha
  *
- * This returns the SAME file shape as listPRFiles — GithubPRFile with
- * filename/status/additions/deletions/patch — so the renderer can reuse
- * the same diff display component.
+ * This returns a commit object with a `files` array containing filename,
+ * status, additions, deletions, and patch for each file changed in that
+ * specific commit. This is more reliable than the compare API because:
+ *   - Works for the first commit in a repo (no parent needed)
+ *   - Works for merge commits (shows files from all parents)
+ *   - Doesn't require `~1` refspec notation (which the compare API may
+ *     not support)
  *
- * For the FIRST commit in the PR (no parent within the PR), we compare
- * against the PR's base branch instead — this shows what the commit
- * changed relative to the base, which is what the user expects.
+ * The response shape differs slightly from listPRFiles — the `files`
+ * array has `sha` as null and `blob_url`/`raw_url` may be missing. We
+ * normalize to GithubPRFile shape so the renderer doesn't need to branch.
  */
 export async function getCommitFiles(
   owner: string,
@@ -281,13 +284,41 @@ export async function getCommitFiles(
 ): Promise<GithubPRFile[]> {
   const { token } = getAuthState();
   if (!token) throw new Error('Not authenticated with GitHub');
-  // Compare commit with its parent (commit~1) to get only that commit's
-  // changes. GitHub's compare API accepts ref notation: base...head.
-  const result = await httpsJson<{ files?: GithubPRFile[] }>(
-    `https://api.github.com/repos/${owner}/${repo}/compare/${commitSha}~1...${commitSha}`,
+  // Use the commits API which returns files directly.
+  // GitHub limits this to 300 files per commit — if there are more,
+  // we'd need the compare API as a fallback. In practice 300 is plenty.
+  const result = await httpsJson<{
+    files?: Array<{
+      sha?: string;
+      filename: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      changes: number;
+      patch?: string;
+      blob_url?: string;
+      raw_url?: string;
+      contents_url?: string;
+      previous_filename?: string;
+    }>;
+  }>(
+    `https://api.github.com/repos/${owner}/${repo}/commits/${commitSha}`,
     { token }
   );
-  return result.files ?? [];
+  // Normalize to GithubPRFile shape — fill in missing fields with defaults.
+  return (result.files ?? []).map((f) => ({
+    sha: f.sha ?? '',
+    filename: f.filename,
+    status: (f.status as GithubPRFile['status']) ?? 'modified',
+    additions: f.additions,
+    deletions: f.deletions,
+    changes: f.changes,
+    patch: f.patch,
+    blob_url: f.blob_url ?? '',
+    raw_url: f.raw_url ?? '',
+    contents_url: f.contents_url ?? '',
+    previous_filename: f.previous_filename,
+  }));
 }
 
 export async function logout(): Promise<void> {
