@@ -11,7 +11,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   GitCommit, X, Loader, FileText, GitBranch, ArrowRight, ArrowDown,
-  Plus, Minus, Check, ChevronDown, ChevronRight, Copy, ExternalLink,
+  Plus, Minus, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Sparkles,
 } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
@@ -54,6 +54,11 @@ export function FileHistoryViewer({ filePath, onClose }: FileHistoryViewerProps)
   const [blame, setBlame] = useState<BlameResult | null>(null);
   const [blameLoading, setBlameLoading] = useState(false);
   const [showBlame, setShowBlame] = useState(true);
+  // Blame noise filter — when ON, commits that are pure formatting/linting
+  // (black/prettier/eslint/ruff/isort, "format", "lint", "whitespace")
+  // are hidden from the blame gutter. The gutter shows the REAL author
+  // who wrote the logic, not the person who ran a formatter.
+  const [filterNoise, setFilterNoise] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEscapeKey(true, onClose);
@@ -384,7 +389,7 @@ export function FileHistoryViewer({ filePath, onClose }: FileHistoryViewerProps)
                           {blame && <span className="ml-2">· blame loaded</span>}
                         </span>
                         <div className="flex items-center gap-2">
-                          {/* Blame toggle — show/hide the age gutter */}
+                          {/* Blame toggle */}
                           {blame && (
                             <button
                               className={cn('icon-btn !w-5 !h-5', showBlame && '!text-accent')}
@@ -394,6 +399,40 @@ export function FileHistoryViewer({ filePath, onClose }: FileHistoryViewerProps)
                               <FileText size={11} />
                             </button>
                           )}
+                          {/* Noise filter toggle — hide formatting/lint commits */}
+                          {blame && showBlame && (
+                            <button
+                              className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors', filterNoise ? 'bg-accent-muted text-accent border-accent/30' : 'text-text-tertiary border-border-subtle hover:text-text-primary')}
+                              onClick={() => setFilterNoise(!filterNoise)}
+                              title={filterNoise ? 'Noise filter ON — hiding format/lint commits from blame' : 'Noise filter OFF — showing all commits'}
+                            >
+                              ⚙ Filter
+                            </button>
+                          )}
+                          {/* AI Explain button */}
+                          <button
+                            className="btn btn-secondary text-2xs flex items-center gap-1"
+                            onClick={() => {
+                              const commit = selectedCommit;
+                              if (!commit) return;
+                              const parentHash = commit.parents?.[0] || `${commit.hash}^`;
+                              const prompt = `Explain commit ${shortHash(commit.hash)}:
+
+Subject: ${commit.subject}
+Author: ${commit.author.name}
+Date: ${commit.author.date}
+File: ${filePath}
+
+Please explain in plain language:
+1. What was the purpose of this change to ${filePath}?
+2. What problem did it solve?
+3. Are there any risks or side effects in this file?`;
+                              window.dispatchEvent(new CustomEvent('smartgit:ai-prompt', { detail: { prompt } }));
+                            }}
+                            title="Ask AI to explain this commit"
+                          >
+                            <Sparkles size={10} /> AI
+                          </button>
                           <button className="icon-btn !w-5 !h-5" onClick={handleCopyContent} title="Copy file content">
                             <Copy size={11} />
                           </button>
@@ -402,28 +441,34 @@ export function FileHistoryViewer({ filePath, onClose }: FileHistoryViewerProps)
                       <pre className="text-xs font-mono overflow-x-auto leading-relaxed">
                         {snapshot.split('\n').map((line, i) => {
                           const blameLine = blame?.lines[i];
+                          const isNoise = blameLine ? (filterNoise && isNoiseCommit(blameLine.summary)) : false;
                           const ageColor = blameLine ? getAgeColor(blameLine.authorTime, selectedCommit?.author.date) : '';
                           const isBlameCommit = blameLine && commits.some(c => c.hash.startsWith(blameLine.hash));
                           return (
                             <div
                               key={i}
-                              className={cn('flex hover:bg-bg-hover group', showBlame && blameLine && 'border-l-2')}
+                              className={cn('flex hover:bg-bg-hover group', showBlame && blameLine && 'border-l-2', isNoise && 'opacity-50')}
                               style={showBlame && blameLine ? { borderColor: ageColor } : undefined}
                             >
                               {/* Blame gutter — age color bar + author */}
                               {showBlame && blameLine && (
                                 <span
-                                  className="text-2xs select-none flex-shrink-0 flex items-center gap-1 px-1 cursor-pointer hover:bg-bg-hover"
-                                  style={{ width: 80 }}
-                                  title={`${blameLine.author} · ${formatDate(blameLine.authorTime)}\n${blameLine.summary}`}
+                                  className={cn('text-2xs select-none flex-shrink-0 flex items-center gap-1 px-1 cursor-pointer hover:bg-bg-hover', isNoise && 'italic')}
+                                  style={{ width: 90 }}
+                                  title={isNoise
+                                    ? `⚠ Noise: ${blameLine.summary}\n${blameLine.author} · ${formatDate(blameLine.authorTime)}\nThis looks like a formatting/linting commit — toggle Filter off to see raw blame.`
+                                    : `${blameLine.author} · ${formatDate(blameLine.authorTime)}\n${blameLine.summary}`
+                                  }
                                   onClick={() => {
                                     if (!isBlameCommit) return;
                                     const idx = commits.findIndex(c => c.hash.startsWith(blameLine.hash));
                                     if (idx !== -1) setSelectedIdx(idx);
                                   }}
                                 >
-                                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: ageColor }} />
-                                  <span className="truncate text-text-tertiary">{blameLine.author.split(' ')[0]}</span>
+                                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: isNoise ? '#9ca3af' : ageColor }} />
+                                  <span className={cn('truncate', isNoise ? 'text-text-tertiary' : 'text-text-secondary')}>
+                                    {isNoise ? '⚙ ' + blameLine.author.split(' ')[0] : blameLine.author.split(' ')[0]}
+                                  </span>
                                 </span>
                               )}
                               {/* Line number */}
@@ -545,20 +590,37 @@ function e_shiftTitle(): string {
  *   < 30 days       → #f97316 (orange — getting stale)
  *   > 30 days       → #6b7280 (gray — old, stable code)
  */
+
+/**
+ * Detect if a commit is a "noise" commit — pure formatting/linting
+ * with no business logic change.
+ */
+function isNoiseCommit(summary: string): boolean {
+  const s = summary.toLowerCase().trim();
+  if (/^(format|black|prettier|lint|ruff|isort|autopep8|stylefix)$/.test(s)) return true;
+  if (/\b(format|formatting|black|prettier|eslint|ruff|isort|autopep8|auto-format|whitespace|trailing|indent|style)\b/i.test(s)) return true;
+  if (/\b(run|apply|fix)\s+(formatter?|lint|prettier|black|ruff)\b/i.test(s)) return true;
+  if (/\b(organize|sort)\s+imports?\b/i.test(s)) return true;
+  return false;
+}
+
+/**
+ * Compute a color for a blame line based on its age relative to the
+ * selected commit. Fresh lines glow bright; old lines fade to gray.
+ */
 function getAgeColor(authorTime: string, selectedDate?: string): string {
   const lineTs = new Date(authorTime).getTime();
   if (isNaN(lineTs)) return '#6b7280';
-  // If no selected commit, just use age from now
   const refTs = selectedDate ? new Date(selectedDate).getTime() : Date.now();
   if (isNaN(refTs)) return '#6b7280';
   const diffMs = refTs - lineTs;
   const dayMs = 86400000;
-  if (diffMs < 0) return '#6b7280'; // future — shouldn't happen
-  if (diffMs < dayMs) return '#4ade80';    // same day — bright green
-  if (diffMs < 7 * dayMs) return '#84cc16'; // < 1 week — lime
-  if (diffMs < 30 * dayMs) return '#eab308'; // < 1 month — yellow
-  if (diffMs < 90 * dayMs) return '#f97316'; // < 3 months — orange
-  return '#6b7280'; // > 3 months — gray
+  if (diffMs < 0) return '#6b7280';
+  if (diffMs < dayMs) return '#4ade80';
+  if (diffMs < 7 * dayMs) return '#84cc16';
+  if (diffMs < 30 * dayMs) return '#eab308';
+  if (diffMs < 90 * dayMs) return '#f97316';
+  return '#6b7280';
 }
 
 /** Parse raw git diff output into DiffResult-like hunks. */
