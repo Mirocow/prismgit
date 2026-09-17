@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../types/settings-api.js';
 import simpleGit from 'simple-git';
@@ -197,7 +198,22 @@ export function migratePlaintextSecrets(): void {
 // ============= Repositories =============
 
 export function getRepos(): RepositoryEntry[] {
-  return (store.get('repositories') || []) as RepositoryEntry[];
+  const repos = (store.get('repositories') || []) as RepositoryEntry[];
+  // Auto-remove repos whose directory no longer exists on disk.
+  // The user may have deleted a repo folder via the OS file manager
+  // (Finder/Explorer) without removing it from the app's store.
+  // Without this, the repo stays in the sidebar and clicking it shows
+  // "Not a Git repository". We filter them out here AND persist the
+  // cleanup to the store so the change survives a restart.
+  // This check runs in the MAIN process where fs is available — the
+  // renderer cannot use fs.existsSync (contextIsolation: true).
+  const existing = repos.filter((r) => {
+    try { return fs.existsSync(r.path); } catch { return true; }
+  });
+  if (existing.length < repos.length) {
+    store.set('repositories', existing);
+  }
+  return existing;
 }
 
 export function addRepo(repo: { path: string; name: string }): void {
