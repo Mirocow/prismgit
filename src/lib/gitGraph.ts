@@ -127,6 +127,21 @@ export class GraphLayoutBuilder {
   private colorMap = new Map<string, number>();
   private maxLane = 0;
   private ancestry: ResolvedAncestry | undefined;
+  /**
+   * Lanes that closed recently, mapped to a TTL counter (rows until cold).
+   * `firstFreeLane()` skips them while warm so a new branch doesn't
+   * visually "continue" a lane that just closed — matches SmartGit's
+   * behaviour where each branch gets its own visually distinct lane.
+   *
+   * The TTL decrements at the end of each `addOne()` call. When it
+   * reaches 0 the lane is removed from the map and becomes eligible
+   * for reuse. Default TTL is 2 — meaning a lane stays "warm" for 2
+   * rows after it closes. This handles the common case where one
+   * branch closes (e.g., a merged-in feature) and a new unrelated
+   * branch starts 1-2 rows later. Without this buffer the new branch
+   * would reuse the closed lane and look like a continuation.
+   */
+  private recentlyClosedLanes = new Map<number, number>();
 
   constructor(options: LayoutOptions = {}) {
     this.ancestry = options.ancestry;
@@ -142,11 +157,41 @@ export class GraphLayoutBuilder {
     return c;
   }
 
-  /** Find the first free (null) lane, or append a new one. */
+  /**
+   * Find a free lane for a new branch tip.
+   *
+   * Bug fix: previously this returned the LOWEST free lane index, which
+   * caused two unrelated branches to share the same visual lane when
+   * they appeared sequentially. Example:
+   *
+   *   main:    A → B → C (merge in f1) → D
+   *   f1:      B → F1a → F1b
+   *   f2:      A → F2a → F2b
+   *
+   * After f1's lane closes at row 3 (F1a merges into B), lane 1 becomes
+   * free. The next new branch tip (F2b at row 5) would pick lane 1
+   * again — visually continuing f1's lane, even though f2 is unrelated.
+   * SmartGit avoids this by NOT reusing a lane that just closed in the
+   * previous row.
+   *
+   * Fix: skip lanes in `recentlyClosedLanes` (closed within the last
+   * 2 rows). If no cold free lane exists, APPEND a new lane at the end
+   * rather than reusing a warm one. This grows the graph width but
+   * keeps sequential branches visually distinct (SmartGit behaviour).
+   *
+   * Trade-off: graph width vs. visual clarity. We prioritize clarity —
+   * SmartGit does the same. The TTL decay (default 2 rows) ensures
+   * closed lanes eventually become cold and reusable, so the graph
+   * doesn't grow unbounded on long histories with many short-lived
+   * branches.
+   */
   private firstFreeLane(): number {
+    // Look for a "cold" free lane — not in recentlyClosedLanes.
     for (let i = 0; i < this.lanes.length; i++) {
-      if (this.lanes[i] === null) return i;
+      if (this.lanes[i] === null && !this.recentlyClosedLanes.has(i)) return i;
     }
+    // No cold free lane — append a new lane at the end. Don't reuse a
+    // warm one (would visually merge two unrelated branches).
     const idx = this.lanes.length;
     this.lanes.push(null);
     return idx;
@@ -190,6 +235,12 @@ export class GraphLayoutBuilder {
 
     let lane: number;
     const closing: LaneRef[] = [];
+    /**
+     * Track lanes that closed during THIS row's processing. They get
+     * added to `recentlyClosedLanes` so the NEXT commit's `firstFreeLane()`
+     * skips them — preventing visual lane reuse for sequential branches.
+     */
+    const closedThisRow = new Set<number>();
 
     if (waiting.length === 0) {
       // Nobody is waiting for this commit — allocate a free lane and a new color
@@ -205,6 +256,7 @@ export class GraphLayoutBuilder {
         const wl = this.lanes[l]!;
         closing.push({ lane: l, color: wl.color, dashed: wl.dashed });
         this.lanes[l] = null;
+        closedThisRow.add(l);
       }
     }
 
@@ -235,6 +287,7 @@ export class GraphLayoutBuilder {
     if (parents.length === 0 || truncated) {
       // Root commit or truncated — lane ends here.
       this.lanes[lane] = null;
+      closedThisRow.add(lane);
       continues = false;
     } else {
       const firstParent = parents[0];
@@ -251,6 +304,7 @@ export class GraphLayoutBuilder {
         // First parent already has a different lane — close our lane
         closing.push({ lane: lane, color: myColor, dashed: firstDashed });
         this.lanes[lane] = null;
+        closedThisRow.add(lane);
         continues = false;
       }
 
@@ -296,6 +350,22 @@ export class GraphLayoutBuilder {
     };
 
     this.rows.push({ node, passing });
+
+    // ── Decay recently-closed TTLs for the next row ──────────────────────
+    // Each lane in `recentlyClosedLanes` has a TTL (rows until it becomes
+    // cold and eligible for reuse). Decrement TTLs at end of addOne; drop
+    // lanes whose TTL reaches 0. New closes during THIS row (in
+    // `closedThisRow`) get added with a fresh TTL of 2.
+    const RECENT_TTL = 2;
+    for (const [lane, ttl] of this.recentlyClosedLanes) {
+      const next = ttl - 1;
+      if (next <= 0) this.recentlyClosedLanes.delete(lane);
+      else this.recentlyClosedLanes.set(lane, next);
+    }
+    for (const lane of closedThisRow) {
+      // Overwrite the TTL to fresh value — the close happened THIS row.
+      this.recentlyClosedLanes.set(lane, RECENT_TTL);
+    }
   }
 
   add(entries: LogEntry[]): void {
