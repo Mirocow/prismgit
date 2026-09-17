@@ -283,7 +283,10 @@ export function DiffPage() {
         // comparison. Triple-dot diff compares from merge-base, which gives
         // wrong results for stash commits (stash^...stash vs stash^..stash).
         // Stash commits have parent[0] = base, so direct diff is what we want.
-        const rawFiles = await api.git.raw(repo.path, ['diff', '--name-status', '--no-color', `${baseRef}..${compareRef}`]);
+        const diffArgs = await buildDiffArgs(repo.path, baseRef, compareRef);
+        const rawFiles = await api.git.raw(repo.path, [...diffArgs, '--name-status']);
+        // Remove '--no-color' from the args we built since --name-status doesn't need it
+        const rawFilesClean = rawFiles;
         const files: CommitFile[] = rawFiles.split('\n').filter(Boolean).map(line => {
           const parts = line.split('\t');
           const status = parts[0];
@@ -297,7 +300,8 @@ export function DiffPage() {
         }
         const fileToDiff = curSel || files[0]?.path;
         if (fileToDiff) {
-          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', fileToDiff]);
+          const diffArgsFile = await buildDiffArgs(repo.path, baseRef, compareRef);
+          const rawDiff = await api.git.raw(repo.path, [...diffArgsFile, '--', fileToDiff]);
           // Parse
           const result = parseRawDiff(rawDiff, fileToDiff);
           setDiff(result);
@@ -322,7 +326,9 @@ export function DiffPage() {
           result = await api.git.diff(repo.path, fileToDiff, { staged: true, ref: baseRef });
         } else {
           // Same `..` rationale here — direct ref comparison, not merge-base.
-          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', fileToDiff]);
+          // buildDiffArgs handles the root-commit case (hash^..hash → --root hash).
+          const diffArgsSingle = await buildDiffArgs(repo.path, baseRef, compareRef);
+          const rawDiff = await api.git.raw(repo.path, [...diffArgsSingle, '--', fileToDiff]);
           result = parseRawDiff(rawDiff, fileToDiff);
         }
         writeDiffCache(fileToDiff, result);
@@ -369,7 +375,8 @@ export function DiffPage() {
         const rawDiff = await api.git.stashFileRawDiff(repo.path, stashHash, file);
         result = parseRawDiff(rawDiff, file);
       } else if (compareMode === 'ref' && compareRef) {
-        const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', file]);
+        const diffArgsLoad = await buildDiffArgs(repo.path, baseRef, compareRef);
+        const rawDiff = await api.git.raw(repo.path, [...diffArgsLoad, '--', file]);
         result = parseRawDiff(rawDiff, file);
       } else {
         result = await api.git.diff(repo.path, file, { ref: baseRef, staged: compareMode === 'staged' });
@@ -678,6 +685,40 @@ export function DiffPage() {
       </div>
     </div>
   );
+}
+
+// ─── Root-commit-safe diff args ─────────────────────────────────────────
+// When the user clicks a file in the root commit (init commit, no parents),
+// HistoryPage sets baseRef = `${hash}^` — but `hash^` doesn't exist for a
+// root commit. `git diff hash^..hash` throws:
+//   fatal: bad revision '<root>^..<root>'
+// This helper builds the correct git diff args: if baseRef ends with `^`
+// AND the commit is a root commit (no parents), use `--root compareRef`
+// instead of `baseRef..compareRef`. This shows all files as "new file"
+// (the full diff of the root commit against the empty tree).
+//
+// The check is done at call time (not earlier) because the commit may
+// have been gc'd between the initial load and the diff request.
+async function buildDiffArgs(
+  repoPath: string,
+  baseRef: string,
+  compareRef: string,
+): Promise<string[]> {
+  // If baseRef ends with ^, check if the commit has a parent.
+  if (baseRef.endsWith('^')) {
+    const hash = baseRef.slice(0, -1);
+    try {
+      const out = await api.git.raw(repoPath, ['rev-list', '--parents', '-n', '1', hash]);
+      const parts = out.trim().split(/\s+/).filter(Boolean);
+      // parts[0] = hash, parts[1+] = parents. Root commit has no parents.
+      if (parts.length <= 1) {
+        // Root commit — use --root flag + compareRef.
+        return ['diff', '--no-color', '--root', compareRef];
+      }
+    } catch { /* fall through to normal range */ }
+  }
+  // Normal case: baseRef..compareRef (double-dot, direct comparison).
+  return ['diff', '--no-color', `${baseRef}..${compareRef}`];
 }
 
 // Helper to parse raw git diff output into DiffResult
