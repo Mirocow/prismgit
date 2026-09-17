@@ -545,7 +545,39 @@ export function setRepoGroupExpanded(id: string, expanded: boolean): void {
 export function setRepoGroup(repoPath: string, groupId: string | null): void {
   const repos = (store.get('repositories') || []) as RepositoryEntry[];
   const idx = repos.findIndex((r) => r.path === repoPath);
-  if (idx < 0) throw new Error(`Repository not found: ${repoPath}`);
+  if (idx < 0) {
+    // Bug fix: the repo may have been cloned into a path that differs in
+    // trailing slash or case (macOS HFS+ is case-insensitive). Try a
+    // normalized comparison before giving up. If still not found, AUTO-ADD
+    // the repo so the group assignment succeeds instead of throwing.
+    const normalized = repoPath.replace(/\/+$/, '');
+    const idxNorm = repos.findIndex((r) => r.path.replace(/\/+$/, '') === normalized);
+    if (idxNorm < 0) {
+      // Auto-add the repo to the store with the given path. The group
+      // will be set below. This handles the race where cloneRepository()
+      // calls setRepoGroup() BEFORE openRepository() has had a chance to
+      // call addRepo() (the clone just finished, the store hasn't been
+      // updated yet).
+      const name = repoPath.split('/').pop() || repoPath;
+      repos.push({ path: repoPath, name, lastOpened: Date.now(), groupId: null });
+      const newIdx = repos.length - 1;
+      const parent = groupId ?? null;
+      if (parent !== null && !getGroups().some((g) => g.id === parent)) {
+        throw new Error(`Group not found: ${parent}`);
+      }
+      repos[newIdx] = { ...repos[newIdx], groupId: parent };
+      store.set('repositories', repos);
+      return;
+    }
+    // Found via normalized path — use it.
+    const parent = groupId ?? null;
+    if (parent !== null && !getGroups().some((g) => g.id === parent)) {
+      throw new Error(`Group not found: ${parent}`);
+    }
+    repos[idxNorm] = { ...repos[idxNorm], groupId: parent };
+    store.set('repositories', repos);
+    return;
+  }
   const parent = groupId ?? null;
   if (parent !== null && !getGroups().some((g) => g.id === parent)) {
     throw new Error(`Group not found: ${parent}`);
