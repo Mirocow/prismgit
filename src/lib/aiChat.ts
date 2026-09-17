@@ -267,8 +267,10 @@ Rules:
 15. "Show recent commits" / "покажи коммиты" / "история" / "log" → get_log (COLLAPSED mode by default — it returns a summary + last 5 commits. Only use verbose=true if the user asks for MORE commits).
 16. "Show the diff" / "покажи diff" / "что именно поменялось в коде" → get_diff (STAT mode by default — file names + line counts. Only use full=true + file="<path>" if the user asks for the actual diff CONTENT of a specific file).
 17. "Изучи коммиты" / "what was done" / "что было реализовано" / "summary of changes" → get_log (default collapsed mode gives you the last 5 commit messages — that's usually enough to summarise what was done. If the user wants ALL commits, call get_log with verbose=true and count=50).
-18. "Sync with remote" / "обновить из origin" / "откатить и обновить" → sync_with_remote (atomic stash + fetch + reset + restore).
-19. NEVER call get_status when the user asks about COMMITS — use get_log. NEVER call get_log when the user asks about FILE CHANGES — use get_status. NEVER call get_diff with full=true without specifying a file — it will return 1000+ lines and flood the chat.
+18. "Read file" / "прочитай файл" / "покажи содержимое файла" / "what's in this file" → read_file (pass the file path. For large files, use start_line and end_line to read specific sections. Returns the file content with line numbers).
+19. "List files" / "список файлов" / "какие файлы есть" / "show me the project structure" → list_files (pass pattern="*.ts" to filter by type, or include_untracked=true to also see untracked files).
+20. "Sync with remote" / "обновить из origin" / "откатить и обновить" → sync_with_remote (atomic stash + fetch + reset + restore).
+21. NEVER call get_status when the user asks about COMMITS — use get_log. NEVER call get_log when the user asks about FILE CHANGES — use get_status. NEVER call get_diff with full=true without specifying a file — it will return 1000+ lines and flood the chat.
 
 ── Error recovery ──
 20. If a tool returns an error (e.g. "Ollama chat error 0"), DON'T repeat the same request. Instead, tell the user what happened and suggest a fix (e.g. "the model may have timed out, try again" or "check if the git operation is valid").

@@ -310,6 +310,123 @@ export const gitTagsTool: AITool = {
   },
 };
 
+/** Read the content of a file from the repository working tree.
+ *
+ *  Uses `git show HEAD:<path>` to read the file content at the current
+ *  HEAD commit. This works for tracked files. For untracked files, falls
+ *  back to `api.fs.readFile` which reads from the filesystem.
+ *
+ *  The output is capped at maxLines (default 200) to avoid flooding the
+ *  chat with a 10000-line generated file. The AI should use `start_line`
+ *  and `end_line` to read specific sections of large files.
+ */
+export const readFileTool: AITool = {
+  name: 'read_file',
+  description: 'Read the content of a file in the repository. Returns the file content (text). For large files, use start_line and end_line to read specific sections. Binary files return "[binary file]". Default: first 200 lines.',
+  parameters: {
+    type: 'object',
+    properties: {
+      file: { type: 'string', description: 'Path to the file (relative to the repo root, e.g. "src/index.ts"). Required.' },
+      start_line: { type: 'number', description: 'Starting line number (1-based). Default: 1.', default: 1 },
+      end_line: { type: 'number', description: 'Ending line number (1-based, inclusive). Default: 200 (or the last line of the file, whichever is smaller).' },
+    },
+    required: ['file'],
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    const p = params as { file: string; start_line?: number; end_line?: number };
+    const filePath = p.file;
+    if (!filePath) return 'Error: file path is required.';
+    const startLine = Math.max(1, p.start_line ?? 1);
+    const endLine = Math.min(2000, p.end_line ?? 200);
+    const maxLines = endLine - startLine + 1;
+
+    try {
+      // Try git show HEAD:<path> first (works for tracked files, even if
+      // the working tree copy was modified/deleted).
+      let content: string;
+      try {
+        content = await api.git.raw(repoPath, ['show', `HEAD:${filePath}`]);
+      } catch {
+        // Untracked file or not in HEAD — read from filesystem.
+        // Build absolute path: repoPath + filePath
+        const path = await import('path');
+        const absPath = path.join(repoPath, filePath);
+        try {
+          content = await api.fs.readFile(absPath);
+        } catch {
+          return `Error: file not found: ${filePath}. The file does not exist in the repository or working tree.`;
+        }
+      }
+
+      // Check if binary (heuristic: contains null bytes in the first 8KB).
+      if (content.slice(0, 8192).includes('\0')) {
+        return `[binary file: ${filePath}]`;
+      }
+
+      const lines = content.split('\n');
+      const totalLines = lines.length;
+      const slice = lines.slice(startLine - 1, startLine - 1 + maxLines);
+      const result = slice.join('\n');
+
+      let header = `File: ${filePath} (${totalLines} lines total)`;
+      if (startLine > 1 || endLine < totalLines) {
+        header += ` — showing lines ${startLine}-${Math.min(startLine + slice.length - 1, totalLines)}`;
+      }
+      header += '\n';
+
+      // Cap the result at 48000 chars to avoid flooding the chat.
+      const MAX_CHARS = 48000;
+      if (result.length > MAX_CHARS) {
+        return `${header}${result.slice(0, MAX_CHARS)}\n… [truncated — ${result.length - MAX_CHARS} more characters. Use start_line/end_line to read a smaller section.]`;
+      }
+      return `${header}${result}`;
+    } catch (e) {
+      return `Error reading file: ${String(e)}`;
+    }
+  },
+};
+
+/** List files in the repository (tracked or all).
+ *
+ *  Uses `git ls-files` for tracked files or `git ls-files --others --ignored`
+ *  for untracked. Helps the AI discover what files exist before reading them.
+ */
+export const listFilesTool: AITool = {
+  name: 'list_files',
+  description: 'List files in the repository. Default: tracked files (git ls-files). Pass include_untracked=true to also show untracked files. Pass pattern="*.ts" to filter by glob pattern.',
+  parameters: {
+    type: 'object',
+    properties: {
+      include_untracked: { type: 'boolean', description: 'If true, also list untracked files (not yet git-added). Default: false.', default: false },
+      pattern: { type: 'string', description: 'Optional glob pattern to filter, e.g. "*.ts" or "src/**/*.tsx".' },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    const p = params as { include_untracked?: boolean; pattern?: string };
+    try {
+      const args: string[] = ['ls-files'];
+      if (p.include_untracked) {
+        args.push('--others', '--exclude-standard');
+      }
+      if (p.pattern) {
+        args.push(p.pattern);
+      }
+      const out = await api.git.raw(repoPath, args);
+      if (!out || !out.trim()) return 'No files found.';
+      const lines = out.trim().split('\n');
+      // Cap at 500 files to avoid flooding.
+      if (lines.length > 500) {
+        return `${lines.slice(0, 500).join('\n')}\n… and ${lines.length - 500} more files. Use pattern="..." to filter.`;
+      }
+      return `${lines.length} files:\n${lines.join('\n')}`;
+    } catch (e) {
+      return `Error listing files: ${String(e)}`;
+    }
+  },
+};
+
 // ============= WRITE TOOLS (actions) =============
 
 /** Stage files (git add). */
@@ -1228,6 +1345,9 @@ export const AI_TOOLS: AITool[] = [
   gitBranchesTool,
   gitStashesTool,
   gitTagsTool,
+  // File operations (read-only)
+  readFileTool,
+  listFilesTool,
   // Write operations
   gitStageTool,
   gitUnstageTool,
