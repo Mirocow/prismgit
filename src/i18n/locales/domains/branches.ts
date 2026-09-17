@@ -230,6 +230,13 @@ export const en: Record<string, string> = {
   'branches.resetModeMixed': 'Mixed',
   'branches.resetModeHard': 'Hard',
   'branches.resetModeKeep': 'Keep',
+
+  'branches.notPushed': 'Not pushed',
+  'branches.localOnlyHint': 'Local-only branch — not pushed to any remote. Right-click → Push... to publish with -u.',
+  'branches.unpushed': 'unpushed',
+  'branches.aheadHint': '{n} commit(s) ahead of upstream — Push to publish them.',
+  'branches.synced': 'synced',
+  'branches.syncedHint': 'Up to date with upstream',
 };
 
 export const ru: Record<string, string> = {
@@ -456,6 +463,13 @@ export const ru: Record<string, string> = {
   'branches.resetModeMixed': 'Смешанный',
   'branches.resetModeHard': 'Жёсткий',
   'branches.resetModeKeep': 'Сохранить',
+
+  'branches.notPushed': 'Не запушена',
+  'branches.localOnlyHint': 'Локальная ветка — не запушена на remote. ПКМ → Push... для публикации с -u.',
+  'branches.unpushed': 'не запушено',
+  'branches.aheadHint': '{n} коммит(ов) впереди upstream — Push для публикации.',
+  'branches.synced': 'синхр.',
+  'branches.syncedHint': 'Синхронизирована с upstream',
 };
 
 export const zh: Record<string, string> = {
@@ -682,6 +696,13 @@ export const zh: Record<string, string> = {
   'branches.resetModeMixed': '混合',
   'branches.resetModeHard': '硬',
   'branches.resetModeKeep': '保留',
+
+  'branches.notPushed': '未推送',
+  'branches.localOnlyHint': '仅本地分支 — 未推送到任何远程。右键 → Push... 使用 -u 发布。',
+  'branches.unpushed': '未推送',
+  'branches.aheadHint': '领先 upstream {n} 个提交 — Push 以发布。',
+  'branches.synced': '已同步',
+  'branches.syncedHint': '与 upstream 同步',
 };
 
 export const de: Record<string, string> = {
@@ -908,4 +929,11 @@ export const de: Record<string, string> = {
   'branches.resetModeMixed': 'Mixed',
   'branches.resetModeHard': 'Hard',
   'branches.resetModeKeep': 'Keep',
+
+  'branches.notPushed': 'Nicht gepusht',
+  'branches.localOnlyHint': 'Lokaler Branch — nicht zu Remote gepusht. Rechtsklick → Push... zum Veröffentlichen mit -u.',
+  'branches.unpushed': 'ungepusht',
+  'branches.aheadHint': '{n} Commit(s) vor Upstream — Push zum Veröffentlichen.',
+  'branches.synced': 'synchr.',
+  'branches.syncedHint': 'Mit Upstream synchronisiert',
 };

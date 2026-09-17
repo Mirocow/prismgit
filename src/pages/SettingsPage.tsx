@@ -301,39 +301,16 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="flex flex-col flex-1 overflow-y-auto bg-bg-primary">
-      <div className="max-w-3xl mx-auto p-6 w-full">
-        <div className="flex items-center justify-between gap-3 mb-4 pb-4 border-b border-border-default">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-accent-muted flex items-center justify-center">
-              <SettingsIcon size={20} className="text-accent" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-text-primary tracking-tight">
-                {showApp ? t('settings.application') : t('settings.project')}
-              </h1>
-              <p className="text-xs text-text-tertiary">
-                {showApp
-                  ? t('settings.appDescription')
-                  : t('settings.projectDescription')}
-              </p>
-            </div>
-          </div>
-          {/* Task (Settings redesign) — removed the per-repo Settings button
-              from the top of the Settings page. Repository settings are now
-              accessed via right-click on the repo row in the Sidebar (the
-              'repo-settings' context-menu action), so duplicating the entry
-              point at the top of global Settings was redundant. */}
-        </div>
-
-        {/* Tab switcher */}
-        <div className="flex border-b border-border-default mb-4">
+    <div className="flex flex-col flex-1 overflow-hidden bg-bg-primary">
+      <div className="flex-1 flex overflow-hidden">
+        {/* Vertical sidebar — tabs on the left */}
+        <nav className="w-52 flex-shrink-0 border-r border-border-default bg-bg-secondary overflow-y-auto py-3 px-2">
           <button
             className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
               showApp
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
             )}
             onClick={() => setActiveTab('application')}
           >
@@ -341,10 +318,10 @@ export function SettingsPage() {
           </button>
           <button
             className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
               showGit
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
             )}
             onClick={() => setActiveTab('git')}
           >
@@ -353,10 +330,10 @@ export function SettingsPage() {
           </button>
           <button
             className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
               showProject
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary',
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
               !currentRepo && 'opacity-50 cursor-not-allowed'
             )}
             onClick={() => currentRepo && setActiveTab('project')}
@@ -365,40 +342,28 @@ export function SettingsPage() {
           >
             {t('settings.project')}
             {currentRepo && (
-              <span className="text-2xs text-text-tertiary font-normal truncate max-w-32">
+              <span className="text-2xs text-text-tertiary font-normal truncate block max-w-40">
                 {currentRepo.name}
               </span>
             )}
           </button>
           <button
             className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-              showIntegrations
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
-            )}
-            onClick={() => setActiveTab('show-integrations')}
-          >
-            {t('settings.integrations')}
-          </button>
-          <button
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
               showThemes
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
             )}
             onClick={() => setActiveTab('themes')}
           >
-            <Palette size={14} />
-            {t('settings.themes')}
+            {t('settings.themes', { defaultValue: 'Themes' })}
           </button>
           <button
             className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
               showSecurity
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
             )}
             onClick={() => setActiveTab('security')}
           >
@@ -407,10 +372,10 @@ export function SettingsPage() {
           </button>
           <button
             className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
               showAi
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
             )}
             onClick={() => setActiveTab('ai')}
           >
@@ -419,17 +384,32 @@ export function SettingsPage() {
           </button>
           <button
             className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
               showAdvanced
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
             )}
             onClick={() => setActiveTab('advanced')}
           >
             <SettingsIcon size={14} />
             {t('settings.advanced', { defaultValue: 'Advanced' })}
           </button>
-        </div>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
+              showIntegrations
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('show-integrations')}
+          >
+            {t('settings.integrations', { defaultValue: 'Integrations' })}
+          </button>
+        </nav>
+
+        {/* Content area — scrollable */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-3xl mx-auto p-6 w-full">
 
         {/* No repo open for Project Settings tab */}
         {activeTab === 'project' && !currentRepo && (
@@ -2642,6 +2622,8 @@ smartgit.refresh.inspectEol=true
         </section>
         )}
 
+      </div>
+        </div>
       </div>
     </div>
   );

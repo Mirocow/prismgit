@@ -1451,17 +1451,31 @@ export function BranchesPage() {
               </span>
             )}
             {/* No upstream at all — local-only branch, never pushed.
-                Shown as info (blue) — less severe than 'gone'. */}
+                Shown as info (blue) — less severe than 'gone'.
+                Uses 'Not pushed' text to make it obvious to the user
+                that this branch has no remote tracking. */}
             {!b.gone && !b.remote && !b.tracking && !b.upstream && (
               <span className="text-2xs px-1 py-0.5 rounded bg-status-info/15 text-status-info flex items-center gap-0.5 font-medium"
-                title="Local-only branch — no upstream configured. Push with -u to publish.">
-                local
+                title={t('branches.localOnlyHint', { defaultValue: 'Local-only branch — not pushed to any remote. Right-click → Push... to publish with -u.' })}>
+                {t('branches.notPushed', { defaultValue: 'Not pushed' })}
               </span>
             )}
-            {b.ahead !== undefined && b.ahead > 0 && (
+            {/* Upstream exists but local is ahead — unpushed commits.
+                Show a green ↑N badge so the user knows how many commits
+                need to be pushed. */}
+            {b.tracking && b.ahead !== undefined && b.ahead > 0 && (
               <span className="text-2xs px-1 py-0.5 rounded bg-status-added/15 text-status-added flex items-center gap-0.5 font-medium"
-                title={b.current ? `${b.ahead} commit(s) ahead of upstream — Pull would attempt to merge or fail. Push to publish them.` : `${b.ahead} ahead of upstream`}>
-                <ArrowUp size={8} />{b.ahead}
+                title={t('branches.aheadHint', { defaultValue: '{n} commit(s) ahead of upstream — Push to publish them.', n: b.ahead })}>
+                <ArrowUp size={8} />{b.ahead} {t('branches.unpushed', { defaultValue: 'unpushed' })}
+              </span>
+            )}
+            {/* Up to date with upstream — synced. Show a subtle green
+                checkmark so the user can see at a glance that the
+                branch is in sync with its remote. */}
+            {b.tracking && (b.ahead === undefined || b.ahead === 0) && (b.behind === undefined || b.behind === 0) && !b.gone && (
+              <span className="text-2xs px-1 py-0.5 rounded bg-status-added/10 text-status-added/70 flex items-center gap-0.5 font-medium"
+                title={t('branches.syncedHint', { defaultValue: 'Up to date with upstream' })}>
+                <Check size={8} />{t('branches.synced', { defaultValue: 'synced' })}
               </span>
             )}
             {b.behind !== undefined && b.behind > 0 && (
