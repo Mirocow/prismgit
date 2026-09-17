@@ -34,7 +34,12 @@ export async function providerListModels(
   apiKey?: string
 ): Promise<{ ok: boolean; error: string | null; models: ProviderModelInfo[]; latencyMs: number }> {
   const started = Date.now();
-  const base = (url || '').trim().replace(/\/+$/, '');
+  // Derive the base URL: strip trailing slashes and /chat/completions
+  // suffix so we can append /models for the models endpoint.
+  // Without this, a URL like "https://openrouter.ai/api/v1/chat/completions"
+  // would produce "https://openrouter.ai/api/v1/chat/completions/models"
+  // → 404. We need "https://openrouter.ai/api/v1/models" instead.
+  const base = (url || '').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
   try {
     if (kind === 'ollama') {
       const b = base || 'http://localhost:11434';

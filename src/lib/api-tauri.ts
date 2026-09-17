@@ -846,7 +846,8 @@ export const tauriApi = {
     providerListModels: async (kind: string, url: string, apiKey?: string): Promise<{ ok: boolean; error: string | null; models: { id: string; size?: number; family?: string; parameterSize?: string; quantization?: string; format?: string }[]; latencyMs: number }> => {
       // Tauri: direct fetch, same dispatch logic as the Electron main process.
       const started = Date.now();
-      const base = (url || '').trim().replace(/\/+$/, '');
+      // Strip /chat/completions suffix so /models gets appended correctly.
+      const base = (url || '').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
       try {
         if (kind === 'ollama') {
           const b = base || 'http://localhost:11434';
