@@ -736,26 +736,27 @@ Please review this PR — identify potential issues, suggest improvements, and s
             )}
           </div>
         ) : activeTab === 'commits' ? (
-          <div className="flex h-full">
-            {/* Commits list (left) */}
-            <div className={`${selectedCommit ? 'w-1/2' : 'w-full'} border-r border-border-subtle overflow-y-auto flex-shrink-0`}>
-              {commits.length === 0 ? (
-                <div className="p-8 text-center text-text-tertiary text-xs italic">
-                  {t('pages.prNoCommits', { defaultValue: 'No commits found.' })}
-                </div>
-              ) : (
-                commits.map((c) => (
-                  <div
-                    key={c.sha}
-                    className={cn(
-                      'px-4 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer flex items-start gap-2',
-                      selectedCommit?.sha === c.sha && 'bg-accent-muted'
-                    )}
-                    onClick={() => {
+          <div className="overflow-y-auto h-full">
+            {commits.length === 0 ? (
+              <div className="p-8 text-center text-text-tertiary text-xs italic">
+                {t('pages.prNoCommits', { defaultValue: 'No commits found.' })}
+              </div>
+            ) : (
+              commits.map((c) => (
+                <div
+                  key={c.sha}
+                  className={cn(
+                    'px-4 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer flex items-start gap-2',
+                    filesCommitFilter === c.sha && 'bg-accent-muted'
+                  )}
+                  onClick={() => {
+                    // Jump to Files tab with this commit's filter applied.
                       setSelectedCommit(c);
+                      setFilesCommitFilter(c.sha);
                       void loadCommitFiles(c.sha);
+                      setActiveTab('files');
                     }}
-                    title={t('pages.prClickCommitForDiff', { defaultValue: 'Click to view changes in this commit' })}
+                    title={t('pages.prClickCommitForDiff', { defaultValue: 'Click to view files changed in this commit' })}
                   >
                     <GitCommit size={12} className="mt-0.5 text-text-tertiary flex-shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -782,65 +783,6 @@ Please review this PR — identify potential issues, suggest improvements, and s
                     </div>
                   </div>
                 ))
-              )}
-            </div>
-            {/* Selected commit diff (right) */}
-            {selectedCommit && (
-              <div className="flex-1 overflow-y-auto bg-bg-secondary">
-                <div className="px-3 py-1.5 text-xs font-mono text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary flex items-center justify-between">
-                  <span className="truncate">{selectedCommit.commit.message.split('\n')[0]}</span>
-                  <code className="text-text-tertiary text-2xs">{shortHash(selectedCommit.sha)}</code>
-                </div>
-                {commitFilesLoading ? (
-                  <div className="p-4 text-center text-text-tertiary text-xs">
-                    <Loader size={14} className="animate-spin inline mr-2" />
-                    {t('common.loading')}
-                  </div>
-                ) : commitFiles.length === 0 ? (
-                  <div className="p-4 text-center text-text-tertiary text-xs italic">
-                    {t('pages.prNoFilesInCommit', { defaultValue: 'No file changes found for this commit.' })}
-                  </div>
-                ) : (
-                  commitFiles.map((f) => (
-                    <div key={f.sha + f.filename} className="border-b border-border-subtle">
-                      <button
-                        className={cn(
-                          'w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors flex items-center gap-2',
-                          selectedFile?.filename === f.filename && 'bg-accent-muted text-accent'
-                        )}
-                        onClick={() => setSelectedFile(f)}
-                      >
-                        <span className={cn(
-                          'text-2xs px-1 rounded uppercase font-medium flex-shrink-0',
-                          f.status === 'added' && 'bg-status-added/15 text-status-added',
-                          f.status === 'removed' && 'bg-status-deleted/15 text-status-deleted',
-                          f.status === 'modified' && 'bg-status-modified/15 text-status-modified',
-                          f.status === 'renamed' && 'bg-status-renamed/15 text-status-renamed',
-                        )}>
-                          {f.status.slice(0, 3)}
-                        </span>
-                        <span className="font-mono truncate flex-1" title={f.filename}>{f.filename}</span>
-                        <span className="text-status-added text-2xs flex-shrink-0">+{f.additions}</span>
-                        <span className="text-status-deleted text-2xs flex-shrink-0">-{f.deletions}</span>
-                      </button>
-                      {selectedFile?.filename === f.filename && f.patch && (
-                        <pre className="text-2xs font-mono p-2 overflow-x-auto leading-tight bg-bg-tertiary">
-                          {f.patch.split('\n').map((line: string, i: number) => (
-                            <div key={i} className={cn(
-                              'px-1',
-                              line.startsWith('+') && !line.startsWith('+++') && 'bg-status-added/15 text-status-added',
-                              line.startsWith('-') && !line.startsWith('---') && 'bg-status-deleted/15 text-status-deleted',
-                              line.startsWith('@@') && 'text-accent'
-                            )}>
-                              {line || ' '}
-                            </div>
-                          ))}
-                        </pre>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
             )}
           </div>
         ) : activeTab === 'files' ? (
