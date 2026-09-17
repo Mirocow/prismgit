@@ -1970,18 +1970,21 @@ export function HistoryPage() {
         <div className="bg-bg-secondary overflow-y-auto flex-shrink-0" style={{ width: detailWidth }}>
           {selected ? (
             <div className="p-3">
-              <div className="text-sm font-medium text-text-primary mb-2">
-                {bugtraq
-                  ? linkifyCommitMessage(selected.subject, bugtraq).map((seg, i) =>
-                      seg.url ? (
-                        <a key={i} href={seg.url} className="text-accent hover:underline" onClick={(e) => { e.preventDefault(); api.app.openExternal(seg.url!); }}>
-                          {seg.text}
-                        </a>
-                      ) : (
-                        <span key={i}>{seg.text}</span>
+              <div className="flex items-start gap-2 mb-2">
+                <Avatar name={selected.author.name} email={selected.author.email} size={20} className="mt-0.5 flex-shrink-0" />
+                <div className="text-sm font-medium text-text-primary flex-1 min-w-0">
+                  {bugtraq
+                    ? linkifyCommitMessage(selected.subject, bugtraq).map((seg, i) =>
+                        seg.url ? (
+                          <a key={i} href={seg.url} className="text-accent hover:underline" onClick={(e) => { e.preventDefault(); api.app.openExternal(seg.url!); }}>
+                            {seg.text}
+                          </a>
+                        ) : (
+                          <span key={i}>{seg.text}</span>
+                        )
                       )
-                    )
-                  : selected.subject}
+                    : selected.subject}
+                </div>
               </div>
               {selectedNote && (
                 <div className="mb-2 px-2 py-1.5 rounded bg-amber-500/10 border border-amber-500/30 flex items-start gap-1.5">
