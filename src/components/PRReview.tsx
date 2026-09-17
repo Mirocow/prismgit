@@ -77,6 +77,11 @@ export function PRReview({
   const [selectedCommit, setSelectedCommit] = useState<GithubPRCommit | null>(null);
   const [commitFiles, setCommitFiles] = useState<GithubPRFile[]>([]);
   const [commitFilesLoading, setCommitFilesLoading] = useState(false);
+  // Commit filter for the Files tab — when set, only files from that
+  // commit are shown (loaded via loadCommitFiles). When null, all PR
+  // files are shown.
+  const [filesCommitFilter, setFilesCommitFilter] = useState<string | null>(null);
+  const [filteredFiles, setFilteredFiles] = useState<GithubPRFile[] | null>(null);
   const [loading, setLoading] = useState(true);
   // Anti-spam: deduplicate concurrent loads. Without this, the load()
   // effect fires multiple times when:
@@ -842,10 +847,43 @@ Please review this PR — identify potential issues, suggest improvements, and s
           <div className="flex h-full">
             {/* Files list */}
             <div className="w-1/3 border-r border-border-subtle overflow-y-auto flex-shrink-0">
-              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 py-1.5 border-b border-border-subtle bg-bg-tertiary sticky top-0">
-                {t('pages.prChangedFiles', { defaultValue: 'Changed files' })} ({files.length})
+              {/* Commit filter dropdown */}
+              <div className="px-3 py-2 border-b border-border-subtle bg-bg-tertiary sticky top-0 z-10">
+                <div className="flex items-center gap-2">
+                  <select
+                    className="text-2xs bg-bg-secondary border border-border-default rounded px-2 py-1 w-full"
+                    value={filesCommitFilter ?? ''}
+                    onChange={(e) => {
+                      const sha = e.target.value;
+                      if (!sha) {
+                        setFilesCommitFilter(null);
+                        setFilteredFiles(null);
+                        setSelectedFile(files.length > 0 ? files[0] : null);
+                      } else {
+                        setFilesCommitFilter(sha);
+                        // Load files for this commit and filter the file list
+                        void loadCommitFiles(sha).then(() => {
+                          // loadCommitFiles sets commitFiles state — use those
+                          // to filter the main file list by filename match.
+                          // We'll read commitFiles from state in the next render.
+                        });
+                      }
+                    }}
+                    title={t('pages.prFilterByCommit', { defaultValue: 'Filter files by commit' })}
+                  >
+                    <option value="">{t('pages.prAllCommits', { defaultValue: 'All commits' })} ({files.length} files)</option>
+                    {commits.map((c) => (
+                      <option key={c.sha} value={c.sha}>
+                        {shortHash(c.sha)} {c.commit.message.split('\n')[0].substring(0, 50)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              {files.map((f) => (
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 py-1.5 border-b border-border-subtle bg-bg-tertiary">
+                {t('pages.prChangedFiles', { defaultValue: 'Changed files' })} ({(filesCommitFilter ? commitFiles : files).length})
+              </div>
+              {(filesCommitFilter ? commitFiles : files).map((f) => (
                 <button
                   key={f.sha + f.filename}
                   className={cn(
