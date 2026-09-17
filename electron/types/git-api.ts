@@ -365,6 +365,8 @@ export interface GitApi {
   pollRemoteSummary: (repoPath: string) => Promise<RemoteCheckSummary>;
   /** Batch version over several repos with bounded concurrency. */
   pollRemoteSummaries: (paths: string[]) => Promise<Record<string, RemoteCheckSummary>>;
+  /** Clear the poll cache — forces a fresh fetch on the next poll. */
+  clearPollCache: (repoPath?: string) => Promise<void>;
   diff: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) => Promise<DiffResult>;
   diffBranches: (repoPath: string, base: string, compare: string) => Promise<DiffResult>;
   diffCommit: (repoPath: string, hash: string, parentHash?: string) => Promise<DiffResult>;

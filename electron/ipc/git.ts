@@ -125,6 +125,13 @@ export function registerGitIpc(): void {
   // Periodic remote check for the repository list (fetch + incoming/outgoing)
   ipcMain.handle('git:pollRemoteSummary', (_e, p: string) => wrap(gitService.pollRemoteSummary)(p));
   ipcMain.handle('git:pollRemoteSummaries', (_e, paths: string[]) => wrap(gitService.pollRemoteSummaries)(paths));
+  // Clear the poll cache — used by the Sidebar refresh button to force
+  // a fresh fetch + incoming/outgoing recount instead of returning
+  // the 60s cached result. Without this, clicking refresh within 60s
+  // of the last poll returns stale ↓/↑ numbers.
+  ipcMain.handle('git:clearPollCache', (_e, repoPath?: string) =>
+    gitService.clearPollCache(repoPath)
+  );
 
   // Diff
   ipcMain.handle('git:diff', (_e, p: string, f: string, o?: { staged?: boolean; ref?: string }) =>

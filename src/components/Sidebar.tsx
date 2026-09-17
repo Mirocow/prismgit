@@ -792,7 +792,15 @@ export function Sidebar() {
                 //     provider) — previously this was NOT refreshed, which
                 //     made the sidebar rows look "stuck" after a push/pull
                 //     because the cached stats never updated.
-                void checkRemotes();
+                //  3) repo list — removes repos whose folders were deleted
+                //     from disk externally (e.g. via Finder).
+                // Bug fix: clearPollCache() BEFORE checkRemotes() so the
+                // poll doesn't return the 60s cached result. Without this,
+                // clicking refresh within 60s of the last poll returned
+                // stale ↓/↑ numbers.
+                void api.git.clearPollCache().then(() => {
+                  void checkRemotes();
+                });
                 void useRepositoryStore.getState().refreshAllStats();
               }}
             >

@@ -93,6 +93,7 @@ const api = {
       ipcRenderer.invoke('git:aheadBehind', repoPath, base, compare),
     pollRemoteSummary: (repoPath: string) => ipcRenderer.invoke('git:pollRemoteSummary', repoPath),
     pollRemoteSummaries: (paths: string[]) => ipcRenderer.invoke('git:pollRemoteSummaries', paths),
+    clearPollCache: (repoPath?: string) => ipcRenderer.invoke('git:clearPollCache', repoPath),
     diff: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) =>
       ipcRenderer.invoke('git:diff', repoPath, file, options),
     diffBranches: (repoPath: string, base: string, compare: string) =>

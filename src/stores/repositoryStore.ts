@@ -74,20 +74,44 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
         api.settings.getRepos(),
         api.settings.getRepoGroups().catch(() => [] as RepoGroup[]),
       ]);
+      // Filter out repos whose directory no longer exists on disk.
+      // The user may have deleted a repo folder via the OS file manager
+      // (Finder/Explorer) without removing it from the app's store.
+      // Without this check, the repo stays in the sidebar and clicking
+      // it shows "Not a Git repository". We auto-remove missing repos
+      // from the store so the sidebar stays clean.
+      // Also clean up missing repos from the remote-checks map.
+      const fs = await import('fs');
+      const existingRepos: typeof repos = [];
+      const removedPaths: string[] = [];
+      for (const r of repos) {
+        if (fs.existsSync(r.path)) {
+          existingRepos.push(r);
+        } else {
+          removedPaths.push(r.path);
+        }
+      }
+      // If any repos were removed from disk, persist the cleanup to the
+      // store so the change survives a restart.
+      if (removedPaths.length > 0) {
+        for (const p of removedPaths) {
+          await api.settings.removeRepo(p).catch(() => {});
+        }
+        // Also clear their remote checks from the UI state.
+        if (removedPaths.length > 0) {
+          const newChecks = { ...get().remoteChecks };
+          for (const p of removedPaths) delete newChecks[p];
+          set({ remoteChecks: newChecks });
+        }
+      }
       // Sort: favorites first, then pinned — but DON'T re-sort by lastOpened.
-      // The user complaint was that repos "jump around like a goat" every time
-      // they open one — because lastOpened changed and the list re-sorted.
-      // Now we keep stable insertion order (preserving the order repos were added).
-      const sorted = [...repos].sort((a, b) => {
+      const sorted = [...existingRepos].sort((a, b) => {
         const metaA = get().metadata[a.path];
         const metaB = get().metadata[b.path];
-        // Favorites first
         if (metaA?.favorite && !metaB?.favorite) return -1;
         if (!metaA?.favorite && metaB?.favorite) return 1;
-        // Pinned second
         if (a.pinned && !b.pinned) return -1;
         if (!a.pinned && b.pinned) return 1;
-        // Otherwise: stable — keep insertion order (don't sort by lastOpened)
         return 0;
       });
       set({ repos: sorted, groups, loading: false });
