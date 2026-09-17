@@ -693,9 +693,10 @@ export function DiffPage() {
 // root commit. `git diff hash^..hash` throws:
 //   fatal: bad revision '<root>^..<root>'
 // This helper builds the correct git diff args: if baseRef ends with `^`
-// AND the commit is a root commit (no parents), use `--root compareRef`
-// instead of `baseRef..compareRef`. This shows all files as "new file"
-// (the full diff of the root commit against the empty tree).
+// AND the commit is a root commit (no parents), use `git show` instead of
+// `git diff` — `git diff --root <hash>` returns EMPTY for root commits
+// (a known git quirk), but `git show <hash> --format=` returns the full
+// diff (all files as "new file" against the empty tree).
 //
 // The check is done at call time (not earlier) because the commit may
 // have been gc'd between the initial load and the diff request.
@@ -712,8 +713,13 @@ async function buildDiffArgs(
       const parts = out.trim().split(/\s+/).filter(Boolean);
       // parts[0] = hash, parts[1+] = parents. Root commit has no parents.
       if (parts.length <= 1) {
-        // Root commit — use --root flag + compareRef.
-        return ['diff', '--no-color', '--root', compareRef];
+        // Root commit — use `git show` instead of `git diff --root`.
+        // `git diff --root <hash>` returns EMPTY for root commits (git
+        // quirk), but `git show <hash> --format=` returns the full
+        // diff showing all files as "new file" against the empty tree.
+        // --no-color keeps the output parseable.
+        // --format= strips the commit message so only the diff remains.
+        return ['show', '--no-color', '--format=', compareRef];
       }
     } catch { /* fall through to normal range */ }
   }

@@ -2838,6 +2838,7 @@ export async function diffCommit(
   // tree (i.e. all files in the commit are "new file").
   let range: string;
   let extraArgs: string[] = [];
+  let useShow = false;
   if (parentHash) {
     range = `${parentHash}..${hash}`;
   } else {
@@ -2847,9 +2848,12 @@ export async function diffCommit(
     const parentsRaw = await git.raw(['rev-list', '--parents', '-n', '1', hash]).catch(() => '');
     const parents = parentsRaw.trim().split(/\s+/).filter(Boolean).slice(1);
     if (parents.length === 0) {
-      // Root commit — use --root flag, no range.
+      // Root commit — use `git show` instead of `git diff --root`.
+      // `git diff --root <hash>` returns EMPTY for root commits (a git
+      // quirk), but `git show <hash> --format=` returns the full diff
+      // showing all files as "new file" against the empty tree.
       range = hash;
-      extraArgs = ['--root'];
+      useShow = true;
     } else {
       // Non-root, no explicit parent supplied — diff against the first parent.
       range = `${parents[0]}..${hash}`;
@@ -2857,7 +2861,11 @@ export async function diffCommit(
   }
   let rawDiff: string;
   try {
-    rawDiff = await git.raw(['diff', '--no-color', ...extraArgs, range]);
+    if (useShow) {
+      rawDiff = await git.raw(['show', '--no-color', '--format=', range]);
+    } else {
+      rawDiff = await git.raw(['diff', '--no-color', ...extraArgs, range]);
+    }
   } catch {
     // Race: commit may have been gc'd between the preflight and the diff.
     // Return an empty diff rather than propagating the error.
