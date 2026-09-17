@@ -71,6 +71,7 @@ import type { RefAction } from './components/RefActionDialog';
 const ChangesPage = lazy(() => import('./pages/ChangesPage').then(m => ({ default: m.ChangesPage })));
 const HistoryPage = lazy(() => import('./pages/HistoryPage').then(m => ({ default: m.HistoryPage })));
 const DiffPage = lazy(() => import('./pages/DiffPage').then(m => ({ default: m.DiffPage })));
+const FileHistoryPage = lazy(() => import('./pages/FileHistoryPage').then(m => ({ default: m.FileHistoryPage })));
 const AnnotatePage = lazy(() => import('./pages/AnnotatePage').then(m => ({ default: m.AnnotatePage })));
 const BlamePage = lazy(() => import('./pages/BlamePage').then(m => ({ default: m.BlamePage })));
 const InvestigatePage = lazy(() => import('./pages/InvestigatePage').then(m => ({ default: m.InvestigatePage })));
@@ -1654,6 +1655,7 @@ export default function App() {
               <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} onResolveConflictAction={(f, mode) => resolveConflict(mode, f)} />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/diff" element={<DiffPage />} />
+              <Route path="/file-history" element={<FileHistoryPage />} />
               {/* Annotate: file-history investigation (SmartGit "Log of file") */}
               <Route path="/annotate" element={<AnnotatePage />} />
               {/* Investigate renamed to Search */}

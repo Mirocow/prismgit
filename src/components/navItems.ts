@@ -51,6 +51,8 @@ export const NAV_ITEMS: NavItem[] = [
     description: t('nav.desc.history') },
   { path: '/diff', label: t('nav.label.diff'), icon: FileText, group: GROUP_WORKING_TREE(),
     description: t('nav.desc.diff') },
+  { path: '/file-history', label: t('nav.label.fileHistory', { defaultValue: 'File History' }), icon: FileText, group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.fileHistory', { defaultValue: 'Analyze changes to a specific file over time' }) },
   { path: '/search', label: t('nav.label.search'), icon: Search, group: GROUP_WORKING_TREE(),
     description: t('nav.desc.search') },
   { path: '/blame', icon: FileText, label: t('nav.label.blame'), group: GROUP_WORKING_TREE(),

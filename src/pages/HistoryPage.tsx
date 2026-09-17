@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '../components/Avatar';
 import { CommitFileTree } from '../components/CommitFileTree';
 import { DiffViewer } from '../components/DiffViewer';
-import { FileHistoryViewer } from '../components/FileHistoryViewer';
 import { ActivityWave } from '../components/ActivityWave';
 import { FilterInput } from '../components/FilterInput';
 import {
@@ -893,9 +892,8 @@ export function HistoryPage() {
   // Compare a commit with the current working tree — shows a diff dialog
   const [compareDiff, setCompareDiff] = useState<{ result: import('../lib/api').DiffResult; title: string } | null>(null);
   useEscapeKey(!!compareDiff, () => setCompareDiff(null));
-  // FileHistoryViewer — opens when user clicks "View file history" on a file
+  // File History — now navigates to /file-history page (not a modal)
   const [fileHistoryPath, setFileHistoryPath] = useState<string | null>(null);
-  useEscapeKey(!!fileHistoryPath, () => setFileHistoryPath(null));
 
   const handleRevert = async (entry: LogEntry) => {
     if (await blockedByRepoState()) return;
@@ -2404,9 +2402,9 @@ export function HistoryPage() {
           </div>
         </div>
       )}
-      {/* File History Viewer — shows commit graph + snapshot + diff + actions */}
+      {/* File History — navigate to /file-history page with file + commit params */}
       {fileHistoryPath && (
-        <FileHistoryViewer filePath={fileHistoryPath} onClose={() => setFileHistoryPath(null)} />
+        <FileHistoryRedirect filePath={fileHistoryPath} commitHash={selected?.hash} onClose={() => setFileHistoryPath(null)} />
       )}
 
       {/* Split Off Files dialog */}
@@ -2470,4 +2468,15 @@ export function HistoryPage() {
       )}
     </div>
   );
+}
+
+/** Redirect helper — navigates to /file-history with query params. */
+function FileHistoryRedirect({ filePath, commitHash, onClose }: { filePath: string; commitHash?: string; onClose: () => void }) {
+  useEffect(() => {
+    const params = new URLSearchParams({ file: filePath });
+    if (commitHash) params.set('commit', commitHash);
+    window.location.hash = `#/file-history?${params.toString()}`;
+    onClose();
+  }, [filePath, commitHash, onClose]);
+  return null;
 }
