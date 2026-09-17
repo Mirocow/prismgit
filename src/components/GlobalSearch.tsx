@@ -53,6 +53,7 @@ interface SearchResult {
    *  When set, a BranchSyncIndicator is rendered next to the label. */
   sync?: {
     tracking?: string | null;
+    upstream?: string | null;
     ahead?: number;
     behind?: number;
     gone?: boolean;
@@ -246,6 +247,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
           tertiary: b.current ? 'HEAD' : (b.remote ? 'remote' : ''),
           sync: {
             tracking: b.tracking,
+            upstream: b.upstream,
             ahead: b.ahead,
             behind: b.behind,
             gone: b.gone,
@@ -497,6 +499,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
                       {r.kind === 'branch' && r.sync && (
                         <BranchSyncIndicator
                           tracking={r.sync.tracking}
+                          upstream={r.sync.upstream}
                           ahead={r.sync.ahead}
                           behind={r.sync.behind}
                           gone={r.sync.gone}

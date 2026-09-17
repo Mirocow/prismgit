@@ -1650,6 +1650,7 @@ export function HistoryPage() {
                       />
                       <BranchSyncIndicator
                         tracking={b.tracking}
+                        upstream={b.upstream}
                         ahead={b.ahead}
                         behind={b.behind}
                         gone={b.gone}
@@ -1688,6 +1689,7 @@ export function HistoryPage() {
                       />
                       <BranchSyncIndicator
                         tracking={b.tracking}
+                        upstream={b.upstream}
                         ahead={b.ahead}
                         behind={b.behind}
                         gone={b.gone}

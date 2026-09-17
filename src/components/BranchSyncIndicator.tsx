@@ -4,13 +4,24 @@
  *
  * Reusable component showing:
  *   - PlugConnected (green) when the branch is in sync with its upstream
- *     (ahead=0 AND behind=0 AND tracking exists).
+ *     (ahead=0 AND behind=0 AND tracking/upstream exists).
  *   - PlugDisconnected (orange/red) when the branch is out of sync
  *     (ahead>0 OR behind>0 OR gone).
  *   - PlugDisconnected dimmed when the branch has NO tracking upstream
  *     (local-only, never pushed).
  *   - Nothing for remote branches without a tracking relationship (they
  *     are the upstream side — no "sync" concept applies).
+ *
+ * The component accepts BOTH `tracking` and `upstream` props because the
+ * git backend sets them on different branch rows:
+ *   - branches() sets `tracking` only on the CURRENT branch (from git status).
+ *   - branches() sets `upstream` on non-current local branches with an
+ *     upstream (from `git for-each-ref --format='%(upstream:short)'`).
+ *
+ * We use whichever is set: `tracking || upstream`. Without this fallback,
+ * every non-current local branch with an upstream would render the dimmed
+ * "No upstream" plug — wrong, because git itself confirms the upstream
+ * exists via the `upstream` field.
  *
  * Used in: BranchesPage row, RefActionDialog row, HistoryPage graph row,
  * GlobalSearch branch rows. Replaces the older BranchTrackingIndicator
@@ -20,8 +31,10 @@ import { PlugConnected, PlugDisconnected } from './icons';
 import { cn } from '../lib/utils';
 
 export interface BranchSyncIndicatorProps {
-  /** True if the branch has an upstream tracking ref (`b.tracking`). */
+  /** Set on the CURRENT branch (from git status). */
   tracking?: string | null;
+  /** Set on non-current local branches with an upstream (from for-each-ref). */
+  upstream?: string | null;
   /** Commits ahead of upstream. undefined = unknown. */
   ahead?: number;
   /** Commits behind upstream. undefined = unknown. */
@@ -38,6 +51,7 @@ export interface BranchSyncIndicatorProps {
 
 export function BranchSyncIndicator({
   tracking,
+  upstream,
   ahead,
   behind,
   gone,
@@ -48,8 +62,14 @@ export function BranchSyncIndicator({
   // Remote branches are the upstream side — no "sync" to display.
   if (remote) return null;
 
-  // Local branch with no tracking — show dimmed disconnected plug.
-  if (!tracking) {
+  // Resolve the effective upstream ref name — `tracking` is set by
+  // `git status` for the current branch, `upstream` is set by
+  // `for-each-ref` for non-current branches. Either one means the
+  // branch HAS an upstream configured.
+  const upstreamRef = tracking || upstream;
+
+  // Local branch with no upstream at all — show dimmed disconnected plug.
+  if (!upstreamRef) {
     return (
       <span
         className={cn('inline-flex items-center text-text-tertiary/40', className)}
@@ -67,7 +87,7 @@ export function BranchSyncIndicator({
     return (
       <span
         className={cn('inline-flex items-center text-status-warning', className)}
-        title={`⚠ Upstream ${tracking} was deleted on the remote. Push to recreate or set a new tracked branch.`}
+        title={`⚠ Upstream ${upstreamRef} was deleted on the remote. Push to recreate or set a new tracked branch.`}
         role="img"
         aria-label="Upstream gone"
       >
@@ -84,7 +104,7 @@ export function BranchSyncIndicator({
     return (
       <span
         className={cn('inline-flex items-center text-status-added', className)}
-        title={`In sync with ${tracking}`}
+        title={`In sync with ${upstreamRef}`}
         role="img"
         aria-label="In sync"
       >
@@ -101,7 +121,7 @@ export function BranchSyncIndicator({
         ? 'text-status-added'
         : 'text-status-info';
   const title = [
-    `Local ↔ ${tracking}`,
+    `Local ↔ ${upstreamRef}`,
     aheadN > 0 ? `↑ ${aheadN} ahead` : '',
     behindN > 0 ? `↓ ${behindN} behind` : '',
   ].filter(Boolean).join(' · ');

@@ -1426,6 +1426,7 @@ export function BranchesPage() {
             PlugDisconnected icons and color tone. */}
         <BranchSyncIndicator
           tracking={b.tracking}
+          upstream={b.upstream}
           ahead={b.ahead}
           behind={b.behind}
           gone={b.gone}
@@ -1442,6 +1443,11 @@ export function BranchesPage() {
               </span>
             )}
             {b.tracking && <span className="text-2xs text-text-tertiary">→ {b.tracking}</span>}
+            {/* For non-current branches, branches() sets `upstream` (not
+                `tracking`) via `for-each-ref`. Show the same "→ upstream"
+                arrow so the user can see which remote this branch tracks,
+                even when it's not the checked-out branch. */}
+            {!b.tracking && b.upstream && <span className="text-2xs text-text-tertiary">→ {b.upstream}</span>}
             {/* SmartGit: show the in-progress state explicitly on the branch —
                 the unfinished operation is not committed yet, so the branch is
                 effectively detached from its remote until it is finished. */}
@@ -1475,8 +1481,9 @@ export function BranchesPage() {
             )}
             {/* Upstream exists but local is ahead — unpushed commits.
                 Show a green ↑N badge so the user knows how many commits
-                need to be pushed. */}
-            {b.tracking && b.ahead !== undefined && b.ahead > 0 && (
+                need to be pushed. Works for both current (b.tracking) and
+                non-current (b.upstream) branches. */}
+            {(b.tracking || b.upstream) && b.ahead !== undefined && b.ahead > 0 && (
               <span className="text-2xs px-1 py-0.5 rounded bg-status-added/15 text-status-added flex items-center gap-0.5 font-medium"
                 title={t('branches.aheadHint', { defaultValue: '{n} commit(s) ahead of upstream — Push to publish them.', n: b.ahead })}>
                 <ArrowUp size={8} />{b.ahead} {t('branches.unpushed', { defaultValue: 'unpushed' })}
@@ -1484,8 +1491,9 @@ export function BranchesPage() {
             )}
             {/* Up to date with upstream — synced. Show a subtle green
                 checkmark so the user can see at a glance that the
-                branch is in sync with its remote. */}
-            {b.tracking && (b.ahead === undefined || b.ahead === 0) && (b.behind === undefined || b.behind === 0) && !b.gone && (
+                branch is in sync with its remote. Works for both
+                current (b.tracking) and non-current (b.upstream) branches. */}
+            {(b.tracking || b.upstream) && (b.ahead === undefined || b.ahead === 0) && (b.behind === undefined || b.behind === 0) && !b.gone && (
               <span className="text-2xs px-1 py-0.5 rounded bg-status-added/10 text-status-added/70 flex items-center gap-0.5 font-medium"
                 title={t('branches.syncedHint', { defaultValue: 'Up to date with upstream' })}>
                 <Check size={8} />{t('branches.synced', { defaultValue: 'synced' })}

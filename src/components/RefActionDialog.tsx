@@ -185,6 +185,7 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
                   branches (no upstream concept). */}
               <BranchSyncIndicator
                 tracking={b.tracking}
+                upstream={b.upstream}
                 ahead={b.ahead}
                 behind={b.behind}
                 gone={b.gone}
