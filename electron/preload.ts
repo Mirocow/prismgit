@@ -407,6 +407,8 @@ const api = {
       ipcRenderer.invoke('gitlab:listMRNotes', projectId, mrIid),
     listMRCommits: (projectId: number, mrIid: number) =>
       ipcRenderer.invoke('gitlab:listMRCommits', projectId, mrIid),
+    getCommitDiff: (projectId: number, commitSha: string) =>
+      ipcRenderer.invoke('gitlab:getCommitDiff', projectId, commitSha),
     createMergeRequest: (projectId: number, data: { title: string; source_branch: string; target_branch: string; description?: string }) =>
       ipcRenderer.invoke('gitlab:createMergeRequest', projectId, data),
     approveMergeRequest: (projectId: number, mrIid: number) =>

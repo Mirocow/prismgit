@@ -163,6 +163,9 @@ export interface GitLabApi {
   listMRNotes: (projectId: number, mrIid: number) => Promise<GitLabMRNote[]>;
   /** Fetch the commits that make up the MR. */
   listMRCommits: (projectId: number, mrIid: number) => Promise<GitLabMRCommit[]>;
+  /** Fetch the diff for a specific commit in the GitLab project.
+   *  Uses: GET /projects/:id/repository/commits/:sha/diff */
+  getCommitDiff: (projectId: number, commitSha: string) => Promise<GitLabMRFile[]>;
   createMergeRequest: (projectId: number, data: {
     title: string;
     source_branch: string;

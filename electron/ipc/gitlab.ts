@@ -40,6 +40,9 @@ export function registerGitlabIpc(): void {
   ipcMain.handle('gitlab:listMRCommits', (_e, projectId: number, mrIid: number) =>
     gitlab.listMRCommits(projectId, mrIid)
   );
+  ipcMain.handle('gitlab:getCommitDiff', (_e, projectId: number, commitSha: string) =>
+    gitlab.getCommitDiff(projectId, commitSha)
+  );
   ipcMain.handle(
     'gitlab:createMergeRequest',
     (_e, projectId: number, data: { title: string; source_branch: string; target_branch: string; description?: string }) =>

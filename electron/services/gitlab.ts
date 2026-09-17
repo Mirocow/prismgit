@@ -380,6 +380,62 @@ export async function listMRCommits(
   }));
 }
 
+/**
+ * Fetch the diff for a specific commit in a GitLab project.
+ *
+ * Uses: GET /projects/:id/repository/commits/:sha/diff
+ *
+ * Returns an array of file diffs — each with old_path, new_path, diff
+ * (unified patch), new_file, renamed_file, deleted_file flags. Same
+ * shape as listMRChanges, so the renderer can reuse the same display.
+ */
+export async function getCommitDiff(
+  projectId: number,
+  commitSha: string
+): Promise<GitLabMRFile[]> {
+  const resp = await apiJson<Array<Record<string, unknown>>>(
+    `/projects/${projectId}/repository/commits/${commitSha}/diff`
+  );
+  const baseUrl = getBaseUrl();
+  const projectPath = String(projectId);
+  return resp.map((c) => {
+    const newFile = !!c.new_file;
+    const renamedFile = !!c.renamed_file;
+    const deletedFile = !!c.deleted_file;
+    const oldPath = String(c.old_path || '');
+    const newPath = String(c.new_path || '');
+    const diff = String(c.diff || '');
+    let additions = 0;
+    let deletions = 0;
+    for (const line of diff.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+      else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+    }
+    const status: GitLabMRFile['status'] = newFile
+      ? 'added'
+      : deletedFile
+        ? 'removed'
+        : renamedFile
+          ? 'renamed'
+          : 'modified';
+    return {
+      old_path: oldPath,
+      new_path: newPath,
+      a_mode: String(c.a_mode || ''),
+      b_mode: String(c.b_mode || ''),
+      diff,
+      new_file: newFile,
+      renamed_file: renamedFile,
+      deleted_file: deletedFile,
+      status,
+      filename: deletedFile ? oldPath : newPath,
+      additions,
+      deletions,
+      blob_url: `${baseUrl}/${projectPath}/-/blob/${newPath}`,
+    } satisfies GitLabMRFile;
+  });
+}
+
 export async function createMergeRequest(
   projectId: number,
   data: {

@@ -321,19 +321,46 @@ export function PRReview({
     try {
       if (provider === 'github' && owner && repo) {
         // Use GitHub commits API: GET /repos/:owner/:repo/commits/:sha
-        // Returns the commit object with a `files` array containing
-        // filename, status, additions, deletions, and patch for each
-        // file changed in that specific commit.
         const result = await api.github.getCommitFiles(owner, repo, commitSha);
         setCommitFiles(result);
         if (result.length > 0) setSelectedFile(result[0]);
-      } else if (provider === 'gitlab' && gitlabProjectId != null) {
-        // GitLab: use the MR changes endpoint (shows all changed files
-        // in the MR, not per-commit — GitLab doesn't have a per-commit
-        // compare API exposed). Still better than nothing.
-        const mrFiles = await api.gitlab.listMRChanges(gitlabProjectId, pr.number);
-        setCommitFiles(mrFiles as unknown as GithubPRFile[]);
-        if (mrFiles.length > 0) setSelectedFile(mrFiles[0] as unknown as GithubPRFile);
+      } else if (provider === 'gitlab') {
+        // GitLab: resolve project ID if not cached, then use
+        // GET /projects/:id/repository/commits/:sha/diff
+        let projectId = gitlabProjectId ?? null;
+        if (projectId == null && owner && repo) {
+          const fullPath = `${owner}/${repo}`;
+          try {
+            const project = await api.gitlab.getProjectByPath(fullPath);
+            projectId = project.id;
+            onGitlabProjectIdResolvedRef.current?.(project.id);
+          } catch {
+            // Can't resolve — show empty
+            setCommitFiles([]);
+            return;
+          }
+        }
+        if (projectId != null) {
+          const diffFiles = await api.gitlab.getCommitDiff(projectId, commitSha);
+          // Normalize GitLabMRFile → GithubPRFile shape
+          const normalizedFiles: GithubPRFile[] = diffFiles.map((f: GitLabMRFile) => ({
+            sha: '',
+            filename: f.filename,
+            status: f.status === 'removed' ? 'removed' : f.status === 'renamed' ? 'renamed' : f.status === 'added' ? 'added' : 'modified',
+            additions: f.additions,
+            deletions: f.deletions,
+            changes: f.additions + f.deletions,
+            patch: f.diff,
+            blob_url: f.blob_url,
+            raw_url: f.blob_url,
+            contents_url: f.blob_url,
+            previous_filename: f.renamed_file ? f.old_path : undefined,
+          }));
+          setCommitFiles(normalizedFiles);
+          if (normalizedFiles.length > 0) setSelectedFile(normalizedFiles[0]);
+        } else {
+          setCommitFiles([]);
+        }
       } else {
         setCommitFiles([]);
       }
