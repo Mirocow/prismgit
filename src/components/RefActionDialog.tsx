@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { X, Search, Loader } from './icons';
+import { BranchSyncIndicator } from './BranchSyncIndicator';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -179,6 +180,17 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
               )}
             >
               <span className="truncate flex-1 mono">{b.name}</span>
+              {/* Sync indicator — plug connected/disconnected for the
+                  branch's upstream relationship. Hidden for remote-only
+                  branches (no upstream concept). */}
+              <BranchSyncIndicator
+                tracking={b.tracking}
+                ahead={b.ahead}
+                behind={b.behind}
+                gone={b.gone}
+                remote={b.remote}
+                size={11}
+              />
               {b.current && <span className="text-2xs px-1 rounded bg-green-500/20 text-green-500">HEAD</span>}
               {typeof b.ahead === 'number' && typeof b.behind === 'number' && (b.ahead || b.behind) && (
                 <span className="text-2xs text-text-tertiary">{b.ahead > 0 ? `↑${b.ahead}` : ''}{b.behind > 0 ? `↓${b.behind}` : ''}</span>

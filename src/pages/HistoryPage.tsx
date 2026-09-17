@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '../components/Avatar';
+import { BranchSyncIndicator } from '../components/BranchSyncIndicator';
 import { CommitFileTree } from '../components/CommitFileTree';
 import { DiffViewer } from '../components/DiffViewer';
 import { FilterInput } from '../components/FilterInput';
@@ -1647,6 +1648,14 @@ export function HistoryPage() {
                           }
                         }}
                       />
+                      <BranchSyncIndicator
+                        tracking={b.tracking}
+                        ahead={b.ahead}
+                        behind={b.behind}
+                        gone={b.gone}
+                        remote={b.remote}
+                        size={11}
+                      />
                       <span className={cn('truncate', b.current && 'text-accent font-medium')}>{b.name}</span>
                       {b.current && <span className="text-2xs text-text-tertiary ml-auto">HEAD</span>}
                     </label>
@@ -1676,6 +1685,14 @@ export function HistoryPage() {
                             setBranchFilter('all');
                           }
                         }}
+                      />
+                      <BranchSyncIndicator
+                        tracking={b.tracking}
+                        ahead={b.ahead}
+                        behind={b.behind}
+                        gone={b.gone}
+                        remote={b.remote}
+                        size={11}
                       />
                       <span className="truncate">{b.name}</span>
                     </label>

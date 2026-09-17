@@ -7,7 +7,7 @@ import {
 import { MergePanel } from '../components/MergePanel';
 import { EmptyState } from '../components/EmptyState';
 import { FilterInput } from '../components/FilterInput';
-import { BranchTrackingIndicator } from '../components/BranchTrackingIndicator';
+import { BranchSyncIndicator } from '../components/BranchSyncIndicator';
 import { generateBranchNames, type LLMProvider } from '../lib/aiCommitMessages';
 import type { AppSettings } from '../../electron/types/settings-api';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -1418,7 +1418,20 @@ export function BranchesPage() {
         {/* Task 6 — visual fork/socket indicator for the local↔remote
             tracking relationship. Plug inserted into the socket when the
             branch has an upstream; hovering shows the upstream ref name. */}
-        <BranchTrackingIndicator tracking={!!b.tracking} upstreamName={b.tracking} size={12} />
+        {/* Task 6 — visual fork/socket indicator for the local↔remote
+            tracking relationship. Plug inserted into the socket when the
+            branch has an upstream; hovering shows the upstream ref name.
+            Replaced by BranchSyncIndicator — same SVG concept, but it
+            also reflects ahead/behind/gone state via PlugConnected vs
+            PlugDisconnected icons and color tone. */}
+        <BranchSyncIndicator
+          tracking={b.tracking}
+          ahead={b.ahead}
+          behind={b.behind}
+          gone={b.gone}
+          remote={b.remote}
+          size={12}
+        />
         {/* Name */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">

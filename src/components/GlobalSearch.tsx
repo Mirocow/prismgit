@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Search, GitCommit, GitBranch, Tag, FileText, GitPullRequest, FolderGit, X, ChevronRight,
 } from './icons';
+import { BranchSyncIndicator } from './BranchSyncIndicator';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -48,6 +49,15 @@ interface SearchResult {
   secondary?: string;
   /** Tertiary text shown on the right (date, type tag). */
   tertiary?: string;
+  /** Optional sync indicator metadata — only present for branch results.
+   *  When set, a BranchSyncIndicator is rendered next to the label. */
+  sync?: {
+    tracking?: string | null;
+    ahead?: number;
+    behind?: number;
+    gone?: boolean;
+    remote?: boolean;
+  };
   /** Action to run when the result is selected (navigates, opens, etc.). */
   action: () => void;
   /** Match score — lower = better. Used to sort within a group. */
@@ -234,6 +244,13 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
           label: b.name,
           secondary: b.lastCommit ? `${b.lastCommit.hash.slice(0, 7)} · ${b.lastCommit.message}` : '',
           tertiary: b.current ? 'HEAD' : (b.remote ? 'remote' : ''),
+          sync: {
+            tracking: b.tracking,
+            ahead: b.ahead,
+            behind: b.behind,
+            gone: b.gone,
+            remote: b.remote,
+          },
           score: s,
           action: () => {
             useSelectionStore.getState().selectBranch(b.name);
@@ -477,6 +494,16 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
                       onClick={() => execute(r)}
                     >
                       <KindIcon kind={r.kind} />
+                      {r.kind === 'branch' && r.sync && (
+                        <BranchSyncIndicator
+                          tracking={r.sync.tracking}
+                          ahead={r.sync.ahead}
+                          behind={r.sync.behind}
+                          gone={r.sync.gone}
+                          remote={r.sync.remote}
+                          size={11}
+                        />
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="truncate font-medium">{r.label}</div>
                         {r.secondary && (
