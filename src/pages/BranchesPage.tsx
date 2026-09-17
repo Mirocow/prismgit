@@ -1286,9 +1286,17 @@ export function BranchesPage() {
   const filteredStashes = stashes.filter(s => s.message.toLowerCase().includes(search.toLowerCase()));
 
   // Group branches: Local, then by remote
-  const localBranches = filtered.filter(b => !b.remote);
+  // Defense-in-depth: also filter out symbolic refs like "origin/HEAD"
+  // and "github/HEAD" on the UI side. The backend branches() already
+  // strips them, but if a cached list (or a different code path that
+  // builds the branch list from `git for-each-ref` directly) slips
+  // through, the user would see "origin/HEAD" rows that look like
+  // real branches but cannot be pushed, merged, or checked out.
+  const isSymbolicHead = (name: string): boolean =>
+    name === 'HEAD' || name.endsWith('/HEAD');
+  const localBranches = filtered.filter(b => !b.remote && !isSymbolicHead(b.name));
   const remoteGroups: Record<string, BranchInfo[]> = {};
-  for (const b of filtered.filter(b => b.remote)) {
+  for (const b of filtered.filter(b => b.remote && !isSymbolicHead(b.name))) {
     const remoteName = b.name.split('/')[0];
     if (!remoteGroups[remoteName]) remoteGroups[remoteName] = [];
     remoteGroups[remoteName].push(b);

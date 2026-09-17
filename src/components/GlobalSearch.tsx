@@ -236,7 +236,12 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
     }
 
     // Branches — match by name
+    // Skip symbolic HEAD refs like "origin/HEAD" and "github/HEAD" —
+    // they are pointers to the default branch of the remote, not real
+    // branches. Selecting them in GlobalSearch would attempt to
+    // checkout/merge a non-existent ref.
     for (const b of branches) {
+      if (b.name === 'HEAD' || b.name.endsWith('/HEAD')) continue;
       const s = matchScore(b.name, q);
       if (s >= 0) {
         out.push({

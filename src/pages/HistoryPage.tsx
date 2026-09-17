@@ -1602,10 +1602,10 @@ export function HistoryPage() {
                   />
                   <span className="font-medium">All branches</span>
                 </label>
-                {branches.filter(b => !b.remote).length > 0 && (
+                {branches.filter(b => !b.remote && !b.name.endsWith('/HEAD')).length > 0 && (
                   <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Local</div>
                 )}
-                {branches.filter(b => !b.remote).map(b => {
+                {branches.filter(b => !b.remote && !b.name.endsWith('/HEAD')).map(b => {
                   // A branch is "checked" if either:
                   //   - it's in the multi-select set (Ctrl+click in BranchesPage
                   //     or any checkbox tick), OR
@@ -1662,10 +1662,10 @@ export function HistoryPage() {
                     </label>
                   );
                 })}
-                {branches.filter(b => b.remote).length > 0 && (
+                {branches.filter(b => b.remote && !b.name.endsWith('/HEAD')).length > 0 && (
                   <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Remote</div>
                 )}
-                {branches.filter(b => b.remote).map(b => {
+                {branches.filter(b => b.remote && !b.name.endsWith('/HEAD')).map(b => {
                   const isMultiSelected = selectedBranches.has(b.name);
                   const isSingleSelected = selectedBranches.size === 0 && globalSelectedBranch === b.name;
                   const isChecked = isMultiSelected || isSingleSelected;

@@ -167,7 +167,11 @@ export function SetTrackedDialog({
   useEscapeKey(true, onClose);
 
   const filtered = useMemo(
-    () => remoteBranches.filter((b) => b.toLowerCase().includes(filter.toLowerCase())),
+    // Filter out symbolic HEAD refs like "origin/HEAD" — they point to
+    // the remote's default branch and are not real branches.
+    () => remoteBranches.filter(
+      (b) => b !== 'HEAD' && !b.endsWith('/HEAD') && b.toLowerCase().includes(filter.toLowerCase()),
+    ),
     [remoteBranches, filter]
   );
 
@@ -306,9 +310,11 @@ export function PushToDialog({
 
   // Suggest existing branches that live on the SELECTED remote
   // ("origin/main" → "main") so the user can pick instead of typing.
+  // Exclude symbolic HEAD refs like "origin/HEAD" — they are pointers
+  // to the default branch, not real branches.
   const suggestions = useMemo(
     () => remoteBranches
-      .filter((b) => b.startsWith(`${remote}/`))
+      .filter((b) => b.startsWith(`${remote}/`) && !b.endsWith('/HEAD'))
       .map((b) => b.slice(remote.length + 1)),
     [remoteBranches, remote]
   );
