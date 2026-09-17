@@ -363,9 +363,17 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   refreshAllStats: async () => {
     // Single IPC call → main process loops the repo list and re-runs git
     // per repo (sequential to avoid saturating the system with N concurrent
-    // git subprocesses). Once done, reload metadata into the store so the
-    // sidebar rows re-render with fresh lastCommit / branchCount / etc.
+    // git subprocesses). Once done, reload BOTH the repo list and metadata
+    // into the store so the sidebar rows re-render with fresh lastCommit /
+    // branchCount / etc. AND any repos that were removed externally (e.g.
+    // via the OS file manager or another PrismGit instance) disappear from
+    // the list.
+    // Bug fix: previously this only called loadMetadata() — not loadRepos().
+    // The user reported: "удалил репозиторий, жму обновить, репозитории
+    // не пропали из группы". The refresh button didn't reload the repo list
+    // from the store, so deleted repos stayed visible.
     await api.settings.refreshAllRepoStats();
+    await get().loadRepos();
     await get().loadMetadata();
     const cur = get().currentRepo;
     if (cur) {
