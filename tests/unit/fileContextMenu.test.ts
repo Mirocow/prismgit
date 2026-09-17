@@ -307,6 +307,41 @@ describe('runFileAction', () => {
     expect(onSelectDirectory).toHaveBeenLastCalledWith(null);
   });
 
+  it('file-history navigates to /file-history page with file path and commit context', async () => {
+    // We can't observe window.location.hash mutations in jsdom without a router,
+    // but we CAN assert that selectFile + setPathFilter are called so the
+    // FileHistoryPage receives the file context via the selection store.
+    const sel = useSelectionStore.getState();
+    const selectFileSpy = vi.spyOn(sel, 'selectFile');
+    const setPathFilterSpy = vi.spyOn(sel, 'setPathFilter');
+    const originalHash = window.location.hash;
+    try {
+      await runFileAction('file-history', baseCtx({ mode: 'history', commitSha: '6168d300a8cce986eaf147d20aa911fe9bcdc61a' }));
+      expect(selectFileSpy).toHaveBeenCalledWith('src/app/main.ts');
+      expect(setPathFilterSpy).toHaveBeenCalledWith('src/app/main.ts');
+      // Hash should now point at /file-history with file + commit params.
+      expect(window.location.hash).toContain('#/file-history');
+      expect(window.location.hash).toContain('file=src%2Fapp%2Fmain.ts');
+      expect(window.location.hash).toContain('commit=6168d300a8cce986eaf147d20aa911fe9bcdc61a');
+    } finally {
+      selectFileSpy.mockRestore();
+      setPathFilterSpy.mockRestore();
+      window.location.hash = originalHash;
+    }
+  });
+
+  it('file-history works without commitSha (omits commit param)', async () => {
+    const originalHash = window.location.hash;
+    try {
+      await runFileAction('file-history', baseCtx({ mode: 'changes' }));
+      expect(window.location.hash).toContain('#/file-history');
+      expect(window.location.hash).toContain('file=src%2Fapp%2Fmain.ts');
+      expect(window.location.hash).not.toContain('commit=');
+    } finally {
+      window.location.hash = originalHash;
+    }
+  });
+
   it('returns false for unknown action ids', async () => {
     expect(await runFileAction('no-such-action', baseCtx())).toBe(false);
   });

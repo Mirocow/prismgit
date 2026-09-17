@@ -892,8 +892,6 @@ export function HistoryPage() {
   // Compare a commit with the current working tree — shows a diff dialog
   const [compareDiff, setCompareDiff] = useState<{ result: import('../lib/api').DiffResult; title: string } | null>(null);
   useEscapeKey(!!compareDiff, () => setCompareDiff(null));
-  // File History — now navigates to /file-history page (not a modal)
-  const [fileHistoryPath, setFileHistoryPath] = useState<string | null>(null);
 
   const handleRevert = async (entry: LogEntry) => {
     if (await blockedByRepoState()) return;
@@ -2237,16 +2235,8 @@ export function HistoryPage() {
                                 window.location.hash = '#/diff';
                               },
                             };
-                            showContextMenu([
-                              ...buildFileMenu(fileCtx),
-                              { type: 'separator' },
-                              { label: t('pages.viewFileHistory', { defaultValue: 'View file history...' }), clickId: 'view-file-history' },
-                            ], async (action) => {
-                              if (action === 'view-file-history') {
-                                setFileHistoryPath(f.path);
-                              } else {
-                                await runFileAction(action, fileCtx);
-                              }
+                            showContextMenu(buildFileMenu(fileCtx), async (action) => {
+                              await runFileAction(action, fileCtx);
                             });
                           }}
                         />
@@ -2285,16 +2275,8 @@ export function HistoryPage() {
                                 window.location.hash = '#/diff';
                               },
                             };
-                            showContextMenu([
-                              ...buildFileMenu(fileCtx),
-                              { type: 'separator' },
-                              { label: t('pages.viewFileHistory', { defaultValue: 'View file history...' }), clickId: 'view-file-history' },
-                            ], async (action) => {
-                              if (action === 'view-file-history') {
-                                setFileHistoryPath(f.path);
-                              } else {
-                                await runFileAction(action, fileCtx);
-                              }
+                            showContextMenu(buildFileMenu(fileCtx), async (action) => {
+                              await runFileAction(action, fileCtx);
                             });
                           }}
                           title={isHighlighted ? `${f.path} — matches your file-history filter` : 'Click to filter history by this file · Right-click for more actions'}
@@ -2410,10 +2392,6 @@ export function HistoryPage() {
           </div>
         </div>
       )}
-      {/* File History — navigate to /file-history page with file + commit params */}
-      {fileHistoryPath && (
-        <FileHistoryRedirect filePath={fileHistoryPath} commitHash={selected?.hash} onClose={() => setFileHistoryPath(null)} />
-      )}
 
       {/* Split Off Files dialog */}
       {showSplitOff && splitOffEntry && (
@@ -2476,15 +2454,4 @@ export function HistoryPage() {
       )}
     </div>
   );
-}
-
-/** Redirect helper — navigates to /file-history with query params. */
-function FileHistoryRedirect({ filePath, commitHash, onClose }: { filePath: string; commitHash?: string; onClose: () => void }) {
-  useEffect(() => {
-    const params = new URLSearchParams({ file: filePath });
-    if (commitHash) params.set('commit', commitHash);
-    window.location.hash = `#/file-history?${params.toString()}`;
-    onClose();
-  }, [filePath, commitHash, onClose]);
-  return null;
 }

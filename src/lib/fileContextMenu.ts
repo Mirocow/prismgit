@@ -390,9 +390,20 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     case 'open-diff':
       ctx.onOpenDiff?.();
       return true;
-    case 'file-history':
-      goTo('#/history', true);
+    case 'file-history': {
+      // Navigate to the standalone File History page with both the file
+      // path AND the current commit (when known) so the page can center on
+      // the right revision. Previously this just filtered the History page
+      // by path — confusing because the same list already shows commit
+      // files filtered to that path.
+      const sel = useSelectionStore.getState();
+      sel.selectFile(ctx.path);
+      sel.setPathFilter(ctx.path);
+      const params = new URLSearchParams({ file: ctx.path });
+      if (ctx.commitSha) params.set('commit', ctx.commitSha);
+      window.location.hash = `#/file-history?${params.toString()}`;
       return true;
+    }
     case 'blame':
       // selectFile sets globalFilePath which BlamePage watches —
       // it auto-triggers the blame for this file.

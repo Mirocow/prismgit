@@ -98,7 +98,20 @@ export function FileHistoryPage() {
   }, [repo.path, toast, initialCommit, initialBase, initialCompare]);
 
   useEffect(() => {
-    if (filePath) void load(filePath);
+    if (filePath) {
+      void load(filePath);
+    } else {
+      // Navigated to /file-history without ?file= — clear stale state so
+      // the snapshot/blame useEffect doesn't fire loadSnapshot() with the
+      // previous file's commits but an empty filePath (which would crash
+      // git blame with "fatal: no such path  in <hash>").
+      setCommits([]);
+      setSnapshot(null);
+      setBlame(null);
+      setDiffResult(null);
+      setSelectedIdx(0);
+      setCompareIdx(null);
+    }
   }, [filePath, load]);
 
   const handleSelectFile = () => {
@@ -109,6 +122,14 @@ export function FileHistoryPage() {
   };
 
   const loadSnapshot = useCallback(async (hash: string) => {
+    // Guard against the race where filePath becomes empty between the
+    // commits being populated and this callback firing — without this,
+    // `git blame <hash> -- ''` fails with "no such path  in <hash>".
+    if (!filePath) {
+      setSnapshot(null);
+      setBlame(null);
+      return;
+    }
     setSnapshotLoading(true);
     setSnapshot(null);
     setBlame(null);
@@ -142,7 +163,9 @@ export function FileHistoryPage() {
   }, [repo.path, filePath]);
 
   useEffect(() => {
-    if (commits.length === 0 || selectedIdx >= commits.length) return;
+    // Bail out early if there's no filePath — loadSnapshot/loadDiff would
+    // call git with an empty file path and crash with "no such path".
+    if (!filePath || commits.length === 0 || selectedIdx >= commits.length) return;
     const commit = commits[selectedIdx];
     if (viewMode === 'snapshot') {
       void loadSnapshot(commit.hash);
@@ -150,7 +173,7 @@ export function FileHistoryPage() {
       const base = commits[compareIdx];
       void loadDiff(base.hash, commit.hash);
     }
-  }, [selectedIdx, compareIdx, viewMode, commits, loadSnapshot, loadDiff]);
+  }, [filePath, selectedIdx, compareIdx, viewMode, commits, loadSnapshot, loadDiff]);
 
   const selectedCommit = commits[selectedIdx];
 
