@@ -51,6 +51,30 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
   const [sshRes, setSshRes] = useState<SshUrlResolution | null>(null);
   const [sshTesting, setSshTesting] = useState(false);
   const [sshTestResult, setSshTestResult] = useState<SshTestResult | null>(null);
+  // Sidebar group selector: clone into a specific group (or root if null).
+  // The chosen groupId is forwarded to cloneRepository() which calls
+  // api.settings.setRepoGroup() after the clone lands.
+  const [groups, setGroups] = useState<{ id: string; name: string; parentId?: string | null }[]>([]);
+  const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+
+  // Load sidebar groups on modal open — used to populate the group dropdown.
+  // We use api.settings.getRepoGroups() which returns the list of all groups
+  // (top-level + nested) so the user can pick which group to clone into.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoadingGroups(true);
+    (async () => {
+      try {
+        const list = await api.settings.getRepoGroups();
+        if (!cancelled) setGroups(list);
+      } catch { /* non-fatal */ } finally {
+        if (!cancelled) setLoadingGroups(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -245,8 +269,34 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
   const handleBrowse = async () => {
     const path = await api.fs.openDirectoryPicker();
     if (path) {
-      setTargetPath(path);
+      // Bug fix: when the user picks a parent directory (e.g. /opt) AND
+      // a URL is supplied, the clone should land in /opt/<repo-name>
+      // instead of /opt itself. Without this, git clone clones INTO
+      // /opt — which creates /opt/.git, /opt/HEAD, etc. and mixes the
+      // repo files with whatever is already in /opt.
+      //
+      // We append the repo name derived from the URL (if available)
+      // so the user sees "/opt/29agroapk" as the final path.
+      const repoName = url.trim() ? deriveRepoNameFromUrl(url.trim()) : '';
+      if (repoName) {
+        setTargetPath(`${path}/${repoName}`.replace(/\/+/g, '/'));
+      } else {
+        setTargetPath(path);
+      }
     }
+  };
+
+  /**
+   * Extract the repo name from a git URL.
+   *   https://host/group/repo.git  →  repo
+   *   git@host:group/repo.git      →  repo
+   *   /path/to/repo.git            →  repo
+   *   /path/to/repo               →  repo
+   * Returns '' if the URL is empty or malformed.
+   */
+  const deriveRepoNameFromUrl = (input: string): string => {
+    const m = input.match(/\/([^/]+?)(?:\.git)?(?:\?|#|$)/);
+    return m?.[1] ?? '';
   };
 
   // SmartGit 24: tolerant URL parsing — strip "git clone " prefix
@@ -298,6 +348,14 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
         // Mirror clone: copies ALL refs (heads, tags, notes, remotes) — bare backup copy
         await api.git.mirror(normalizedUrl, finalPath);
         await useRepositoryStore.getState().openRepository(finalPath);
+        // Mirror clones also honour the group selector.
+        if (targetGroupId) {
+          try {
+            await api.settings.setRepoGroup(finalPath, targetGroupId);
+            await api.settings.setRepoGroupExpanded?.(targetGroupId, true).catch(() => {});
+            await useRepositoryStore.getState().loadRepos();
+          } catch { /* non-fatal */ }
+        }
       } else if (partialClone) {
         // SmartGit Manual: Partial clone — fetch tree without blobs, fetch on demand
         await api.git.clonePartial(normalizedUrl, finalPath, 'blob:none', {
@@ -306,10 +364,20 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
           recursive: !noRecursive,
         });
         await useRepositoryStore.getState().openRepository(finalPath);
+        if (targetGroupId) {
+          try {
+            await api.settings.setRepoGroup(finalPath, targetGroupId);
+            await api.settings.setRepoGroupExpanded?.(targetGroupId, true).catch(() => {});
+            await useRepositoryStore.getState().loadRepos();
+          } catch { /* non-fatal */ }
+        }
       } else {
         await cloneRepository(normalizedUrl, finalPath, {
           depth: depth ? Number(depth) : undefined,
           branch: branch || undefined,
+          // Forward the chosen sidebar group so the cloned repo lands
+          // in the right place in the Sidebar's tree (not the root).
+          groupId: targetGroupId,
         });
       }
       if (setupCredentialHelper) {
@@ -493,7 +561,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                   <input
                     type="text"
                     className="flex-1 text-sm font-mono"
-                    placeholder="/path/to/clone"
+                    placeholder="/path/to/clone/<repo-name>"
                     value={targetPath}
                     onChange={(e) => setTargetPath(e.target.value)}
                   />
@@ -502,6 +570,38 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                     {t('dialogs.browse')}
                   </button>
                 </div>
+                {/* Hint: when a URL is supplied, the chosen parent dir
+                    will get /<repo-name> appended automatically. */}
+                {url.trim() && (
+                  <div className="text-2xs text-text-tertiary mt-1">
+                    {t('dialogs.targetHint', { defaultValue: 'The repo will be cloned into the chosen folder + repo name from the URL.' })}
+                  </div>
+                )}
+              </div>
+              {/* Sidebar group selector — clone into a specific group.
+                  The chosen groupId is forwarded to cloneRepository()
+                  which calls api.settings.setRepoGroup() after the
+                  clone lands so the new repo appears in the chosen
+                  group instead of at the root of the Sidebar tree. */}
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">
+                  {t('clone.targetGroup', { defaultValue: 'Sidebar group' })}
+                </label>
+                <select
+                  className="w-full text-sm bg-bg-secondary border border-border-default rounded px-2 py-1"
+                  value={targetGroupId ?? ''}
+                  onChange={(e) => setTargetGroupId(e.target.value || null)}
+                  disabled={loadingGroups || groups.length === 0}
+                  title={t('clone.targetGroupHint', { defaultValue: 'Where the cloned repo will appear in the Sidebar tree. Pick "(root)" to add it to the top level.' })}
+                >
+                  <option value="">{t('clone.targetGroupRoot', { defaultValue: '(root — no group)' })}</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+                {loadingGroups && (
+                  <span className="text-2xs text-text-tertiary ml-2">{t('dialogs.loading', { defaultValue: 'loading...' })}</span>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

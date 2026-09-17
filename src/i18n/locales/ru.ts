@@ -233,6 +233,9 @@ export const ru: Record<string, string> = {
   'clone.ssh.testing': 'Проверка…',
   'clone.ssh.ok': 'Подключено',
   'clone.ssh.failed': 'Не удалось',
+  'clone.targetGroup': 'Группа в Sidebar',
+  'clone.targetGroupHint': 'Где в дереве Sidebar появится клонированный репозиторий. Выберите "(корень)" для верхнего уровня.',
+  'clone.targetGroupRoot': '(корень — без группы)',
 
   // Diff
   'diff.unified': 'Единый',

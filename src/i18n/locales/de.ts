@@ -233,6 +233,9 @@ export const de: Record<string, string> = {
   'clone.ssh.testing': 'Teste…',
   'clone.ssh.ok': 'Verbunden',
   'clone.ssh.failed': 'Fehlgeschlagen',
+  'clone.targetGroup': 'Sidebar-Gruppe',
+  'clone.targetGroupHint': 'Wo das geklonte Repo im Sidebar-Baum erscheint. Wähle "(Root)", um es auf oberster Ebene hinzuzufügen.',
+  'clone.targetGroupRoot': '(Root — keine Gruppe)',
 
   // Diff
   'diff.unified': 'Unified',

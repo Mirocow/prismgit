@@ -233,6 +233,9 @@ export const zh: Record<string, string> = {
   'clone.ssh.testing': '测试中…',
   'clone.ssh.ok': '已连接',
   'clone.ssh.failed': '失败',
+  'clone.targetGroup': 'Sidebar 分组',
+  'clone.targetGroupHint': '克隆的仓库将出现在 Sidebar 树中的位置。选择 "(根)" 将其添加到顶层。',
+  'clone.targetGroupRoot': '(根 — 无分组)',
 
   // Diff
   'diff.unified': '统一',

@@ -26,7 +26,7 @@ interface RepositoryState {
   openRepositoryPicker: () => Promise<void>;
   closeRepository: () => void;
   removeRepo: (path: string) => Promise<void>;
-  cloneRepository: (url: string, targetPath: string, options?: { depth?: number; branch?: string }) => Promise<string>;
+  cloneRepository: (url: string, targetPath: string, options?: { depth?: number; branch?: string; groupId?: string | null }) => Promise<string>;
   initRepository: (targetPath: string) => Promise<void>;
   pinRepo: (path: string, pinned: boolean) => Promise<void>;
 
@@ -221,6 +221,20 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const result = await api.git.clone(url, targetPath, options);
+      // If a groupId was supplied, assign the newly cloned repo to that
+      // group so it lands in the right place in the Sidebar's tree.
+      // The repo was just added by api.settings.addRepo inside
+      // openRepository() — we set the group via setRepoGroup, then
+      // reload the repo list so the Sidebar shows the new repo under
+      // the chosen group.
+      if (options?.groupId) {
+        try {
+          await api.settings.setRepoGroup(result, options.groupId);
+          // Auto-expand the group so the new repo is visible.
+          await api.settings.setRepoGroupExpanded?.(options.groupId, true).catch(() => {});
+          await get().loadRepos();
+        } catch { /* non-fatal — repo is cloned, just not in the group */ }
+      }
       await get().openRepository(result);
       return result;
     } catch (e) {
