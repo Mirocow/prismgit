@@ -342,8 +342,12 @@ export const tauriApi = {
       };
     },
     pull: async (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean): Promise<void> => {
+      // Always pass an explicit --rebase / --no-rebase flag so git 2.27+
+      // never refuses with "Need to specify how to reconcile divergent
+      // branches" on repos without `pull.rebase` configured.
+      // Mirrors the fix in electron/services/git.ts:pull().
       const args = ['pull'];
-      if (rebase) args.push('--rebase');
+      args.push(rebase ? '--rebase' : '--no-rebase');
       if (noFF) args.push('--no-ff');
       args.push(remote || 'origin');
       if (branch) args.push(branch);
