@@ -34,7 +34,7 @@ import {
 import type { AiProviderEntry } from '../../electron/types/settings-api';
 import {
   Cpu, Plus, Trash, Pencil, CheckCircle, AlertCircle, Loader, X, Power,
-  KeyRound, RefreshCw, ChevronDown, Zap, Lock,
+  KeyRound, RefreshCw, ChevronDown, Zap, Lock, Search,
 } from './icons';
 
 interface ProviderModelInfo {
@@ -100,6 +100,7 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
 
   const [models, setModels] = useState<ProviderModelInfo[]>([]);
   const [modelsOpen, setModelsOpen] = useState(false);
+  const [modelSearch, setModelSearch] = useState('');
   const [fetching, setFetching] = useState(false);
   const [fetchResult, setFetchResult] = useState<TestResult | null>(null);
 
@@ -308,9 +309,9 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
               </button>
             </div>
 
-            {/* Fetched models dropdown */}
+            {/* Fetched models dropdown with search */}
             {modelsOpen && (
-              <div className="mt-2 border border-border-default rounded bg-bg-elevated max-h-56 overflow-y-auto">
+              <div className="mt-2 border border-border-default rounded bg-bg-elevated max-h-72 overflow-hidden flex flex-col">
                 {fetching && (
                   <div className="px-3 py-2 text-2xs text-text-tertiary flex items-center gap-2">
                     <Loader size={11} className="animate-spin" />
@@ -328,21 +329,46 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
                     {t('settings.aiGridNoModels') || 'Server reachable, but no models found. Pull/install a model first.'}
                   </div>
                 )}
-                {!fetching && fetchResult?.ok && models.map(m => (
-                  <button
-                    key={m.id}
-                    className={cn(
-                      'w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors flex items-center gap-2',
-                      model === m.id && 'bg-accent-muted text-accent',
-                    )}
-                    onClick={() => { setModel(m.id); setModelsOpen(false); }}
-                  >
-                    <span className="truncate flex-1 font-mono">{m.id}</span>
-                    {m.parameterSize && <span className="text-3xs text-text-tertiary flex-shrink-0">{m.parameterSize}</span>}
-                    {m.quantization && <span className="text-3xs text-text-tertiary flex-shrink-0">{m.quantization}</span>}
-                    {m.size && <span className="text-3xs text-text-tertiary flex-shrink-0">{formatSize(m.size)}</span>}
-                  </button>
-                ))}
+                {!fetching && fetchResult?.ok && models.length > 0 && (
+                  <>
+                    {/* Search field — filters models by name (case-insensitive) */}
+                    <div className="relative px-2 py-1.5 border-b border-border-subtle flex-shrink-0">
+                      <Search size={11} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+                      <input
+                        type="text"
+                        autoFocus
+                        className="w-full text-xs pl-6 pr-2 py-1 bg-bg-tertiary border border-border-default rounded outline-none focus:border-accent"
+                        placeholder={t('settings.aiGridSearchModels') || 'Search models...'}
+                        value={modelSearch}
+                        onChange={(e) => setModelSearch(e.target.value)}
+                      />
+                    </div>
+                    <div className="overflow-y-auto flex-1">
+                      {models
+                        .filter(m => !modelSearch.trim() || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
+                        .map(m => (
+                        <button
+                          key={m.id}
+                          className={cn(
+                            'w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors flex items-center gap-2',
+                            model === m.id && 'bg-accent-muted text-accent',
+                          )}
+                          onClick={() => { setModel(m.id); setModelsOpen(false); setModelSearch(''); }}
+                        >
+                          <span className="truncate flex-1 font-mono">{m.id}</span>
+                          {m.parameterSize && <span className="text-3xs text-text-tertiary flex-shrink-0">{m.parameterSize}</span>}
+                          {m.quantization && <span className="text-3xs text-text-tertiary flex-shrink-0">{m.quantization}</span>}
+                          {m.size && <span className="text-3xs text-text-tertiary flex-shrink-0">{formatSize(m.size)}</span>}
+                        </button>
+                      ))}
+                      {models.filter(m => !modelSearch.trim() || m.id.toLowerCase().includes(modelSearch.toLowerCase())).length === 0 && (
+                        <div className="px-3 py-2 text-2xs text-text-tertiary italic">
+                          {t('settings.aiGridNoMatch') || 'No models match'} "{modelSearch}"
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
