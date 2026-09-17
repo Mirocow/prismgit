@@ -81,14 +81,22 @@ export interface ProjectPrefs {
 const GLOBAL_COLLAPSED_GROUPS_KEY = 'prismgit-sidebar-collapsed-groups';
 
 /** Read the global default for collapsed sidebar groups (no repo open / first run). */
+/** Default groups that are collapsed on first run (before the user has
+ *  toggled any group). The user asked for WORKING TREE, WORKFLOWS, and
+ *  REFS to be collapsed by default — they expand only the section they
+ *  need. Group names are stored in the user's current locale (the same
+ *  string shown in the sidebar heading), so we include English variants
+ *  here as the canonical defaults. */
+const DEFAULT_COLLAPSED_GROUPS = ['Working Tree', 'Workflows', 'Refs'];
+
 export function loadGlobalCollapsedGroups(): string[] {
   try {
     const raw = localStorage.getItem(GLOBAL_COLLAPSED_GROUPS_KEY);
-    if (!raw) return [];
+    if (!raw) return DEFAULT_COLLAPSED_GROUPS;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((s) => typeof s === 'string') : [];
+    return Array.isArray(parsed) ? parsed.filter((s) => typeof s === 'string') : DEFAULT_COLLAPSED_GROUPS;
   } catch {
-    return [];
+    return DEFAULT_COLLAPSED_GROUPS;
   }
 }
 

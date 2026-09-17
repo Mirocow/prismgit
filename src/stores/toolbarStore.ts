@@ -9,8 +9,8 @@ import { create } from 'zustand';
 export const DEFAULT_TOOLBAR_GROUPS = {
   sync: true,
   stage: true,
-  changes: true,
   stash: true,
+  changes: true,
   log: true,
   workflows: true,
   utils: true,
@@ -24,7 +24,18 @@ const STORAGE_KEY = 'prismgit-toolbar-groups';
 function loadToolbarGroups(): ToolbarGroups {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { ...DEFAULT_TOOLBAR_GROUPS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw) as Record<string, boolean>;
+      // Build the groups in DEFAULT order, pulling visibility from saved.
+      // This ensures the render order matches DEFAULT_TOOLBAR_GROUPS even
+      // if the saved object has keys in a different order (e.g. from an
+      // older PrismGit version where 'changes' came before 'stash').
+      const ordered: Record<string, boolean> = {};
+      for (const key of Object.keys(DEFAULT_TOOLBAR_GROUPS)) {
+        ordered[key] = saved[key] ?? DEFAULT_TOOLBAR_GROUPS[key as keyof typeof DEFAULT_TOOLBAR_GROUPS];
+      }
+      return ordered as ToolbarGroups;
+    }
   } catch { /* ignore */ }
   return DEFAULT_TOOLBAR_GROUPS;
 }
