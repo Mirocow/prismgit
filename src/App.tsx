@@ -1457,6 +1457,17 @@ export default function App() {
   // Refresh status when repository changes (only once, not on every render)
   useEffect(() => {
     if (currentRepo) {
+      // ── Clear the previous repo's git status FIRST ────────────────────
+      // Without this, the UI keeps the OLD `status.current` (HEAD branch
+      // name from the previous repo) until the new `git status` resolves.
+      // On large/LFS repos that can take 1-5s — during which the Toolbar
+      // / Sidebar / History page show the previous repo's branch name
+      // attached to the new repo. The user reported this as "после
+      // переключения репозитория теряется информация о текущей HEAD ветке".
+      // Clearing status to null makes the UI show an empty/loading state
+      // until the new status arrives, instead of a stale branch name.
+      useGitStore.getState().clearStatus();
+
       // Don't await — fire-and-forget. The UI shows immediately with the
       // previous status (or empty), then updates when the status resolves.
       // Previously this was also fire-and-forget but the loadMetadata() call

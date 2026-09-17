@@ -7045,7 +7045,14 @@ export async function batchOperation(
                 await git.raw([...netArgs, 'fetch', r, '--prune']);
                 break;
               case 'pull':
-                await git.raw([...netArgs, 'pull', r, options.branch || '']);
+                // Delegate to the dedicated pull() function — it ALWAYS
+                // passes `--rebase` OR `--no-rebase` so git 2.27+ never
+                // refuses with "Need to specify how to reconcile divergent
+                // branches". The previous raw git.raw() here hit that
+                // error on every divergent repo in the batch.
+                // pull() also handles auto-stash + untracked-overwrite
+                // recovery, which the raw form didn't.
+                await pull(repo, r, options.branch || undefined, false, false);
                 break;
               case 'push':
                 await git.raw([...netArgs, '-c', 'http.version=HTTP/1.1', 'push', r, ...(options.force ? ['--force-with-lease'] : [])]);

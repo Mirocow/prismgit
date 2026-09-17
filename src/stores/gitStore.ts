@@ -18,6 +18,19 @@ interface GitState {
   lastRefresh: number;
 
   refreshStatus: (repoPath: string) => Promise<void>;
+  /**
+   * Clear the cached `status` (e.g. when switching repositories).
+   * Called from App.tsx on `currentRepo?.path` change BEFORE
+   * refreshStatus() so the UI doesn't briefly show the previous
+   * repo's HEAD branch name while the new status resolves.
+   *
+   * Without this, switching from repo A (HEAD=main) to repo B
+   * (HEAD=develop) would show "develop"'s working tree with the
+   * label "main" for the duration of `git status` on B (1-5s on
+   * large/LFS repos). The user reported this as "после переключения
+   * репозитория теряется информация о текущей HEAD ветке".
+   */
+  clearStatus: () => void;
   stageFiles: (repoPath: string, files: string[]) => Promise<void>;
   stageAll: (repoPath: string) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean) => Promise<string>;
@@ -31,6 +44,8 @@ export const useGitStore = create<GitState>((set, get) => ({
   loading: false,
   error: null,
   lastRefresh: 0,
+
+  clearStatus: () => set({ status: null, loading: false, error: null, lastRefresh: 0 }),
 
   refreshStatus: async (repoPath: string) => {
     // RACE FIX: if a status refresh is already in flight for this repo,
