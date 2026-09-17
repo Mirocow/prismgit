@@ -12,7 +12,7 @@ import { useI18n } from '../lib/i18n';
  * Tag-Grouping (the same tabs as SmartGit's Repository Settings dialog).
  */
 
-const TABS = ['User', 'Fetch and Pull', 'Push', 'Signing', 'Encoding', 'Tag-Grouping', 'Performance'] as const;
+const TABS = ['User', 'Fetch and Pull', 'Push', 'Credential Helper', 'Signing', 'Encoding', 'Tag-Grouping', 'Performance'] as const;
 type Tab = (typeof TABS)[number];
 
 export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => void; remoteName?: string }) {
@@ -38,7 +38,14 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
   const [gpgProgram, setGpgProgram] = useState('');
   const [encoding, setEncoding] = useState('UTF-8');
   const [tagGroupPattern, setTagGroupPattern] = useState('');
+  const [tagGroupSinglePattern, setTagGroupSinglePattern] = useState('');
   const [tagGroupOrder, setTagGroupOrder] = useState('');
+  // Credential Helper tab
+  const [credentialHelper, setCredentialHelper] = useState('');
+  // Fetch and Pull — extra submodule checkboxes (SmartGit has these as
+  // separate toggles, not just the recurseSubmodules select).
+  const [submoduleUpdate, setSubmoduleUpdate] = useState<boolean>(false);
+  const [submoduleInit, setSubmoduleInit] = useState<string>('');
   // Performance tab — per-repo git config (local scope)
   const [repoManyFiles, setRepoManyFiles] = useState('');
   const [repoFsmonitor, setRepoFsmonitor] = useState('');
@@ -49,14 +56,16 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
     const p = repo.path;
     const get = (k: string, def = '') => api.git.configGet(p, k).then((v) => v ?? def).catch(() => def);
     try {
-      const [n, e, pr, fp, frs, prs, sc, sk, gp, enc, tgp, tgo, mf, fsm, wcg] = await Promise.all([
+      const [n, e, pr, fp, frs, prs, sc, sk, gp, enc, tgp, tgp2, tgo, mf, fsm, wcg, ch, su, si] = await Promise.all([
         get('user.name'), get('user.email'),
         get('pull.rebase', 'false'), get('fetch.prune', 'false'),
         get('fetch.recurseSubmodules', 'on-demand'),
         get('push.recurseSubmodules', 'check'),
         get('commit.gpgsign', 'false'), get('user.signingkey'), get('gpg.program'),
         get('gui.encoding', 'UTF-8'),
-        get('smartgit.tag-grouping.pattern'), get('smartgit.tag-grouping.order'),
+        get('smartgit.tag-grouping.pattern'), get('smartgit.tag-grouping.single'), get('smartgit.tag-grouping.order'),
+        get('credential.helper'),
+        get('submodule.recurse', 'false'), get('submodule.active',''),
         get('feature.manyFiles'), get('core.fsmonitor'), get('fetch.writeCommitGraph'),
       ]);
       setUserName(n); setUserEmail(e);
@@ -66,7 +75,9 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
       setPushSubmodules(prs);
       setSignCommits(sc); setSigningKey(sk); setGpgProgram(gp);
       setEncoding(enc);
-      setTagGroupPattern(tgp); setTagGroupOrder(tgo);
+      setTagGroupPattern(tgp); setTagGroupSinglePattern(tgp2); setTagGroupOrder(tgo);
+      setCredentialHelper(ch);
+      setSubmoduleUpdate(su === 'true'); setSubmoduleInit(si);
       setRepoManyFiles(mf); setRepoFsmonitor(fsm); setRepoCommitGraph(wcg);
     } catch (e) {
       toast.error(t('toast.repo.settingsLoadFailed'), String(e));
@@ -104,9 +115,24 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
       if (tagGroupPattern.trim()) {
         await set('smartgit.tag-grouping.pattern', tagGroupPattern.trim());
         await set('smartgit.tag-grouping.order', tagGroupOrder.trim() || 'ascending');
+        if (tagGroupSinglePattern.trim()) {
+          await set('smartgit.tag-grouping.single', tagGroupSinglePattern.trim());
+        } else {
+          await api.git.configUnset(p, 'smartgit.tag-grouping.single').catch(() => {});
+        }
       } else {
         await api.git.configUnset(p, 'smartgit.tag-grouping.pattern').catch(() => {});
+        await api.git.configUnset(p, 'smartgit.tag-grouping.single').catch(() => {});
         await api.git.configUnset(p, 'smartgit.tag-grouping.order').catch(() => {});
+      }
+      // Credential Helper
+      await setOrUnset('credential.helper', credentialHelper);
+      // Submodule update/init
+      await set('submodule.recurse', String(submoduleUpdate));
+      if (submoduleInit.trim()) {
+        await setOrUnset('submodule.active', submoduleInit);
+      } else {
+        await api.git.configUnset(p, 'submodule.active').catch(() => {});
       }
       // Performance — per-repo overrides (local scope)
       await setOrUnset('feature.manyFiles', repoManyFiles);
@@ -201,6 +227,13 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
                   <option value="true">{t('action.label.alwaysRecurse')}</option>
                 </select>
               </label>
+              <label className="flex items-center gap-2 text-text-secondary">
+                <input type="checkbox" checked={submoduleUpdate === true} onChange={(e) => setSubmoduleUpdate(e.target.checked)} />
+                Update registered submodules (submodule.recurse)
+              </label>
+              <label className="flex flex-col gap-1 text-text-secondary">Initialize new submodules (submodule.active)
+                <input value={submoduleInit} onChange={(e) => setSubmoduleInit(e.target.value)} className={inputCls} placeholder=".* (all) or specific paths, empty = disabled" />
+              </label>
             </div>
           )}
           {tab === 'Push' && (
@@ -213,6 +246,27 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
                   <option value="on-demand">Push submodule changes first (on-demand)</option>
                 </select>
               </label>
+            </div>
+          )}
+          {tab === 'Credential Helper' && (
+            <div className="grid grid-cols-1 gap-3">
+              <p className="text-text-tertiary">Configure how Git stores credentials for HTTPS remotes (credential.helper).</p>
+              <label className="flex flex-col gap-1 text-text-secondary">Credential helper
+                <select value={credentialHelper} onChange={(e) => setCredentialHelper(e.target.value)} className={selectCls}>
+                  <option value="">None (prompt every time)</option>
+                  <option value="store">store — plaintext file in ~/.git-credentials</option>
+                  <option value="cache">cache — in-memory for 15 minutes</option>
+                  <option value="osxkeychain">osxkeychain — macOS Keychain</option>
+                  <option value="manager">manager — Git Credential Manager (Windows)</option>
+                  <option value="libsecret">libsecret — GNOME Keyring (Linux)</option>
+                  <option value="wincred">wincred — Windows Credential Manager (legacy)</option>
+                </select>
+              </label>
+              <p className="text-text-tertiary text-2xs">
+                PrismGit stores HTTP credentials for remotes in its encrypted vault
+                (Settings → Security → Known credentials). The credential.helper setting
+                above affects command-line git, not PrismGit's internal auth.
+              </p>
             </div>
           )}
           {tab === 'Signing' && (
@@ -251,6 +305,9 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
               <label className="flex flex-col gap-1 text-text-secondary">Pattern (RegEx, capture group = displayed name)
                 <input value={tagGroupPattern} onChange={(e) => setTagGroupPattern(e.target.value)} className={inputCls} placeholder={'v(\\d+\\.\\d+)\\..*  →  groups v1.x tags'} />
               </label>
+              <label className="flex flex-col gap-1 text-text-secondary">Single patterns (refs to preserve individually)
+                <input value={tagGroupSinglePattern} onChange={(e) => setTagGroupSinglePattern(e.target.value)} className={inputCls} placeholder={'refs/heads/main  →  never group this ref'} />
+              </label>
               <label className="flex flex-col gap-1 text-text-secondary">Sort order
                 <select value={tagGroupOrder} onChange={(e) => setTagGroupOrder(e.target.value)} className={selectCls}>
                   <option value="ascending">{t('action.label.ascending')}</option>
@@ -286,6 +343,12 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
         </div>
 
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+          {/* Config file paths — matches SmartGit's bottom panel showing
+              where the settings are stored. */}
+          <div className="flex-1 text-2xs text-text-tertiary font-mono flex flex-col justify-center gap-0.5">
+            <span>Repo config: {repo.path}/.git/config</span>
+            <span>Global config: ~/.gitconfig</span>
+          </div>
           <button className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover" onClick={onClose}>{t('action.button.cancel')}</button>
           <button
             className="px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded hover:opacity-90 disabled:opacity-40 flex items-center gap-1"
