@@ -94,6 +94,19 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
       // Check GitLab auth state (separate from GitHub auth).
       loadGitlabAuthState();
     }
+    // Read the target group from sessionStorage — set by App.tsx when
+    // the user right-clicks a group in the Sidebar and chooses
+    // "Clone into Group". Without this, the group dropdown defaults
+    // to "(root)" and the cloned repo lands at the Sidebar root
+    // instead of in the chosen group.
+    const storedGroupId = sessionStorage.getItem('prismgit-clone-target-group');
+    if (storedGroupId) {
+      setTargetGroupId(storedGroupId);
+      // Clean up so it doesn't persist on the next manual Clone open.
+      sessionStorage.removeItem('prismgit-clone-target-group');
+    } else {
+      setTargetGroupId(null);
+    }
   }, [open, authenticated, settings.defaultCloneDir]);
 
   // SmartGit 24.1: detect active branch from remote via `git ls-remote --symref`
