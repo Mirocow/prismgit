@@ -12,16 +12,16 @@ A modern, cross-platform Git client built on Electron + React + TypeScript, insp
 # Clone and install
 git clone <repo-url>
 cd prismgit-electron
-npm install
+make install
 
 # Development
-npm run dev        # or: make dev
+make dev
 
 # Build for current platform
-npm run package
+make package
 
 # Run tests
-npm test           # or: make test
+make test
 
 # Cross-platform build via Docker
 make docker-all

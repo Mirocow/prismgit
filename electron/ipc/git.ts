@@ -486,7 +486,6 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:createSignedTag', (_e, p: string, name: string, msg: string, ref?: string, sshSign?: boolean) =>
     wrap(gitService.createSignedTag)(p, name, msg, ref, sshSign)
   );
-  ipcMain.handle('git:lfsFsck', (_e, p: string) => wrap(gitService.lfsFsck)(p));
   ipcMain.handle('git:batchOperation', (_e, repos: string[], op: 'fetch' | 'pull' | 'push' | 'status', o?: { remote?: string; branch?: string; force?: boolean }) =>
     wrap(gitService.batchOperation)(repos, op, o)
   );
