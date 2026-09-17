@@ -217,7 +217,23 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:listRemote', (_e, p: string, remote?: string) => wrap(gitService.listRemote)(p, remote));
   // ls-remote for a raw URL (no repository yet) — carries the SSH env for
   // ssh:// and scp-like clone URLs (Clone dialog branch detection).
-  ipcMain.handle('git:lsRemoteUrl', (_e, url: string, args?: string[]) => wrap(gitService.lsRemoteUrl)(url, args));
+  // This is a PROBE call — it fires as the user types the URL in the
+  // CloneModal, so failures are expected (partial URLs, unreachable hosts,
+  // auth-required repos). The renderer's detectActiveBranch catches the
+  // rejection silently, but ipcMain.handle ALSO logs every thrown error
+  // to the main-process console — which floods it with "Error occurred in
+  // handler for 'git:lsRemoteUrl'" on every keystroke debounce.
+  // We suppress the error here: return '' on failure so the renderer
+  // gets an empty result (which it already handles as "no branch detected").
+  ipcMain.handle('git:lsRemoteUrl', async (_e, url: string, args?: string[]) => {
+    try {
+      return await wrap(gitService.lsRemoteUrl)(url, args);
+    } catch {
+      // Benign: the URL is partial, the host is unreachable, or the repo
+      // requires auth. The renderer treats '' as "no branch detected".
+      return '';
+    }
+  });
   ipcMain.handle('git:addAnnotatedTag', (_e, p: string, name: string, msg: string, ref?: string) => wrap(gitService.addAnnotatedTag)(p, name, msg, ref));
 
   // Worktrees (SmartGit 20+)
