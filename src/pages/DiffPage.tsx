@@ -673,7 +673,7 @@ export function DiffPage() {
               }}
             />
           ) : diff ? (
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-hidden flex flex-col">
               <DiffViewer diff={diff} filePath={activeFile} />
             </div>
           ) : (
