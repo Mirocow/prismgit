@@ -567,7 +567,13 @@ function buildOpenAIBody(messages: ChatMessage[], provider: LLMProvider, include
 }
 
 async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
-  const url = provider.url || 'https://api.openai.com/v1/chat/completions';
+  // Ensure the URL ends with /chat/completions. Some providers store just
+  // the base URL (e.g. "https://openrouter.ai/api/v1") without the
+  // /chat/completions suffix. If it's missing, append it — same logic as
+  // generateCommitMessage in electron/services/ai.ts.
+  const rawUrl = provider.url || 'https://api.openai.com/v1/chat/completions';
+  const base = rawUrl.replace(/\/+$/, '');
+  const url = /\/chat\/completions$/.test(base) ? base : `${base}/chat/completions`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
 
@@ -626,7 +632,9 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, si
 }
 
 async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
-  const url = provider.url || 'https://api.anthropic.com/v1/messages';
+  const rawUrl = provider.url || 'https://api.anthropic.com/v1/messages';
+  const base = rawUrl.replace(/\/+$/, '');
+  const url = /\/v1\/messages$/.test(base) ? base : `${base}/v1/messages`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
@@ -690,7 +698,12 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider,
 }
 
 async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
-  const url = (provider.url || 'http://localhost:11434') + '/api/chat';
+  // Ollama URL should be the base server URL (e.g. http://localhost:11434).
+  // Strip any trailing /api/chat or /chat/completions that might have been
+  // saved from a different provider, then append /api/chat.
+  const rawUrl = (provider.url || 'http://localhost:11434').replace(/\/+$/, '');
+  const base = rawUrl.replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '');
+  const url = `${base}/api/chat`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
   // Ollama's tool format:
