@@ -179,13 +179,17 @@ export function Sidebar() {
     setCollapsedGroups(saved ? new Set(saved) : new Set(loadGlobalCollapsedGroups()));
   }, [currentRepo?.path]);
   // Favorites — GLOBAL (shared across all repositories), not per-repo.
-  // Default: Changes, History, Diff — the 3 most-used tools.
+  // If the user has never toggled any favorite (no localStorage entry),
+  // show DEFAULT_FAVORITES. Once they add/remove any favorite, their
+  // custom set is persisted and used instead.
   const FAVORITES_KEY = 'prismgit-favorite-tools';
   const DEFAULT_FAVORITES = ['/changes', '/history', '/branches', '/diff'];
   const [favoriteTools, setFavoriteTools] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(FAVORITES_KEY);
-      if (raw) return JSON.parse(raw);
+      // If raw is null → user never interacted with favorites → show defaults.
+      // If raw exists (even '[]') → user has customized → use their set.
+      if (raw !== null) return JSON.parse(raw);
     } catch { /* ignore */ }
     return DEFAULT_FAVORITES;
   });
@@ -978,12 +982,13 @@ export function Sidebar() {
                 </button>
               )}
               {!collapsedGroups.has(groupName) && items
-                // Hide items that are already favorited — they show in the
-                // Favorites section at the top, no need to duplicate them
-                // in their original group. This keeps the sidebar compact
-                // and avoids the "where do I click" ambiguity of the same
-                // tool appearing in two places.
-                .filter(item => !favoriteTools.includes(item.path))
+                // Show ALL items in their groups — even if favorited.
+                // Previously favorited items were hidden from their group
+                // (only shown in Favorites section), but this confused
+                // users: they added a tool to favorites, it disappeared
+                // from its group, and they thought it wasn't added.
+                // Now items appear in BOTH places — Favorites section
+                // at the top AND in their original group.
                 .map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
