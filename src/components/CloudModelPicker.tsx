@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { RefreshCw, Check, AlertCircle, Loader, Search } from './icons';
 import { api } from '../lib/api';
-import { proxyFetch } from '../lib/aiChat';
 import { cn } from '../lib/utils';
 import { type ProviderPreset } from '../lib/aiCommitMessages';
 
@@ -72,15 +71,17 @@ export function CloudModelPicker({
     setLoading(true);
     setError(null);
     try {
-      // Use proxyFetch (IPC proxy) to bypass CORS. Send a GET request
-      // to the provider's /models endpoint.
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
+      // Use window.fetch DIRECTLY (renderer = Chromium network stack).
+      // This respects system proxy/SSL/DNS — unlike the IPC proxy which
+      // uses Node.js fetch (undici) or net.request in the main process.
+      // Most cloud providers (OpenRouter, OpenAI, Groq) send
+      // Access-Control-Allow-Origin: * on GET /models, so CORS is not
+      // an issue for GET requests.
+      const headers: Record<string, string> = {};
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-      const result = await proxyFetch(modelsUrl, headers, '', undefined, 'GET');
-      if (result.ok) {
-        const data = JSON.parse(result.body);
+      const res = await window.fetch(modelsUrl, { method: 'GET', headers });
+      if (res.ok) {
+        const data = await res.json() as any;
         const modelList: CloudModel[] = (data.data || data.models || data || [])
           .map((m: { id?: string; name?: string; owned_by?: string }) => ({
             id: m.id || m.name || '',
@@ -95,12 +96,13 @@ export function CloudModelPicker({
       } else {
         setModels([]);
         setTested(true);
-        if (result.status === 401) {
+        if (res.status === 401) {
           setError('Authentication failed — check your API key.');
-        } else if (result.status === 0) {
+        } else if (res.status === 0) {
           setError('Cannot connect to the server. Check the URL and your internet connection.');
         } else {
-          setError(`HTTP ${result.status}: ${result.statusText}`);
+          const errText = await res.text().catch(() => '');
+          setError(`HTTP ${res.status}: ${errText.slice(0, 300) || res.statusText}`);
         }
       }
     } catch (e) {
