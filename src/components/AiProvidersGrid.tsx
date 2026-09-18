@@ -97,7 +97,6 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
   const [model, setModel] = useState(initial?.model ?? '');
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [saving, setSaving] = useState(false);
-
   const [models, setModels] = useState<ProviderModelInfo[]>([]);
   const [modelsOpen, setModelsOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
@@ -123,61 +122,12 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
   const fetchModels = useCallback(async () => {
     setFetching(true);
     setModelsOpen(true);
-    const started = Date.now();
     try {
-      // Use window.fetch DIRECTLY (renderer = Chromium network stack).
-      // This respects system proxy/SSL/DNS — unlike the IPC proxy which
-      // uses Node.js fetch (undici) or net.request in the main process.
-      // Most cloud providers send Access-Control-Allow-Origin: * on
-      // GET /models, so CORS is not an issue.
-      const connectUrl = (url || '').trim().replace(/\/+$/, '');
-      if (!connectUrl) {
-        setFetchResult({ loading: false, ok: false, error: 'URL is not configured', modelCount: 0 });
-        return;
-      }
-      // Derive the models URL from the stored URL (clone, never modify original).
-      let modelsUrl: string;
-      if (protocol === 'ollama') {
-        const b = connectUrl.replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '');
-        modelsUrl = `${b}/api/tags`;
-      } else if (protocol === 'anthropic') {
-        const b = connectUrl.replace(/\/v1\/messages$/, '');
-        modelsUrl = `${b}/v1/models`;
-      } else {
-        const modelsBase = connectUrl.replace(/\/chat\/completions$/, '');
-        modelsUrl = modelsBase.endsWith('/models') ? modelsBase : `${modelsBase}/models`;
-      }
-
-      // Build headers.
-      const headers: Record<string, string> = {};
-      if (apiKey) {
-        if (protocol === 'anthropic') {
-          headers['x-api-key'] = apiKey;
-          headers['anthropic-version'] = '2023-06-01';
-        } else {
-          headers['Authorization'] = `Bearer ${apiKey}`;
-        }
-      }
-
-      const res = await window.fetch(modelsUrl, { method: 'GET', headers });
-      if (res.ok) {
-        const data = await res.json() as any;
-        const rawList: Array<any> = Array.isArray(data) ? data : (data.data || data.models || data || []);
-        const modelList: ProviderModelInfo[] = rawList.map((m: any) => ({
-          id: m.id || m.name || '',
-          ...(m.size ? { size: m.size } : {}),
-          ...(m.details?.family ? { family: m.details.family } : {}),
-          ...(m.details?.parameter_size ? { parameterSize: m.details.parameter_size } : {}),
-          ...(m.details?.quantization_level ? { quantization: m.details.quantization_level } : {}),
-          ...(m.details?.format ? { format: m.details.format } : {}),
-        })).filter((m) => m.id);
-        setModels(modelList);
-        setFetchResult({ loading: false, ok: true, error: null, latencyMs: Date.now() - started, modelCount: modelList.length });
-      } else {
-        const errText = await res.text().catch(() => '');
-        setModels([]);
-        setFetchResult({ loading: false, ok: false, error: `HTTP ${res.status}: ${errText.slice(0, 300) || res.statusText}`, latencyMs: Date.now() - started, modelCount: 0 });
-      }
+      const res = await api.ai.providerListModels(protocol, url, apiKey || undefined) as unknown as {
+        ok: boolean; error: string | null; models: ProviderModelInfo[]; latencyMs: number;
+      };
+      setModels(res.models || []);
+      setFetchResult({ loading: false, ok: res.ok, error: res.error, latencyMs: res.latencyMs, modelCount: res.models?.length ?? 0 });
     } catch (e) {
       setFetchResult({ loading: false, ok: false, error: String(e), modelCount: 0 });
       setModels([]);
