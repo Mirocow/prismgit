@@ -17,66 +17,79 @@ import { loadAIMemory, saveAIMemoryEntry, buildMemorySummary } from '../services
  * Returns a Response-like object compatible with the old fetch() calls:
  *   { ok: boolean, status: number, statusText: string, json(): Promise, text(): Promise }
  */
-function netFetch(url: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{
+async function netFetch(url: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{
   ok: boolean;
   status: number;
   statusText: string;
   json: () => Promise<unknown>;
   text: () => Promise<string>;
 }> {
-  return new Promise((resolve, reject) => {
-    const method = options.method || 'GET';
-    // Build headers — always include Content-Type for POST requests
-    // and User-Agent for all requests (some APIs reject without it).
-    const hdrs: Record<string, string> = { ...options.headers };
-    if (!hdrs['User-Agent'] && !hdrs['user-agent']) hdrs['User-Agent'] = 'PrismGit/2.1';
-    if (method !== 'GET' && method !== 'HEAD' && !hdrs['Content-Type'] && !hdrs['content-type']) {
-      hdrs['Content-Type'] = 'application/json';
-    }
+  const method = options.method || 'GET';
+  // Build headers — always include Content-Type for POST requests
+  // and User-Agent for all requests (some APIs reject without it).
+  const hdrs: Record<string, string> = { ...options.headers };
+  if (!hdrs['User-Agent'] && !hdrs['user-agent']) hdrs['User-Agent'] = 'PrismGit/2.1';
+  if (method !== 'GET' && method !== 'HEAD' && !hdrs['Content-Type'] && !hdrs['content-type']) {
+    hdrs['Content-Type'] = 'application/json';
+  }
 
-    // Use the default session — this ensures system proxy settings,
-    // cookies, and certificate store are used (same as the renderer's
-    // fetch). Without `session: 'default'`, net.request may not pick
-    // up proxy configuration on some systems.
-    const request = net.request({
-      url,
-      method,
-    });
-
-    // Apply headers via setHeader (not constructor — the constructor's
-    // `headers` option expects Record<string, string|string[]>, but
-    // setHeader accepts individual key/value pairs which is simpler).
-    for (const [key, value] of Object.entries(hdrs)) {
-      request.setHeader(key, value);
-    }
-
-    let body = '';
-    let statusCode = 0;
-    let statusText = '';
-
-    request.on('response', (response) => {
-      statusCode = response.statusCode;
-      statusText = response.statusMessage || '';
-      response.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-      response.on('end', () => {
-        resolve({
-          ok: statusCode >= 200 && statusCode < 300,
-          status: statusCode,
-          statusText,
-          json: async () => JSON.parse(body),
-          text: async () => body,
+  // Try Electron's net.request first (uses Chromium network stack —
+  // respects system proxy, SSL certs, DNS). If it fails with a
+  // connection error, fall back to Node.js fetch (undici) which may
+  // work on networks where net.request has issues (ERR_CONNECTION_CLOSED
+  // can happen when the server or proxy closes the connection before
+  // the TLS handshake completes, but fetch handles this differently).
+  try {
+    return await new Promise((resolve, reject) => {
+      const request = net.request({ url, method });
+      for (const [key, value] of Object.entries(hdrs)) {
+        request.setHeader(key, value);
+      }
+      let respBody = '';
+      let respStatus = 0;
+      let respStatusText = '';
+      request.on('response', (response) => {
+        respStatus = response.statusCode;
+        respStatusText = response.statusMessage || '';
+        response.on('data', (chunk: Buffer) => { respBody += chunk.toString(); });
+        response.on('end', () => {
+          resolve({
+            ok: respStatus >= 200 && respStatus < 300,
+            status: respStatus,
+            statusText: respStatusText,
+            json: async () => JSON.parse(respBody),
+            text: async () => respBody,
+          });
         });
+        response.on('error', (e: Error) => reject(e));
       });
-      response.on('error', (e: Error) => reject(e));
+      request.on('error', (e: Error) => reject(e));
+      if (options.body && method !== 'GET' && method !== 'HEAD') {
+        request.write(options.body);
+      }
+      request.end();
     });
-
-    request.on('error', (e: Error) => reject(e));
-
+  } catch (netErr) {
+    // net.request failed — fall back to Node.js fetch (undici).
+    // This handles cases where net.request gets ERR_CONNECTION_CLOSED
+    // but fetch() succeeds (different TLS/connection handling).
+    const fetchOpts: RequestInit = {
+      method,
+      headers: hdrs as Record<string, string>,
+    };
     if (options.body && method !== 'GET' && method !== 'HEAD') {
-      request.write(options.body);
+      fetchOpts.body = options.body;
     }
-    request.end();
-  });
+    const res = await fetch(url, fetchOpts);
+    const text = await res.text();
+    return {
+      ok: res.ok,
+      status: res.status,
+      statusText: res.statusText,
+      json: async () => JSON.parse(text),
+      text: async () => text,
+    };
+  }
 }
 
 /**
