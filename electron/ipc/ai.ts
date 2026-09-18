@@ -34,15 +34,16 @@ export async function providerListModels(
   apiKey?: string
 ): Promise<{ ok: boolean; error: string | null; models: ProviderModelInfo[]; latencyMs: number }> {
   const started = Date.now();
-  // Derive the base URL: strip trailing slashes and /chat/completions
-  // suffix so we can append /models for the models endpoint.
-  // Without this, a URL like "https://openrouter.ai/api/v1/chat/completions"
-  // would produce "https://openrouter.ai/api/v1/chat/completions/models"
-  // → 404. We need "https://openrouter.ai/api/v1/models" instead.
-  const base = (url || '').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+  // CLONE the URL into a local variable — never modify the original.
+  // The stored provider URL is the CHAT endpoint (e.g.
+  // "https://openrouter.ai/api/v1/chat/completions"). For the models
+  // endpoint, we derive a SEPARATE URL by stripping /chat/completions
+  // and appending /models. The original URL is never touched.
+  const connectUrl = (url || '').trim().replace(/\/+$/, '');
   try {
     if (kind === 'ollama') {
-      const b = base || 'http://localhost:11434';
+      // Ollama: strip /api/chat or /chat/completions if present, then use /api/tags
+      const b = connectUrl.replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '') || 'http://localhost:11434';
       const res = await fetch(`${b}/api/tags`);
       if (!res.ok) {
         return { ok: false, error: `HTTP ${res.status} ${res.statusText}`, models: [], latencyMs: Date.now() - started };
@@ -64,7 +65,8 @@ export async function providerListModels(
     }
 
     if (kind === 'anthropic') {
-      const b = base || 'https://api.anthropic.com';
+      // Anthropic: strip /v1/messages if present, then use /v1/models
+      const b = connectUrl.replace(/\/v1\/messages$/, '') || 'https://api.anthropic.com';
       const headers: Record<string, string> = {
         'x-api-key': apiKey || '',
         'anthropic-version': '2023-06-01',
@@ -81,13 +83,15 @@ export async function providerListModels(
       return { ok: true, error: null, models, latencyMs: Date.now() - started };
     }
 
-    // OpenAI-compatible (default) — GET {base}/models
-    if (!base) {
+    // OpenAI-compatible (default) — strip /chat/completions, append /models
+    if (!connectUrl) {
       return { ok: false, error: 'URL is not configured', models: [], latencyMs: Date.now() - started };
     }
+    const modelsBase = connectUrl.replace(/\/chat\/completions$/, '');
+    const modelsUrl = modelsBase.endsWith('/models') ? modelsBase : `${modelsBase}/models`;
     const headers: Record<string, string> = {};
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-    const res = await fetch(`${base}/models`, { headers });
+    const res = await fetch(modelsUrl, { headers });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 300) || res.statusText}`, models: [], latencyMs: Date.now() - started };
@@ -104,7 +108,7 @@ export async function providerListModels(
   } catch (e) {
     const msg = String(e);
     const friendly = msg.includes('fetch') || msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND')
-      ? `Cannot connect to ${base || 'server'}. Check that the server is running and the URL is correct. (${msg})`
+      ? `Cannot connect to ${connectUrl || 'server'}. Check that the server is running and the URL is correct. (${msg})`
       : msg;
     return { ok: false, error: friendly, models: [], latencyMs: Date.now() - started };
   }

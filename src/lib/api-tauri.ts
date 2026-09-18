@@ -845,12 +845,14 @@ export const tauriApi = {
     },
     providerListModels: async (kind: string, url: string, apiKey?: string): Promise<{ ok: boolean; error: string | null; models: { id: string; size?: number; family?: string; parameterSize?: string; quantization?: string; format?: string }[]; latencyMs: number }> => {
       // Tauri: direct fetch, same dispatch logic as the Electron main process.
+      // CLONE the URL — never modify the original. The stored URL is the
+      // chat endpoint (may include /chat/completions). For the models
+      // endpoint, we derive a separate URL from a local copy.
       const started = Date.now();
-      // Strip /chat/completions suffix so /models gets appended correctly.
-      const base = (url || '').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+      const connectUrl = (url || '').trim().replace(/\/+$/, '');
       try {
         if (kind === 'ollama') {
-          const b = base || 'http://localhost:11434';
+          const b = connectUrl.replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '') || 'http://localhost:11434';
           const res = await fetch(`${b}/api/tags`);
           if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [], latencyMs: Date.now() - started };
           const data = await res.json();
@@ -861,15 +863,17 @@ export const tauriApi = {
           return { ok: true, error: null, models, latencyMs: Date.now() - started };
         }
         if (kind === 'anthropic') {
-          const b = base || 'https://api.anthropic.com';
+          const b = connectUrl.replace(/\/v1\/messages$/, '') || 'https://api.anthropic.com';
           const res = await fetch(`${b}/v1/models`, { headers: { 'x-api-key': apiKey || '', 'anthropic-version': '2023-06-01' } });
           if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [], latencyMs: Date.now() - started };
           const data = await res.json();
           const models = (data.data || []).map((m: { id?: string }) => ({ id: m.id || '' })).filter((m: { id: string }) => m.id);
           return { ok: true, error: null, models, latencyMs: Date.now() - started };
         }
-        if (!base) return { ok: false, error: 'URL is not configured', models: [], latencyMs: Date.now() - started };
-        const res = await fetch(`${base}/models`, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} });
+        if (!connectUrl) return { ok: false, error: 'URL is not configured', models: [], latencyMs: Date.now() - started };
+        const modelsBase = connectUrl.replace(/\/chat\/completions$/, '');
+        const modelsUrl = modelsBase.endsWith('/models') ? modelsBase : `${modelsBase}/models`;
+        const res = await fetch(modelsUrl, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} });
         if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [], latencyMs: Date.now() - started };
         const data = await res.json();
         const rawList: Array<{ id?: string; name?: string }> = Array.isArray(data) ? data : (data.data || data.models || []);
