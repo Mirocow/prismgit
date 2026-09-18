@@ -103,6 +103,18 @@ export interface AiChatState {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** Flush any pending debounced save immediately. Called on app quit. */
+export function flushChatHistory(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    // Read the latest state and save synchronously.
+    const { sessionRepoPath, messages } = useAiChatStore.getState();
+    const limit = useSettingsStore.getState().settings.aiChatHistoryLimit ?? DEFAULT_HISTORY_LIMIT;
+    saveChatHistory(sessionRepoPath, messages, limit);
+  }
+}
+
 export const useAiChatStore = create<AiChatState>((set, get) => ({
   sessionRepoPath: undefined,
   messages: [],
@@ -146,6 +158,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
 function scheduleSave(get: () => AiChatState): void {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    saveTimer = null;
     const { sessionRepoPath, messages } = get();
     // historyLimit comes from the IPC-backed settings store — read it
     // non-reactively via getState() (this is a plain async callback, not
@@ -153,6 +166,16 @@ function scheduleSave(get: () => AiChatState): void {
     const limit = useSettingsStore.getState().settings.aiChatHistoryLimit ?? DEFAULT_HISTORY_LIMIT;
     saveChatHistory(sessionRepoPath, messages, limit);
   }, SAVE_DEBOUNCE_MS);
+}
+
+// ── App quit: flush pending save so chat history isn't lost ─────────────
+// The debounced save (500ms) means closing the app within 500ms of the
+// last AI response loses the messages. This listener flushes the save
+// before the window unloads.
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    flushChatHistory();
+  });
 }
 
 // ── Cross-window sync ─────────────────────────────────────────────────────
