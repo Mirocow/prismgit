@@ -367,7 +367,7 @@ export const readFileTool: AITool = {
       const lines = content.split('\n');
       const totalLines = lines.length;
       const slice = lines.slice(startLine - 1, startLine - 1 + maxLines);
-      const result = slice.join('\n');
+      const result = slice.map((line, i) => `${startLine + i}\t${line}`).join('\n');
 
       let header = `File: ${filePath} (${totalLines} lines total)`;
       if (startLine > 1 || endLine < totalLines) {
@@ -406,12 +406,16 @@ export const listFilesTool: AITool = {
   async execute(params, repoPath) {
     const p = params as { include_untracked?: boolean; pattern?: string };
     try {
-      const args: string[] = ['ls-files'];
+      // git ls-files lists tracked files. --cached is the default but
+      // explicit for clarity. --others --exclude-standard adds untracked
+      // (non-ignored) files. To show BOTH tracked AND untracked, we need
+      // --cached --others --exclude-standard.
+      const args: string[] = ['ls-files', '--cached'];
       if (p.include_untracked) {
         args.push('--others', '--exclude-standard');
       }
       if (p.pattern) {
-        args.push(p.pattern);
+        args.push('--', p.pattern);
       }
       const out = await api.git.raw(repoPath, args);
       if (!out || !out.trim()) return 'No files found.';
