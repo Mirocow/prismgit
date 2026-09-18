@@ -111,6 +111,25 @@ export async function proxyFetch(
         if (!r) throw new Error('IPC returned empty');
         result = r;
       }
+      // If the IPC proxy returned a NETWORK error (status === 0),
+      // try the direct renderer fetch as a fallback. The IPC handler
+      // uses Node.js fetch (undici) which ignores system proxy settings
+      // on macOS. The renderer's fetch uses Chromium's network stack
+      // which respects system proxy/SSL/DNS. This fallback is the
+      // difference between "Cannot connect" and actually connecting.
+      if (result.status === 0 && result.ok === false) {
+        try {
+          const fetchOpts: RequestInit = { method: httpMethod, headers, signal };
+          if (httpMethod !== 'GET' && httpMethod !== 'HEAD' && body) {
+            fetchOpts.body = body;
+          }
+          const res = await fetch(url, fetchOpts);
+          const text = await res.text();
+          result = { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
+        } catch {
+          // Direct fetch also failed — keep the IPC error result.
+        }
+      }
     } catch (e) {
       // If the user aborted, rethrow the AbortError immediately — don't
       // fall through to the retry/model-loading logic below.
