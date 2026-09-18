@@ -782,7 +782,11 @@ export async function* callLLMStream(
 
   // --- Ollama (NDJSON — one JSON object per line) ---
   async function* streamOllama(): AsyncGenerator<string> {
-    const url = (provider.url || 'http://localhost:11434') + '/api/chat';
+    // Normalize: strip trailing /, /api/chat, and /chat/completions,
+    // then append /api/chat. Prevents double-suffix bug when the stored
+    // URL already contains /api/chat (e.g. from the provider registry).
+    const base = (provider.url || 'http://localhost:11434').replace(/\/+$/, '').replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '');
+    const url = `${base}/api/chat`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const body = JSON.stringify({
       model: provider.model,

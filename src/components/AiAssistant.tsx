@@ -7,8 +7,9 @@ import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage, type TokenUsage } from '../lib/aiChat';
 import type { LLMProvider } from '../lib/aiCommitMessages';
+import { buildProviderFromSettings } from '../lib/aiUtils';
 import {
-  getEnabledAiProviders, getActiveAiProvider, buildProviderFromActiveEntry,
+  getEnabledAiProviders, getActiveAiProvider,
   ensureAiProvidersMigrated, activateAiProvider,
 } from '../lib/aiProviders';
 import MarkdownRenderer from './MarkdownRenderer';
@@ -306,17 +307,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   }, [repos]);
 
   const buildProvider = useCallback((): LLMProvider | null => {
-    // Preferred: the multi-provider registry (Settings → AI grid).
-    const fromRegistry = buildProviderFromActiveEntry(settings);
-    if (fromRegistry) return fromRegistry;
-    // Legacy fallback: flat fields (registry not migrated yet / empty).
-    if (!settings?.aiProvider) return null;
-    const type = settings.aiProvider as LLMProvider['type'];
-    const id = settings.aiProvider;
-    const url = settings.aiUrl || '';
-    const model = settings.aiModel || '';
-    if (!model) return null;
-    return { id, name: id, type, url, apiKey: settings.aiApiKey, model };
+    return buildProviderFromSettings(settings);
   }, [settings]);
 
   const handleSend = useCallback(async (overrideInput?: string, isRegenerate = false) => {
