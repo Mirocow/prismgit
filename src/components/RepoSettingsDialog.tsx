@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
-import { X, Loader, Settings as SettingsIcon } from './icons';
-import { useRepositoryStore } from '../stores/repositoryStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
+import { cn } from '../lib/utils';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useToastActions } from '../stores/toastStore';
+import { Loader, Settings as SettingsIcon, X } from './icons';
 
 /**
  * SmartGit "Repository | Settings": per-repository configuration stored in
@@ -152,7 +152,7 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={onClose}>
-      <div className="panel w-full max-w-xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="panel w-full max-w-3xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center px-4 py-3 border-b border-border">
           <span className="text-sm font-semibold">{t('action.label.repositorySettings')}</span>
           <span className="text-xs text-text-tertiary ml-2 truncate">{repo.name}</span>
@@ -345,10 +345,10 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
           {/* Config file paths — matches SmartGit's bottom panel showing
               where the settings are stored. */}
-          <div className="flex-1 text-2xs text-text-tertiary font-mono flex flex-col justify-center gap-0.5">
+          {/* <div className="flex-1 text-2xs text-text-tertiary font-mono flex flex-col justify-center gap-0.5">
             <span>Repo config: {repo.path}/.git/config</span>
             <span>Global config: ~/.gitconfig</span>
-          </div>
+          </div> */}
           <button className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover" onClick={onClose}>{t('action.button.cancel')}</button>
           <button
             className="px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded hover:opacity-90 disabled:opacity-40 flex items-center gap-1"

@@ -97,7 +97,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'openrouter',
     label: 'OpenRouter (free models aggregator)',
-    defaultUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    defaultUrl: 'https://openrouter.ai/api/v1',
     defaultModel: 'meta-llama/llama-3.1-8b-instruct:free',
     description: 'Aggregator with dozens of FREE models (Llama 3, Gemma, Mistral). No credit card needed. Pick any model from openrouter.ai/models.',
     apiKeyHint: 'https://openrouter.ai/keys',
