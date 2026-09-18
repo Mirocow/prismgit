@@ -23,7 +23,7 @@ const DEFAULT_MAX_ITERATIONS = 5;
 const DEFAULT_DIFF_TRUNCATE_CHARS = 48000;
 
 /** Read the current AI tool limits from the settings store. */
-function getToolLimits() {
+export function getToolLimits() {
   const s = useSettingsStore.getState().settings;
   return {
     maxLogCount: s.aiMaxLogCount ?? DEFAULT_MAX_LOG_COUNT,

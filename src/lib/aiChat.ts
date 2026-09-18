@@ -21,7 +21,7 @@
  */
 
 import type { LLMProvider } from './aiCommitMessages';
-import { AI_TOOLS, getTool, type AITool } from './aiTools';
+import { AI_TOOLS, getTool, getToolLimits, type AITool } from './aiTools';
 import { api } from './api';
 
 /**
@@ -573,7 +573,7 @@ function buildOpenAIBody(messages: ChatMessage[], provider: LLMProvider, include
       }
       return { role: m.role, content: m.content };
     }),
-    max_tokens: 1024,
+    max_tokens: provider.maxTokens ?? getToolLimits().maxTokensChat,
     temperature: provider.temperature ?? 0.4,
   };
   if (includeTools) {
@@ -689,7 +689,7 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider,
     system,
     messages: userMessages,
     tools: AI_TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters })),
-    max_tokens: 1024,
+    max_tokens: provider.maxTokens ?? getToolLimits().maxTokensChat,
   });
   const res = await proxyFetch(url, headers, body, signal);
   if (!res.ok) {
@@ -712,7 +712,12 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider,
       content: textParts,
       toolCalls: toolUses?.length ? toolUses : undefined,
     },
-    usage: undefined, // Anthropic returns usage in a different format
+    usage: data.usage ? {
+      inputTokens: data.usage.input_tokens ?? 0,
+      outputTokens: data.usage.output_tokens ?? 0,
+      totalTokens: (data.usage.input_tokens ?? 0) + (data.usage.output_tokens ?? 0),
+      contextSize: data.usage.input_tokens ?? 0,
+    } : undefined,
   };
 }
 
@@ -836,7 +841,12 @@ async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, si
       content: toolCalls?.length ? content.replace(/<tool>[\s\S]*?<\/tool>/g, '').trim() : content,
       toolCalls,
     },
-    usage: undefined, // Ollama doesn't return usage stats in /api/chat
+    usage: (data.prompt_eval_count || data.eval_count) ? {
+      inputTokens: data.prompt_eval_count ?? 0,
+      outputTokens: data.eval_count ?? 0,
+      totalTokens: (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0),
+      contextSize: data.prompt_eval_count ?? 0,
+    } : undefined,
   };
 }
 

@@ -11,7 +11,7 @@ import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, generateCommitMessageStream, type LLMProvider } from '../lib/aiCommitMessages';
-import { buildProviderFromActiveEntry } from '../lib/aiProviders';
+import { buildProviderFromSettings } from '../lib/aiUtils';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { findCommentLines, resolveCommentChar, stripCommitComments } from '../lib/commitMessage';
 import { formatTime } from '../lib/authorBadges';
@@ -41,26 +41,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 let slowRenameToastShown = false;
 
 /** Build an LLMProvider from settings, or null if not configured. */
-function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvider | null {
-  // Preferred: the multi-provider registry (Settings → AI grid).
-  const fromRegistry = buildProviderFromActiveEntry(settings);
-  if (fromRegistry) return fromRegistry;
-  // Legacy fallback: flat fields (registry not migrated yet / empty).
-  if (!settings?.aiProvider) return null;
-  const type = settings.aiProvider as LLMProvider['type'];
-  const id = settings.aiProvider;
-  const url = settings.aiUrl || '';
-  const model = settings.aiModel || '';
-  if (!model) return null;
-  return {
-    id,
-    name: id,
-    type,
-    url,
-    apiKey: settings.aiApiKey,
-    model,
-  };
-}
+const buildAIProvider = buildProviderFromSettings;
 
 interface ChangesPageProps {
   onResolveConflict?: (file: string) => void;
