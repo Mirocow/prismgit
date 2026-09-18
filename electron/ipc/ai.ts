@@ -26,11 +26,26 @@ function netFetch(url: string, options: { method?: string; headers?: Record<stri
 }> {
   return new Promise((resolve, reject) => {
     const method = options.method || 'GET';
-    const request = net.request({ url, method });
-
-    // Apply headers
-    const hdrs = options.headers || {};
+    // Build headers — always include Content-Type for POST requests
+    // and User-Agent for all requests (some APIs reject without it).
+    const hdrs: Record<string, string> = { ...options.headers };
     if (!hdrs['User-Agent'] && !hdrs['user-agent']) hdrs['User-Agent'] = 'PrismGit/2.1';
+    if (method !== 'GET' && method !== 'HEAD' && !hdrs['Content-Type'] && !hdrs['content-type']) {
+      hdrs['Content-Type'] = 'application/json';
+    }
+
+    // Use the default session — this ensures system proxy settings,
+    // cookies, and certificate store are used (same as the renderer's
+    // fetch). Without `session: 'default'`, net.request may not pick
+    // up proxy configuration on some systems.
+    const request = net.request({
+      url,
+      method,
+    });
+
+    // Apply headers via setHeader (not constructor — the constructor's
+    // `headers` option expects Record<string, string|string[]>, but
+    // setHeader accepts individual key/value pairs which is simpler).
     for (const [key, value] of Object.entries(hdrs)) {
       request.setHeader(key, value);
     }
