@@ -488,18 +488,43 @@ export function AiProvidersGrid() {
 
   const testProvider = useCallback(async (entry: AiProviderEntry) => {
     setTests(prev => ({ ...prev, [entry.id]: { loading: true } }));
+    const started = Date.now();
     try {
-      const res = await api.ai.providerListModels(entry.kind, entry.url, entry.apiKey || undefined) as unknown as {
-        ok: boolean; error: string | null; models: ProviderModelInfo[]; latencyMs: number;
-      };
+      // Derive models URL in renderer (same as fetchModels above),
+      // then use proxyFetch (same path as old CloudModelPicker).
+      const connectUrl = (entry.url || '').trim().replace(/\/+$/, '');
+      if (!connectUrl) {
+        setTests(prev => ({ ...prev, [entry.id]: { loading: false, ok: false, error: 'URL not configured' } }));
+        return;
+      }
+      const isOllama = entry.kind === 'ollama';
+      const isAnthropic = entry.kind === 'anthropic';
+      let modelsUrl: string;
+      if (isOllama) {
+        const b = connectUrl.replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '');
+        modelsUrl = `${b}/api/tags`;
+      } else if (isAnthropic) {
+        const b = connectUrl.replace(/\/v1\/messages$/, '');
+        modelsUrl = `${b}/v1/models`;
+      } else {
+        const modelsBase = connectUrl.replace(/\/chat\/completions$/, '');
+        modelsUrl = modelsBase.endsWith('/models') ? modelsBase : `${modelsBase}/models`;
+      }
+      const headers: Record<string, string> = {};
+      if (entry.apiKey) {
+        if (isAnthropic) { headers['x-api-key'] = entry.apiKey; headers['anthropic-version'] = '2023-06-01'; }
+        else { headers['Authorization'] = `Bearer ${entry.apiKey}`; }
+      }
+      const result = await proxyFetch(modelsUrl, headers, '', undefined, 'GET');
+      const modelCount = result.ok ? (JSON.parse(result.body || '[]') as any[]).length : 0;
       setTests(prev => ({
         ...prev,
         [entry.id]: {
           loading: false,
-          ok: res.ok,
-          error: res.error,
-          latencyMs: res.latencyMs,
-          modelCount: res.models?.length ?? 0,
+          ok: result.ok,
+          error: result.ok ? null : (result.status === 401 ? 'Auth failed' : `HTTP ${result.status}`),
+          latencyMs: Date.now() - started,
+          modelCount,
         },
       }));
     } catch (e) {
