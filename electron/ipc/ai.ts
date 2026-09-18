@@ -1,7 +1,68 @@
-import { ipcMain } from 'electron';
+import { ipcMain, net } from 'electron';
 import * as ai from '../services/ai.js';
 import type { AiProviderConfig } from '../services/ai.js';
 import { loadAIMemory, saveAIMemoryEntry, buildMemorySummary } from '../services/aiMemory.js';
+
+/**
+ * netFetch — wrapper around Electron's `net.request` that uses Chromium's
+ * network stack instead of Node.js's built-in `fetch` (undici).
+ *
+ * WHY: Node.js fetch (undici) ignores system proxy settings, system
+ * certificate store, and system DNS resolver. On macOS (and some Linux
+ * configs), this causes "TypeError: fetch failed" when the user is behind
+ * a proxy, VPN, or when the system's CA certificates differ from undici's
+ * bundled ones. Electron's `net` module uses Chromium's network stack
+ * which respects ALL system network settings.
+ *
+ * Returns a Response-like object compatible with the old fetch() calls:
+ *   { ok: boolean, status: number, statusText: string, json(): Promise, text(): Promise }
+ */
+function netFetch(url: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{
+  ok: boolean;
+  status: number;
+  statusText: string;
+  json: () => Promise<unknown>;
+  text: () => Promise<string>;
+}> {
+  return new Promise((resolve, reject) => {
+    const method = options.method || 'GET';
+    const request = net.request({ url, method });
+
+    // Apply headers
+    const hdrs = options.headers || {};
+    if (!hdrs['User-Agent'] && !hdrs['user-agent']) hdrs['User-Agent'] = 'PrismGit/2.1';
+    for (const [key, value] of Object.entries(hdrs)) {
+      request.setHeader(key, value);
+    }
+
+    let body = '';
+    let statusCode = 0;
+    let statusText = '';
+
+    request.on('response', (response) => {
+      statusCode = response.statusCode;
+      statusText = response.statusMessage || '';
+      response.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      response.on('end', () => {
+        resolve({
+          ok: statusCode >= 200 && statusCode < 300,
+          status: statusCode,
+          statusText,
+          json: async () => JSON.parse(body),
+          text: async () => body,
+        });
+      });
+      response.on('error', (e: Error) => reject(e));
+    });
+
+    request.on('error', (e: Error) => reject(e));
+
+    if (options.body && method !== 'GET' && method !== 'HEAD') {
+      request.write(options.body);
+    }
+    request.end();
+  });
+}
 
 /**
  * Unified model-list / connectivity check for the multi-provider registry
@@ -44,11 +105,11 @@ export async function providerListModels(
     if (kind === 'ollama') {
       // Ollama: strip /api/chat or /chat/completions if present, then use /api/tags
       const b = connectUrl.replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '') || 'http://localhost:11434';
-      const res = await fetch(`${b}/api/tags`);
+      const res = await netFetch(`${b}/api/tags`);
       if (!res.ok) {
         return { ok: false, error: `HTTP ${res.status} ${res.statusText}`, models: [], latencyMs: Date.now() - started };
       }
-      const data = await res.json();
+      const data = await res.json() as any;
       const models: ProviderModelInfo[] = (data.models || []).map((m: {
         name: string;
         size?: number;
@@ -71,12 +132,12 @@ export async function providerListModels(
         'x-api-key': apiKey || '',
         'anthropic-version': '2023-06-01',
       };
-      const res = await fetch(`${b}/v1/models`, { headers });
+      const res = await netFetch(`${b}/v1/models`, { headers });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 300) || res.statusText}`, models: [], latencyMs: Date.now() - started };
       }
-      const data = await res.json();
+      const data = await res.json() as any;
       const models: ProviderModelInfo[] = (data.data || data.models || []).map((m: { id?: string; name?: string }) => ({
         id: m.id || m.name || '',
       })).filter((m: ProviderModelInfo) => m.id);
@@ -91,12 +152,12 @@ export async function providerListModels(
     const modelsUrl = modelsBase.endsWith('/models') ? modelsBase : `${modelsBase}/models`;
     const headers: Record<string, string> = {};
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-    const res = await fetch(modelsUrl, { headers });
+    const res = await netFetch(modelsUrl, { headers });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 300) || res.statusText}`, models: [], latencyMs: Date.now() - started };
     }
-    const data = await res.json();
+    const data = await res.json() as any;
     // OpenAI format: { data: [{ id }] }; some servers return a bare array;
     // Ollama's OpenAI-compat layer returns { models: [...] } — accept all.
     const rawList: Array<{ id?: string; name?: string }> =
@@ -130,11 +191,11 @@ export function registerAiIpc(): void {
     async (_e, url: string) => {
       try {
         const base = (url || 'http://localhost:11434').trim().replace(/\/$/, '');
-        const response = await fetch(`${base}/api/tags`);
+        const response = await netFetch(`${base}/api/tags`);
         if (!response.ok) {
           return { ok: false, error: `HTTP ${response.status} ${response.statusText}`, models: [] };
         }
-        const data = await response.json();
+        const data = await response.json() as any;
         const models = (data.models || []).map((m: {
           name: string;
           size?: number;
@@ -172,11 +233,11 @@ export function registerAiIpc(): void {
     async (_e, url: string) => {
       try {
         const base = (url || 'http://localhost:11434').trim().replace(/\/$/, '');
-        const response = await fetch(`${base}/api/ps`);
+        const response = await netFetch(`${base}/api/ps`);
         if (!response.ok) {
           return { ok: false, error: `HTTP ${response.status}`, models: [] };
         }
-        const data = await response.json();
+        const data = await response.json() as any;
         const models = (data.models || []).map((m: { name: string; expires_at?: string; size_vram?: number }) => ({
           name: m.name,
           expiresAt: m.expires_at,
@@ -207,7 +268,7 @@ export function registerAiIpc(): void {
         // Send a no-op generate request with keep_alive to extend the
         // model's in-memory lifetime. The prompt is intentionally empty
         // — Ollama returns immediately, but the model stays loaded.
-        const response = await fetch(`${base}/api/generate`, {
+        const response = await netFetch(`${base}/api/generate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -253,15 +314,14 @@ export function registerAiIpc(): void {
         // forbids it, and some servers (Z.ai, Groq) reject requests
         // with a body on GET endpoints (returning 400 or connection
         // errors).
-        const fetchOpts: RequestInit = {
+        const netOpts: { method: string; headers: Record<string, string>; body?: string } = {
           method: httpMethod,
           headers: config.headers,
-          signal: controller.signal,
         };
         if (httpMethod !== 'GET' && httpMethod !== 'HEAD' && config.body) {
-          fetchOpts.body = config.body;
+          netOpts.body = config.body;
         }
-        const res = await fetch(config.url, fetchOpts);
+        const res = await netFetch(config.url, netOpts);
         const text = await res.text();
         return { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
       } catch (e) {
