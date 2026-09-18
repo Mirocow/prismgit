@@ -27,7 +27,7 @@ import {
   isValidDeepLinkPath,
   takePendingDeepLinkPage,
 } from './lib/deepLinks';
-import { t as i18nT, useI18nStore } from './lib/i18n';
+import { t as i18nT, useI18nStore, initLocaleFromSettings } from './lib/i18n';
 import { clearProjectPrefs, loadProjectPrefs, saveProjectPrefs } from './lib/projectPrefs';
 import { useAuthStore } from './stores/authStore';
 import { useCommandLogStore } from './stores/commandLogStore';
@@ -490,6 +490,11 @@ export default function App() {
     loadMetadata();
     loadSettings();
     loadAuth();
+    // Load the saved language from the IPC-backed settings store
+    // (persistent JSON file in userData). Overrides the localStorage
+    // / navigator.language detection if a language was explicitly
+    // chosen by the user in Settings.
+    void initLocaleFromSettings();
   }, [loadRepos, loadMetadata, loadSettings, loadAuth]);
 
   // Initialize the IPC listener for operation-log events from main process.

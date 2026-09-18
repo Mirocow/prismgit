@@ -133,6 +133,13 @@ export interface AppSettings {
    */
   zoomLevel?: number;
   /**
+   * UI language/locale — 'en' | 'ru' | 'zh' | 'de'. Stored in the
+   * IPC-backed settings JSON (persistent file in userData) instead of
+   * localStorage which can be unreliable in some Electron configs.
+   * Falls back to OS language detection when unset.
+   */
+  appLanguage?: string;
+  /**
    * UI contrast level — 100 = default, lower = softer, higher = punchier.
    * Range 50–150. Applied as `filter: contrast(N%)` on the root element via
    * a CSS variable. Useful for low-vision users or for high-glare environments.

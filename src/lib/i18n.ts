@@ -42,6 +42,7 @@ function getInitialLocale(): Locale {
     // regardless of the OS language.
     const envLocale = (typeof window !== 'undefined' && (window as { smartgit?: { app?: { envLocale?: string } } }).smartgit?.app?.envLocale) || '';
     if (envLocale && ['en', 'ru', 'zh', 'de'].includes(envLocale)) return envLocale as Locale;
+    // Try localStorage first (synchronous, fast).
     const saved = localStorage.getItem(STORAGE_KEY) as Locale | null;
     if (saved && ['en', 'ru', 'zh', 'de'].includes(saved)) return saved;
     // Detect from navigator.language
@@ -53,6 +54,32 @@ function getInitialLocale(): Locale {
   } catch {
     return 'en';
   }
+}
+
+/**
+ * Async locale init — reads the saved locale from the IPC-backed
+ * settings store (persistent JSON file) and overrides the initial
+ * localStorage-based detection. Called once on app startup.
+ *
+ * This is needed because getInitialLocale() is synchronous (called
+ * during store creation), but the IPC settings store is async.
+ * The settings store's appLanguage field is the authoritative source
+ * — localStorage is a legacy fallback.
+ */
+export async function initLocaleFromSettings(): Promise<void> {
+  try {
+    const settings = (window as { smartgit?: { settings?: { getAll?: () => Promise<Record<string, unknown>> } } }).smartgit?.settings;
+    if (!settings?.getAll) return;
+    const all = await settings.getAll();
+    const lang = all.appLanguage as string | undefined;
+    if (lang && ['en', 'ru', 'zh', 'de'].includes(lang)) {
+      const current = useI18nStore.getState().locale;
+      // Only override if different from what localStorage detected.
+      if (current !== lang) {
+        useI18nStore.getState().setLocale(lang as Locale);
+      }
+    }
+  } catch { /* ignore — keep the detected locale */ }
 }
 
 interface I18nState {
@@ -80,7 +107,15 @@ export const useI18nStore = create<I18nState>((set) => ({
   locale: getInitialLocale(),
   dictVersion: 0,
   setLocale: (locale) => {
+    // Save to localStorage (legacy, kept for backwards compat).
     try { localStorage.setItem(STORAGE_KEY, locale); } catch { /* ignore */ }
+    // Save to the IPC-backed settings store (persistent JSON file in
+    // userData). This is more reliable than localStorage which can be
+    // unreliable in some Electron configurations.
+    try {
+      const settings = (window as { smartgit?: { settings?: { set?: (key: string, value: unknown) => Promise<void> } } }).smartgit?.settings;
+      settings?.set?.('appLanguage', locale);
+    } catch { /* ignore */ }
     ensureLocale(locale);
     set({ locale });
   },
