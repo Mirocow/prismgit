@@ -23,6 +23,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { useI18n } from '../lib/i18n';
 import { api } from '../lib/api';
+import { proxyFetch } from '../lib/aiChat';
 import { cn } from '../lib/utils';
 import {
   PROVIDER_TEMPLATES, getProviderTemplate, kindToProtocol, kindBadge,
@@ -122,19 +123,74 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
   const fetchModels = useCallback(async () => {
     setFetching(true);
     setModelsOpen(true);
+    const started = Date.now();
     try {
-      const res = await api.ai.providerListModels(protocol, url, apiKey || undefined) as unknown as {
-        ok: boolean; error: string | null; models: ProviderModelInfo[]; latencyMs: number;
-      };
-      setModels(res.models || []);
-      setFetchResult({ loading: false, ok: res.ok, error: res.error, latencyMs: res.latencyMs, modelCount: res.models?.length ?? 0 });
+      // Derive the models URL in the RENDERER (same as CloudModelPicker),
+      // then use proxyFetch (IPC → ai:chat handler → Node.js fetch).
+      // This is the SAME path that worked before the provider rewrite.
+      const connectUrl = (url || '').trim().replace(/\/+$/, '');
+      if (!connectUrl) {
+        setFetchResult({ loading: false, ok: false, error: 'URL is not configured', modelCount: 0 });
+        return;
+      }
+
+      // Derive models URL (clone, never modify original).
+      let modelsUrl: string;
+      if (isOllama) {
+        const b = connectUrl.replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '');
+        modelsUrl = `${b}/api/tags`;
+      } else if (protocol === 'anthropic') {
+        const b = connectUrl.replace(/\/v1\/messages$/, '');
+        modelsUrl = `${b}/v1/models`;
+      } else {
+        const modelsBase = connectUrl.replace(/\/chat\/completions$/, '');
+        modelsUrl = modelsBase.endsWith('/models') ? modelsBase : `${modelsBase}/models`;
+      }
+
+      // Build headers.
+      const headers: Record<string, string> = {};
+      if (apiKey) {
+        if (protocol === 'anthropic') {
+          headers['x-api-key'] = apiKey;
+          headers['anthropic-version'] = '2023-06-01';
+        } else {
+          headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+      }
+
+      // Use proxyFetch (same path as the old CloudModelPicker that WORKED).
+      // proxyFetch sends through the 'ai:chat' IPC handler which uses
+      // Node.js fetch() in the main process.
+      const result = await proxyFetch(modelsUrl, headers, '', undefined, 'GET');
+      if (result.ok) {
+        const data = JSON.parse(result.body) as any;
+        const rawList: Array<any> = Array.isArray(data) ? data : (data.data || data.models || data || []);
+        const modelList: ProviderModelInfo[] = rawList.map((m: any) => ({
+          id: m.id || m.name || '',
+          ...(m.size ? { size: m.size } : {}),
+          ...(m.details?.family ? { family: m.details.family } : {}),
+          ...(m.details?.parameter_size ? { parameterSize: m.details.parameter_size } : {}),
+          ...(m.details?.quantization_level ? { quantization: m.details.quantization_level } : {}),
+          ...(m.details?.format ? { format: m.details.format } : {}),
+        })).filter((m: ProviderModelInfo) => m.id);
+        setModels(modelList);
+        setFetchResult({ loading: false, ok: true, error: null, latencyMs: Date.now() - started, modelCount: modelList.length });
+      } else {
+        setModels([]);
+        const errMsg = result.status === 401
+          ? 'Authentication failed — check your API key.'
+          : result.status === 0
+            ? `Cannot connect to ${modelsUrl}. Check the URL and network.`
+            : `HTTP ${result.status}: ${result.statusText}`;
+        setFetchResult({ loading: false, ok: false, error: errMsg, latencyMs: Date.now() - started, modelCount: 0 });
+      }
     } catch (e) {
       setFetchResult({ loading: false, ok: false, error: String(e), modelCount: 0 });
       setModels([]);
     } finally {
       setFetching(false);
     }
-  }, [protocol, url, apiKey]);
+  }, [protocol, url, apiKey, isOllama]);
 
   const handleSave = async () => {
     const finalName = name.trim() || template.label;
