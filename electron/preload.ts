@@ -619,10 +619,26 @@ const api = {
     list: () => ipcRenderer.invoke('command-log:list'),
     clear: () => ipcRenderer.invoke('command-log:clear'),
     onEntry: (cb: (entry: CommandLogEntry) => void) => {
-      const listener = (_: unknown, entry: CommandLogEntry) => cb(entry);
-      ipcRenderer.on('command-log:entry', listener);
+      // PERFORMANCE: main process batches entries 100 ms and emits them
+      // via 'command-log:batch' (Array<CommandLogEntry>) instead of per-
+      // entry 'command-log:entry'. We unpack the batch here so the store
+      // API stays the same. The legacy per-entry channel is kept as a
+      // fallback for any older main process still sending single entries
+      // (not used in production since v2.1.1, but harmless to keep).
+      const batchListener = (_: unknown, batch: CommandLogEntry[]) => {
+        if (Array.isArray(batch)) {
+          for (const e of batch) cb(e);
+        } else {
+          // Single entry fallback (legacy main process shape).
+          cb(batch as unknown as CommandLogEntry);
+        }
+      };
+      const singleListener = (_: unknown, entry: CommandLogEntry) => cb(entry);
+      ipcRenderer.on('command-log:batch', batchListener);
+      ipcRenderer.on('command-log:entry', singleListener);
       return () => {
-        ipcRenderer.removeListener('command-log:entry', listener);
+        ipcRenderer.removeListener('command-log:batch', batchListener);
+        ipcRenderer.removeListener('command-log:entry', singleListener);
       };
     },
   },

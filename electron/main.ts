@@ -98,6 +98,24 @@ const windowStateStore = new SimpleStore({
 
 let mainWindow: BrowserWindow | null = null;
 
+// Command-log batch buffer (see installGitCommandLogger below).
+// Module-scoped so `before-quit` can flush the pending batch.
+let batchTimer: NodeJS.Timeout | null = null;
+let batchedEntries: unknown[] = [];
+
+function flushCommandLogBatch(): void {
+  if (batchTimer) {
+    clearTimeout(batchTimer);
+    batchTimer = null;
+  }
+  if (batchedEntries.length === 0) return;
+  const batch = batchedEntries;
+  batchedEntries = [];
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('command-log:batch', batch);
+  }
+}
+
 function getWindowState(): WindowState {
   // Guard: mainWindow may be null OR already destroyed by the time the
   // 'close' / 'before-quit' event fires. Calling getBounds() on a
@@ -262,10 +280,17 @@ app.whenReady().then(() => {
   // it wraps child_process.spawn so every git process spawned afterwards
   // (simple-git, push/pull helpers, background polls) is captured with its
   // full stdout/stderr and exit code for the Output panel's Commands tab.
+  //
+  // PERFORMANCE: on a busy repo (auto-fetch + watcher refresh + IDE auto-
+  // save triggering watcher) we can see 50+ git spawns per second. Sending
+  // an IPC broadcast per entry saturates the renderer's IPC queue. We now
+  // batch entries 100 ms — the renderer still sees them appear in real-time
+  // (100 ms is below human perception), but IPC traffic drops by ~10×.
   installGitCommandLogger({
     onEntry: (entry) => {
-      for (const w of BrowserWindow.getAllWindows()) {
-        if (!w.isDestroyed()) w.webContents.send('command-log:entry', entry);
+      batchedEntries.push(entry);
+      if (batchTimer === null) {
+        batchTimer = setTimeout(flushCommandLogBatch, 100);
       }
     },
   });
@@ -412,6 +437,9 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   saveWindowState();
   stopAllWatchers();
+  // Flush any pending command-log batch — otherwise the last 100 ms of
+  // git commands would never reach the renderer's Output panel.
+  flushCommandLogBatch();
   // Flush the debounced store writes — otherwise a quit within 100 ms of
   // any settings/repo/auth/secrets change could lose it. Each store's
   // writeNow() is synchronous (tmp-write + rename), so the app is
