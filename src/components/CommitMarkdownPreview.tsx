@@ -1,9 +1,23 @@
 /**
  * Simple markdown preview for commit messages.
  * Renders: headers, bold, italic, code, lists, links, code blocks.
+ *
+ * SECURITY: markdown links are sanitised — only `http:`/`https:`/`mailto:`
+ * URLs are kept. `javascript:`, `data:`, `vbscript:` and other schemes are
+ * stripped, because commit messages are user-controlled and a malicious
+ * `[click](javascript:alert(1))` payload would otherwise render as a
+ * clickable `<a href="javascript:...">` via `dangerouslySetInnerHTML`.
  */
 import { useMemo } from 'react';
 import { useI18n } from '../lib/i18n';
+
+const SAFE_URL_RE = /^(https?:\/\/|mailto:)/i;
+
+function sanitizeHref(href: string): string {
+  const trimmed = href.trim();
+  if (SAFE_URL_RE.test(trimmed)) return trimmed;
+  return '';
+}
 
 export function CommitMarkdownPreview({ content }: { content: string }) {
   const { t } = useI18n();
@@ -31,8 +45,14 @@ export function CommitMarkdownPreview({ content }: { content: string }) {
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/\*([^*]+)\*/g, '<em>$1</em>')
 
-      // Links
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-accent underline">$1</a>')
+      // Links — sanitize href (XSS defence: only http(s)/mailto: are allowed).
+      // Unsafe URLs become plain text labels with no <a> wrapper.
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, href: string) => {
+        const safe = sanitizeHref(href);
+        return safe
+          ? `<a href="${safe}" class="text-accent underline" target="_blank" rel="noopener noreferrer">${label}</a>`
+          : `<span class="text-text-tertiary">${label}</span>`;
+      })
 
       // Lists
       .replace(/^[\s]*[-*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')

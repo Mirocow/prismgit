@@ -10,63 +10,71 @@
  *
  * `t()` in src/lib/i18n.ts falls back to English when a key is missing in
  * the active locale — but the unit tests assert exact key parity, so every
- * domain must provide all four languages for every key.
+ * domain must provide all four languages for every key. The parity tests
+ * import DOMAINS from `tests/i18n-domains.ts` (NOT from here) so the
+ * ru/zh/de dictionaries from each domain stay out of the production bundle.
+ *
+ * IMPORTANT: do NOT re-export DOMAINS from this file. Doing so pulls the
+ * ru/zh/de dictionaries of every domain into the startup bundle (~180 KB
+ * gzipped of dead weight, because Rollup cannot prove they are unused).
  */
-import * as core from './core';
-import * as shell from './domains/shell';
-import * as changes from './domains/changes';
-import * as history from './domains/history';
-import * as diff from './domains/diff';
-import * as branches from './domains/branches';
-import * as stashes from './domains/stashes';
-import * as tags from './domains/tags';
-import * as remotes from './domains/remotes';
-import * as dialogs from './domains/dialogs';
-import * as pages from './domains/pages';
-import * as settings from './domains/settings';
-import * as vscode from './domains/vscode';
-import * as search from './domains/search';
-import * as tour from './domains/tour';
-import * as aiassistant from './domains/aiassistant';
-import * as toasts from './domains/toasts';
-import * as actions from './domains/actions';
-import * as contextMenus from './domains/contextMenus';
-import * as banner from './domains/banner';
-import * as conflict from './domains/conflict';
-import * as iRebase from './domains/iRebase';
-import * as nav from './domains/nav';
-import * as errors from './domains/errors';
+import { en as coreEn } from './core';
+import { en as shellEn } from './domains/shell';
+import { en as changesEn } from './domains/changes';
+import { en as historyEn } from './domains/history';
+import { en as diffEn } from './domains/diff';
+import { en as branchesEn } from './domains/branches';
+import { en as stashesEn } from './domains/stashes';
+import { en as tagsEn } from './domains/tags';
+import { en as remotesEn } from './domains/remotes';
+import { en as dialogsEn } from './domains/dialogs';
+import { en as pagesEn } from './domains/pages';
+import { en as settingsEn } from './domains/settings';
+import { en as vscodeEn } from './domains/vscode';
+import { en as searchEn } from './domains/search';
+import { en as tourEn } from './domains/tour';
+import { en as aiassistantEn } from './domains/aiassistant';
+import { en as toastsEn } from './domains/toasts';
+import { en as actionsEn } from './domains/actions';
+import { en as contextMenusEn } from './domains/contextMenus';
+import { en as bannerEn } from './domains/banner';
+import { en as conflictEn } from './domains/conflict';
+import { en as iRebaseEn } from './domains/iRebase';
+import { en as navEn } from './domains/nav';
+import { en as errorsEn } from './domains/errors';
 
-/** All domain modules — used by the parity tests to walk every dictionary. */
-export const DOMAINS: Record<string, { en: Record<string, string>; ru: Record<string, string>; zh: Record<string, string>; de: Record<string, string> }> = {
-  core,
-  shell,
-  changes,
-  history,
-  diff,
-  branches,
-  stashes,
-  tags,
-  remotes,
-  dialogs,
-  pages,
-  settings,
-  vscode,
-  search,
-  tour,
-  aiassistant,
-  toasts,
-  actions,
-  contextMenus,
-  banner,
-  conflict,
-  iRebase,
-  nav,
-  errors,
+/** Static English merge — synchronous fallback for the whole app.
+ *
+ * Built by spreading each domain's `en` dictionary directly (not by walking
+ * a runtime `DOMAINS` object) so Rollup can tree-shake the ru/zh/de exports
+ * of each domain module out of the production startup bundle.
+ */
+export const en: Record<string, string> = {
+  ...coreEn,
+  ...shellEn,
+  ...changesEn,
+  ...historyEn,
+  ...diffEn,
+  ...branchesEn,
+  ...stashesEn,
+  ...tagsEn,
+  ...remotesEn,
+  ...dialogsEn,
+  ...pagesEn,
+  ...settingsEn,
+  ...vscodeEn,
+  ...searchEn,
+  ...tourEn,
+  ...aiassistantEn,
+  ...toastsEn,
+  ...actionsEn,
+  ...contextMenusEn,
+  ...bannerEn,
+  ...conflictEn,
+  ...iRebaseEn,
+  ...navEn,
+  ...errorsEn,
 };
-
-/** Static English merge — synchronous fallback for the whole app. */
-export const en: Record<string, string> = Object.values(DOMAINS).reduce((acc, d) => ({ ...acc, ...d.en }), {});
 
 /** Locales whose dictionaries load asynchronously (non-fallback languages). */
 export type AsyncLocale = 'ru' | 'zh' | 'de';

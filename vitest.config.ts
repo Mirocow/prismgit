@@ -35,8 +35,6 @@ export default defineConfig({
         'src/**/*.d.ts',
         'src/main.tsx',
         'src/lib/distributedReviews.ts',
-        'src/lib/smartViews.ts',
-        'src/lib/overlap.ts',
         'src/lib/useContextMenu.ts',
         'src/lib/authorBadges.ts',
         'src/stores/authStore.ts',

@@ -332,20 +332,33 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     return () => clearTimeout(t);
   }, [repo.path, leftWidth, treeWidth, journalHeight, commitHeight]);
 
+  // RACE FIX (R4): per-request counter — when the user clicks file A then
+  // file B within 150 ms, both loadDiff() calls fire. If A resolves AFTER
+  // B, `setDiff(diffA)` would overwrite B's diff with stale content.
+  // The counter tags each request; only the latest request's result is
+  // applied to state.
+  const diffRequestIdRef = useRef(0);
+
   const loadDiff = useCallback(
     async (file: string, staged: boolean) => {
+      const requestId = ++diffRequestIdRef.current;
       setDiffLoading(true);
       try {
         const result = await api.git.diff(repo.path, file, { staged });
+        // Stale-write guard: only apply the result if this is still the
+        // latest request. If the user has selected another file in the
+        // meantime, drop the result on the floor.
+        if (requestId !== diffRequestIdRef.current) return;
         setDiff(result);
       } catch (e) {
+        if (requestId !== diffRequestIdRef.current) return;
         toast.error(t('changes.loadDiffFailed'), String(e));
         setDiff(null);
       } finally {
-        setDiffLoading(false);
+        if (requestId === diffRequestIdRef.current) setDiffLoading(false);
       }
     },
-    [repo.path, toast]
+    [repo.path, toast, t]
   );
 
   const loadJournal = useCallback(async () => {

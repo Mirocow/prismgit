@@ -66,7 +66,6 @@ export function seedUserData(
       defaultCloneDir: '',
       showReflogInHistory: false,
       maxHistoryLoad: 500,
-      enableTelemetry: false,
       pullStrategy: 'merge',
     },
     repositories: reposData,

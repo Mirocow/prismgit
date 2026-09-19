@@ -83,10 +83,50 @@ function download(url: string, timeoutMs = 5000): Promise<Buffer | null> {
   });
 }
 
-/** In-memory cache: URL → data URI (so we don't hit disk on every call). */
-const memCache = new Map<string, string | null>();
+/**
+ * In-memory cache: URL → data URI (so we don't hit disk on every call).
+ *
+ * MEMORY FIX (M2): previously unbounded — a session with 1000 unique
+ * authors (large OSS projects) accumulated ~25 MB of base64 data URIs.
+ * Now bounded by LRU with 500 entries — covers 99 % of real workloads.
+ *
+ * Negative (null) entries now have a TTL: a user who has since registered
+ * a gravatar would otherwise be stuck with the cached "no avatar" result
+ * forever. NULL_TTL_MS = 5 min — long enough to avoid thrashing during a
+ * single History session, short enough to recover from transient 404s.
+ */
+const MEM_CACHE_MAX = 500;
+const NULL_TTL_MS = 5 * 60 * 1000;
+const memCache = new Map<string, { value: string | null; ts: number }>();
 /** In-flight downloads (prevent duplicate concurrent downloads). */
 const inFlight = new Map<string, Promise<string | null>>();
+
+function memCacheGet(url: string): string | null | undefined {
+  const entry = memCache.get(url);
+  if (!entry) return undefined;
+  if (entry.value === null) {
+    // Negative cache — respect TTL.
+    if (Date.now() - entry.ts > NULL_TTL_MS) {
+      memCache.delete(url);
+      return undefined;
+    }
+    return null;
+  }
+  // Positive cache — avatars are immutable, no TTL.
+  return entry.value;
+}
+
+function memCacheSet(url: string, value: string | null): void {
+  // LRU: re-insert moves entry to the end (Map iterates in insertion order).
+  memCache.delete(url);
+  memCache.set(url, { value, ts: Date.now() });
+  // Evict oldest entries while over capacity.
+  while (memCache.size > MEM_CACHE_MAX) {
+    const oldest = memCache.keys().next().value;
+    if (oldest === undefined) break;
+    memCache.delete(oldest);
+  }
+}
 
 /**
  * Get a cached avatar as a data URI string.
@@ -99,8 +139,8 @@ const inFlight = new Map<string, Promise<string | null>>();
  * The promise NEVER rejects — failures return null.
  */
 export async function getCachedAvatar(url: string): Promise<string | null> {
-  // 1. In-memory cache.
-  const memHit = memCache.get(url);
+  // 1. In-memory cache (LRU + TTL for negatives).
+  const memHit = memCacheGet(url);
   if (memHit !== undefined) return memHit;
 
   // 2. In-flight download — don't start a second download for the same URL.
@@ -116,7 +156,7 @@ export async function getCachedAvatar(url: string): Promise<string | null> {
         const buf = fs.readFileSync(filePath);
         if (buf.length > 0) {
           const dataUri = `data:image/png;base64,${buf.toString('base64')}`;
-          memCache.set(url, dataUri);
+          memCacheSet(url, dataUri);
           return dataUri;
         }
       }
@@ -126,7 +166,7 @@ export async function getCachedAvatar(url: string): Promise<string | null> {
     try {
       const buf = await download(url);
       if (!buf || buf.length === 0) {
-        memCache.set(url, null);
+        memCacheSet(url, null);
         return null;
       }
       // Save to disk (best effort — if it fails, we still return the data URI).
@@ -134,10 +174,10 @@ export async function getCachedAvatar(url: string): Promise<string | null> {
         fs.writeFileSync(filePath, buf);
       } catch { /* ignore disk write errors */ }
       const dataUri = `data:image/png;base64,${buf.toString('base64')}`;
-      memCache.set(url, dataUri);
+      memCacheSet(url, dataUri);
       return dataUri;
     } catch {
-      memCache.set(url, null);
+      memCacheSet(url, null);
       return null;
     }
   })();
@@ -152,6 +192,11 @@ export async function getCachedAvatar(url: string): Promise<string | null> {
 
 /**
  * Build a Gravatar URL from an email address (MD5 hash, sync).
+ *
+ * NOTE: this is kept only for direct tests / CLI tools. The renderer builds
+ * its own Gravatar URL via `src/lib/gravatar.ts` (which supports both MD5
+ * and SHA-256 hashes); the previous `avatar:getByEmail` IPC handler that
+ * consumed this function was removed as dead code.
  */
 export function gravatarUrlFromEmail(email: string, size = 48): string {
   const normalized = email.trim().toLowerCase();

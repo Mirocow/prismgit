@@ -267,7 +267,15 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
                 <button
                   className="btn btn-secondary text-xs"
                   title={t('action.title.takeOurs')}
+                  disabled={saving}
                   onClick={async () => {
+                    // RACE FIX (R5): a single shared `saving` lock prevents
+                    // a double-click from launching two parallel
+                    // checkout + add sequences that could interleave (e.g.
+                    // checkout --ours from click #2 landing between
+                    // checkout --theirs and git add from click #1, leaving
+                    // a half-staged file).
+                    setSaving(true);
                     try {
                       await api.git.raw(repo.path, ['checkout', '--ours', '--', filePath]);
                       await api.git.add(repo.path, [filePath]);
@@ -275,6 +283,7 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
                       await refreshStatus(repo.path);
                       onClose();
                     } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
+                    finally { setSaving(false); }
                   }}
                 >
                   {t('action.button.takeOurs')}
@@ -284,7 +293,9 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
                 <button
                   className="btn btn-secondary text-xs"
                   title={t('action.title.takeTheirs')}
+                  disabled={saving}
                   onClick={async () => {
+                    setSaving(true);
                     try {
                       await api.git.raw(repo.path, ['checkout', '--theirs', '--', filePath]);
                       await api.git.add(repo.path, [filePath]);
@@ -292,6 +303,7 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
                       await refreshStatus(repo.path);
                       onClose();
                     } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
+                    finally { setSaving(false); }
                   }}
                 >
                   {t('action.button.takeTheirs')}
@@ -301,18 +313,21 @@ export function ConflictSolver({ filePath, onClose, onResolved }: ConflictSolver
               <button
                 className="btn btn-danger text-xs"
                 title={t('action.title.resolveAsDeleted')}
+                disabled={saving}
                 onClick={async () => {
+                  setSaving(true);
                   try {
                     await api.git.raw(repo.path, ['rm', '--', filePath]);
                     toast.success(t('toast.conflict.deleted'));
                     await refreshStatus(repo.path);
                     onClose();
                   } catch (e) { toast.error(t('toast.conflict.failed'), String(e)); }
+                  finally { setSaving(false); }
                 }}
               >
                 {t('action.button.resolveAsDeleted')}
               </button>
-              <button className="btn btn-secondary text-xs" onClick={onClose}>{t('action.button.cancel')}</button>
+              <button className="btn btn-secondary text-xs" disabled={saving} onClick={onClose}>{t('action.button.cancel')}</button>
             </div>
           </div>
         </div>

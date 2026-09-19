@@ -7,9 +7,12 @@ import { useRepositoryStore } from './repositoryStore';
 import { useToastStore } from './toastStore';
 import { useSettingsStore } from './settingsStore';
 
-// In-flight promise for refreshStatus — prevents concurrent status() calls
-// on the same repo from spawning multiple `git status` subprocesses.
-let refreshInFlight: Promise<void> | null = null;
+// In-flight promises for refreshStatus — keyed by repoPath so a status
+// refresh on repo B is NOT short-circuited by an in-flight refresh on
+// repo A. Before this was a Map, switching A → B while status(A) was
+// running made refreshStatus(B) return the promise of A and skip the
+// `git status` call for B entirely, leaving the UI on a stale snapshot.
+const refreshInFlight = new Map<string, Promise<void>>();
 
 interface GitState {
   status: StatusResult | null;
@@ -56,22 +59,32 @@ export const useGitStore = create<GitState>((set, get) => ({
     // the same repo. simple-git queues them (maxConcurrentProcesses=4),
     // but each `git status` on a large/LFS repo takes 1-5s → 4 × 5s = 20s
     // of queued git processes → UI frozen.
-    if (refreshInFlight) {
-      return refreshInFlight;
-    }
+    //
+    // Keyed by repoPath: switching A → B while status(A) is running no
+    // longer makes status(B) piggyback on status(A)'s promise (which
+    // would skip B's status call entirely and leave its UI stale).
+    const existing = refreshInFlight.get(repoPath);
+    if (existing) return existing;
 
     set({ loading: true, error: null });
     const promise = (async () => {
       try {
         const status = await api.git.status(repoPath);
-        set({ status, loading: false, lastRefresh: Date.now() });
+        // Only commit the status if we're STILL on the same repo. If the
+        // user has switched to repo B in the meantime, dropping the result
+        // is correct — refreshStatus(B) is running its own status() call.
+        if (useRepositoryStore.getState().currentRepo?.path === repoPath) {
+          set({ status, loading: false, lastRefresh: Date.now() });
+        }
       } catch (e) {
-        set({ error: String(e), loading: false });
+        if (useRepositoryStore.getState().currentRepo?.path === repoPath) {
+          set({ error: String(e), loading: false });
+        }
       } finally {
-        refreshInFlight = null;
+        refreshInFlight.delete(repoPath);
       }
     })();
-    refreshInFlight = promise;
+    refreshInFlight.set(repoPath, promise);
     return promise;
   },
 

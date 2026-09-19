@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { api, type RepositoryEntry, type RepositoryMetadata, type RepoGroup, type RemoteCheckSummary } from '../lib/api';
+import { clearProjectPrefs } from '../lib/projectPrefs';
+import { clearChatHistory } from './aiChatStore';
 import { useToastStore } from './toastStore';
 
 interface RepositoryState {
@@ -141,6 +143,17 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   openRepository: async (path: string) => {
     set({ loading: true, error: null });
     try {
+      // RACE/LEAK FIX: if another repo is currently open, tear down its
+      // watcher and invalidate its cached SimpleGit instance BEFORE
+      // switching. Previously, opening B while A was active left A's
+      // watcher firing (its `git status` results would land in a stale
+      // store slot when the user came back to A) and A's SimpleGit child
+      // process pool lingered in the main process for the whole session.
+      const prev = get().currentRepo;
+      if (prev && prev.path !== path) {
+        api.watcher.stop(prev.path).catch(() => { /* ignore */ });
+        api.git.invalidateCache(prev.path).catch(() => { /* ignore */ });
+      }
       // Perf: validity check and basename are independent — run them in one
       // round-trip instead of two sequential IPC hops (repo open latency).
       const [isRepo, name] = await Promise.all([
@@ -228,6 +241,19 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     // Invalidate git cache for the removed repo — its SimpleGit instance
     // and child process pool are no longer needed.
     api.git.invalidateCache(path).catch(() => { /* ignore */ });
+    // STORAGE LEAK FIX: clean up per-repo localStorage keys so they don't
+    // accumulate forever in the browser origin. Previously, removing a
+    // repo from the sidebar kept its AI chat history (10-500 KB) and UI
+    // preferences (panel sizes, view modes, commit-message history) in
+    // localStorage forever — over a year of adding/removing repos this
+    // could grow to several MB and slow down every `localStorage.getItem`
+    // call (which scans the entire origin key set on some browsers).
+    try {
+      clearChatHistory(path);
+      clearProjectPrefs(path);
+    } catch {
+      /* localStorage might be unavailable in tests — non-critical */
+    }
     // If the removed repo was the current repo, close it properly —
     // stop the file watcher, clear git status, dispatch the repo-closed
     // event so App.tsx clears global selections and navigates to the

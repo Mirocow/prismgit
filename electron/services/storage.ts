@@ -32,7 +32,6 @@ const store = new SimpleStore({
       defaultCloneDir: '',
       showReflogInHistory: false,
       maxHistoryLoad: 500,
-      enableTelemetry: false,
     },
     repositories: [],
     repoMetadata: {},
@@ -600,4 +599,13 @@ export function setRepoGroup(repoPath: string, groupId: string | null): void {
   }
   repos[idx] = { ...repos[idx], groupId: parent };
   store.set('repositories', repos);
+}
+
+/**
+ * Flush pending debounced writes (call on app quit). Without this, the last
+ * 100 ms of settings/repo-list changes can be lost when the app quits
+ * before the debounce timer fires.
+ */
+export function flushSettings(): void {
+  store.flush();
 }

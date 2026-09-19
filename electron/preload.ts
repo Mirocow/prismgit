@@ -653,11 +653,11 @@ const api = {
 
   // Menu events (one-way from main to renderer)
   // Avatar cache — downloads + caches avatar images on disk.
-  // Renderer calls api.avatar.get(url) or api.avatar.getByEmail(email).
-  // Returns a data URI string (or null) — no network in renderer.
+  // Renderer calls api.avatar.get(url). Returns a data URI string (or null)
+  // — no network in renderer. The `getByEmail` variant was removed as dead
+  // code; the renderer builds the Gravatar URL itself via src/lib/gravatar.ts.
   avatar: {
     get: (url: string) => ipcRenderer.invoke('avatar:get', url),
-    getByEmail: (email: string, size?: number) => ipcRenderer.invoke('avatar:getByEmail', email, size),
   },
 
   events: {

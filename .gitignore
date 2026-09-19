@@ -18,6 +18,13 @@ coverage/
 *.swp
 *.swo
 *~
+# VS Code "Bookmarks" extension artifact (per-developer code bookmarks —
+# not project state, never share it).
+bookmarks.json
+
+# Local-only dev screenshots / download artifacts (per-developer session
+# output — should never be committed).
+download/
 
 # OS
 .DS_Store

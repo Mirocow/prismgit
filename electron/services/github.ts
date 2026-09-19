@@ -92,6 +92,13 @@ async function httpsJson<T>(url: string, options: https.RequestOptions & { token
         });
       }
     );
+    // NETWORK TIMEOUT: 15 s hard cap so a hung connection (GitHub
+    // maintenance, flaky proxy, dead captive portal) cannot block the IPC
+    // handler forever. Without this, the renderer-side `await` hangs
+    // indefinitely and the UI shows a permanent spinner.
+    req.setTimeout(15000, () => {
+      req.destroy(new Error('GitHub API request timed out after 15 s'));
+    });
     req.on('error', (e) => {
       finishApiCall(handle, { status: 0, error: String(e) });
       reject(e);
@@ -337,7 +344,34 @@ export interface CommitCheckStatus {
 /**
  * Fetch check-run summaries for a batch of commits (max ~25 per call to stay
  * within the API rate limits and keep latency acceptable).
+ *
+ * PERFORMANCE: previously this ran a sequential `for...of await` — 25 SHAs
+ * × ~200 ms per request = 5 s wall time on a busy PR. Now runs with
+ * bounded concurrency 5 → ~1 s wall time. A per-SHA in-memory cache (the
+ * checks for a given commit SHA are immutable) further avoids re-fetching
+ * SHAs we've already seen in this session.
  */
+const checkRunCache = new Map<string, CommitCheckStatus>();
+const MAX_CONCURRENT_CHECK_RUNS = 5;
+
+async function runWithBoundedConcurrency<T, R>(
+  items: T[],
+  worker: (item: T) => Promise<R>,
+  concurrency: number
+): Promise<void> {
+  let cursor = 0;
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(concurrency, items.length); i++) {
+    workers.push((async () => {
+      while (cursor < items.length) {
+        const idx = cursor++;
+        await worker(items[idx]);
+      }
+    })());
+  }
+  await Promise.all(workers);
+}
+
 export async function getCheckRuns(
   owner: string,
   repo: string,
@@ -347,7 +381,18 @@ export async function getCheckRuns(
   if (!token) throw new Error('Not authenticated with GitHub');
   const batch = shas.slice(0, 25);
   const results: Record<string, CommitCheckStatus> = {};
+
+  // 1) Serve everything we've already cached in this session (immutable per SHA).
+  const todo: string[] = [];
   for (const sha of batch) {
+    const cached = checkRunCache.get(sha);
+    if (cached) results[sha] = cached;
+    else todo.push(sha);
+  }
+  if (todo.length === 0) return results;
+
+  // 2) Fetch the remaining SHAs with bounded concurrency 5.
+  await runWithBoundedConcurrency(todo, async (sha) => {
     try {
       const json = await httpsJson<{
         total_count?: number;
@@ -365,21 +410,26 @@ export async function getCheckRuns(
       } else if (runs.length > 0) {
         conclusion = 'success';
       }
-      results[sha] = {
+      const status: CommitCheckStatus = {
         sha,
         status: runs.length > 0 ? 'completed' : 'none',
         conclusion,
         totalChecks: json.total_count ?? runs.length,
       };
+      results[sha] = status;
+      checkRunCache.set(sha, status);
     } catch (e) {
       if (/404/.test(String(e))) {
         // No checks for this commit (or private API mismatch) — mark as none
-        results[sha] = { sha, status: 'none', totalChecks: 0 };
+        const status: CommitCheckStatus = { sha, status: 'none', totalChecks: 0 };
+        results[sha] = status;
+        checkRunCache.set(sha, status);
       } else {
         throw e;
       }
     }
-  }
+  }, MAX_CONCURRENT_CHECK_RUNS);
+
   return results;
 }
 
@@ -393,6 +443,13 @@ export function getStoredAuthState(): { authenticated: boolean; user?: GithubUse
 
 export function getStoredToken(): string | undefined {
   return getAuthState().token;
+}
+
+/**
+ * Flush pending debounced writes (call on app quit).
+ */
+export function flushGithubStore(): void {
+  store.flush();
 }
 
 // ============================================================

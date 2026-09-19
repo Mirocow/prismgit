@@ -15,9 +15,9 @@ import { cleanupTempCopies } from './services/vscode.js';
 import { installGitCommandLogger } from './services/commandLog.js';
 import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
 import { SimpleStore } from './services/simpleStore.js';
-import { migratePlaintextSecrets } from './services/storage.js';
-import { migrateLegacyGithubToken } from './services/github.js';
-import { migrateLegacyGitLabToken } from './services/gitlab.js';
+import { migratePlaintextSecrets, flushSettings } from './services/storage.js';
+import { migrateLegacyGithubToken, flushGithubStore } from './services/github.js';
+import { migrateLegacyGitLabToken, flushGitlabStore } from './services/gitlab.js';
 import { flushSecrets } from './services/secrets.js';
 import { buildAppMenu } from './menu.js';
 import { setMenuLocale, normalizeMenuLocale } from './i18n-menu.js';
@@ -412,9 +412,17 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   saveWindowState();
   stopAllWatchers();
-  // Flush the debounced secret vault (and settings) write — otherwise a
-  // quit within 100ms of a secret write could lose it.
+  // Flush the debounced store writes — otherwise a quit within 100 ms of
+  // any settings/repo/auth/secrets change could lose it. Each store's
+  // writeNow() is synchronous (tmp-write + rename), so the app is
+  // guaranteed to have flushed before the process exits.
   flushSecrets();
+  flushSettings();
+  flushGithubStore();
+  flushGitlabStore();
+  // The window-state store lives in this module — flush it too, even
+  // though saveWindowState() schedules a debounced write above.
+  windowStateStore.flush();
 });
 
 // Expose dialog for renderer

@@ -83,6 +83,32 @@ export async function proxyFetch(
   let lastError: { ok: boolean; status: number; statusText: string; body: string } | null = null;
   let backoff = INITIAL_BACKOFF_MS;
 
+  // RACE FIX (R8): the retry loop's `setTimeout` backoff timers were never
+  // cleared on abort — if the user pressed Stop during a 2-8 s backoff,
+  // the timer kept running and the abort only fired on the NEXT iteration.
+  // On Ollama cold-model (3 retries × 8 s = 24 s of backoff + up to 300 s
+  // per request), this meant the model stayed loaded in VRAM for minutes
+  // after the user pressed Stop.
+  //
+  // We now race every backoff timer against the abort signal and clear the
+  // timer as soon as the abort wins, so the event loop drops the timer
+  // immediately.
+  const sleepWithAbort = (ms: number): Promise<void> => new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(t);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     // If the user pressed Stop, abort immediately — don't start another
     // retry attempt. The caller (runWithTools) will surface this as an
@@ -154,7 +180,7 @@ export async function proxyFetch(
         // fetch abort on the long initial wait). If we haven't exhausted retries,
         // treat as model-loading and retry.
         if (attempt < MAX_RETRIES) {
-          await new Promise(resolve => setTimeout(resolve, backoff));
+          await sleepWithAbort(backoff);
           backoff *= 2;
           continue;
         }
@@ -171,7 +197,7 @@ export async function proxyFetch(
     // loading the model in the background. After 2-3 retries (4-12 seconds
     // total), the model is typically warm and subsequent requests succeed.
     if (attempt < MAX_RETRIES && isModelLoading(result.status, result.body)) {
-      await new Promise(resolve => setTimeout(resolve, backoff));
+      await sleepWithAbort(backoff);
       backoff *= 2;
       continue;
     }

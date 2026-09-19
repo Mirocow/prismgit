@@ -42,7 +42,38 @@ export function useLazyList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(600);
-  const [measuredHeights, setMeasuredHeights] = useState<Map<number, number>>(new Map());
+  // PERFORMANCE (P7): the previous `measuredHeights: Map<number, number>`
+  // recreated a Map on every measurement, which in turn invalidated the
+  // `totalHeight + offsets` useMemo — re-running an O(N) scan on every
+  // measurement. On a 10 000-row list with 30 visible items, the initial
+  // measurement pass did 30 × O(10 000) = 300 000 ops just for offsets.
+  //
+  // Now heights live in a flat `Float64Array` indexed by row position.
+  // Mutation is in-place (no Map clone), and the `version` counter is the
+  // only thing that bumps to trigger the useMemo recompute.
+  const heightsRef = useRef<Float64Array>(new Float64Array(0));
+  const [heightsVersion, setHeightsVersion] = useState(0);
+  // Reallocate when itemCount changes (avoid index-out-of-bounds writes).
+  if (heightsRef.current.length !== itemCount) {
+    const next = new Float64Array(itemCount);
+    // Preserve previously measured heights for indices that still exist.
+    next.set(heightsRef.current.subarray(0, Math.min(heightsRef.current.length, itemCount)));
+    heightsRef.current = next;
+  }
+
+  // Compute cumulative heights.
+  const { totalHeight, offsets } = useMemo(() => {
+    const heights = heightsRef.current;
+    const offs = new Float64Array(itemCount + 1);
+    let total = 0;
+    offs[0] = 0;
+    for (let i = 0; i < itemCount; i++) {
+      const h = heights[i] || estimateRowHeight;
+      total += h;
+      offs[i + 1] = total;
+    }
+    return { totalHeight: total, offsets: offs };
+  }, [itemCount, estimateRowHeight, heightsVersion]);
 
   // Track viewport size
   useEffect(() => {
@@ -76,23 +107,6 @@ export function useLazyList({
     return () => el.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  // Compute cumulative heights
-  const { totalHeight, offsets } = useMemo(() => {
-    const heights: number[] = new Array(itemCount);
-    let total = 0;
-    for (let i = 0; i < itemCount; i++) {
-      heights[i] = measuredHeights.get(i) ?? estimateRowHeight;
-      total += heights[i];
-    }
-    // Compute cumulative offsets
-    const offs: number[] = new Array(itemCount + 1);
-    offs[0] = 0;
-    for (let i = 0; i < itemCount; i++) {
-      offs[i + 1] = offs[i] + heights[i];
-    }
-    return { totalHeight: total, offsets: offs };
-  }, [itemCount, measuredHeights, estimateRowHeight]);
-
   // Binary search for the first item whose bottom is below scrollTop
   const start = useMemo(() => {
     let lo = 0, hi = itemCount;
@@ -119,13 +133,11 @@ export function useLazyList({
   const offsetY = offsets[start] ?? 0;
 
   const measureItem = useCallback((index: number, height: number) => {
-    setMeasuredHeights(prev => {
-      const cur = prev.get(index);
-      if (cur !== undefined && Math.abs(cur - height) < 1) return prev; // no change
-      const next = new Map(prev);
-      next.set(index, height);
-      return next;
-    });
+    const cur = heightsRef.current[index];
+    if (cur !== undefined && Math.abs(cur - height) < 1) return; // no change
+    heightsRef.current[index] = height;
+    // Bump version to trigger recompute of totalHeight + offsets.
+    setHeightsVersion(v => v + 1);
   }, []);
 
   const scrollToIndex = useCallback((index: number) => {

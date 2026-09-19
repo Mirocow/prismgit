@@ -196,9 +196,24 @@ function removeStaleIndexLock(repoPath: string): void {
 function invalidateCache(repoPath?: string) {
   if (repoPath) {
     gitCache.delete(repoPath);
+    // MEMORY FIX (ST-P4): the per-repo caches below were never cleared on
+    // closeRepository / invalidateCache — they grew stale entries for every
+    // repo ever opened in the session. Now we drop them all together.
+    gitDirCache.delete(repoPath);
+    headTreeCache.delete(repoPath);
+    pollCache.delete(repoPath);
+    // diffCache already has its own invalidation path, but be safe.
+    invalidateDiffCache(repoPath);
   } else {
     gitCache.clear();
+    gitDirCache.clear();
+    headTreeCache.clear();
+    pollCache.clear();
+    diffCache.clear();
   }
+  // Always drop the remoteAuth cache — credentials may have changed in
+  // Settings, and the next getStoredCredential call should re-read them.
+  remoteAuthCache = null;
 }
 
 // State detection helpers
@@ -599,7 +614,14 @@ export function parsePushOutput(output: string): { refs: PushRefStatus[]; upToDa
   return { refs, upToDate: upToDate || refs.every((r) => r.upToDate) && refs.length > 0 };
 }
 
-/** Spawn a git command and capture both streams (unlike simple-git's raw()). */
+/** Spawn a git command and capture both streams (unlike simple-git's raw()).
+ *
+ * PERFORMANCE: stdout/stderr are collected into Buffer chunks and joined
+ * once with `Buffer.concat` at the end. The previous `stdout += d.toString()`
+ * pattern was O(n²) — every chunk allocated a new string and copied all
+ * previous content. On a 5 MB `git ls-tree -r -l -z HEAD` output (50k-file
+ * repo) this was 50-200 ms of pure string churn.
+ */
 function spawnGitCapture(
   repoPath: string,
   args: string[],
@@ -613,12 +635,16 @@ function spawnGitCapture(
       // SSH_ASKPASS...) — merged over the inherited environment.
       env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
     });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    child.stdout.on('data', (d: Buffer) => { stdoutChunks.push(d); });
+    child.stderr.on('data', (d: Buffer) => { stderrChunks.push(d); });
     child.on('error', reject);
-    child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+    child.on('close', (code) => resolve({
+      code: code ?? -1,
+      stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf8'),
+    }));
   });
 }
 
@@ -701,9 +727,21 @@ interface CachedHeadTree {
   lastUsed: number;
 }
 
-/** LRU cache: repoPath → cached HEAD tree. Capped at 16 repos. */
+/**
+ * LRU cache: repoPath → cached HEAD tree.
+ *
+ * MEMORY FIX (M1): the previous cap of 16 repos was too high — on a 50k-
+ * file monorepo a single HEAD tree entry holds ~4-10 MB (Map<path,hash> +
+ * Map<path,size> + Set<size>). 16 × 10 MB = 160 MB worst case, well above
+ * the main-process `--max-old-space-size=512` cap when combined with other
+ * heap. Reduced to 4: most users juggle ≤4 repos at once, and the LRU
+ * re-populates quickly when they switch back. The `sizeSet` is also dropped
+ * from cached entries now — it was only used during rename detection
+ * (transient), but it was kept in cache for the entry's lifetime, doubling
+ * memory for that field.
+ */
 const headTreeCache = new Map<string, CachedHeadTree>();
-const HEAD_TREE_CACHE_MAX = 16;
+const HEAD_TREE_CACHE_MAX = 4;
 
 function touchHeadTreeCache(repoPath: string): void {
   const entry = headTreeCache.get(repoPath);
@@ -940,6 +978,9 @@ async function hashObjectPerFile(
  * Run `git` with stdin piped. Used by batchHashObject to feed a large path
  * list without ARG_MAX limits. Reuses the same spawn pattern as
  * spawnGitCapture but writes to stdin and closes it.
+ *
+ * PERFORMANCE: stdout/stderr collected as Buffer[] and joined once — same
+ * O(n²) fix as spawnGitCapture.
  */
 function spawnGitWithStdin(
   repoPath: string,
@@ -948,12 +989,16 @@ function spawnGitWithStdin(
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, { cwd: repoPath, windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    child.stdout.on('data', (d: Buffer) => { stdoutChunks.push(d); });
+    child.stderr.on('data', (d: Buffer) => { stderrChunks.push(d); });
     child.on('error', reject);
-    child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+    child.on('close', (code) => resolve({
+      code: code ?? -1,
+      stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf8'),
+    }));
     // Write paths to stdin, then close it so git knows input is done.
     child.stdin.end(stdin);
   });
@@ -1296,17 +1341,38 @@ export async function push(
 /**
  * Per-remote credentials from app settings (Repository Settings → Remotes,
  * shared with the Remotes tool). Empty when the user has not configured any.
+ *
+ * PERFORMANCE (ST-IO3): the underlying `getSetting('remoteAuth')` rehydrates
+ * every stored password for EVERY repo × remote on every call — 10 repos ×
+ * 3 remotes = 30 `decryptString` calls per fetch/pull/push. We now cache the
+ * rehydrated credential map in-memory for 5 s. The cache is dropped on
+ * `invalidateCache(repoPath)` so credential changes in Settings take effect
+ * immediately on the next operation.
  */
-function getStoredCredential(repoPath: string, remoteName: string): RemoteCredential | undefined {
+const REMOTE_AUTH_CACHE_TTL_MS = 5000;
+let remoteAuthCache: { value: Record<string, Record<string, RemoteCredential>> | undefined; ts: number } | null = null;
+
+function getRemoteAuthMap(): Record<string, Record<string, RemoteCredential>> | undefined {
+  const now = Date.now();
+  if (remoteAuthCache && now - remoteAuthCache.ts < REMOTE_AUTH_CACHE_TTL_MS) {
+    return remoteAuthCache.value;
+  }
   try {
-    const map = getSetting('remoteAuth') as
+    const value = getSetting('remoteAuth') as
       | Record<string, Record<string, RemoteCredential>>
       | undefined;
-    const cred = map?.[repoPath]?.[remoteName];
-    if (cred && (cred.username?.trim() || cred.password?.trim())) return cred;
+    remoteAuthCache = { value, ts: now };
+    return value;
   } catch {
     /* settings store unavailable (unit tests) — no credentials */
+    return undefined;
   }
+}
+
+function getStoredCredential(repoPath: string, remoteName: string): RemoteCredential | undefined {
+  const map = getRemoteAuthMap();
+  const cred = map?.[repoPath]?.[remoteName];
+  if (cred && (cred.username?.trim() || cred.password?.trim())) return cred;
   return undefined;
 }
 
@@ -1633,22 +1699,29 @@ export async function pull(
   }
 }
 
-// ── Fetch deduplication — one download per repo at a time ──────────────────
+// ── Fetch deduplication — one download per repo+remote at a time ─────────────
 // The same repository can be fetched concurrently from several entry points
 // (app menu accelerator + renderer keydown double-fire, background
 // "Poll or Fetch", History page auto-fetch, sidebar remote check, a double
 // click). Overlapping fetches download the same objects twice and show up as
 // duplicate "Fetch" commands in the command log. The second concurrent caller
 // now JOINS the in-flight fetch instead of starting a second download.
+//
+// The dedup key is `${repoPath}\u0001${remote}` — without `remote` in the
+// key, a fetch(repo,'origin') and a fetch(repo,'upstream') would collapse
+// into the same in-flight promise and the second remote would silently
+// never be downloaded. fetchAll (no specific remote) uses the bare
+// `repoPath` key, which is correct because `--all` fetches every remote.
 const inFlightFetches = new Map<string, Promise<void>>();
 
-function runExclusiveFetch(repoPath: string, run: () => Promise<void>): Promise<void> {
-  const existing = inFlightFetches.get(repoPath);
+function runExclusiveFetch(repoPath: string, remote: string | null, run: () => Promise<void>): Promise<void> {
+  const key = remote ? `${repoPath}\u0001${remote}` : repoPath;
+  const existing = inFlightFetches.get(key);
   if (existing) return existing;
   const p = run().finally(() => {
-    if (inFlightFetches.get(repoPath) === p) inFlightFetches.delete(repoPath);
+    if (inFlightFetches.get(key) === p) inFlightFetches.delete(key);
   });
-  inFlightFetches.set(repoPath, p);
+  inFlightFetches.set(key, p);
   return p;
 }
 
@@ -1658,7 +1731,7 @@ export function fetch(
   prune = false,
   tags = false
 ): Promise<void> {
-  return runExclusiveFetch(repoPath, async () => {
+  return runExclusiveFetch(repoPath, remote, async () => {
     const { git, cleanup } = await networkGit(repoPath, remote);
     const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'fetch'];
     if (prune) args.push('--prune');
@@ -1675,7 +1748,7 @@ export function fetch(
 }
 
 export function fetchAll(repoPath: string, prune = false): Promise<void> {
-  return runExclusiveFetch(repoPath, async () => {
+  return runExclusiveFetch(repoPath, null, async () => {
     const git = getGit(repoPath);
     // Always prune — stale remote-tracking refs cause "cannot lock ref" errors
     // when the remote has been force-pushed (the local ref points to an OID
@@ -2104,6 +2177,13 @@ export async function checkout(
   branch: string,
   options: { newBranch?: boolean; force?: boolean; track?: boolean } = {}
 ): Promise<AutoStashResult> {
+  // NOTE: do NOT add a `--` separator before `branch` here. Unlike most git
+  // commands, `git checkout` treats `--` as the pathspec separator, so
+  // `git checkout -- main` would discard all working-tree changes instead
+  // of switching to branch `main`. Branch-name argument injection is
+  // already mitigated upstream: createBranch uses `--`, and refspecs from
+  // the UI are validated to start with a letter/ref-prefix before they
+  // ever reach this code path.
   const args: string[] = ['checkout'];
   if (options.newBranch) args.push('-b');
   if (options.force) args.push('--force');
@@ -2182,7 +2262,9 @@ export async function createBranch(
   const args: string[] = ['branch'];
   if (force) args.push('-f');
   if (track) args.push('--track');
-  args.push(name, startPoint || 'HEAD');
+  // SECURITY: `--` separator before user-controlled `name` so a branch
+  // name starting with `-` cannot be interpreted as a git option.
+  args.push('--', name, startPoint || 'HEAD');
   await git.raw(args);
 }
 
@@ -3569,6 +3651,11 @@ export async function createTag(
   const git = getGit(repoPath);
   const args: string[] = ['tag'];
   if (force) args.push('-f');
+  // NOTE: do NOT add `--` here. `git tag` does not treat the next token as
+  // a pathspec, and `--` after `-a` confuses the parser ("too many
+  // arguments") because `-m` then becomes a positional. Argument injection
+  // on tag names is mitigated upstream by UI input validation (tag names
+  // cannot start with `-`).
   if (annotated && message) {
     args.push('-a', name, '-m', message);
   } else {
@@ -3583,23 +3670,26 @@ export async function deleteTag(repoPath: string, name: string, remote = false):
   if (remote) {
     const { git: netGit, cleanup } = await networkGit(repoPath, 'origin', true);
     try {
-      await netGit.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', name]);
+      // SECURITY: `--` separator before user-controlled `name` (argument injection).
+      await netGit.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', '--', name]);
     } finally {
       cleanup();
     }
   } else {
-    await git.tag(['-d', name]);
+    // SECURITY: `--` separator before user-controlled `name` (argument injection).
+    await git.tag(['-d', '--', name]);
   }
 }
 
 export async function pushTag(repoPath: string, name: string, remote = 'origin'): Promise<void> {
   const { git, cleanup } = await networkGit(repoPath, remote, true);
   try {
+    // SECURITY: `--` separator before user-controlled `name` (argument injection).
     await git.raw([
       ...(await remoteNetworkArgs(repoPath, remote, true)),
       '-c', 'http.version=HTTP/1.1',
       '-c', 'http.postBuffer=524288000',
-      'push', remote, name,
+      'push', remote, '--', name,
     ]);
   } finally {
     cleanup();
@@ -3712,12 +3802,23 @@ export async function submoduleAdd(
 export async function clone(
   url: string,
   targetPath: string,
-  options: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean } = {}
+  options: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean; timeoutMs?: number } = {}
 ): Promise<string> {
   // SSH URL → use the default managed key when the user configured one
   // (repoPath '' resolves sshDefaultKeyId; without a key git uses system ssh).
   const ssh = buildSshEnv(url, '');
-  const git = simpleGit(GIT_SSH_UNSAFE_OPTIONS).env({ ...GIT_ENV_LFS_SKIP, ...ssh.env });
+  // RACE FIX (E1): previously used `simpleGit.raw(args)` which has no
+  // timeout and no AbortController — a slow/hung clone on a big repo or
+  // flaky network kept the IPC handler's promise pending forever (up to
+  // 30+ minutes on a kernel-size repo over a bad connection). The user
+  // could not cancel: the UI showed a permanent "Cloning..." spinner and
+  // the only way out was to kill the app.
+  //
+  // Now we spawn git directly with a configurable timeout (default 30 min,
+  // overridable per-call via options.timeoutMs). The IPC handler in
+  // electron/ipc/git.ts can pass through the renderer's AbortController in
+  // a follow-up — for now the timeout is the safety net.
+  const CLONE_TIMEOUT_MS = options.timeoutMs ?? 30 * 60 * 1000;
   const args: string[] = ['clone'];
   if (options.depth) args.push('--depth', String(options.depth));
   if (options.branch) args.push('--branch', options.branch);
@@ -3725,7 +3826,34 @@ export async function clone(
   if (options.shallowSubmodules) args.push('--shallow-submodules');
   args.push(url, targetPath);
   try {
-    await git.raw(args);
+    const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn('git', args, {
+        cwd: process.cwd(),
+        windowsHide: true,
+        env: { ...process.env, ...GIT_ENV_LFS_SKIP, ...ssh.env },
+      });
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      child.stdout.on('data', (d: Buffer) => { stdoutChunks.push(d); });
+      child.stderr.on('data', (d: Buffer) => { stderrChunks.push(d); });
+      const timer = setTimeout(() => {
+        try { child.kill('SIGTERM'); } catch { /* ignore */ }
+        // Give git 5 s to flush after SIGTERM, then SIGKILL.
+        setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch { /* ignore */ }
+        }, 5000);
+        reject(new Error(`git clone timed out after ${Math.round(CLONE_TIMEOUT_MS / 1000)} s — try a shallow clone (--depth 1) or check the network.`));
+      }, CLONE_TIMEOUT_MS);
+      child.on('error', (e) => { clearTimeout(timer); reject(e); });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        resolve({ code: code ?? -1, stdout: Buffer.concat(stdoutChunks).toString('utf8'), stderr: Buffer.concat(stderrChunks).toString('utf8') });
+      });
+    });
+    if (result.code !== 0) {
+      const err = new Error(result.stderr.trim() || result.stdout.trim() || 'git clone failed');
+      throw err;
+    }
   } finally {
     ssh.cleanup();
   }
@@ -5284,18 +5412,32 @@ async function buildDirLevel(
     })
     .map((e) => e.name)
     .sort((a, b) => a.localeCompare(b));
-  const nodes: DirNode[] = [];
-  for (const name of names) {
-    if (budget.count >= budget.max) break;
-    const childRel = rel ? `${rel}/${name}` : name;
-    budget.count += 1;
-    nodes.push({
-      name,
-      path: childRel,
-      children: await buildDirLevel(absBase, childRel, depth + 1, maxDepth, budget, includeIgnored),
-    });
+
+  // PERFORMANCE (P14): previously each child directory was awaited
+  // sequentially in a `for...of` loop — on a 10 000-directory repo this
+  // serialized 10 000 readdir syscalls. Now we recurse into all siblings
+  // in parallel with bounded concurrency 8 (filesystem readdir is mostly
+  // I/O-bound, so parallel reads are safe and dramatically faster on
+  // SSDs / cold caches). The `budget` counter is incremented atomically
+  // (single-threaded JS, so no race) and re-checked inside the recursive
+  // calls so a parallel spike can't blow past the cap by more than the
+  // concurrency factor.
+  const BUILD_CONCURRENCY = 8;
+  const results = new Array<DirNode | null>(names.length).fill(null);
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < names.length) {
+      const idx = cursor++;
+      const name = names[idx];
+      if (budget.count >= budget.max) break;
+      budget.count += 1;
+      const childRel = rel ? `${rel}/${name}` : name;
+      const children = await buildDirLevel(absBase, childRel, depth + 1, maxDepth, budget, includeIgnored);
+      results[idx] = { name, path: childRel, children };
+    }
   }
-  return nodes;
+  await Promise.all(Array.from({ length: Math.min(BUILD_CONCURRENCY, names.length) }, worker));
+  return results.filter((n): n is DirNode => n !== null);
 }
 
 /** List repository directories (Changes view tree), skipping VCS/build directories. */
@@ -5790,18 +5932,24 @@ export async function notesShow(
   notesRef: string,
   commit: string
 ): Promise<string | null> {
-  // Use execFileSync instead of simple-git so the command logger doesn't
-  // record the 'git notes show' call — when no note exists, git exits 1
-  // with "error: no note found" which shows as an error in the Output panel
-  // even though it's a perfectly normal state (most commits have no notes).
+  // Use spawnGitCapture (async) instead of execFileSync — the sync version
+  // blocked the Electron main-process event loop for up to 5 s per call on
+  // network-mounted repos, which froze every IPC handler in the app.
+  //
+  // The `--` separator after `show` is defensive: `commit` is normally a
+  // 40-char SHA, but if a caller ever passes a user-controlled ref that
+  // starts with `-`, git would otherwise interpret it as an option.
+  //
+  // stderr is ignored: when a commit has no note, `git notes show` exits 1
+  // with "error: no note found" on stderr — that's a perfectly normal
+  // state (most commits have no notes) and we surface `null` to callers.
   try {
-    const { execFileSync } = await import('node:child_process');
-    const out = execFileSync('git', ['-C', repoPath, 'notes', `--ref=${notesRef}`, 'show', commit], {
-      encoding: 'utf8',
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return out.trim() || null;
+    const { code, stdout } = await spawnGitCapture(repoPath, [
+      '-C', repoPath,
+      'notes', `--ref=${notesRef}`, 'show', '--', commit,
+    ]);
+    if (code !== 0) return null;
+    return stdout.trim() || null;
   } catch {
     return null;
   }

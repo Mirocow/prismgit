@@ -156,7 +156,6 @@ export interface AppSettings {
   gitUserEmail?: string;
   showReflogInHistory: boolean;
   maxHistoryLoad: number;
-  enableTelemetry: boolean;
   githubPAT?: string;
   pullStrategy: 'merge' | 'rebase';
   /**

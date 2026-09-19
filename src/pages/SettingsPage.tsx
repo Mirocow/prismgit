@@ -47,11 +47,29 @@ function BlurSaveInput({
 }
 
 export function SettingsPage() {
-  const { settings, theme, themeMode, setSetting, toggleTheme, setTheme, setThemeMode } = useSettingsStore();
+  // PERFORMANCE: previously this subscribed to the entire `useSettingsStore()`
+  // — every keystroke in any settings input mutated `settings` and re-
+  // rendered the whole 2625-line page (10-30 ms). Now we subscribe to the
+  // individual fields the component actually reads. setSetting / setTheme /
+  // setThemeMode / toggleTheme are stable action references in Zustand, so
+  // they never trigger re-renders on their own.
+  const settings = useSettingsStore((s) => s.settings);
+  const theme = useSettingsStore((s) => s.theme);
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const setSetting = useSettingsStore((s) => s.setSetting);
+  const toggleTheme = useSettingsStore((s) => s.toggleTheme);
+  const setTheme = useSettingsStore((s) => s.setTheme);
+  const setThemeMode = useSettingsStore((s) => s.setThemeMode);
   const { user, authenticated, loginWithPAT, logout, loadAuthState } = useAuthStore();
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastActions();
-  const { repos, removeRepo, loadRepos, openRepository } = useRepositoryStore();
+  // PERFORMANCE: same shallow pick for repositoryStore — `repos` changes
+  // when repos are added/removed, `removeRepo/loadRepos/openRepository` are
+  // stable action references.
+  const repos = useRepositoryStore((s) => s.repos);
+  const removeRepo = useRepositoryStore((s) => s.removeRepo);
+  const loadRepos = useRepositoryStore((s) => s.loadRepos);
+  const openRepository = useRepositoryStore((s) => s.openRepository);
   const { t, locale, setLocale } = useI18n();
 
   const [pat, setPat] = useState('');

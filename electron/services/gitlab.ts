@@ -168,6 +168,12 @@ async function apiJson<T>(
       finishApiCall(handle, { status: 0, error: String(e) });
       reject(e);
     });
+    // NETWORK TIMEOUT: 15 s hard cap — same rationale as github.ts.
+    // Without this, a hung GitLab connection blocks the IPC handler
+    // forever and the UI shows a permanent spinner.
+    req.setTimeout(15000, () => {
+      req.destroy(new Error('GitLab API request timed out after 15 s'));
+    });
     if (options.body) {
       req.write(options.body);
     }
@@ -190,6 +196,11 @@ export async function authWithPAT(
 
 export function logout(): void {
   setAuthState({});
+}
+
+/** Flush pending debounced writes (call on app quit). */
+export function flushGitlabStore(): void {
+  store.flush();
 }
 
 /** Public auth state for the renderer. The token is NOT exposed — only
