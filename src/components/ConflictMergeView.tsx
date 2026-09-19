@@ -360,6 +360,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
   const loadFile = useCallback(async () => {
     setLoading(true);
     setDirty(false);
+    dirtyRef.current = false;
     try {
       // FIRST: check if the file is actually in conflict state.
       // `git ls-files -u <file>` lists unmerged entries with their stages.
@@ -459,9 +460,34 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
 
   // ===== Editor input handling (uncontrolled contentEditable) ==============
 
+  // F7 perf fix: previously setDirty(true) ran on EVERY input event (every
+  // keystroke), forcing a re-render of the 887-line ConflictMergeView tree
+  // (3 contentEditable panels + syntax-highlighted line list + merge
+  // toolbar). For long files this caused 50-200 ms lag per keystroke.
+  //
+  // Now we use a dirtyRef that updates synchronously (so the Save button
+  // check stays immediate) and a 300 ms debounce for the React state bump.
+  const dirtyRef = useRef(false);
+  const dirtyStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushDirtyState = useCallback(() => {
+    if (dirtyStateTimerRef.current) {
+      clearTimeout(dirtyStateTimerRef.current);
+      dirtyStateTimerRef.current = null;
+    }
+    setDirty(true);
+  }, []);
   const parseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleEditorInput = useCallback(() => {
-    setDirty(true);
+    // Update the ref synchronously — Save button reads this for its
+    // "is there anything to save?" check without waiting for a re-render.
+    if (!dirtyRef.current) {
+      dirtyRef.current = true;
+      // Debounce the React state bump so we don't re-render on every
+      // keystroke — 300 ms is below human perception for the Save button
+      // highlight change.
+      if (dirtyStateTimerRef.current) clearTimeout(dirtyStateTimerRef.current);
+      dirtyStateTimerRef.current = setTimeout(flushDirtyState, 300);
+    }
     if (parseTimerRef.current) clearTimeout(parseTimerRef.current);
     parseTimerRef.current = setTimeout(() => {
       if (editorRef.current) {
@@ -474,7 +500,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
         }
       }
     }, 400);
-  }, [hunks.length]);
+  }, [hunks.length, flushDirtyState]);
 
   // ===== Resolution actions =================================================
 
@@ -554,6 +580,7 @@ export function ConflictMergeView({ filePath, onResolved }: ConflictMergeViewPro
       toast.success(t('changes.conflictResolvedStaged'));
       await refreshStatus(repo.path);
       setDirty(false);
+      dirtyRef.current = false;
       onResolved?.(filePath);
     } catch (e) {
       toast.error(t('changes.saveFailed'), String(e));
