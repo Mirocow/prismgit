@@ -462,6 +462,8 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
               setDirty(true);
             }}
             textareaRef={textareaRef}
+            oursContent={oursContent}
+            theirsContent={theirsContent}
           />
           {/* Floating per-conflict action bars */}
           {conflictMarkersInResult.map((startLine, i) => (
