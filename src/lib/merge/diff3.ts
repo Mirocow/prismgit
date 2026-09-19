@@ -95,16 +95,22 @@ function buildMatchPoints(
   for (const [bs, ts, len] of theirsBlocks) {
     for (let k = 0; k < len; k++) theirsAt.set(bs + k, ts + k);
   }
-  // Boundaries = positions where BOTH ours and theirs have a match (these
-  // are the "stable anchors" that we can sync on). Plus start and end.
+  // Boundaries = positions where BOTH ours AND theirs have a match.
+  // Only these are true "stable anchors" where all three sides agree.
+  // Asymmetric matches (ours matches but theirs doesn't, or vice versa)
+  // are NOT anchors — they're part of the conflict/changed region.
   const points: MatchPoint[] = [];
-  points.push({ baseIdx: 0, oursIdx: oursAt.get(0) ?? null, theirsIdx: theirsAt.get(0) ?? null });
+  // Start point: check if base[0] matches in both sides
+  const startOurs = oursAt.get(0) ?? null;
+  const startTheirs = theirsAt.get(0) ?? null;
+  points.push({ baseIdx: 0, oursIdx: startOurs, theirsIdx: startTheirs });
   for (let bi = 1; bi < base.length; bi++) {
-    // We treat a position as an anchor if ours OR theirs has a match here.
-    // Actual classification happens in the walk.
     const oi = oursAt.get(bi) ?? null;
     const ti = theirsAt.get(bi) ?? null;
-    if (oi !== null || ti !== null) {
+    // Only create an anchor point where BOTH sides match base.
+    // This prevents asymmetric matches from "consuming" content that
+    // should be part of a conflict/changed region.
+    if (oi !== null && ti !== null) {
       points.push({ baseIdx: bi, oursIdx: oi, theirsIdx: ti });
     }
   }
@@ -141,13 +147,7 @@ function classifyChunk(
   oursStart: number | null, oursEnd: number | null,
   theirsStart: number | null, theirsEnd: number | null,
 ): RegionKind {
-  // Slice the three chunks. null means that side had no anchor before this
-  // chunk — treat it as "the whole side is consumed past this point" →
-  // effectively an empty chunk from that side.
   const baseChunk = baseLines.slice(baseStart, baseEnd);
-  // For ours/theirs: when startIdx is null, we use the LAST known position
-  // (which is the previous anchor's match). The caller (walkMatchPoints)
-  // tracks last-known positions and passes them as non-null.
   const oursChunk = oursStart !== null && oursEnd !== null
     ? oursLines.slice(oursStart, oursEnd)
     : [];
@@ -161,9 +161,25 @@ function classifyChunk(
     && baseChunk.every((l, i) => l === theirsChunk[i]);
   const oursEqTheirs = oursChunk.length === theirsChunk.length
     && oursChunk.every((l, i) => l === theirsChunk[i]);
-  if (oursEqTheirs) return 'stable'; // both sides agree (or both empty)
+
+  // All three empty → nothing to classify (shouldn't happen, but safe).
+  if (baseChunk.length === 0 && oursChunk.length === 0 && theirsChunk.length === 0) {
+    return 'stable';
+  }
+  // Both sides agree AND base is the same → stable.
+  // IMPORTANT: only return stable if ALL THREE agree. Previously, when
+  // ours and theirs were both empty (length 0) but base had content,
+  // oursEqTheirs=true → wrongly returned 'stable'. That made the
+  // conflict markers disappear (buildAutoMergeResult skips stable regions).
+  if (oursEqTheirs && baseEqOurs && baseEqTheirs) return 'stable';
+  // Both sides made the SAME change (ours == theirs, but != base) → stable
+  // (both sides agree on the new content, no conflict).
+  if (oursEqTheirs && oursChunk.length > 0) return 'stable';
+  // Only theirs changed (ours == base) → changed-theirs.
   if (baseEqOurs && !baseEqTheirs) return 'changed-theirs';
+  // Only ours changed (theirs == base) → changed-ours.
   if (baseEqTheirs && !baseEqOurs) return 'changed-ours';
+  // Both sides changed differently → conflict.
   return 'conflict';
 }
 
