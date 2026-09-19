@@ -294,9 +294,15 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
 
   // Cleanup: if the panel closes while a request is in flight, abort it
   // so we don't leave a dangling fetch holding a model in memory.
+  // F8 fix: also reset `busy` in the store — otherwise the next time
+  // the panel mounts it shows a permanent "busy" state (the user closed
+  // the panel mid-stream, the abort fired, but `setBusy(false)` never
+  // ran because the await chain was broken).
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      useAiChatStore.getState().setBusy(false);
+      abortRef.current = null;
     };
   }, []);
 

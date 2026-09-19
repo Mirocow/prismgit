@@ -172,18 +172,33 @@ function scheduleSave(get: () => AiChatState): void {
 // The debounced save (500ms) means closing the app within 500ms of the
 // last AI response loses the messages. This listener flushes the save
 // before the window unloads.
+//
+// B5 HMR guard: in Vite dev mode, this module re-evaluates on every HMR
+// update. Without the guard, each reload stacks ANOTHER beforeunload
+// listener that all fire on the next quit (and never get cleaned up).
+// The `if (import.meta.hot)` block registers a dispose handler so the
+// previous listener is removed before the new module instance loads.
 if (typeof window !== 'undefined') {
-  window.addEventListener('beforeunload', () => {
+  const beforeUnloadHandler = () => {
     flushChatHistory();
-  });
+  };
+  window.addEventListener('beforeunload', beforeUnloadHandler);
+  // Vite HMR: remove the previous listener when this module is replaced.
+  if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+      window.removeEventListener('beforeunload', beforeUnloadHandler);
+    });
+  }
 }
 
 // ── Cross-window sync ─────────────────────────────────────────────────────
 // Listen for 'storage' events (fires when ANOTHER window mutates localStorage
 // — same as opening the popup and the page in two windows of the same app).
 // Reload from the new key so both surfaces stay in sync.
+//
+// B5 HMR guard: same rationale as beforeunload — remove on HMR dispose.
 if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (e) => {
+  const storageHandler = (e: StorageEvent) => {
     if (e.key && e.key.startsWith(STORAGE_KEY_PREFIX)) {
       // Only reload if the changed key matches the current session.
       const { sessionRepoPath } = useAiChatStore.getState();
@@ -191,16 +206,24 @@ if (typeof window !== 'undefined') {
         useAiChatStore.getState().reloadFromStorage();
       }
     }
-  });
+  };
+  window.addEventListener('storage', storageHandler);
   // Same-window custom event — fired by saveChatHistory() after a write so
   // any other mounted subscriber in the same window picks up the change.
   // (Both AiAssistant popup and AiChatPage mount in the same window when
   // both are open simultaneously — this is the common case.)
-  window.addEventListener(UPDATE_EVENT, () => {
+  const updateHandler = () => {
     // No-op: subscribers using useAiChatStore selectors re-render automatically
     // because set() was called. This listener exists only to allow future
     // extensions (e.g. external code that wants to be notified).
-  });
+  };
+  window.addEventListener(UPDATE_EVENT, updateHandler);
+  if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+      window.removeEventListener('storage', storageHandler);
+      window.removeEventListener(UPDATE_EVENT, updateHandler);
+    });
+  }
 }
 
 // Export the helpers so the AiAssistant.tsx "Export chat log as Markdown"
