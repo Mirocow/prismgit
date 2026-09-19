@@ -11,6 +11,11 @@ import {
   GIT_SSH_UNSAFE_OPTIONS,
   GIT_UNSAFE_OPTIONS,
 } from './git-env.js';
+// D12: parseDiff is shared with the renderer via src/lib/diffParser.ts so
+// both processes use the SAME parser implementation (the previous in-file
+// duplicate had drifted from the renderer version once already). The
+// shared module exports identical types, so no conversion is needed.
+import { parseDiff as parseDiffShared, type ParsedDiff } from '../../src/lib/diffParser';
 import { buildSshEnv } from './ssh.js';
 import { getSetting } from './storage.js';
 
@@ -2653,79 +2658,12 @@ export async function pollRemoteSummaries(paths: string[]): Promise<Record<strin
   return result;
 }
 
-function parseDiff(rawDiff: string, oldPath: string, newPath: string): { hunks: DiffHunk[]; newFile: boolean; deletedFile: boolean; renamedFile: boolean; modeChange?: { oldMode: number; newMode: number } } {
-  const lines = rawDiff.split('\n');
-  const hunks: DiffHunk[] = [];
-  let currentHunk: DiffHunk | null = null;
-  let oldLine = 0;
-  let newLine = 0;
-  let newFile = false;
-  let deletedFile = false;
-  let renamedFile = false;
-  let modeChange: { oldMode: number; newMode: number } | undefined;
-
-  for (const line of lines) {
-    if (line.startsWith('new file mode')) newFile = true;
-    if (line.startsWith('deleted file mode')) deletedFile = true;
-    if (line.startsWith('rename from') || line.startsWith('rename to')) renamedFile = true;
-    const modeMatch = line.match(/^old mode (\d+)$/) || line.match(/^new mode (\d+)$/);
-    if (modeMatch) {
-      const mode = parseInt(modeMatch[1], 10);
-      if (line.startsWith('old mode')) modeChange = { oldMode: mode, newMode: modeChange?.newMode ?? mode };
-      if (line.startsWith('new mode')) modeChange = { oldMode: modeChange?.oldMode ?? mode, newMode: mode };
-    }
-    if (line.startsWith('diff --git')) continue;
-    if (line.startsWith('index ')) continue;
-    if (line.startsWith('--- ') || line.startsWith('+++ ')) continue;
-    if (line.startsWith('@@')) {
-      if (currentHunk) hunks.push(currentHunk);
-      const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/);
-      if (match) {
-        const oldStart = parseInt(match[1], 10);
-        const oldLines = match[2] ? parseInt(match[2], 10) : 1;
-        const newStart = parseInt(match[3], 10);
-        const newLines = match[4] ? parseInt(match[4], 10) : 1;
-        currentHunk = {
-          oldStart,
-          oldLines,
-          newStart,
-          newLines,
-          header: line,
-          lines: [],
-        };
-        oldLine = oldStart;
-        newLine = newStart;
-      }
-      continue;
-    }
-    if (currentHunk) {
-      if (line.startsWith('+')) {
-        currentHunk.lines.push({
-          type: 'add',
-          content: line.substring(1),
-          oldLineNumber: null,
-          newLineNumber: newLine++,
-        });
-      } else if (line.startsWith('-')) {
-        currentHunk.lines.push({
-          type: 'del',
-          content: line.substring(1),
-          oldLineNumber: oldLine++,
-          newLineNumber: null,
-        });
-      } else if (line.startsWith(' ')) {
-        currentHunk.lines.push({
-          type: 'context',
-          content: line.substring(1),
-          oldLineNumber: oldLine++,
-          newLineNumber: newLine++,
-        });
-      }
-    }
-  }
-  if (currentHunk) hunks.push(currentHunk);
-  return { hunks, newFile, deletedFile, renamedFile, modeChange };
-}
+// D12: parseDiff was previously duplicated in this file (75 LOC). The
+// duplicate is now removed — we import the renderer-shared implementation
+// from src/lib/diffParser.ts so both processes parse diffs identically.
+// The shared parseDiff takes a single `rawDiff` argument; the old local
+// signature accepted `(rawDiff, oldPath, newPath)` but never read the
+// path arguments (they were only there for an early abandoned feature).
 
 export async function diff(
   repoPath: string,
@@ -2811,7 +2749,7 @@ export async function diff(
     newContent = '';
   }
 
-  const parsed = parseDiff(rawDiff, file, file);
+  const parsed: ParsedDiff = parseDiffShared(rawDiff);
   const result: DiffResult = {
     oldContent,
     newContent,
@@ -2863,7 +2801,7 @@ export async function diffBranches(
 ): Promise<DiffResult> {
   const git = getGit(repoPath);
   const rawDiff = await git.raw(['diff', `${base}...${compare}`, '--no-color']);
-  const parsed = parseDiff(rawDiff, base, compare);
+  const parsed: ParsedDiff = parseDiffShared(rawDiff);
   return {
     oldContent: '',
     newContent: '',
@@ -2958,7 +2896,7 @@ export async function diffCommit(
       newFile: false, deletedFile: false, renamedFile: false,
     };
   }
-  const parsed = parseDiff(rawDiff, hash, hash);
+  const parsed: ParsedDiff = parseDiffShared(rawDiff);
   return {
     oldContent: '',
     newContent: '',
