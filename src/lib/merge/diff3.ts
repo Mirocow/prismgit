@@ -191,9 +191,6 @@ export function diff3(
 
   for (let pi = 0; pi < points.length; pi++) {
     const p = points[pi];
-    // Determine the chunk range on each side.
-    // For sides where p's index is null, we use prevKnown for that side
-    // (chunk length 0 from that side).
     const baseEnd = p.baseIdx;
     const oursEnd = p.oursIdx;
     const theirsEnd = p.theirsIdx;
@@ -218,14 +215,47 @@ export function diff3(
         theirsLen,
       });
     }
-    // Advance prev pointers. If p has a null for a side, keep the prev value
-    // (so the next chunk extends from where we last left off on that side).
+    // If this point has a match on BOTH sides, emit a STABLE region
+    // for the matching line(s). This is the key fix: matching lines
+    // (anchors) become their own stable regions, not part of the
+    // surrounding conflict/changed region.
+    if (p.oursIdx !== null && p.theirsIdx !== null) {
+      const oursIdx = p.oursIdx;
+      const theirsIdx = p.theirsIdx;
+      // Count how many consecutive lines match starting from this anchor.
+      let matchLen = 0;
+      while (
+        baseEnd + matchLen < baseLines.length &&
+        oursIdx + matchLen < oursLines.length &&
+        theirsIdx + matchLen < theirsLines.length &&
+        baseLines[baseEnd + matchLen] === oursLines[oursIdx + matchLen] &&
+        baseLines[baseEnd + matchLen] === theirsLines[theirsIdx + matchLen]
+      ) {
+        matchLen++;
+      }
+      if (matchLen > 0) {
+        regions.push({
+          kind: 'stable',
+          baseStart: baseEnd,
+          baseLen: matchLen,
+          oursStart: oursIdx,
+          oursLen: matchLen,
+          theirsStart: theirsIdx,
+          theirsLen: matchLen,
+        });
+        // Advance all pointers past the stable block.
+        prevBase = baseEnd + matchLen;
+        prevOurs = oursIdx + matchLen;
+        prevTheirs = theirsIdx + matchLen;
+        continue;
+      }
+    }
+    // Advance prev pointers. If p has a null for a side, keep the prev value.
     prevBase = baseEnd;
     if (oursEnd !== null) prevOurs = oursEnd;
     if (theirsEnd !== null) prevTheirs = theirsEnd;
   }
-  // Merge adjacent regions of the same kind (optimization: fewer regions =
-  // fewer React components + cleaner UI).
+  // Merge adjacent regions of the same kind.
   return mergeAdjacentRegions(regions);
 }
 
