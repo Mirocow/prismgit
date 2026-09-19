@@ -39,11 +39,15 @@ beforeAll(() => {
   rmSync(ROOT, { recursive: true, force: true });
   mkdirSync(ROOT, { recursive: true });
 
-  // Bare remote
-  sh('git init -q --bare remote.git');
+  // Bare remote — `-b main` makes the empty remote's HEAD point at `main`
+  // (older git defaults to `master`, which then makes `git push -u origin
+  // main` fail with "src refspec main does not match any").
+  sh('git init -q -b main --bare remote.git');
 
-  // Clone to local
+  // Clone to local — an empty bare clone doesn't carry the branch name,
+  // so create `main` explicitly before the first commit.
   sh(`git clone -q ${REMOTE} local`, ROOT);
+  sh('git checkout -b main', LOCAL);
   sh('git config user.name "T"', LOCAL);
   sh('git config user.email "t@t"', LOCAL);
 

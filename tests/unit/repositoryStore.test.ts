@@ -154,7 +154,12 @@ describe('repositoryStore', () => {
 
     it('keeps currentRepo if different path', async () => {
       vi.mocked(api.settings.removeRepo).mockResolvedValue(undefined);
-      vi.mocked(api.settings.getRepos).mockResolvedValue([]);
+      // The currently-open repo ('/other') must be in the returned list —
+      // otherwise loadRepos() correctly calls closeRepository() (the v3
+      // feature that auto-closes a repo that was deleted from disk).
+      vi.mocked(api.settings.getRepos).mockResolvedValue([
+        { path: '/other', name: 'other', lastOpened: 0 },
+      ]);
       useRepositoryStore.setState({
         currentRepo: { path: '/other', name: 'other', lastOpened: 0 },
       });

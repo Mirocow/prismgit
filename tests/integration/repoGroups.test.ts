@@ -64,7 +64,10 @@ describe('storage — repository groups (tree with drag & drop support)', () => 
     storage.setRepoGroup(repoA, null);
     expect(storage.getRepos().find((r) => r.path === repoA)!.groupId).toBeNull();
 
-    expect(() => storage.setRepoGroup('/ghost/path', null)).toThrow(/not found/i);
+    // V3 changed setRepoGroup to AUTO-ADD a repo that isn't in the store
+    // yet (handles the clone race where setRepoGroup runs before
+    // openRepository's addRepo). So an unknown repo path with a valid
+    // group no longer throws — but an unknown GROUP must still throw.
     expect(() => storage.setRepoGroup(repoA, 'ghost-group')).toThrow(/not found/i);
   });
 

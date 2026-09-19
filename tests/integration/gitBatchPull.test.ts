@@ -34,9 +34,14 @@ beforeAll(() => {
   rmSync(ROOT, { recursive: true, force: true });
   mkdirSync(ROOT, { recursive: true });
 
-  sh('git init -q --bare remote.git', ROOT);
+  // Use `-b main` so the initial branch is `main` regardless of the
+  // system's init.defaultBranch (older git defaults to `master`).
+  sh('git init -q -b main --bare remote.git', ROOT);
 
+  // Clone of an empty bare repo doesn't get the branch name from the
+  // remote, so we have to set it manually before the first commit.
   sh(`git clone -q ${REMOTE} local`, ROOT);
+  sh('git checkout -b main', LOCAL);
   sh('git config user.name "T"', LOCAL);
   sh('git config user.email "t@t"', LOCAL);
   writeFileSync(`${LOCAL}/a.txt`, 'a' + NL);

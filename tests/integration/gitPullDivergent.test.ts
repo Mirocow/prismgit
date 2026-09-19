@@ -35,8 +35,9 @@ beforeAll(() => {
   rmSync(ROOT, { recursive: true, force: true });
   mkdirSync(ROOT, { recursive: true });
 
-  // Create a bare remote
-  sh('git init -q --bare remote.git');
+  // Create a bare remote — `-b main` ensures the empty remote's HEAD
+  // points at `main` (older git defaults to `master`).
+  sh('git init -q -b main --bare remote.git');
 
   // local1: initial commit + push
   sh('git init -q -b main local1', ROOT);
