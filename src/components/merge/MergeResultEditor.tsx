@@ -206,7 +206,7 @@ export function MergeResultEditor({
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] || '';
       const cls = classified[i];
-      const lineNum = `<span class="inline-block w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle mr-2" style="color: var(--text-tertiary)">${i + 1}</span>`;
+      const lineNum = `<span style="display:inline-block;width:40px;flex-shrink:0;text-align:right;padding-right:8px;color:var(--text-tertiary);user-select:none;border-right:1px solid var(--border-subtle);margin-right:8px;">${i + 1}</span>`;
       let contentHtml: string;
       if (line.startsWith('<<<<<<<') || line.startsWith('=======') || line.startsWith('>>>>>>>')) {
         // Conflict marker line — plain text (no syntax highlight).
@@ -239,7 +239,7 @@ export function MergeResultEditor({
         // Context line or no word-diff data — plain syntax highlight.
         contentHtml = tokensToHtml(tokenizeLine(line, lang)) || '&nbsp;';
       }
-      html += `<div class="flex items-start font-mono text-xs leading-5 px-1" style="height: ${ROW_HEIGHT}px; min-height: ${ROW_HEIGHT}px; background-color: ${cls.bgClass};">${lineNum}<span class="flex-1 whitespace-pre-wrap">${contentHtml}</span></div>`;
+      html += `<div style="height:${ROW_HEIGHT}px;min-height:${ROW_HEIGHT}px;background-color:${cls.bgClass};font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;font-size:12px;line-height:20px;padding:0 8px 0 0;display:flex;align-items:flex-start;white-space:pre-wrap;word-break:break-word;">${lineNum}<span style="flex:1;white-space:pre-wrap;">${contentHtml}</span></div>`;
     }
     return html;
   }, [initialContent, lang, oursContent, theirsContent, oursLines, theirsLines]);
@@ -296,7 +296,7 @@ export function MergeResultEditor({
         <pre
           ref={preRef}
           aria-hidden="true"
-          className="absolute inset-0 m-0 overflow-auto pointer-events-none font-mono text-xs leading-5 px-0 py-0"
+          className="absolute inset-0 m-0 overflow-auto pointer-events-none"
           style={{
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
@@ -305,6 +305,10 @@ export function MergeResultEditor({
             padding: 0,
             margin: 0,
             border: 0,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+            fontSize: '12px',
+            lineHeight: '20px',
+            zIndex: 0,
           }}
           dangerouslySetInnerHTML={{ __html: highlightedHtml }}
         />
@@ -327,6 +331,7 @@ export function MergeResultEditor({
             margin: 0,
             whiteSpace: 'pre',
             overflow: 'auto',
+            zIndex: 1,
             // Match the pre's font metrics EXACTLY:
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
             fontSize: '12px',
