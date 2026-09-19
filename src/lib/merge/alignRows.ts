@@ -100,38 +100,29 @@ export function alignRows(
         });
       }
     } else {
-      // conflict — both sides changed differently. Emit ours first (with
-      // theirs as ghosts), then theirs (with ours as ghosts). This keeps
-      // BOTH sides fully visible — the user can read each side top-to-bottom.
-      // (Meld uses this layout; KDiff3 uses side-by-side within the region.)
-      for (let k = 0; k < oursSlice.length; k++) {
+      // conflict — both sides changed differently.
+      // Align ours and theirs LINE-BY-LINE (like Meld): each row shows
+      // ours[k] on the left and theirs[k] on the right. When one side
+      // is shorter, the remaining rows get ghost (null) for that side.
+      //
+      // This is DIFFERENT from the old sequential layout (ours first,
+      // then theirs) which made the theirs pane show ALL-GHOST rows
+      // for the entire ours block → blue colour never appeared.
+      const maxLen = Math.max(oursSlice.length, theirsSlice.length);
+      for (let k = 0; k < maxLen; k++) {
+        const hasOurs = k < oursSlice.length;
+        const hasTheirs = k < theirsSlice.length;
         rows.push({
           baseLine: k < baseSlice.length ? r.baseStart + k : null,
-          oursLine: r.oursStart + k,
-          theirsLine: null,
+          oursLine: hasOurs ? r.oursStart + k : null,
+          theirsLine: hasTheirs ? r.theirsStart + k : null,
           resultLine: null,
           regionKind: 'conflict',
           regionIdx: ri,
           isGhost: {
             base: k >= baseSlice.length,
-            ours: false,
-            theirs: true,
-          },
-        });
-      }
-      // If ours is shorter than theirs, emit remaining theirs with ours=null.
-      for (let k = oursSlice.length; k < theirsSlice.length; k++) {
-        rows.push({
-          baseLine: k < baseSlice.length ? r.baseStart + k : null,
-          oursLine: null,
-          theirsLine: r.theirsStart + k,
-          resultLine: null,
-          regionKind: 'conflict',
-          regionIdx: ri,
-          isGhost: {
-            base: k >= baseSlice.length,
-            ours: true,
-            theirs: false,
+            ours: !hasOurs,
+            theirs: !hasTheirs,
           },
         });
       }
