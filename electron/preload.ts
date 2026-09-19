@@ -312,25 +312,18 @@ const api = {
     noteAdd: (repoPath: string, commit: string, content: string, ref?: string, force?: boolean) =>
       ipcRenderer.invoke('git:noteAdd', repoPath, commit, content, ref, force),
     noteRemove: (repoPath: string, commit: string, ref?: string) => ipcRenderer.invoke('git:noteRemove', repoPath, commit, ref),
-    forceCompare: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) =>
-      ipcRenderer.invoke('git:forceCompare', repoPath, file, options),
+    // NOTE: forceCompare IPC was removed (dead renderer-side code).
     isEolOnlyChange: (repoPath: string, file: string) => ipcRenderer.invoke('git:isEolOnlyChange', repoPath, file),
     pushToGerrit: (repoPath: string, branch?: string, remote?: string, options?: { draft?: boolean; reviewers?: string[]; topic?: string }) =>
       ipcRenderer.invoke('git:pushToGerrit', repoPath, branch, remote, options),
     clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean }) =>
       ipcRenderer.invoke('git:clonePartial', url, targetPath, filter, options),
     setupCredentialHelper: (repoPath: string) => ipcRenderer.invoke('git:setupCredentialHelper', repoPath),
-    blameBidirectional: (repoPath: string, file: string, ref?: string) =>
-      ipcRenderer.invoke('git:blameBidirectional', repoPath, file, ref),
-    pickaxeSearch: (repoPath: string, file: string, search: string, options?: { regex?: boolean; ignoreCase?: boolean }) =>
-      ipcRenderer.invoke('git:pickaxeSearch', repoPath, file, search, options),
-    detectRenames: (repoPath: string, options?: { threshold?: number; ref?: string }) =>
-      ipcRenderer.invoke('git:detectRenames', repoPath, options),
+    // NOTE: blameBidirectional, pickaxeSearch, detectRenames IPCs were
+    // removed (dead renderer-side code).
     isCommitPushed: (repoPath: string, hash: string) => ipcRenderer.invoke('git:isCommitPushed', repoPath, hash),
-    squashCommits: (repoPath: string, fromHash: string, toHash: string, message?: string) =>
-      ipcRenderer.invoke('git:squashCommits', repoPath, fromHash, toHash, message),
-    coalesceCommits: (repoPath: string, firstHash: string, secondHash: string) =>
-      ipcRenderer.invoke('git:coalesceCommits', repoPath, firstHash, secondHash),
+    // NOTE: squashCommits, coalesceCommits IPCs were removed (dead
+    // renderer-side code).
 
     // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
     smartPull: (repoPath: string, remote?: string, branch?: string) =>

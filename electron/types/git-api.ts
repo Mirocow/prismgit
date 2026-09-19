@@ -612,8 +612,8 @@ export interface GitApi {
   noteAdd: (repoPath: string, commit: string, content: string, ref?: string, force?: boolean) => Promise<void>;
   noteRemove: (repoPath: string, commit: string, ref?: string) => Promise<void>;
 
-  /** Force compare (bypass maxFileSize limit). */
-  forceCompare: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) => Promise<DiffResult>;
+  // NOTE: forceCompare IPC type was removed (dead renderer-side code).
+  // The underlying gitService.forceCompare is kept for integration tests.
 
   /** EOL-only change detection. */
   isEolOnlyChange: (repoPath: string, file: string) => Promise<boolean>;
@@ -627,22 +627,16 @@ export interface GitApi {
   /** Setup PrismGit as credential helper. */
   setupCredentialHelper: (repoPath: string) => Promise<void>;
 
-  /** Bidirectional blame (past + future). */
-  blameBidirectional: (repoPath: string, file: string, ref?: string) => Promise<BidirectionalBlameResult>;
-
-  /** Pickaxe search — find commits that introduced or removed a string. */
-  pickaxeSearch: (repoPath: string, file: string, search: string, options?: { regex?: boolean; ignoreCase?: boolean }) => Promise<{ hash: string; subject: string; date: string; lineNumbers: number[] }[]>;
-
-  /** Detect renames with --find-renames=<threshold>%. */
-  detectRenames: (repoPath: string, options?: { threshold?: number; ref?: string }) => Promise<{ from: string; to: string; similarity: number }[]>;
+  // NOTE: blameBidirectional, pickaxeSearch, detectRenames IPC types were
+  // removed (dead renderer-side code). The underlying gitService.*
+  // functions are kept for integration tests.
 
   /** Check if commit has been pushed to any remote. */
   isCommitPushed: (repoPath: string, hash: string) => Promise<boolean>;
 
-  /** Squash multiple commits into one. */
-  squashCommits: (repoPath: string, fromHash: string, toHash: string, message?: string) => Promise<void>;
-  /** Coalesce two adjacent commits (combine messages). */
-  coalesceCommits: (repoPath: string, firstHash: string, secondHash: string) => Promise<void>;
+  // NOTE: squashCommits, coalesceCommits IPC types were removed (dead
+  // renderer-side code). The underlying gitService.* functions are kept
+  // for integration tests.
 
   // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
   /** Smart Pull — prevents divergence after remote force-push. */

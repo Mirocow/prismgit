@@ -451,10 +451,9 @@ export function registerGitIpc(): void {
     wrap(gitService.noteAdd)(p, c, content, r, f)
   );
   ipcMain.handle('git:noteRemove', (_e, p: string, c: string, r?: string) => wrap(gitService.noteRemove)(p, c, r));
-  // Force compare
-  ipcMain.handle('git:forceCompare', (_e, p: string, f: string, o?: { staged?: boolean; ref?: string }) =>
-    wrap(gitService.forceCompare)(p, f, o)
-  );
+  // NOTE: git:forceCompare IPC handler was removed as dead code — no
+  // renderer caller exists. The underlying gitService.forceCompare is
+  // kept (it's covered by integration tests).
   // EOL-only change detection
   ipcMain.handle('git:isEolOnlyChange', (_e, p: string, f: string) => wrap(gitService.isEolOnlyChange)(p, f));
   // Push to Gerrit
@@ -467,28 +466,14 @@ export function registerGitIpc(): void {
   );
   // Credential helper
   ipcMain.handle('git:setupCredentialHelper', (_e, p: string) => wrap(gitService.setupCredentialHelper)(p));
-  // Bidirectional blame
-  ipcMain.handle('git:blameBidirectional', (_e, p: string, f: string, r?: string) =>
-    wrap(gitService.blameBidirectional)(p, f, r)
-  );
-  // Pickaxe search
-  ipcMain.handle('git:pickaxeSearch', (_e, p: string, f: string, s: string, o?: { regex?: boolean; ignoreCase?: boolean }) =>
-    wrap(gitService.pickaxeSearch)(p, f, s, o)
-  );
-  // Detect renames
-  ipcMain.handle('git:detectRenames', (_e, p: string, o?: { threshold?: number; ref?: string }) =>
-    wrap(gitService.detectRenames)(p, o)
-  );
+  // NOTE: git:blameBidirectional, git:pickaxeSearch, git:detectRenames IPC
+  // handlers were removed as dead code — no renderer callers. The
+  // underlying gitService.* functions are kept (covered by integration tests).
   // Is commit pushed
   ipcMain.handle('git:isCommitPushed', (_e, p: string, h: string) => wrap(gitService.isCommitPushed)(p, h));
-  // Squash commits
-  ipcMain.handle('git:squashCommits', (_e, p: string, fromHash: string, toHash: string, m?: string) =>
-    wrap(gitService.squashCommits)(p, fromHash, toHash, m)
-  );
-  // Coalesce commits
-  ipcMain.handle('git:coalesceCommits', (_e, p: string, firstHash: string, secondHash: string) =>
-    wrap(gitService.coalesceCommits)(p, firstHash, secondHash)
-  );
+  // NOTE: git:squashCommits, git:coalesceCommits IPC handlers were removed
+  // as dead code — no renderer callers. The underlying gitService.*
+  // functions are kept (covered by integration tests).
 
   // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
   ipcMain.handle('git:smartPull', (_e, p: string, r?: string, b?: string) => wrap(gitService.smartPull)(p, r, b));
