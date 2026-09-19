@@ -1635,32 +1635,35 @@ input[type="checkbox"], input[type="radio"] {
    - .bg-ghost-row       : striped grey for alignment-filler rows
 */
 .conflict-bg-ours {
-  background-color: rgba(var(--status-added-rgb,   170 217 76) / 0.20);
-  border-left: 3px solid rgba(var(--status-added-rgb, 170 217 76) / 0.7);
+  background-color: rgba(170, 217, 76, 0.20);
+  border-left: 3px solid rgba(170, 217, 76, 0.7);
 }
 .conflict-bg-theirs {
-  background-color: rgba(var(--status-incoming-rgb, 9 105 218) / 0.18);
-  border-right: 3px solid rgba(var(--status-incoming-rgb, 9 105 218) / 0.7);
+  background-color: rgba(9, 105, 218, 0.18);
+  border-right: 3px solid rgba(9, 105, 218, 0.7);
 }
-.conflict-bg-marker   { background-color: rgba(var(--status-conflict-rgb, 255 143 111) / 0.30); font-weight: 600; }
-.conflict-bg-conflict { background-color: rgba(var(--status-conflict-rgb, 255 143 111) / 0.18); }
+.conflict-bg-marker   { background-color: rgba(255, 143, 111, 0.30); font-weight: 600; }
+.conflict-bg-conflict { background-color: rgba(255, 143, 111, 0.18); }
 
 /* Ghost row — striped grey, used when one side has no line at this position
    (alignment filler). Repeat-linear-gradient gives a subtle diagonal stripe
    pattern so the user immediately sees "this row doesn't exist on this side". */
 .bg-ghost-row {
-  background-color: rgba(var(--text-tertiary-rgb, 128 128 128) / 0.05);
+  background-color: rgba(128, 128, 128, 0.05);
   background-image: repeating-linear-gradient(
     45deg,
     transparent,
     transparent 4px,
-    rgba(var(--text-tertiary-rgb, 128 128 128) / 0.04) 4px,
-    rgba(var(--text-tertiary-rgb, 128 128 128) / 0.04) 8px
+    rgba(128, 128, 128, 0.04) 4px,
+    rgba(128, 128, 128, 0.04) 8px
   );
 }
 /* The Tailwind-style alias used by MergeRow — `bg-bg-ghost-row` is the
    className the component sets; map it to the same styles as .bg-ghost-row. */
-.bg-bg-ghost-row { background-color: rgba(var(--text-tertiary-rgb, 128 128 128) / 0.05); background-image: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(var(--text-tertiary-rgb, 128 128 128) / 0.04) 4px, rgba(var(--text-tertiary-rgb, 128 128 128) / 0.04) 8px); }
+.bg-bg-ghost-row {
+  background-color: rgba(128, 128, 128, 0.05);
+  background-image: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(128, 128, 128, 0.04) 4px, rgba(128, 128, 128, 0.04) 8px);
+}
 
 /* === Word-level diff highlight (inside conflict regions) ===
    These classes are applied to <span> elements wrapping individual words
@@ -1677,15 +1680,15 @@ input[type="checkbox"], input[type="radio"] {
    word-diff span) so they visually "disappear" into the row.
 */
 .word-diff-ours {
-  background-color: rgba(var(--status-added-rgb, 170 217 76) / 0.55);
-  color: var(--text-inverse, #fff);
+  background-color: rgba(170, 217, 76, 0.55);
+  color: #fff;
   font-weight: 600;
   border-radius: 2px;
   padding: 0 1px;
 }
 .word-diff-theirs {
-  background-color: rgba(var(--status-incoming-rgb, 9 105 218) / 0.55);
-  color: var(--text-inverse, #fff);
+  background-color: rgba(9, 105, 218, 0.55);
+  color: #fff;
   font-weight: 600;
   border-radius: 2px;
   padding: 0 1px;
@@ -1695,15 +1698,15 @@ input[type="checkbox"], input[type="radio"] {
    expects generic "added/removed" class names). Kept so we don't break
    the 2-way diff display elsewhere in the app. */
 .word-diff-added {
-  background-color: rgba(var(--status-added-rgb, 170 217 76) / 0.40);
+  background-color: rgba(170, 217, 76, 0.40);
   font-weight: 600;
   border-radius: 2px;
   padding: 0 1px;
 }
 .word-diff-removed {
-  background-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.40);
+  background-color: rgba(242, 109, 120, 0.40);
   text-decoration: line-through;
-  text-decoration-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.8);
+  text-decoration-color: rgba(242, 109, 120, 0.8);
   border-radius: 2px;
   padding: 0 1px;
 }
