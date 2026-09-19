@@ -53,26 +53,15 @@
 
 import { useEffect, useRef, useMemo, useCallback } from 'react';
 import { tokenizeLine, tokensToHtml, type SupportedLang } from '../../lib/syntaxHighlight';
-import { wordDiff, type WordSegment } from '../../lib/wordDiff';
 
 const ROW_HEIGHT = 20;
 const GUTTER_WIDTH = 48; // px — matches w-10 + pr-2 + border = ~48px
 
 interface MergeResultEditorProps {
-  /** Initial content (used as defaultValue — uncontrolled). */
   initialContent: string;
-  /** Detected language for syntax highlighting. */
   lang: SupportedLang;
-  /** Called on every input (debounced externally). */
   onChange?: (text: string) => void;
-  /** Ref forwarded to the underlying textarea — for parent to read content
-      when saving. */
   textareaRef?: React.RefObject<HTMLTextAreaElement>;
-  /** OURS content — for word-diff inside conflict regions.
-   *  Optional: when omitted, no word-diff is computed (only bg tints). */
-  oursContent?: string;
-  /** THEIRS content — for word-diff inside conflict regions. */
-  theirsContent?: string;
 }
 
 /** Line classification (state machine) within the Result editor. */
@@ -139,47 +128,11 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Render word-diff segments as HTML, highlighting words unique to THIS side.
- *  Same visual language as MergeRow.tsx — words unique to this side get a
- *  SIDE-SPECIFIC highlight:
- *    - .word-diff-ours   (green)  for OURS rows
- *    - .word-diff-theirs (red)    for THEIRS rows
- *  Shared words get plain syntax highlighting. */
-function renderWordDiffHtml(
-  segments: WordSegment[],
-  lang: SupportedLang,
-  side: 'ours' | 'theirs',
-): string {
-  let html = '';
-  for (const seg of segments) {
-    if (seg.text === '') continue;
-    if (seg.kind === 'equal') {
-      html += tokensToHtml(tokenizeLine(seg.text, lang)) || escapeHtml(seg.text);
-    } else {
-      // 'removed' = word present on OURS side (in wordDiff(ours, theirs).old)
-      // 'added'   = word present on THEIRS side (in wordDiff(ours, theirs).new)
-      // For OURS pane: 'removed' segments are unique to ours.
-      // For THEIRS pane: 'added' segments are unique to theirs.
-      const isUnique = (side === 'ours' && seg.kind === 'removed')
-                    || (side === 'theirs' && seg.kind === 'added');
-      if (isUnique) {
-        const cls = side === 'ours' ? 'word-diff-ours' : 'word-diff-theirs';
-        html += `<span class="${cls}">${escapeHtml(seg.text)}</span>`;
-      } else {
-        html += escapeHtml(seg.text);
-      }
-    }
-  }
-  return html || '&nbsp;';
-}
-
 export function MergeResultEditor({
   initialContent,
   lang,
   onChange,
   textareaRef,
-  oursContent,
-  theirsContent,
 }: MergeResultEditorProps) {
   const preRef = useRef<HTMLPreElement>(null);
   const innerTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -188,17 +141,7 @@ export function MergeResultEditor({
   // typing makes the union awkward — at runtime both forms work the same.
   const effectiveRef = (textareaRef ?? innerTextareaRef) as React.RefObject<HTMLTextAreaElement>;
 
-  // Pre-split ours / theirs lines for word-diff lookup.
-  const oursLines = useMemo(() => (oursContent ?? '').split('\n'), [oursContent]);
-  const theirsLines = useMemo(() => (theirsContent ?? '').split('\n'), [theirsContent]);
-
-  // Build the syntax-highlighted HTML for the entire content.
-  // Includes:
-  //   - per-line background tint based on conflict-marker classification
-  //   - word-level diff highlighting inside conflict regions (when oursContent
-  //     and theirsContent are provided)
-  // Memoized on `initialContent` (which only changes when the file is
-  // reloaded — not on every keystroke, since the textarea is uncontrolled).
+  // Build the syntax-highlighted HTML — block-level background tint only.
   const highlightedHtml = useMemo(() => {
     const lines = initialContent.split('\n');
     const classified = classifyResultLines(lines);
@@ -207,42 +150,15 @@ export function MergeResultEditor({
       const line = lines[i] || '';
       const cls = classified[i];
       const lineNum = `<span style="display:inline-block;width:40px;flex-shrink:0;text-align:right;padding-right:8px;color:var(--text-tertiary);user-select:none;border-right:1px solid var(--border-subtle);margin-right:8px;">${i + 1}</span>`;
-      let contentHtml: string;
-      if (line.startsWith('<<<<<<<') || line.startsWith('=======') || line.startsWith('>>>>>>>')) {
-        // Conflict marker line — plain text (no syntax highlight).
-        contentHtml = escapeHtml(line) || '&nbsp;';
-      } else if (cls.kind === 'ours' && oursContent != null) {
-        // Inside the OURS block of a conflict — word-diff against the
-        // corresponding THEIRS line (matched by index within the block).
-        const theirsLine = cls.oursBlockIdx >= 0 && cls.oursBlockIdx < theirsLines.length
-          ? theirsLines[cls.oursBlockIdx]
-          : null;
-        if (theirsLine != null && theirsLine !== line) {
-          const result = wordDiff(line, theirsLine);
-          contentHtml = renderWordDiffHtml(result.old, lang, 'ours') || '&nbsp;';
-        } else {
-          contentHtml = tokensToHtml(tokenizeLine(line, lang)) || '&nbsp;';
-        }
-      } else if (cls.kind === 'theirs' && theirsContent != null) {
-        // Inside the THEIRS block of a conflict — word-diff against the
-        // corresponding OURS line.
-        const oursLine = cls.theirsBlockIdx >= 0 && cls.theirsBlockIdx < oursLines.length
-          ? oursLines[cls.theirsBlockIdx]
-          : null;
-        if (oursLine != null && oursLine !== line) {
-          const result = wordDiff(oursLine, line);
-          contentHtml = renderWordDiffHtml(result.new, lang, 'theirs') || '&nbsp;';
-        } else {
-          contentHtml = tokensToHtml(tokenizeLine(line, lang)) || '&nbsp;';
-        }
-      } else {
-        // Context line or no word-diff data — plain syntax highlight.
-        contentHtml = tokensToHtml(tokenizeLine(line, lang)) || '&nbsp;';
-      }
+      // Only block-level background tint + syntax highlighting.
+      // No word-level diff.
+      const contentHtml = (line.startsWith('<<<<<<<') || line.startsWith('=======') || line.startsWith('>>>>>>>'))
+        ? escapeHtml(line) || '&nbsp;'
+        : tokensToHtml(tokenizeLine(line, lang)) || '&nbsp;';
       html += `<div style="height:${ROW_HEIGHT}px;min-height:${ROW_HEIGHT}px;background-color:${cls.bgClass};font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;font-size:12px;line-height:20px;padding:0 8px 0 0;display:flex;align-items:flex-start;white-space:pre-wrap;word-break:break-word;">${lineNum}<span style="flex:1;white-space:pre-wrap;">${contentHtml}</span></div>`;
     }
     return html;
-  }, [initialContent, lang, oursContent, theirsContent, oursLines, theirsLines]);
+  }, [initialContent, lang]);
 
   // Sync scroll: textarea → pre
   const handleScroll = useCallback(() => {
