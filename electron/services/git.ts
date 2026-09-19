@@ -173,23 +173,25 @@ function getGit(repoPath: string): SimpleGit {
  *   Op B: removeStaleIndexLock (DELETES A's lock!) → git add (fails: race)
  *
  * Now we check the lock file's age — if it was created within the last
- * 5 seconds, it's probably an active lock from a concurrent operation
- * and we DON'T delete it. Only stale locks (older than 5s) are removed.
+ * 30 seconds, it's probably an active lock from a concurrent operation
+ * and we DON'T delete it. Only stale locks (older than 30s) are removed.
+ *
+ * The threshold was raised from 5s to 30s because on LFS repos a single
+ * `git status` can take 5-10 seconds, and a `git add` on a large repo
+ * can take 10-20 seconds. A 5s threshold would delete active locks.
  */
 function removeStaleIndexLock(repoPath: string): void {
   const lockPath = path.join(repoPath, '.git', 'index.lock');
   try {
     if (!fs.existsSync(lockPath)) return;
-    // Check the lock's age — if it's younger than 5 seconds, it's likely
-    // an active lock from a concurrent git operation. Don't delete it.
     const stat = fs.statSync(lockPath);
     const ageMs = Date.now() - stat.mtimeMs;
-    if (ageMs < 5000) {
+    if (ageMs < 30000) {
       // Lock is fresh — another git process is probably holding it.
       // The git command will wait for it or fail with a clear error.
       return;
     }
-    // Lock is stale (older than 5s) — safe to remove.
+    // Lock is stale (older than 30s) — safe to remove.
     fs.unlinkSync(lockPath);
   } catch {
     // Can't remove — either permission issue or another process is

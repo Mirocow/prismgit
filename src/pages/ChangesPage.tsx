@@ -559,6 +559,13 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     }
   }, [repo.path]);
 
+  // R9 FIX: split the 6-subprocess effect into two effects:
+  // 1. Repo switch — run ALL 6 loaders (dirTree, trackedCount, ignored,
+  //    indexFlags, submoduleChanges, numstat). Only fires when repo.path
+  //    changes (not on every status refresh).
+  // 2. Status refresh — run ONLY numstat (the one that depends on
+  //    staged/unstaged diff output). Fires on every lastRefresh, but
+  //    only spawns ONE git subprocess instead of SIX.
   useEffect(() => {
     loadDirTree();
     loadTrackedCount();
@@ -566,7 +573,16 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     loadIndexFlags();
     loadSubmoduleChanges();
     loadNumstat();
-  }, [loadDirTree, loadTrackedCount, loadIgnored, loadIndexFlags, loadSubmoduleChanges, loadNumstat, lastRefresh, status]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo.path]);
+
+  useEffect(() => {
+    // Only reload numstat on status refresh — the other 5 loaders
+    // (dirTree, trackedCount, ignored, indexFlags, submoduleChanges)
+    // don't depend on the working-tree diff and would be redundant.
+    loadNumstat();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastRefresh]);
 
   // Reset folder scope and tree expansion when switching repositories
   useEffect(() => {

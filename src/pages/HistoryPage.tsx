@@ -257,8 +257,12 @@ export function HistoryPage() {
         //   - commits reachable from origin/<branch> (incoming/pushed work)
         // Local-only commits are drawn solid; remote-only as dashed/hollow
         // (the existing incomingHashes logic tags them).
-        const currentBranch = status?.current;
-        const upstream = status?.tracking;
+        // RACE FIX: read status at CALL TIME from the store, not from
+        // the closure. This avoids re-creating loadHistory on every
+        // status change (which would cause an infinite git log loop).
+        const currentStatus = useGitStore.getState().status;
+        const currentBranch = currentStatus?.current;
+        const upstream = currentStatus?.tracking;
         const refs: string[] = [];
         if (currentBranch) refs.push(currentBranch);
         if (upstream && upstream !== currentBranch) refs.push(upstream);
@@ -346,12 +350,13 @@ export function HistoryPage() {
       }
     } catch (e) { toast.error(t('toast.history.loadFailed'), String(e)); }
     finally { setLoading(false); }
-    // NOTE: status?.current / status?.tracking are intentionally in the
-    // deps — when the user switches branches (or pulls/fetches new
-    // upstream commits), the head+upstream filter needs to re-resolve to
-    // the new branch name. Without these deps, switching from 'main' to
-    // 'feature/x' would still show 'main' history.
-  }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit, status?.current, status?.tracking]);
+    // RACE FIX: status?.current / status?.tracking are intentionally
+    // EXCLUDED from deps. They change on every watcher tick (5s) which
+    // would recreate loadHistory → re-run the effect → infinite git log
+    // calls. Instead, we read them at call-time from the store via
+    // useGitStore.getState().status — this gets the CURRENT value when
+    // loadHistory actually runs, without subscribing to changes.
+  }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit]);
 
   // ── Lazy-load older commits on scroll ───────────────────────────────────
   // When the user scrolls near the bottom of the commit list, fetch the
@@ -453,6 +458,18 @@ export function HistoryPage() {
     window.addEventListener('smartgit:history-refresh', handler);
     return () => window.removeEventListener('smartgit:history-refresh', handler);
   }, [loadHistory]);
+
+  // RACE FIX: reload history ONLY when the branch name actually changes
+  // (not on every status refresh). We track the previous branch name in
+  // a ref to detect real changes vs. status object identity changes.
+  const prevBranchRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const currentBranch = status?.current;
+    if (prevBranchRef.current !== currentBranch) {
+      prevBranchRef.current = currentBranch;
+      loadHistory();
+    }
+  }, [status?.current, loadHistory]);
 
   // User-configurable periodic auto-refresh — Settings → Git →
   // "Auto-refresh History page". When enabled, re-runs `git log` on this

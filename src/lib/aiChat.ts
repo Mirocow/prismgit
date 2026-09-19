@@ -507,9 +507,12 @@ export async function runWithTools(
       }
     }
   }
-  // Hit the iteration cap — return the last assistant message.
+  // Hit the iteration cap — return the last assistant message with a
+  // notice that the tool-call limit was reached, so the user understands
+  // why the AI stopped without a final answer.
   const last = history[history.length - 1];
-  return { finalMessage: last?.content ?? 'No final message.', history };
+  const limitNotice = `[Tool-call limit reached (${maxIterations} iterations). The AI was still calling tools when the cap was hit. Send another message to continue.]`;
+  return { finalMessage: last?.content ? `${last.content}\n\n${limitNotice}` : limitNotice, history };
 }
 
 /**
