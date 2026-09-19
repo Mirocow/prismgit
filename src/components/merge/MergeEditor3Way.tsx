@@ -103,15 +103,19 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
         api.git.raw(repo.path, ['show', `:2:${filePath}`]).catch(() => ''),
         api.git.raw(repo.path, ['show', `:3:${filePath}`]).catch(() => ''),
       ]);
-      setBaseContent(base);
-      setOursContent(ours);
-      setTheirsContent(theirs);
+      // Guard against undefined/null returns
+      const baseContent = base ?? '';
+      const oursContentRaw = ours ?? '';
+      const theirsContentRaw = theirs ?? '';
+      setBaseContent(baseContent);
+      setOursContent(oursContentRaw);
+      setTheirsContent(theirsContentRaw);
       langRef.current = detectLang(filePath);
 
       // Run diff3 + auto-merge to build the initial Result.
-      const baseLines = base.split('\n');
-      const oursLines = ours.split('\n');
-      const theirsLines = theirs.split('\n');
+      const baseLines = baseContent.split('\n');
+      const oursLines = oursContentRaw.split('\n');
+      const theirsLines = theirsContentRaw.split('\n');
       const regions = diff3(baseLines, oursLines, theirsLines);
       const autoResult = buildAutoMergeResult(baseLines, oursLines, theirsLines, regions);
       const resultText = autoResult.join('\n');

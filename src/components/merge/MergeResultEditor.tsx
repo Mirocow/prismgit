@@ -96,7 +96,7 @@ function classifyResultLines(lines: string[]): ClassifiedLine[] {
   let oursIdx = 0;
   let theirsIdx = 0;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const line = lines[i] ?? '';
     if (line.startsWith('<<<<<<<')) {
       out[i] = { kind: 'marker-start', bgClass: KIND_BG['marker-start'], oursBlockIdx: -1, theirsBlockIdx: -1 };
       state = 'ours';
@@ -143,7 +143,8 @@ export function MergeResultEditor({
 
   // Build the syntax-highlighted HTML — block-level background tint only.
   const highlightedHtml = useMemo(() => {
-    const lines = initialContent.split('\n');
+    const safeContent = initialContent ?? '';
+    const lines = safeContent.split('\n');
     const classified = classifyResultLines(lines);
     let html = '';
     for (let i = 0; i < lines.length; i++) {
