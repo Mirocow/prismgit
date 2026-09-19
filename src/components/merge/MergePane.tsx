@@ -77,13 +77,16 @@ function MergePaneImpl({
   );
   const headerColor =
     side === 'ours' ? 'text-status-added'
-      : side === 'theirs' ? 'text-status-deleted'
+      : side === 'theirs' ? 'text-status-info'
         : 'text-text-tertiary';
+  const headerStyle = side === 'theirs'
+    ? { color: 'var(--status-info)' }
+    : undefined;
   return (
     <div className="flex-1 flex flex-col border-r border-border-default last:border-r-0 min-w-0 overflow-hidden">
       {/* Header */}
       <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between flex-shrink-0 h-8">
-        <span className={cn('truncate', headerColor)}>
+        <span className={cn('truncate', headerColor)} style={headerStyle}>
           {title}
           <span className="ml-2 text-2xs text-text-tertiary normal-case font-normal">
             ({lines.length} {t('common.lines')})

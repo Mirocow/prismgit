@@ -58,14 +58,34 @@ interface MergeRowProps {
   side?: 'ours' | 'theirs' | 'base';
 }
 
-/** Map regionKind → background CSS class (used when not a ghost). */
-function bgClassForRegion(kind: RegionKind, isGhost: boolean): string {
+/**
+ * Map regionKind + side → background CSS class.
+ *
+ * For 'conflict' regions, the row belongs to EITHER ours OR theirs
+ * (never both — that's the whole point of a conflict: the two sides
+ * diverged). The AlignedRow model sets oursLine=null on theirs-only
+ * rows and theirsLine=null on ours-only rows. We use the `side` prop
+ * (passed from MergePane) to decide which side's tint to apply:
+ *
+ *   side='ours'  + regionKind='conflict'  → conflict-bg-ours (green)
+ *   side='theirs'+ regionKind='conflict'  → conflict-bg-theirs (blue)
+ *
+ * For 'stable' regions there's no conflict → no bg.
+ * For 'changed-ours' → green (only we changed).
+ * For 'changed-theirs' → blue (only they changed).
+ * For ghost rows → striped grey.
+ */
+function bgClassForRegion(kind: RegionKind, isGhost: boolean, side: 'ours' | 'theirs' | 'base'): string {
   if (isGhost) return 'bg-bg-ghost-row';
   switch (kind) {
     case 'stable':         return '';
     case 'changed-ours':   return 'conflict-bg-ours';
     case 'changed-theirs': return 'conflict-bg-theirs';
-    case 'conflict':       return 'conflict-bg-conflict';
+    case 'conflict':
+      // Inside a conflict region, the row belongs to one side only.
+      // Use the side-specific tint so the user can tell at a glance
+      // which pane shows "ours" vs "theirs" content.
+      return side === 'ours' ? 'conflict-bg-ours' : side === 'theirs' ? 'conflict-bg-theirs' : 'conflict-bg-conflict';
     default:               return '';
   }
 }
@@ -153,7 +173,7 @@ function MergeRowImpl({
     return tokensToHtml(tokenizeLine(text, lang)) || '&nbsp;';
   }, [text, isGhost, regionKind, diffAgainst, side, lang]);
 
-  const bg = bgClassForRegion(regionKind, isGhost);
+  const bg = bgClassForRegion(regionKind, isGhost, side);
   return (
     <div
       className={cn('flex items-start font-mono text-xs leading-5 px-1', bg)}
