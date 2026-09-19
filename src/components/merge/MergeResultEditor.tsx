@@ -89,13 +89,14 @@ interface ClassifiedLine {
   theirsBlockIdx: number;
 }
 
+// DIRECT COLOUR VALUES — inline styles, no CSS classes
 const KIND_BG: Record<ResultLineKind, string> = {
-  'context':      '',
-  'marker-start': 'conflict-bg-marker',
-  'marker-sep':   'conflict-bg-marker',
-  'marker-end':   'conflict-bg-marker',
-  'ours':         'conflict-bg-ours',
-  'theirs':       'conflict-bg-theirs',
+  'context':      'transparent',
+  'marker-start': 'rgba(220, 38, 38, 0.35)',   // red for conflict markers
+  'marker-sep':   'rgba(220, 38, 38, 0.35)',
+  'marker-end':   'rgba(220, 38, 38, 0.35)',
+  'ours':         'rgba(34, 197, 94, 0.35)',    // green for ours block
+  'theirs':       'rgba(59, 130, 246, 0.35)',   // blue for theirs block
 };
 
 /** Classify each line of the Result content by its position relative to
@@ -123,7 +124,7 @@ function classifyResultLines(lines: string[]): ClassifiedLine[] {
     } else if (state === 'theirs') {
       out[i] = { kind: 'theirs', bgClass: KIND_BG['theirs'], oursBlockIdx: -1, theirsBlockIdx: theirsIdx++ };
     } else {
-      out[i] = { kind: 'context', bgClass: '', oursBlockIdx: -1, theirsBlockIdx: -1 };
+      out[i] = { kind: 'context', bgClass: KIND_BG['context'], oursBlockIdx: -1, theirsBlockIdx: -1 };
     }
   }
   return out;
@@ -238,7 +239,7 @@ export function MergeResultEditor({
         // Context line or no word-diff data — plain syntax highlight.
         contentHtml = tokensToHtml(tokenizeLine(line, lang)) || '&nbsp;';
       }
-      html += `<div class="flex items-start font-mono text-xs leading-5 px-1 ${cls.bgClass}" style="height: ${ROW_HEIGHT}px; min-height: ${ROW_HEIGHT}px;">${lineNum}<span class="flex-1 whitespace-pre-wrap">${contentHtml}</span></div>`;
+      html += `<div class="flex items-start font-mono text-xs leading-5 px-1" style="height: ${ROW_HEIGHT}px; min-height: ${ROW_HEIGHT}px; background-color: ${cls.bgClass};">${lineNum}<span class="flex-1 whitespace-pre-wrap">${contentHtml}</span></div>`;
     }
     return html;
   }, [initialContent, lang, oursContent, theirsContent, oursLines, theirsLines]);
