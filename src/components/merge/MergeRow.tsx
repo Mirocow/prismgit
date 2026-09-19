@@ -88,11 +88,11 @@ function escapeHtml(s: string): string {
  *
  * To make the highlight intuitive for the user:
  *   - On the OURS side: highlight words that are NOT in theirs → these are
- *     "ours-only" words. Use .word-diff-added (green) to say "this is
- *     what we added".
+ *     "ours-only" words. Use .word-diff-ours (green) so the colour matches
+ *     the OURS row background tint (also green) — same-side = same colour.
  *   - On the THEIRS side: highlight words that are NOT in ours → these are
- *     "theirs-only" words. Use .word-diff-added (green) to say "this is
- *     what they added".
+ *     "theirs-only" words. Use .word-diff-theirs (red) so the colour matches
+ *     the THEIRS row background tint (also red) — same-side = same colour.
  *
  * Equal segments are rendered with plain syntax highlighting.
  */
@@ -111,14 +111,14 @@ function renderWordDiffHtml(
       // For 'ours' side: 'removed' segments (in ours, not in theirs) → ours-only.
       // For 'theirs' side: 'added' segments (in theirs, not in ours) → theirs-only.
       // In both cases, the highlighted span represents "what's unique to this side".
-      // We use .word-diff-added for both — the green tint + bold weight says
-      // "this word is unique to THIS side" regardless of which side we're on.
-      // (Using the same class on both sides keeps the visual language simple:
-      // green = "unique to this pane", no class = "shared with the other pane".)
+      // Use a SIDE-SPECIFIC class so the colour matches the row's bg tint:
+      //   .word-diff-ours   (green) for OURS rows
+      //   .word-diff-theirs (red)   for THEIRS rows
       const isUnique = (side === 'ours' && seg.kind === 'removed')
                     || (side === 'theirs' && seg.kind === 'added');
       if (isUnique) {
-        html += `<span class="word-diff-added">${escapeHtml(seg.text)}</span>`;
+        const cls = side === 'ours' ? 'word-diff-ours' : 'word-diff-theirs';
+        html += `<span class="${cls}">${escapeHtml(seg.text)}</span>`;
       } else {
         // This word exists on the OTHER side but not here — render as
         // plain text (it's a context word that happens to be shared).

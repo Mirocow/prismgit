@@ -1619,17 +1619,23 @@ input[type="checkbox"], input[type="radio"] {
 
 /* === Conflict background colors (background-only — text color stays for
    syntax highlighting, NOT conflict-side indication) ===
-   - .conflict-bg-ours    : light green tint  (matches the left pane)
-   - .conflict-bg-theirs  : light red tint    (matches the right pane)
-   - .conflict-bg-marker  : stronger pink/red  (for <<<<<<< ======= >>>>>>>)
-   - .conflict-bg-conflict : orange/yellow tint (for true 3-way conflicts where
-                           both sides changed differently — visually distinct
-                           from one-sided changes)
-   - .bg-ghost-row       : striped grey for "ghost" rows (alignment fillers
-                          where one side has no line at this position)
+   - .conflict-bg-ours    : green tint (OURS / current branch / HEAD)
+                            + a green left border so the side is immediately
+                            recognisable even on narrow rows
+   - .conflict-bg-theirs  : red tint (THEIRS / incoming branch)
+                            + a red right border
+   - .conflict-bg-marker  : stronger pink (for <<<<<<< ======= >>>>>>>)
+   - .conflict-bg-conflict : orange/yellow tint (true 3-way conflicts)
+   - .bg-ghost-row       : striped grey for alignment-filler rows
 */
-.conflict-bg-ours     { background-color: rgba(var(--status-added-rgb,   170 217 76) / 0.15); }
-.conflict-bg-theirs   { background-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.15); }
+.conflict-bg-ours {
+  background-color: rgba(var(--status-added-rgb,   170 217 76) / 0.20);
+  border-left: 3px solid rgba(var(--status-added-rgb, 170 217 76) / 0.7);
+}
+.conflict-bg-theirs {
+  background-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.20);
+  border-right: 3px solid rgba(var(--status-deleted-rgb, 242 109 120) / 0.7);
+}
 .conflict-bg-marker   { background-color: rgba(var(--status-conflict-rgb, 255 143 111) / 0.30); font-weight: 600; }
 .conflict-bg-conflict { background-color: rgba(var(--status-conflict-rgb, 255 143 111) / 0.18); }
 
@@ -1655,9 +1661,33 @@ input[type="checkbox"], input[type="radio"] {
    that differ between OURS and THEIRS. They make the specific changed
    words pop out against the row's background tint.
 
-   - .word-diff-added   : word added on this side (bold green tint, full opacity)
-   - .word-diff-removed : word removed from this side (red tint + strikethrough)
+   Visual language — the colour tells you WHICH SIDE the word belongs to:
+   - .word-diff-ours     : word unique to OURS  (bold green — matches the
+                            green tint of the OURS row background)
+   - .word-diff-theirs   : word unique to THEIRS (bold red — matches the
+                            red tint of the THEIRS row background)
+
+   Equal/shared words are rendered with plain syntax highlighting (no
+   word-diff span) so they visually "disappear" into the row.
 */
+.word-diff-ours {
+  background-color: rgba(var(--status-added-rgb, 170 217 76) / 0.55);
+  color: var(--text-inverse, #fff);
+  font-weight: 600;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.word-diff-theirs {
+  background-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.55);
+  color: var(--text-inverse, #fff);
+  font-weight: 600;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* Backward-compat aliases (used by the older DiffViewer component which
+   expects generic "added/removed" class names). Kept so we don't break
+   the 2-way diff display elsewhere in the app. */
 .word-diff-added {
   background-color: rgba(var(--status-added-rgb, 170 217 76) / 0.40);
   font-weight: 600;

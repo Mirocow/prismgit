@@ -139,8 +139,11 @@ function escapeHtml(s: string): string {
 }
 
 /** Render word-diff segments as HTML, highlighting words unique to THIS side.
- *  Same visual language as MergeRow.tsx — words unique to this side get
- *  .word-diff-added (bold green), shared words get plain syntax highlighting. */
+ *  Same visual language as MergeRow.tsx — words unique to this side get a
+ *  SIDE-SPECIFIC highlight:
+ *    - .word-diff-ours   (green)  for OURS rows
+ *    - .word-diff-theirs (red)    for THEIRS rows
+ *  Shared words get plain syntax highlighting. */
 function renderWordDiffHtml(
   segments: WordSegment[],
   lang: SupportedLang,
@@ -159,7 +162,8 @@ function renderWordDiffHtml(
       const isUnique = (side === 'ours' && seg.kind === 'removed')
                     || (side === 'theirs' && seg.kind === 'added');
       if (isUnique) {
-        html += `<span class="word-diff-added">${escapeHtml(seg.text)}</span>`;
+        const cls = side === 'ours' ? 'word-diff-ours' : 'word-diff-theirs';
+        html += `<span class="${cls}">${escapeHtml(seg.text)}</span>`;
       } else {
         html += escapeHtml(seg.text);
       }
