@@ -6,6 +6,17 @@
  * single scroll container; this pane just renders rows at the right
  * absolute Y offset.
  *
+ * Word-diff integration:
+ *   For conflict regions, each row gets `diffAgainst` = the corresponding
+ *   line from the OTHER side (at the same aligned-row index). This lets
+ *   MergeRow compute a word-level diff and highlight the specific changed
+ *   words inline, on top of the block-level background tint.
+ *
+ *   For 'ours' pane: diffAgainst = the theirs line at the same index
+ *   For 'theirs' pane: diffAgainst = the ours line at the same index
+ *   For 'base' pane: no diffAgainst (base is the common ancestor, not
+ *   a "side" in the conflict)
+ *
  * Layout:
  *   <div class="pane">
  *     <header>Ours (123 lines)</header>
@@ -27,7 +38,8 @@ const ROW_HEIGHT = 20; // match MergeRow + useMergeViewport
 interface MergePaneProps {
   /** Pane title (Ours / Theirs / Base). */
   title: string;
-  /** Which side — used for accent color (ours=green, theirs=red, base=muted). */
+  /** Which side — used for accent color (ours=green, theirs=red, base=muted)
+   *  AND for picking which line-array to read content from. */
   side: 'ours' | 'theirs' | 'base';
   /** The alignedRows[] from the parent. */
   alignedRows: AlignedRow[];
@@ -39,8 +51,11 @@ interface MergePaneProps {
   scrollTop: number;
   /** Detected programming language for syntax highlighting. */
   lang: SupportedLang;
-  /** Source lines for this side (for content extraction). */
+  /** Source lines for THIS side (for content extraction). */
   lines: string[];
+  /** Source lines for the OTHER side (for word-diff in conflict regions).
+   *  null for the base pane (base doesn't diff against anything). */
+  otherSideLines?: string[] | null;
 }
 
 function MergePaneImpl({
@@ -52,6 +67,7 @@ function MergePaneImpl({
   scrollTop,
   lang,
   lines,
+  otherSideLines,
 }: MergePaneProps) {
   const { t } = useI18n();
   // Slice the visible rows.
@@ -90,17 +106,31 @@ function MergePaneImpl({
         >
           {visibleRows.map((row, i) => {
             const idx = visibleRange.start + i;
-            const lineNum = side === 'ours' ? row.oursLine : side === 'theirs' ? row.theirsLine : row.baseLine;
+            // Which line index does THIS side have at this aligned row?
+            const lineIdx = side === 'ours' ? row.oursLine : side === 'theirs' ? row.theirsLine : row.baseLine;
             const isGhost = side === 'ours' ? row.isGhost.ours : side === 'theirs' ? row.isGhost.theirs : row.isGhost.base;
-            const text = lineNum !== null ? lines[lineNum] ?? '' : '';
+            const text = lineIdx !== null ? lines[lineIdx] ?? '' : '';
+            // For word-diff: in conflict regions, find the corresponding
+            // line from the OTHER side. The aligned-row index points to
+            // the same position in otherSideLines (when that side has a
+            // line at this row — otherwise null).
+            let diffAgainst: string | null = null;
+            if (otherSideLines && row.regionKind === 'conflict') {
+              const otherLineIdx = side === 'ours' ? row.theirsLine : row.oursLine;
+              if (otherLineIdx !== null && otherLineIdx < otherSideLines.length) {
+                diffAgainst = otherSideLines[otherLineIdx];
+              }
+            }
             return (
               <MergeRow
                 key={idx}
                 text={text}
-                lineNum={lineNum !== null ? lineNum + 1 : null}
+                lineNum={lineIdx !== null ? lineIdx + 1 : null}
                 regionKind={row.regionKind}
                 isGhost={isGhost}
                 lang={lang}
+                diffAgainst={diffAgainst}
+                side={side}
               />
             );
           })}

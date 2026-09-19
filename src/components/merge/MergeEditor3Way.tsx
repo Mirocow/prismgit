@@ -447,6 +447,7 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
             scrollTop={viewport.scrollTop}
             lang={langRef.current}
             lines={oursContent.split('\n')}
+            otherSideLines={theirsContent.split('\n')}
           />
         </div>
 
@@ -486,6 +487,7 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
             scrollTop={viewport.scrollTop}
             lang={langRef.current}
             lines={theirsContent.split('\n')}
+            otherSideLines={oursContent.split('\n')}
           />
         </div>
       </div>

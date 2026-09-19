@@ -1622,10 +1622,55 @@ input[type="checkbox"], input[type="radio"] {
    - .conflict-bg-ours    : light green tint  (matches the left pane)
    - .conflict-bg-theirs  : light red tint    (matches the right pane)
    - .conflict-bg-marker  : stronger pink/red  (for <<<<<<< ======= >>>>>>>)
+   - .conflict-bg-conflict : orange/yellow tint (for true 3-way conflicts where
+                           both sides changed differently — visually distinct
+                           from one-sided changes)
+   - .bg-ghost-row       : striped grey for "ghost" rows (alignment fillers
+                          where one side has no line at this position)
 */
-.conflict-bg-ours   { background-color: rgba(var(--status-added-rgb,   170 217 76) / 0.15); }
-.conflict-bg-theirs { background-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.15); }
-.conflict-bg-marker { background-color: rgba(var(--status-conflict-rgb, 255 143 111) / 0.30); font-weight: 600; }
+.conflict-bg-ours     { background-color: rgba(var(--status-added-rgb,   170 217 76) / 0.15); }
+.conflict-bg-theirs   { background-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.15); }
+.conflict-bg-marker   { background-color: rgba(var(--status-conflict-rgb, 255 143 111) / 0.30); font-weight: 600; }
+.conflict-bg-conflict { background-color: rgba(var(--status-conflict-rgb, 255 143 111) / 0.18); }
+
+/* Ghost row — striped grey, used when one side has no line at this position
+   (alignment filler). Repeat-linear-gradient gives a subtle diagonal stripe
+   pattern so the user immediately sees "this row doesn't exist on this side". */
+.bg-ghost-row {
+  background-color: rgba(var(--text-tertiary-rgb, 128 128 128) / 0.05);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    rgba(var(--text-tertiary-rgb, 128 128 128) / 0.04) 4px,
+    rgba(var(--text-tertiary-rgb, 128 128 128) / 0.04) 8px
+  );
+}
+/* The Tailwind-style alias used by MergeRow — `bg-bg-ghost-row` is the
+   className the component sets; map it to the same styles as .bg-ghost-row. */
+.bg-bg-ghost-row { background-color: rgba(var(--text-tertiary-rgb, 128 128 128) / 0.05); background-image: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(var(--text-tertiary-rgb, 128 128 128) / 0.04) 4px, rgba(var(--text-tertiary-rgb, 128 128 128) / 0.04) 8px); }
+
+/* === Word-level diff highlight (inside conflict regions) ===
+   These classes are applied to <span> elements wrapping individual words
+   that differ between OURS and THEIRS. They make the specific changed
+   words pop out against the row's background tint.
+
+   - .word-diff-added   : word added on this side (bold green tint, full opacity)
+   - .word-diff-removed : word removed from this side (red tint + strikethrough)
+*/
+.word-diff-added {
+  background-color: rgba(var(--status-added-rgb, 170 217 76) / 0.40);
+  font-weight: 600;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.word-diff-removed {
+  background-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.40);
+  text-decoration: line-through;
+  text-decoration-color: rgba(var(--status-deleted-rgb, 242 109 120) / 0.8);
+  border-radius: 2px;
+  padding: 0 1px;
+}
 
 /* === Drag and drop === */
 .drag-over {
