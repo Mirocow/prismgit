@@ -262,6 +262,52 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
     ));
   }, [baseContent, oursContent, theirsContent]);
 
+  // Undo last resolution — pop the undo stack and revert that conflict
+  // to its previous state (or to unresolved if there was no previous).
+  const [canUndo, setCanUndo] = useState(false);
+  const handleUndo = useCallback(() => {
+    const stack = undoStackRef.current;
+    if (stack.length === 0) return;
+    const last = stack.pop();
+    if (!last) return;
+    setCanUndo(stack.length > 0);
+    // Re-resolve the conflict with the PREVIOUS resolution (or Reset it
+    // if there was none — i.e. the previous state was "unresolved with
+    // conflict markers").
+    if (last.prevResolution) {
+      handleResolve(last.conflictIdx, last.prevResolution);
+    } else {
+      handleReset(last.conflictIdx);
+    }
+  }, [handleResolve, handleReset]);
+
+  // Reset ALL conflicts to their original state — re-runs buildAutoMergeResult
+  // and restores all conflict markers. Useful when the user has made a mess.
+  const handleResetAll = useCallback(() => {
+    const baseLines = baseContent.split('\n');
+    const oursLines = oursContent.split('\n');
+    const theirsLines = theirsContent.split('\n');
+    const regions = diff3(baseLines, oursLines, theirsLines);
+    const autoResult = buildAutoMergeResult(baseLines, oursLines, theirsLines, regions);
+    const newText = autoResult.join('\n');
+    if (textareaRef.current) {
+      textareaRef.current.value = newText;
+    }
+    resultRef.current = newText;
+    setCurrentResult(newText);
+    setInitialResult(newText);
+    setDirty(true);
+    setConflicts((prev) => prev.map((c) => ({ ...c, resolved: false, resolution: undefined })));
+    undoStackRef.current = [];
+    setCanUndo(false);
+  }, [baseContent, oursContent, theirsContent]);
+
+  // Update canUndo whenever the undo stack changes (e.g. after a resolve).
+  useEffect(() => {
+    setCanUndo(undoStackRef.current.length > 0);
+  });
+
+
   // ============ Save & Stage ============
 
   const handleSave = useCallback(async () => {
@@ -301,7 +347,11 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
         return;
       }
       if (!mod) return;
-      if (e.key === '1') { e.preventDefault(); handleResolve(currentConflictIdx, 'ours'); }
+      if (e.key === 'z' || e.key === 'Z') {
+        e.preventDefault();
+        handleUndo();
+      }
+      else if (e.key === '1') { e.preventDefault(); handleResolve(currentConflictIdx, 'ours'); }
       else if (e.key === '2') { e.preventDefault(); handleResolve(currentConflictIdx, 'theirs'); }
       else if (e.key === '3') { e.preventDefault(); handleResolve(currentConflictIdx, 'both-ours-first'); }
       else if (e.key === '4') { e.preventDefault(); handleResolve(currentConflictIdx, 'both-theirs-first'); }
@@ -312,7 +362,7 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
     };
     window.addEventListener('keydown', handleKey, true);
     return () => window.removeEventListener('keydown', handleKey, true);
-  }, [conflicts.length, currentConflictIdx, handleResolve, saving, handleSave]);
+  }, [conflicts.length, currentConflictIdx, handleResolve, handleUndo, saving, handleSave]);
 
   // ============ Render ============
 
@@ -348,9 +398,12 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
         dirty={dirty}
         saving={saving}
         showBase={showBase}
+        canUndo={canUndo}
         onPrevConflict={() => setCurrentConflictIdx((i) => Math.max(0, i - 1))}
         onNextConflict={() => setCurrentConflictIdx((i) => Math.min(conflicts.length - 1, i + 1))}
         onToggleBase={() => setShowBase((s) => !s)}
+        onUndo={handleUndo}
+        onResetAll={handleResetAll}
         onOpenExternal={() => {
           const fullPath = `${repo.path}/${filePath}`.replace(/\/+/g, '/');
           api.git.openFile(fullPath);
