@@ -206,7 +206,7 @@ export function registerGitIpc(): void {
       // `.gitmodules` no longer references it. Returning an empty string
       // matches what the renderer's .catch(() => '') would have produced
       // and keeps the dev console quiet.
-      if (/does not exist|did not match any file|not in the index|no submodule mapping found/i.test(msg)) {
+      if (/does not exist|did not match any file|not in the index|no submodule mapping found|but not at stage/i.test(msg)) {
         return '';
       }
       // Real error — re-throw so the renderer can handle it.
