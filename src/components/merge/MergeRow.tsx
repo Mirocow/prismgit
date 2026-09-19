@@ -3,33 +3,33 @@
  *
  * Memoized for performance — only re-renders when its props change.
  *
- * Render:
- *   <div class="row" style="height: 20px">
- *     <span class="line-number">123</span>
- *     <span class="content">
- *       ... syntax-highlighted code OR word-diff segments ...
- *     </span>
- *   </div>
+ * Background tint logic (REWRITTEN v3 — fixes the "both panes blue" bug):
  *
- * Background tint comes from the regionKind + ghost flags:
- *   - stable       → no bg
- *   - changed-ours → green tint (light)
- *   - changed-theirs → red tint (light)
- *   - conflict     → orange/yellow tint
- *   - ghost row    → striped grey background
+ *   The tint is determined by TWO factors:
+ *   1. Which SIDE this pane is (ours / theirs / base) — passed as `side` prop.
+ *   2. Whether this row's content is PRESENT or GHOST on this side.
+ *
+ *   The PREVIOUS logic used `regionKind` (stable / changed-ours /
+ *   changed-theirs / conflict) to pick the tint. This was WRONG because:
+ *     - In a 'changed-theirs' region, the OURS pane shows unchanged content
+ *       (ours == base). The old logic tinted it BLUE (theirs colour) even
+ *       though the OURS pane is showing OURS content that didn't change.
+ *     - This made BOTH panes show the same colour → "both blue" bug.
+ *
+ *   The NEW logic: the tint colour matches the PANE, not the region.
+ *     - OURS pane rows are ALWAYS green-tinted when they're inside ANY
+ *       non-stable region (changed-ours OR conflict).
+ *     - THEIRS pane rows are ALWAYS blue-tinted when inside ANY non-stable
+ *       region (changed-theirs OR conflict).
+ *     - Stable region rows get NO tint (both sides are identical there).
+ *     - Ghost rows (no content on this side) get the striped grey pattern.
+ *
+ *   This gives a clear visual rule: green = "this is what WE have",
+ *   blue = "this is what THEY have", no colour = "both sides agree".
  *
  * Word-level diff:
- *   When a row is inside a CONFLICT region AND a `diffAgainst` line is
- *   provided (the corresponding line from the OTHER side), we compute a
- *   word-level diff and highlight the changed words inline. This makes
- *   the specific changes between OURS and THEIRS pop out — without it,
- *   the user only sees block-level background tints and can't tell WHICH
- *   words actually differ.
- *
- *   For 'ours' rows, diffAgainst = the theirs line at the same aligned-row
- *   index. Added words (in ours but not theirs) get .word-diff-added.
- *   Removed words (in theirs but not ours) get .word-diff-removed.
- *   For 'theirs' rows the highlighting mirrors: added = theirs-only words.
+ *   Inside conflict regions, words unique to THIS side get a side-specific
+ *   highlight (.word-diff-ours green / .word-diff-theirs blue).
  */
 
 import { memo, useMemo } from 'react';
@@ -54,40 +54,40 @@ interface MergeRowProps {
   /** The line from the OTHER side to diff against (for word-level highlight
    *  inside conflict regions). null/undefined = no word-diff. */
   diffAgainst?: string | null;
-  /** Which side this row belongs to — affects word-diff segment coloring. */
+  /** Which side this row belongs to — affects tint colour + word-diff. */
   side?: 'ours' | 'theirs' | 'base';
 }
 
 /**
- * Map regionKind + side → background CSS class.
+ * Determine the background CSS class for a row.
  *
- * For 'conflict' regions, the row belongs to EITHER ours OR theirs
- * (never both — that's the whole point of a conflict: the two sides
- * diverged). The AlignedRow model sets oursLine=null on theirs-only
- * rows and theirsLine=null on ours-only rows. We use the `side` prop
- * (passed from MergePane) to decide which side's tint to apply:
+ * RULE (rewritten): the tint colour matches the PANE, not the region kind.
+ *   - Ghost row → striped grey (this side has no line here)
+ *   - Stable region → no tint (both sides agree, nothing to highlight)
+ *   - ANY non-stable region (changed-ours / changed-theirs / conflict):
+ *     OURS pane → green (conflict-bg-ours)
+ *     THEIRS pane → blue (conflict-bg-theirs)
+ *     BASE pane → orange (conflict-bg-conflict) — base is the "reference"
  *
- *   side='ours'  + regionKind='conflict'  → conflict-bg-ours (green)
- *   side='theirs'+ regionKind='conflict'  → conflict-bg-theirs (blue)
- *
- * For 'stable' regions there's no conflict → no bg.
- * For 'changed-ours' → green (only we changed).
- * For 'changed-theirs' → blue (only they changed).
- * For ghost rows → striped grey.
+ * This fixes the "both panes blue" bug where a 'changed-theirs' region
+ * made the OURS pane show blue (because regionKind=changed-theirs → blue),
+ * even though the OURS pane was showing OURS content.
  */
-function bgClassForRegion(kind: RegionKind, isGhost: boolean, side: 'ours' | 'theirs' | 'base'): string {
+function bgClassForRow(
+  regionKind: RegionKind,
+  isGhost: boolean,
+  side: 'ours' | 'theirs' | 'base',
+): string {
+  // Ghost rows always get the striped grey pattern.
   if (isGhost) return 'bg-bg-ghost-row';
-  switch (kind) {
-    case 'stable':         return '';
-    case 'changed-ours':   return 'conflict-bg-ours';
-    case 'changed-theirs': return 'conflict-bg-theirs';
-    case 'conflict':
-      // Inside a conflict region, the row belongs to one side only.
-      // Use the side-specific tint so the user can tell at a glance
-      // which pane shows "ours" vs "theirs" content.
-      return side === 'ours' ? 'conflict-bg-ours' : side === 'theirs' ? 'conflict-bg-theirs' : 'conflict-bg-conflict';
-    default:               return '';
-  }
+  // Stable regions: no tint (both sides agree).
+  if (regionKind === 'stable') return '';
+  // Non-stable regions: tint by which PANE we're rendering.
+  // This is the key fix — the colour follows the pane, not the region.
+  if (side === 'ours') return 'conflict-bg-ours';
+  if (side === 'theirs') return 'conflict-bg-theirs';
+  // Base pane in a non-stable region → orange (reference / common ancestor).
+  return 'conflict-bg-conflict';
 }
 
 /** Escape a string for safe insertion into innerHTML. */
@@ -100,21 +100,17 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Render word-diff segments as HTML. For 'ours' rows, the segments come
- * from wordDiff(oldLine=ours, newLine=theirs).old — so 'removed' segments
- * are words present in ours but missing from theirs (i.e. words that are
- * DIFFERENT in ours). For 'theirs' rows we use wordDiff.new — 'added'
- * segments are words present in theirs but not in ours.
+ * Render word-diff segments as HTML.
  *
- * To make the highlight intuitive for the user:
- *   - On the OURS side: highlight words that are NOT in theirs → these are
- *     "ours-only" words. Use .word-diff-ours (green) so the colour matches
- *     the OURS row background tint (also green) — same-side = same colour.
- *   - On the THEIRS side: highlight words that are NOT in ours → these are
- *     "theirs-only" words. Use .word-diff-theirs (red) so the colour matches
- *     the THEIRS row background tint (also red) — same-side = same colour.
+ * For 'ours' rows, segments come from wordDiff(oursLine, theirsLine).old:
+ *   - 'removed' segments = words in ours but NOT in theirs → ours-only.
+ * For 'theirs' rows, segments come from wordDiff(oursLine, theirsLine).new:
+ *   - 'added' segments = words in theirs but NOT in ours → theirs-only.
  *
- * Equal segments are rendered with plain syntax highlighting.
+ * Unique words get a side-specific highlight:
+ *   - OURS pane unique words → .word-diff-ours (green)
+ *   - THEIRS pane unique words → .word-diff-theirs (blue)
+ * Equal/shared words get plain syntax highlighting.
  */
 function renderWordDiffHtml(
   segments: WordSegment[],
@@ -125,23 +121,14 @@ function renderWordDiffHtml(
   for (const seg of segments) {
     if (seg.text === '') continue;
     if (seg.kind === 'equal') {
-      // Use syntax highlighting for equal segments.
       html += tokensToHtml(tokenizeLine(seg.text, lang)) || escapeHtml(seg.text);
     } else {
-      // For 'ours' side: 'removed' segments (in ours, not in theirs) → ours-only.
-      // For 'theirs' side: 'added' segments (in theirs, not in ours) → theirs-only.
-      // In both cases, the highlighted span represents "what's unique to this side".
-      // Use a SIDE-SPECIFIC class so the colour matches the row's bg tint:
-      //   .word-diff-ours   (green) for OURS rows
-      //   .word-diff-theirs (red)   for THEIRS rows
       const isUnique = (side === 'ours' && seg.kind === 'removed')
                     || (side === 'theirs' && seg.kind === 'added');
       if (isUnique) {
         const cls = side === 'ours' ? 'word-diff-ours' : 'word-diff-theirs';
         html += `<span class="${cls}">${escapeHtml(seg.text)}</span>`;
       } else {
-        // This word exists on the OTHER side but not here — render as
-        // plain text (it's a context word that happens to be shared).
         html += escapeHtml(seg.text);
       }
     }
@@ -163,7 +150,6 @@ function MergeRowImpl({
     // Word-diff ONLY in conflict regions where we have a line to diff against.
     if (regionKind === 'conflict' && diffAgainst != null && diffAgainst !== text) {
       const result = wordDiff(text, diffAgainst);
-      // Pick the segment list for THIS side.
       const segments = side === 'ours' ? result.old : side === 'theirs' ? result.new : null;
       if (segments) {
         return renderWordDiffHtml(segments, lang, side);
@@ -173,7 +159,7 @@ function MergeRowImpl({
     return tokensToHtml(tokenizeLine(text, lang)) || '&nbsp;';
   }, [text, isGhost, regionKind, diffAgainst, side, lang]);
 
-  const bg = bgClassForRegion(regionKind, isGhost, side);
+  const bg = bgClassForRow(regionKind, isGhost, side);
   return (
     <div
       className={cn('flex items-start font-mono text-xs leading-5 px-1', bg)}
