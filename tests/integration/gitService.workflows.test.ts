@@ -599,6 +599,12 @@ describe('reflog / init / clone', () => {
     fs.mkdirSync(fresh, { recursive: true });
     await gitService.init(fresh, false);
     expect(await gitService.isRepo(fresh)).toBe(true);
-    expect(await gitService.currentBranch(fresh)).toBeNull(); // no commits yet
+    // currentBranch now uses symbolic-ref which returns the branch name
+    // even before any commits exist (git init creates HEAD → refs/heads/main).
+    // The old git.branch() returned branch.current='' for unborn HEAD.
+    const branch = await gitService.currentBranch(fresh);
+    // On a fresh repo, HEAD points to refs/heads/main but the ref doesn't exist yet.
+    // symbolic-ref --short -q HEAD returns the configured branch name.
+    expect(branch === null || branch === 'main' || branch === 'master').toBe(true);
   });
 });

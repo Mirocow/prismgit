@@ -359,17 +359,20 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
     const git = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS });
 
     // Run all reads in parallel — they are independent.
-    const [logResult, branchResult, remotes, commitCountStr, headHash] = await Promise.all([
-      git.log({ maxCount: 1 }).catch(() => ({ latest: null })),
+    const [logRaw, branchResult, remotes, commitCountStr, headHash] = await Promise.all([
+      // PERF: git.raw instead of git.log — avoids simple-git's full LogEntry parsing
+      git.raw(['log', '-1', '--format=%H%x1f%s%x1f%cI']).catch(() => ''),
       git.branchLocal().catch(() => ({ all: [] as string[] })),
       git.getRemotes(true).catch(() => []),
-      // Total commit count reachable from HEAD. May fail on empty repos
-      // (no HEAD yet) — fall back to 0.
       git.raw(['rev-list', '--count', 'HEAD']).catch(() => '0'),
       git.revparse('HEAD').catch(() => undefined),
     ]);
 
-    const latest = (logResult as { latest: { hash: string; date: string; message: string } | null }).latest;
+    // Parse the raw log output: hash\x1fsubject\x1fdate
+    const logParts = logRaw.trim().split('\x1f');
+    const latest = logParts.length >= 3
+      ? { hash: logParts[0], date: logParts[2].trim(), message: logParts[1] }
+      : null;
     const origin = (remotes as Array<{ name: string; refs: { fetch: string } }>).find(r => r.name === 'origin') ||
       (remotes as Array<{ name: string; refs: { fetch: string } }>)[0];
     const url = origin?.refs.fetch;
