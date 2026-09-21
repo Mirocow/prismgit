@@ -117,6 +117,14 @@ export function HistoryPage() {
   // holding `j` (or rapid arrow navigation) fires 4 IPC calls per keystroke
   // which queue behind each other on the simple-git subprocess pool.
   const commitSelectionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // MEMORY FIX: clear per-commit caches when switching repos.
+  useEffect(() => {
+    commitFilesCache.current.clear();
+    nestedCommitsCache.current.clear();
+    tagsHereCache.current.clear();
+  }, [repo.path]);
+
   const [showFiles, setShowFiles] = useState(true);
   const [filesPage, setFilesPage] = useState(0);
   const [filesViewMode, setFilesViewMode] = useState<'list' | 'tree'>('list');

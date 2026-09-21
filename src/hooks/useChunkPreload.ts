@@ -66,7 +66,6 @@ const DIALOG_CHUNKS = [
   () => import('../components/ApplyPatchModal'),
   () => import('../components/IndexEditorDialog'),
   () => import('../components/RepoSettingsDialog'),
-  () => import('../components/ConflictSolver'),
 ] as Array<() => Promise<unknown>>;
 
 export const CHUNK_PRELOADERS: Array<() => Promise<unknown>> = [...PAGE_CHUNKS, ...DIALOG_CHUNKS];

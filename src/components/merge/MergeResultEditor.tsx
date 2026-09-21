@@ -52,7 +52,7 @@
  */
 
 import { useEffect, useRef, useMemo, useCallback } from 'react';
-import { tokenizeLine, tokensToHtml, type SupportedLang } from '../../lib/syntaxHighlight';
+import { tokenizeLineCached, tokensToHtml, type SupportedLang } from '../../lib/syntaxHighlight';
 
 const ROW_HEIGHT = 20;
 const GUTTER_WIDTH = 48; // px — matches w-10 + pr-2 + border = ~48px
@@ -155,7 +155,7 @@ export function MergeResultEditor({
       // No word-level diff.
       const contentHtml = (line.startsWith('<<<<<<<') || line.startsWith('=======') || line.startsWith('>>>>>>>'))
         ? escapeHtml(line) || '&nbsp;'
-        : tokensToHtml(tokenizeLine(line, lang)) || '&nbsp;';
+        : tokensToHtml(tokenizeLineCached(line, lang)) || '&nbsp;';
       html += `<div style="height:${ROW_HEIGHT}px;min-height:${ROW_HEIGHT}px;background-color:${cls.bgClass};font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;font-size:12px;line-height:20px;padding:0 8px 0 0;display:flex;align-items:flex-start;white-space:pre-wrap;word-break:break-word;">${lineNum}<span style="flex:1;white-space:pre-wrap;">${contentHtml}</span></div>`;
     }
     return html;

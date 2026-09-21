@@ -190,18 +190,3 @@ export async function getCachedAvatar(url: string): Promise<string | null> {
   }
 }
 
-/**
- * Build a Gravatar URL from an email address (MD5 hash, sync).
- *
- * NOTE: this is kept only for direct tests / CLI tools. The renderer builds
- * its own Gravatar URL via `src/lib/gravatar.ts` (which supports both MD5
- * and SHA-256 hashes); the previous `avatar:getByEmail` IPC handler that
- * consumed this function was removed as dead code.
- */
-export function gravatarUrlFromEmail(email: string, size = 48): string {
-  const normalized = email.trim().toLowerCase();
-  if (!normalized) return '';
-  const crypto = require('crypto') as typeof import('crypto');
-  const hash = crypto.createHash('md5').update(normalized).digest('hex');
-  return `https://www.gravatar.com/avatar/${hash}?s=${size}&d=identicon&r=g`;
-}

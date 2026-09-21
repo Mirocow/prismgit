@@ -8,7 +8,7 @@ import { wordDiff, type WordSegment } from '../lib/wordDiff';
 import { useI18n } from '../lib/i18n';
 import { useContextMenu } from '../lib/useContextMenu';
 import {
-  tokenizeLine, tokensToHtml, detectLang, type SupportedLang,
+  tokenizeLineCached, tokensToHtml, detectLang, type SupportedLang,
 } from '../lib/syntaxHighlight';
 
 interface DiffViewerProps {
@@ -85,7 +85,7 @@ function highlightLine(content: string, lang: SupportedLang): React.ReactNode {
   const cacheKey = `${lang}|${content}`;
   let html = SYNTAX_CACHE.get(cacheKey);
   if (html === undefined) {
-    const tokens = tokenizeLine(content, lang);
+    const tokens = tokenizeLineCached(content, lang);
     html = tokensToHtml(tokens);
     // Evict the oldest entry if the cache is full.
     if (SYNTAX_CACHE.size >= SYNTAX_CACHE_MAX) {
@@ -225,7 +225,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
           // keep their colors even when word-diff is active. Uses the same
           // SYNTAX_CACHE as highlightLine() so repeated segments hit the cache.
           if (lang) {
-            return <span key={i} dangerouslySetInnerHTML={{ __html: tokensToHtml(tokenizeLine(seg.text, lang)) }} />;
+            return <span key={i} dangerouslySetInnerHTML={{ __html: tokensToHtml(tokenizeLineCached(seg.text, lang)) }} />;
           }
           return <span key={i}>{seg.text}</span>;
         }

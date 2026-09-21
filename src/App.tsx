@@ -46,7 +46,6 @@ const CloneModal = lazy(() => import('./components/CloneModal').then(m => ({ def
 const InitModal = lazy(() => import('./components/InitModal').then(m => ({ default: m.InitModal })));
 const GitFlowDialog = lazy(() => import('./components/GitFlowDialog').then(m => ({ default: m.GitFlowDialog })));
 const InteractiveRebaseDialog = lazy(() => import('./components/InteractiveRebaseDialog').then(m => ({ default: m.InteractiveRebaseDialog })));
-const ConflictSolver = lazy(() => import('./components/ConflictSolver').then(m => ({ default: m.ConflictSolver })));
 const RepoInfoDialog = lazy(() => import('./components/RepoInfoDialog').then(m => ({ default: m.RepoInfoDialog })));
 const ApplyPatchModal = lazy(() => import('./components/ApplyPatchModal').then(m => ({ default: m.ApplyPatchModal })));
 const IndexEditorDialog = lazy(() => import('./components/IndexEditorDialog').then(m => ({ default: m.IndexEditorDialog })));

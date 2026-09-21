@@ -7,7 +7,7 @@
  */
 
 import { memo, useMemo } from 'react';
-import { tokenizeLine, tokensToHtml, type SupportedLang } from '../../lib/syntaxHighlight';
+import { tokenizeLineCached, tokensToHtml, type SupportedLang } from '../../lib/syntaxHighlight';
 import type { RegionKind } from '../../lib/merge/mergeTypes';
 
 const ROW_HEIGHT = 20;
@@ -41,7 +41,7 @@ function MergeRowImpl({
 }: MergeRowProps) {
   const contentHtml = useMemo(() => {
     if (isGhost || text === '') return '&nbsp;';
-    return tokensToHtml(tokenizeLine(text, lang)) || '&nbsp;';
+    return tokensToHtml(tokenizeLineCached(text, lang)) || '&nbsp;';
   }, [text, isGhost, lang]);
 
   const bg = isGhost ? COLORS.ghost

@@ -87,31 +87,5 @@ export type ConflictResolution =
   | 'both-theirs-first'
   | 'manual';
 
-/** Common merge actions exposed by the engine. */
-export interface MergeAction {
-  type: 'resolve-hunk';
-  conflictIdx: number;
-  resolution: ConflictResolution;
-}
 
-/** Snapshot of the editable Result content + which conflicts are resolved. */
-export interface MergeState {
-  /** Current text in the Result editor (the merged output). */
-  resultText: string;
-  /** Per-conflict metadata (resolved / pending). */
-  conflicts: ConflictRegion[];
-  /** Undo stack of (conflictIdx, previousResolution) tuples. */
-  undoStack: MergeAction[];
-}
 
-/** Render-time props for a single pane row. */
-export interface PaneRowProps {
-  /** Line content (already stripped of conflict markers). */
-  text: string;
-  /** 1-based line number, or null for ghost rows. */
-  lineNum: number | null;
-  /** Background tint class based on RegionKind + ghost status. */
-  bgClass: string;
-  /** True if this row is a "ghost" (empty filler for alignment). */
-  isGhost: boolean;
-}
