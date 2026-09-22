@@ -45,8 +45,8 @@ const api = {
       ipcRenderer.invoke('git:commit', repoPath, message, amend, signoff, noVerify),
     clean: (repoPath: string, paths: string[], dryRun?: boolean, force?: boolean, directories?: boolean) =>
       ipcRenderer.invoke('git:clean', repoPath, paths, dryRun, force, directories),
-    push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string) =>
-      ipcRenderer.invoke('git:push', repoPath, remote, branch, setUpstream, force, tags, targetBranch),
+    push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string, forceMode?: 'lease' | 'force') =>
+      ipcRenderer.invoke('git:push', repoPath, remote, branch, setUpstream, force, tags, targetBranch, forceMode),
     pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) =>
       ipcRenderer.invoke('git:pull', repoPath, remote, branch, rebase, noFF),
     fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) =>

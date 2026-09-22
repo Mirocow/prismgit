@@ -350,6 +350,14 @@ export interface AppSettings {
   forcePushPolicy?: 'deny' | 'feature-only' | 'allow';
   /** Branches protected from force-push (glob patterns). */
   protectedBranches?: string[];
+  /**
+   * Which git flag a force push uses (Preferences → Commands → Force Push):
+   *   'force' → `git push --force` (default — overwrite unconditionally)
+   *   'lease' → `git push --force-with-lease` (refuse on stale remote-tracking ref)
+   * Applies to every force push in the app: toolbar, Push To…, Branches page,
+   * AI tools, command palette, menu — unless an explicit mode is passed.
+   */
+  forcePushMode?: 'lease' | 'force';
   // === CI/CD integration ===
   /** Jenkins URL for CI status badges. */
   jenkinsUrl?: string;

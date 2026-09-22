@@ -630,6 +630,19 @@ export default function App() {
         })
         .catch((e) => toast.error(i18nT('toast.git.pushFailed'), String(e)));
     };
+    // Menu Remote → Force Push — real `git push --force` on the current
+    // branch. Protected branches are still rejected by the service-level
+    // force-push policy (Preferences → Commands).
+    const handleForcePush = () => {
+      const repo = useRepositoryStore.getState().currentRepo;
+      if (!repo) return;
+      useGitStore.getState().push(repo.path, undefined, undefined, false, true, undefined, 'force')
+        .then(() => {
+          toast.success(i18nT('toast.git.pushSuccess'));
+          window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
+        })
+        .catch((e) => toast.error(i18nT('toast.git.pushFailed'), String(e)));
+    };
     const handlePull = () => {
       const repo = useRepositoryStore.getState().currentRepo;
       if (!repo) return;
@@ -1120,6 +1133,7 @@ export default function App() {
       window.smartgit.events.on('menu:initRepository', handleInit),
       window.smartgit.events.on('menu:commit', handleCommit),
       window.smartgit.events.on('menu:push', handlePush),
+      window.smartgit.events.on('menu:forcePush', handleForcePush),
       window.smartgit.events.on('menu:pull', handlePull),
       window.smartgit.events.on('menu:fetch', handleFetch),
       window.smartgit.events.on('menu:toggleTheme', handleToggleTheme),

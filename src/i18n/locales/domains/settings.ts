@@ -414,6 +414,8 @@ export const en: Record<string, string> = {
   'settings.forcePushHint': 'When policy is',
   'settings.forcePushHint2': 'force push is rejected on protected branches.',
   'settings.forcePushManualNote': 'SmartGit Manual: thin safety configuration for force push.',
+  'settings.forcePushFlag': 'Force push flag',
+  'settings.forcePushFlagHint': 'Which git flag every force push in the app uses: --force overwrites the remote unconditionally (default); --force-with-lease refuses when the remote-tracking ref is stale. Protected branches are always policy-checked.',
 
   // CI/CD Integration
   'settings.ciCdHint': 'Configure CI servers to display pipeline status badges in History. GitHub Actions is configured via GitHub PAT (see GitHub Integration above).',
@@ -928,6 +930,8 @@ export const ru: Record<string, string> = {
   'settings.forcePushHint': 'Когда выбрана политика',
   'settings.forcePushHint2': 'force push на защищённые ветки отклоняется.',
   'settings.forcePushManualNote': 'SmartGit Manual: упрощённая настройка безопасности force push.',
+  'settings.forcePushFlag': 'Флаг force push',
+  'settings.forcePushFlagHint': 'Какой флаг git использует каждый force push в приложении: --force перезаписывает сервер безусловно (по умолчанию); --force-with-lease отклоняет push при устаревшей remote-ссылке. Защищённые ветки всегда проверяются политикой.',
 
   // CI/CD Integration
   'settings.ciCdHint': 'Настройте CI-серверы, чтобы отображать значки состояния конвейеров в History. GitHub Actions настраивается через GitHub PAT (см. GitHub Integration выше).',
@@ -1441,6 +1445,8 @@ export const zh: Record<string, string> = {
   'settings.forcePushHint': '当策略为',
   'settings.forcePushHint2': '时，受保护分支上的强制推送将被拒绝。',
   'settings.forcePushManualNote': 'SmartGit Manual：force push 的轻量安全配置。',
+  'settings.forcePushFlag': '强制推送标志',
+  'settings.forcePushFlagHint': '应用内所有强制推送使用的 git 标志：--force 无条件覆盖远程（默认）；--force-with-lease 在远程跟踪引用过期时拒绝推送。受保护分支始终受策略检查。',
 
   // CI/CD Integration
   'settings.ciCdHint': '配置 CI 服务器以在 History 中显示流水线状态徽标。GitHub Actions 通过 GitHub PAT 配置（见上方的 GitHub 集成）。',
@@ -1954,6 +1960,8 @@ export const de: Record<string, string> = {
   'settings.forcePushHint': 'Wenn die Richtlinie',
   'settings.forcePushHint2': 'ist, wird Force Push auf geschützten Branches abgelehnt.',
   'settings.forcePushManualNote': 'SmartGit-Handbuch: schlanke Sicherheitskonfiguration für Force Push.',
+  'settings.forcePushFlag': 'Force-Push-Flag',
+  'settings.forcePushFlagHint': 'Welches git-Flag jeder Force-Push in der App verwendet: --force überschreibt den Remote bedingungslos (Standard); --force-with-lease lehnt den Push bei veralteter Remote-Tracking-Referenz ab. Geschützte Branches werden immer per Richtlinie geprüft.',
 
   // CI/CD Integration
   'settings.ciCdHint': 'Konfigurieren Sie CI-Server, um Pipeline-Status-Abzeichen in der Historie anzuzeigen. GitHub Actions wird über den GitHub PAT konfiguriert (siehe GitHub-Integration oben).',

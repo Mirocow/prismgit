@@ -1277,6 +1277,119 @@ describe('push with targetBranch (Push To... refspec `local:target`)', () => {
     }
   });
 
+  // ── Force-push FLAG: --force (default) vs --force-with-lease ────────────
+  // push() used to hardcode --force-with-lease for every force push. Now the
+  // effective flag is: explicit forceMode param > forcePushMode setting >
+  // 'force' (real git push --force — user request: "push --force everywhere").
+  // The forcePushPolicy / protectedBranches gate applies to BOTH modes.
+
+  /**
+   * Divergence fixture: src + a teammate clone share a bare remote.
+   * After setup: remote = base+teammate, src = base+local, and src has NOT
+   * fetched → its remote-tracking ref is STALE. A non-FF push must use
+   * --force to succeed; --force-with-lease must reject ("stale info").
+   */
+  async function mkStaleDivergence(tag: string): Promise<string> {
+    const src = await mkRepo(`flag-${tag}`);
+    const bare = bareRemote(`flag-${tag}-origin.git`);
+    await gitService.addRemote(src, 'origin', bare);
+    await gitService.raw(src, ['checkout', '-b', 'feature/stale']);
+    write(src, 'base.txt', 'base\n');
+    await gitService.addAll(src);
+    await gitService.commit(src, 'base');
+    await gitService.push(src, 'origin', 'feature/stale', true);
+
+    // Teammate clone pushes a NEW commit → the remote moves ahead.
+    const mate = path.join(ROOT, `flag-${tag}-mate`);
+    shGit(`clone -q "${bare}" "${mate}"`, ROOT);
+    shGit('checkout -q -b feature/stale origin/feature/stale', mate);
+    write(mate, 'mate.txt', 'teammate\n');
+    shGit('add .', mate);
+    shGit('commit -q -m teammate', mate);
+    shGit('push -q origin feature/stale', mate);
+
+    // src diverges locally WITHOUT fetching → stale remote-tracking ref.
+    write(src, 'local.txt', 'local\n');
+    await gitService.addAll(src);
+    await gitService.commit(src, 'local rewrite');
+    return src;
+  }
+
+  it('DEFAULT force flag is --force: overwrites a diverged remote despite a stale tracking ref', async () => {
+    const storage = await import('../../electron/services/storage');
+    storage.setSetting('forcePushMode', undefined);
+    const src = await mkStaleDivergence('default');
+    try {
+      // Non-FF push. --force-with-lease would reject (stale info); the real
+      // --force default overwrites unconditionally.
+      const res = await gitService.push(src, 'origin', 'feature/stale', false, true);
+      expect(res.updated).toBe(true);
+      const localHash = (await gitService.raw(src, ['rev-parse', 'feature/stale'])).trim();
+      const remote = (await gitService.raw(src, ['ls-remote', 'origin', 'refs/heads/feature/stale'])).trim().split(/\s+/)[0];
+      expect(remote).toBe(localHash);
+    } finally {
+      storage.setSetting('forcePushMode', undefined);
+    }
+  });
+
+  it('forceMode "lease" uses --force-with-lease: rejects when the remote-tracking ref is stale', async () => {
+    const storage = await import('../../electron/services/storage');
+    storage.setSetting('forcePushMode', undefined);
+    const src = await mkStaleDivergence('lease');
+    try {
+      await expect(gitService.push(src, 'origin', 'feature/stale', false, true, false, undefined, 'lease'))
+        .rejects.toThrow(/stale info|rejected|refused/i);
+    } finally {
+      storage.setSetting('forcePushMode', undefined);
+    }
+  });
+
+  it('forcePushMode setting "lease" flips the app-wide default to --force-with-lease', async () => {
+    const storage = await import('../../electron/services/storage');
+    storage.setSetting('forcePushMode', 'lease');
+    const src = await mkStaleDivergence('setting');
+    try {
+      await expect(gitService.push(src, 'origin', 'feature/stale', false, true))
+        .rejects.toThrow(/stale info|rejected|refused/i);
+    } finally {
+      storage.setSetting('forcePushMode', undefined);
+    }
+  });
+
+  it('explicit forceMode "force" overrides the "lease" setting and overwrites the remote', async () => {
+    const storage = await import('../../electron/services/storage');
+    storage.setSetting('forcePushMode', 'lease');
+    const src = await mkStaleDivergence('override');
+    try {
+      const res = await gitService.push(src, 'origin', 'feature/stale', false, true, false, undefined, 'force');
+      expect(res.updated).toBe(true);
+      const localHash = (await gitService.raw(src, ['rev-parse', 'feature/stale'])).trim();
+      const remote = (await gitService.raw(src, ['ls-remote', 'origin', 'refs/heads/feature/stale'])).trim().split(/\s+/)[0];
+      expect(remote).toBe(localHash);
+    } finally {
+      storage.setSetting('forcePushMode', undefined);
+    }
+  });
+
+  it('protected-branch policy applies to BOTH force modes', async () => {
+    const storage = await import('../../electron/services/storage');
+    const src = await mkRepo('flag-policy');
+    const bare = bareRemote('flag-policy-origin.git');
+    await gitService.addRemote(src, 'origin', bare);
+    storage.setSetting('forcePushPolicy', 'feature-only');
+    storage.setSetting('protectedBranches', ['main', 'master', 'develop', 'release/*']);
+    try {
+      await expect(gitService.push(src, 'origin', 'main', false, true, false, undefined, 'force'))
+        .rejects.toThrow(/protected/i);
+      await expect(gitService.push(src, 'origin', 'main', false, true, false, undefined, 'lease'))
+        .rejects.toThrow(/protected/i);
+    } finally {
+      storage.setSetting('forcePushPolicy', undefined);
+      storage.setSetting('protectedBranches', undefined);
+      storage.setSetting('forcePushMode', undefined);
+    }
+  });
+
   it('keeps the plain single-ref refspec when the target equals the source', async () => {
     const src = await mkRepo('pushto-same');
     const bare = bareRemote('pushto-same-origin.git');

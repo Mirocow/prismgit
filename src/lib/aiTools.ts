@@ -515,7 +515,7 @@ export const gitCommitTool: AITool = {
 /** Push to remote. */
 export const gitPushTool: AITool = {
   name: 'push',
-  description: 'Push commits to the remote repository (git push). Optionally set upstream.',
+  description: 'Push commits to the remote repository (git push). Optionally set upstream. Force push uses git push --force by default; set force_mode "lease" for --force-with-lease.',
   parameters: {
     type: 'object',
     properties: {
@@ -523,17 +523,18 @@ export const gitPushTool: AITool = {
       branch: { type: 'string', description: 'Branch to push (default: current)' },
       set_upstream: { type: 'boolean', description: 'Set upstream tracking (git push -u)', default: false },
       force: { type: 'boolean', description: 'Force push (git push --force)', default: false },
+      force_mode: { type: 'string', enum: ['force', 'lease'], description: 'Force flag: "force" → git push --force (default, overwrites remote), "lease" → git push --force-with-lease (safer, refuses on stale remote ref)', default: 'force' },
     },
     additionalProperties: false,
   },
   async execute(params, repoPath) {
-    const p = params as { remote?: string; branch?: string; set_upstream?: boolean; force?: boolean };
+    const p = params as { remote?: string; branch?: string; set_upstream?: boolean; force?: boolean; force_mode?: 'force' | 'lease' };
     if (p.force) {
       const guardError = checkGuard('forcePush');
       if (guardError) return guardError;
     }
-    await api.git.push(repoPath, p.remote || 'origin', p.branch, p.set_upstream, p.force);
-    return `Pushed to ${p.remote || 'origin'}${p.branch ? '/' + p.branch : ''}.`;
+    await api.git.push(repoPath, p.remote || 'origin', p.branch, p.set_upstream, p.force, false, undefined, p.force_mode);
+    return `Pushed to ${p.remote || 'origin'}${p.branch ? '/' + p.branch : ''}${p.force ? (p.force_mode === 'lease' ? ' (--force-with-lease)' : ' (--force)') : ''}.`;
   },
 };
 

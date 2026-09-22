@@ -394,7 +394,7 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
  *   - Push to: <remote> (dropdown of ALL configured remotes, not just origin)
  *   - Push branch: <branch> (dropdown of local branches)
  *   - [✓] Set upstream (-u) — auto-enabled for fresh local branches
- *   - [✓] Force push (--force-with-lease)
+ *   - [✓] Force push + force-flag selector: --force (default) / --force-with-lease
  *   - Push tags
  */
 function PushDropdown({ disabled }: { disabled: boolean }) {
@@ -412,6 +412,12 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
   const [remoteBranch, setRemoteBranch] = useState('');
   const [setUpstream, setSetUpstream] = useState(false);
   const [force, setForce] = useState(false);
+  // Force flag: real --force by default ("push --force everywhere"), lease
+  // one click away. Persisted as the global forcePushMode setting so every
+  // push surface in the app (Push To…, Branches, AI, palette, menu) follows.
+  const [forceMode, setForceMode] = useState<'lease' | 'force'>(
+    settings?.forcePushMode === 'lease' ? 'lease' : 'force'
+  );
   const [pushTags, setPushTags] = useState(false);
   // 0.1 — Force-push policy gate: the isForcePushAllowed IPC existed with zero
   // renderer callers. Query it for the selected branch and disable the force
@@ -428,6 +434,12 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
     return () => { cancelled = true; };
   }, [selectedBranch, settings?.forcePushPolicy, settings?.protectedBranches]);
   const forceDenied = forceAllowed != null && !forceAllowed.allowed;
+
+  // Keep the local selector in sync with the global setting (e.g. changed in
+  // Preferences or in another push surface).
+  useEffect(() => {
+    if (open) setForceMode(settings?.forcePushMode === 'lease' ? 'lease' : 'force');
+  }, [open, settings?.forcePushMode]);
 
   // Load on mount too — the one-click Push button needs a valid default remote.
   useEffect(() => {
@@ -472,16 +484,17 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
     const refspec = remoteBranch.trim()
       ? `HEAD:${remoteBranch.trim()}`
       : b;
-    const cmd = `git push ${selectedRemote} ${refspec} ${setUpstream ? '-u' : ''} ${force ? '--force-with-lease' : ''} ${pushTags ? '--tags' : ''}`.trim();
+    const forceFlag = force ? (forceMode === 'lease' ? '--force-with-lease' : '--force') : '';
+    const cmd = `git push ${selectedRemote} ${refspec} ${setUpstream ? '-u' : ''} ${forceFlag} ${pushTags ? '--tags' : ''}`.trim();
     try {
       const res = await useOperationLogStore.getState().logOperation(
-        `Push ${b || 'current'} → ${selectedRemote}${remoteBranch.trim() ? '/' + remoteBranch.trim() : ''}${force ? ' (force)' : ''}${pushTags ? ' +tags' : ''}`,
+        `Push ${b || 'current'} → ${selectedRemote}${remoteBranch.trim() ? '/' + remoteBranch.trim() : ''}${force ? ` (${forceFlag})` : ''}${pushTags ? ' +tags' : ''}`,
         currentRepo.path, cmd,
         async () => {
           // When using HEAD:remoteBranch, we need to pass the refspec directly.
           // api.git.push takes `branch` as a simple name — but HEAD:main is a refspec.
           // So we pass refspec as the branch parameter; git push handles it correctly.
-          const r = await api.git.push(currentRepo.path, selectedRemote, refspec, setUpstream && !remoteBranch.trim(), force, pushTags);
+          const r = await api.git.push(currentRepo.path, selectedRemote, refspec, setUpstream && !remoteBranch.trim(), force, pushTags, undefined, forceMode);
           await refreshStatus(currentRepo.path);
           // Also refresh repo stats in sidebar
           api.settings.refreshRepoStats(currentRepo.path).then(() => {
@@ -606,6 +619,25 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
                     {forceDenied && <span className="text-2xs text-text-tertiary">— {forceAllowed!.reason}</span>}
                   </label>
                 </div>
+                {force && (
+                  <div className="px-3 py-1 pl-7">
+                    <label className="text-2xs text-text-tertiary block mb-1">{t('shell.forceMode')}</label>
+                    <select
+                      data-testid="push-force-mode"
+                      className="w-full text-xs px-2 py-1 bg-bg-secondary border border-border-default rounded font-mono"
+                      value={forceMode}
+                      onChange={(e) => {
+                        const v = e.target.value as 'lease' | 'force';
+                        setForceMode(v);
+                        // Persist globally — every push surface follows this choice.
+                        useSettingsStore.getState().setSetting('forcePushMode', v).catch(() => {});
+                      }}
+                    >
+                      <option value="force">--force</option>
+                      <option value="lease">--force-with-lease</option>
+                    </select>
+                  </div>
+                )}
                 <div className="px-3 py-1">
                   <label className="flex items-center gap-2 text-xs cursor-pointer">
                     <input type="checkbox" checked={pushTags} onChange={(e) => setPushTags(e.target.checked)} />

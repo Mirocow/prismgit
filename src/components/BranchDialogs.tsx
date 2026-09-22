@@ -249,7 +249,7 @@ const BRANCH_NAME_INVALID = /[~^:?*[\]\\@\s]|\.\.|^-$|^--/;
  * and gets to decide WHERE (remote) and UNDER WHICH NAME (target branch) the
  * branch lands. Pushing `feature` to `main`-named target, publishing a local
  * branch to a second remote, or renaming on the remote side are all the same
- * refspec: `git push [-u] [--force-with-lease] <remote> <local>:<target>`.
+ * refspec: `git push [-u] [--force | --force-with-lease] <remote> <local>:<target>`.
  */
 export function PushToDialog({
   branchName,
@@ -272,19 +272,26 @@ export function PushToDialog({
   /** Whether the branch already has an upstream (→ -u unchecked by default). */
   hasUpstream?: boolean;
   busy?: boolean;
-  onSubmit: (opts: { remote: string; targetBranch: string; setUpstream: boolean; force: boolean }) => void;
+  onSubmit: (opts: { remote: string; targetBranch: string; setUpstream: boolean; force: boolean; forceMode: 'lease' | 'force' }) => void;
   onClose: () => void;
 }) {
   const [remote, setRemote] = useState(defaultRemote || remotes[0] || 'origin');
   const [target, setTarget] = useState(branchName);
   const [setUpstream, setSetUpstream] = useState(!hasUpstream);
   const [force, setForce] = useState(false);
+  // Force flag: real --force by default; lease one click away. Mirrors the
+  // global forcePushMode setting so all push surfaces agree.
+  const [forceMode, setForceMode] = useState<'lease' | 'force'>('force');
   const { t } = useI18n();
   useEscapeKey(true, onClose);
   // 0.1 — Force-push policy gate: disable the force checkbox when the policy
   // denies force-push for this branch (activates the dead isForcePushAllowed IPC).
   const forcePushPolicy = useSettingsStore((s) => s.settings.forcePushPolicy);
   const protectedBranches = useSettingsStore((s) => s.settings.protectedBranches);
+  const forceModeSetting = useSettingsStore((s) => s.settings.forcePushMode);
+  useEffect(() => {
+    setForceMode(forceModeSetting === 'lease' ? 'lease' : 'force');
+  }, [forceModeSetting]);
   const [forceVerdict, setForceVerdict] = useState<{ allowed: boolean; reason: string } | null>(null);
   useEffect(() => {
     if (typeof api.git?.isForcePushAllowed !== 'function') { setForceVerdict(null); return; }
@@ -325,7 +332,7 @@ export function PushToDialog({
 
   const submit = () => {
     if (!canSubmit) return;
-    onSubmit({ remote: remote.trim(), targetBranch: trimmed, setUpstream, force });
+    onSubmit({ remote: remote.trim(), targetBranch: trimmed, setUpstream, force, forceMode });
   };
 
   return (
@@ -414,9 +421,28 @@ export function PushToDialog({
             {t('branches.forcePushCheckbox')}
             {forceDenied && <span className="text-2xs text-text-tertiary">— {forceVerdict!.reason}</span>}
           </label>
+          {force && (
+            <div className="pl-6">
+              <label className="text-2xs text-text-tertiary block mb-1">{t('shell.forceMode')}</label>
+              <select
+                data-testid="push-to-force-mode"
+                className="w-full text-sm font-mono"
+                value={forceMode}
+                onChange={(e) => {
+                  const v = e.target.value as 'lease' | 'force';
+                  setForceMode(v);
+                  // Persist globally — every push surface follows this choice.
+                  useSettingsStore.getState().setSetting('forcePushMode', v).catch(() => {});
+                }}
+              >
+                <option value="force">--force</option>
+                <option value="lease">--force-with-lease</option>
+              </select>
+            </div>
+          )}
         </div>
         <div data-testid="push-to-cmd" className="text-2xs text-text-tertiary font-mono bg-bg-hover/60 rounded px-2 py-1.5 break-all">
-          git push {setUpstream ? '-u ' : ''}{force ? '--force-with-lease ' : ''}{remote} {refspec}
+          git push {setUpstream ? '-u ' : ''}{force ? (forceMode === 'lease' ? '--force-with-lease ' : '--force ') : ''}{remote} {refspec}
         </div>
       </div>
     </DialogShell>

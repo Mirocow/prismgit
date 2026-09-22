@@ -37,7 +37,7 @@ interface GitState {
   stageFiles: (repoPath: string, files: string[]) => Promise<void>;
   stageAll: (repoPath: string) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean) => Promise<string>;
-  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, targetBranch?: string) => Promise<PushResult>;
+  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, targetBranch?: string, forceMode?: 'lease' | 'force') => Promise<PushResult>;
   pull: (repoPath: string, remote?: string, branch?: string) => Promise<void>;
   fetch: (repoPath: string, remote?: string, prune?: boolean) => Promise<void>;
 }
@@ -121,7 +121,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  push: async (repoPath, remote, branch, setUpstream, force, targetBranch) => {
+  push: async (repoPath, remote, branch, setUpstream, force, targetBranch, forceMode) => {
     const log = useOperationLogStore.getState();
     // Never hardcode 'origin' — resolve it (origin → first remote). Fails with
     // a clear message when the repo has no remotes at all.
@@ -130,10 +130,12 @@ export const useGitStore = create<GitState>((set, get) => ({
       throw new Error('No remotes configured — add one on the Remotes page');
     }
     const refspec = targetBranch && targetBranch !== branch ? `${branch}:${targetBranch}` : (branch || '');
-    const cmd = `git push ${resolved} ${refspec} ${setUpstream ? '-u' : ''}${force ? ' --force-with-lease' : ''}`.trim();
+    // Effective force flag: explicit param > forcePushMode setting > --force.
+    const effMode = forceMode ?? useSettingsStore.getState().settings?.forcePushMode ?? 'force';
+    const cmd = `git push ${resolved} ${refspec} ${setUpstream ? '-u' : ''}${force ? ` ${effMode === 'lease' ? '--force-with-lease' : '--force'}` : ''}`.trim();
     const opId = log.startOp('Push', repoPath, cmd);
     try {
-      const result = await api.git.push(repoPath, resolved, branch, setUpstream, force, false, targetBranch);
+      const result = await api.git.push(repoPath, resolved, branch, setUpstream, force, false, targetBranch, forceMode);
       await get().refreshStatus(repoPath);
       // Refresh repository metadata (lastCommit, branchCount, etc.) in the sidebar
       api.settings.refreshRepoStats(repoPath).then(() => {

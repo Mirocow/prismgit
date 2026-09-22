@@ -2024,6 +2024,18 @@ smartgit.refresh.inspectEol=true
               </select>
             </div>
             <div>
+              <label className="text-xs text-text-tertiary block mb-1">{t('settings.forcePushFlag')}</label>
+              <select
+                className="w-full text-sm"
+                value={settings.forcePushMode || 'force'}
+                onChange={(e) => setSetting('forcePushMode', e.target.value as 'lease' | 'force')}
+              >
+                <option value="force">--force</option>
+                <option value="lease">--force-with-lease</option>
+              </select>
+              <div className="text-2xs text-text-tertiary mt-1">{t('settings.forcePushFlagHint')}</div>
+            </div>
+            <div>
               <label className="text-xs text-text-tertiary block mb-1">
                 {t('settings.protectedBranchesLabel')}
               </label>

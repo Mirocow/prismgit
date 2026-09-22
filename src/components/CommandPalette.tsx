@@ -104,6 +104,13 @@ export function CommandPalette({ open, onClose, triggers }: {
         action: () => git.push(repo.path).then(() => toast.success(t('status.pushedSuccessfully'))).catch((e) => toast.error(t('shell.pushFailed'), String(e))),
       },
       {
+        id: 'act-push-force', label: t('shell.forcePushCommand'), group: 'Git Actions', icon: Upload,
+        keywords: 'upload publish remote force overwrite hard', hint: 'git push --force',
+        action: () => git.push(repo.path, undefined, undefined, false, true, undefined, 'force')
+          .then(() => toast.success(t('status.pushedSuccessfully')))
+          .catch((e) => toast.error(t('shell.pushFailed'), String(e))),
+      },
+      {
         id: 'act-pull', label: t('toolbar.pull'), group: 'Git Actions', icon: Download,
         keywords: 'update remote fetch merge', hint: 'git pull',
         action: () => git.pull(repo.path).then(() => toast.success(t('status.pulledSuccessfully'))).catch((e) => toast.error(t('shell.pullFailed'), String(e))),

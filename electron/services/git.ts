@@ -1621,7 +1621,15 @@ export async function push(
   force = false,
   tags = false,
   /** Remote-side branch name (Push To... dialog): refspec becomes `branch:target`. */
-  targetBranch?: string
+  targetBranch?: string,
+  /**
+   * Which git flag a FORCE push uses:
+   *   'force' → `--force`          — overwrite the remote unconditionally
+   *   'lease' → `--force-with-lease` — refuse when the remote-tracking ref is stale
+   * Resolution order: explicit param > `forcePushMode` app setting > 'force'.
+   * The forcePushPolicy / protectedBranches gate applies to BOTH modes.
+   */
+  forceMode?: ForcePushMode
 ): Promise<PushResult> {
   const git = getGit(repoPath);
   // No branch given: resolve the CURRENT branch and auto-publish it.
@@ -1652,8 +1660,8 @@ export async function push(
   // push() never consulted them (dead setting — see docs/implementation-plan
   // 0.1). Enforce at the SERVICE level so every force push goes through the
   // policy: toolbar dropdown, Push To… dialog, AI tools, batch operations.
-  // The REMOTE-side branch is what gets protected: `git push --force-with-
-  // lease origin HEAD:main` must be checked against 'main'.
+  // The REMOTE-side branch is what gets protected: `git push --force origin
+  // HEAD:main` must be checked against 'main'.
   if (force) {
     const policy = getSetting<ForcePushPolicy | undefined>('forcePushPolicy') ?? 'feature-only';
     const protectedBranches = getSetting<string[]>('protectedBranches');
@@ -1685,7 +1693,15 @@ export async function push(
     'push',
   ];
   if (setUp) args.push('-u');
-  if (force) args.push('--force-with-lease');
+  if (force) {
+    // Effective flag: explicit param > forcePushMode setting > --force.
+    // Default is real --force (user request: "push --force everywhere") —
+    // --force-with-lease stays one click away via the mode selectors.
+    const mode: ForcePushMode = forceMode
+      ?? getSetting<ForcePushMode | undefined>('forcePushMode')
+      ?? 'force';
+    args.push(mode === 'lease' ? '--force-with-lease' : '--force');
+  }
   if (tags) args.push('--tags');
   args.push(remote);
   if (refspec) {
@@ -7423,6 +7439,9 @@ export async function octopusMerge(
  * Returns true if force-push is allowed for the given branch.
  */
 export type ForcePushPolicy = 'deny' | 'feature-only' | 'allow';
+
+/** Which git flag a force push uses: real `--force` (default) or `--force-with-lease`. */
+export type ForcePushMode = 'lease' | 'force';
 
 export function isForcePushAllowed(
   branch: string | undefined,

@@ -271,6 +271,9 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
         // No accelerator: Ctrl+Shift+P belongs to Push (Repository menu) —
         // a duplicate here made one keystroke trigger both items.
         { label: m('menu.remote.pushTo'), click: () => send('menu:pushTo') },
+        // Real `git push --force` on the current branch (policy-gated in the
+        // service for protected branches).
+        { label: m('menu.remote.forcePush'), click: () => send('menu:forcePush') },
         { label: m('menu.remote.pullOptions'), accelerator: 'CmdOrCtrl+Down', click: () => send('menu:pullOptions') },
         { label: m('menu.remote.fetchAllRemotes'), click: () => send('menu:fetchAll') },
         { label: m('menu.remote.fetchMore'), click: () => send('menu:fetchMore') },

@@ -500,6 +500,37 @@ export function BranchesPage() {
     } catch (e) { toast.error(t('branches.pushFailed'), String(e)); }
   };
 
+  /**
+   * Force Push (--force) from the branch context menu — the same flow as
+   * handlePushBranch but with force=true, forceMode='force'. Protected
+   * branches are still rejected by the service-level force-push policy.
+   */
+  const handleForcePushBranch = async (branch: BranchInfo) => {
+    const remote = (branch.tracking ? branch.tracking.split('/')[0] : '')
+      || (await resolveDefaultRemote(repo.path))
+      || 'origin';
+    const ok = await confirmDialog({
+      title: t('branches.forcePushConfirmTitle', { name: branch.name }),
+      message: t('branches.forcePushConfirmMessage', { name: branch.name, remote }),
+      confirmLabel: t('branches.forcePushMenu'),
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await useOperationLogStore.getState().logOperation(
+        `Force Push ${branch.name} → ${remote}`, repo.path,
+        `git push --force ${remote} ${branch.name}`,
+        () => api.git.push(repo.path, remote, branch.name, !branch.tracking, true, false, undefined, 'force')
+      );
+      const t2 = describePushResult(res, remote, branch.name);
+      if (t2.kind === 'error') toast.error(t2.title, t2.detail);
+      else if (t2.kind === 'info') toast.info(t2.title, t2.detail);
+      else toast.success(t2.title, t2.detail);
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) { toast.error(t('branches.pushFailed'), String(e)); }
+  };
+
   const handleOpenInBrowser = async (branch: BranchInfo) => {
     try {
       const info = await api.git.extractRepoInfo(repo.path);
@@ -623,16 +654,17 @@ export function BranchesPage() {
   };
 
   // ===== Push To... executor (choose remote + target branch) =====
-  const executePushTo = async (opts: { remote: string; targetBranch: string; setUpstream: boolean; force: boolean }) => {
+  const executePushTo = async (opts: { remote: string; targetBranch: string; setUpstream: boolean; force: boolean; forceMode: 'lease' | 'force' }) => {
     if (!pushToTarget) return;
     setPushToBusy(true);
     const src = pushToTarget.branch;
     const refspec = opts.targetBranch === src ? src : `${src}:${opts.targetBranch}`;
+    const forceFlag = opts.force ? (opts.forceMode === 'lease' ? '--force-with-lease' : '--force') : '';
     try {
       const res = await useOperationLogStore.getState().logOperation(
         `Push ${src} → ${opts.remote}/${opts.targetBranch}`, repo.path,
-        `git push ${opts.setUpstream ? '-u ' : ''}${opts.force ? '--force-with-lease ' : ''}${opts.remote} ${refspec}`,
-        () => api.git.push(repo.path, opts.remote, src, opts.setUpstream, opts.force, false, opts.targetBranch)
+        `git push ${opts.setUpstream ? '-u ' : ''}${forceFlag ? forceFlag + ' ' : ''}${opts.remote} ${refspec}`,
+        () => api.git.push(repo.path, opts.remote, src, opts.setUpstream, opts.force, false, opts.targetBranch, opts.forceMode)
       );
       const t = describePushResult(res, opts.remote, opts.targetBranch);
       if (t.kind === 'error') toast.error(t.title, t.detail);
@@ -1066,6 +1098,7 @@ export function BranchesPage() {
 
       // Group 2: Push
       items.push({ label: t('branches.push'), accelerator: 'CmdOrCtrl+Up', clickId: 'push', enabled: !isInProgress });
+      items.push({ label: t('branches.forcePushMenu'), clickId: 'force-push', enabled: !isInProgress });
       items.push({ label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to', enabled: !isInProgress });
       // SmartGit Manual: Push to Gerrit — refs/for/<branch>
       items.push({ label: t('branches.pushToGerrit'), clickId: 'push-gerrit' });
@@ -1170,6 +1203,9 @@ export function BranchesPage() {
 
         // === Push ===
         else if (action === 'push') handlePushBranch(b);
+
+        // === Force Push (--force) — protected branches still policy-gated ===
+        else if (action === 'force-push') handleForcePushBranch(b);
 
         // === Push To... (choose remote + target branch) ===
         else if (action === 'push-to') {
