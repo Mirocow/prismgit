@@ -1063,10 +1063,15 @@ describe('policy & helpers (isForcePushAllowed / setupCredentialHelper)', () => 
     expect(gitService.isForcePushAllowed('main', 'deny').allowed).toBe(false);
     expect(gitService.isForcePushAllowed('feature/x', 'allow').allowed).toBe(true);
     expect(gitService.isForcePushAllowed(undefined, 'feature-only').allowed).toBe(false);
-    expect(gitService.isForcePushAllowed('main', 'feature-only').allowed).toBe(false);
-    expect(gitService.isForcePushAllowed('develop', 'feature-only').allowed).toBe(false);
-    expect(gitService.isForcePushAllowed('release/2.0', 'feature-only').allowed).toBe(false); // wildcard
-    const feat = gitService.isForcePushAllowed('feature/x', 'feature-only');
+    // NO fabricated default list: with no explicit list, every branch
+    // (including main) is allowed under feature-only (opt-in protection).
+    expect(gitService.isForcePushAllowed('main', 'feature-only').allowed).toBe(true);
+    // An explicitly listed branch blocks — with LOCAL, honest wording
+    const list = ['main', 'master', 'develop', 'release/*'];
+    expect(gitService.isForcePushAllowed('main', 'feature-only', list).allowed).toBe(false);
+    expect(gitService.isForcePushAllowed('develop', 'feature-only', list).allowed).toBe(false);
+    expect(gitService.isForcePushAllowed('release/2.0', 'feature-only', list).allowed).toBe(false); // wildcard
+    const feat = gitService.isForcePushAllowed('feature/x', 'feature-only', list);
     expect(feat.allowed).toBe(true);
     expect(feat.reason).toContain('feature/x');
   });
@@ -1239,6 +1244,8 @@ describe('push with targetBranch (Push To... refspec `local:target`)', () => {
   // ── 0.1 — force-push policy enforcement in push() ───────────────────────
   // The forcePushPolicy / protectedBranches settings previously had UI but
   // push() never consulted them (dead setting). These tests pin the behavior.
+  // The protected list is OPT-IN and EMPTY by default — the app must never
+  // fabricate a list and claim a server-side protection that does not exist.
   it('force-push policy "deny" rejects force push with a clear error', async () => {
     const storage = await import('../../electron/services/storage');
     const src = await mkRepo('policy-deny');
@@ -1271,6 +1278,35 @@ describe('push with targetBranch (Push To... refspec `local:target`)', () => {
       await gitService.commit(src, 'ok');
       const res = await gitService.push(src, 'origin', 'feature/ok', true, true);
       expect(res.updated).toBe(true);
+    } finally {
+      storage.setSetting('forcePushPolicy', undefined);
+      storage.setSetting('protectedBranches', undefined);
+    }
+  });
+
+  it('DEFAULT settings ship NO fabricated protected list — force push to main works', async () => {
+    // User-reported bug: with NO settings configured, `git push --force origin
+    // main` was blocked with a FALSE "Branch 'main' is protected" (the local
+    // GitLab had no protection at all). isForcePushAllowed used to fabricate a
+    // default list ['main','master','develop','release/*']; the default must
+    // stay EMPTY — protection is opt-in via Preferences → Commands, and a
+    // REAL server-side protection is reported by the server on push.
+    const storage = await import('../../electron/services/storage');
+    const src = await mkRepo('policy-default');
+    const bare = bareRemote('policy-default-origin.git');
+    await gitService.addRemote(src, 'origin', bare);
+    storage.setSetting('forcePushPolicy', undefined);
+    storage.setSetting('protectedBranches', undefined);
+    try {
+      const res = await gitService.push(src, 'origin', 'main', false, true);
+      expect(res.updated).toBe(true);
+      // The honest policy reason for the default state: allowed everywhere
+      const verdict = gitService.isForcePushAllowed('main', 'feature-only', undefined);
+      expect(verdict.allowed).toBe(true);
+      // And an explicitly listed branch still blocks with LOCAL wording
+      const blocked = gitService.isForcePushAllowed('main', 'feature-only', ['main']);
+      expect(blocked.allowed).toBe(false);
+      expect(blocked.reason).toMatch(/local protected list/i);
     } finally {
       storage.setSetting('forcePushPolicy', undefined);
       storage.setSetting('protectedBranches', undefined);

@@ -2042,9 +2042,12 @@ smartgit.refresh.inspectEol=true
               <textarea
                 className="w-full font-mono text-xs h-20 resize-none p-2 border border-border-default rounded bg-bg-tertiary"
                 placeholder={'main\nmaster\ndevelop\nrelease/*'}
-                defaultValue={(settings.protectedBranches || ['main', 'master', 'develop', 'release/*']).join('\n')}
+                defaultValue={(settings.protectedBranches || []).join('\n')}
                 onBlur={(e) => setSetting('protectedBranches', e.target.value.split('\n').map(s => s.trim()).filter(Boolean))}
               />
+              <div className="text-2xs text-text-tertiary mt-1">
+                {t('settings.protectedBranchesHint')}
+              </div>
             </div>
             <div className="text-2xs text-text-tertiary">
               {t('settings.forcePushHint')} <code>feature-only</code>, {t('settings.forcePushHint2')}{' '}

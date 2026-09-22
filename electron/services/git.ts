@@ -1662,6 +1662,13 @@ export async function push(
   // policy: toolbar dropdown, Push To… dialog, AI tools, batch operations.
   // The REMOTE-side branch is what gets protected: `git push --force origin
   // HEAD:main` must be checked against 'main'.
+  //
+  // Defaults are TRANSPARENT: policy 'feature-only' + an EMPTY protected
+  // list (the list is opt-in — never fabricated) means every force push is
+  // allowed out of the box (user request: "push --force everywhere"). Only
+  // 'deny', or 'feature-only' combined with branches the user explicitly
+  // listed, blocks. A REAL server-side protection is reported by the server
+  // itself and translated by describeNetworkError().
   if (force) {
     const policy = getSetting<ForcePushPolicy | undefined>('forcePushPolicy') ?? 'feature-only';
     const protectedBranches = getSetting<string[]>('protectedBranches');
@@ -7437,6 +7444,13 @@ export async function octopusMerge(
 /**
  * Force Push policy check — SmartGit Manual: configurable safety.
  * Returns true if force-push is allowed for the given branch.
+ *
+ * The protected list is PURELY LOCAL and OPT-IN (empty by default): a plain
+ * git client cannot know the server-side protection state of GitLab/GitHub,
+ * so it must never claim "Branch X is protected" out of thin air. Only
+ * branches explicitly listed in Preferences → Commands are blocked locally;
+ * a REAL server-side protection surfaces as a push rejection which
+ * describeNetworkError() translates into an actionable hint.
  */
 export type ForcePushPolicy = 'deny' | 'feature-only' | 'allow';
 
@@ -7446,7 +7460,7 @@ export type ForcePushMode = 'lease' | 'force';
 export function isForcePushAllowed(
   branch: string | undefined,
   policy: ForcePushPolicy,
-  protectedBranches: string[] = ['main', 'master', 'develop', 'release/*']
+  protectedBranches: string[] = []
 ): { allowed: boolean; reason: string } {
   if (policy === 'allow') return { allowed: true, reason: 'Force push allowed by policy' };
   if (policy === 'deny') return { allowed: false, reason: 'Force push denied by global policy' };
@@ -7460,7 +7474,11 @@ export function isForcePushAllowed(
     return branch === pattern;
   });
   if (isProtected) {
-    return { allowed: false, reason: `Branch '${branch}' is protected` };
+    // Honest wording: this is the user's own LOCAL opt-in list, NOT a
+    // server-side protection (the old "Branch 'main' is protected" was a
+    // false claim whenever the server had no protection at all — GitLab
+    // protection state is invisible to a plain git client).
+    return { allowed: false, reason: `Branch '${branch}' is in the local protected list` };
   }
   return { allowed: true, reason: `Force push allowed on feature branch '${branch}'` };
 }
