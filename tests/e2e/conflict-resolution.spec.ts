@@ -8,7 +8,7 @@
  * banner → context-menu → 3-way editor → Take Left → Save & Stage flow.
  */
 import { test, expect } from '@playwright/test';
-import { launchCdpApp, cdpNavigateTo, shotDir, FIXTURE_BASE } from './cdp-launch';
+import { launchCdpApp, cdpNavigateTo, waitForMergeEditor, diffFileRow, shotDir, FIXTURE_BASE } from './cdp-launch';
 
 const SHOTS = shotDir();
 
@@ -36,13 +36,27 @@ test.describe('Conflict Resolution E2E', () => {
         //    context menu redirects to this same flow).
         await cdpNavigateTo(app.page, 'Diff');
         await app.page.screenshot({ path: `${SHOTS}/${repo.name}-02-diff.png` });
-        const fileRow = app.page.getByText(repo.file).first();
+        // Pin the interactive file ROW — a bare getByText(file).first() can
+        // resolve to the Diff title bar (it echoes the selected path) and
+        // the click becomes a silent no-op.
+        const fileRow = diffFileRow(app.page, repo.file);
         await fileRow.waitFor({ state: 'visible', timeout: 15000 });
         await fileRow.click();
         await app.page.screenshot({ path: `${SHOTS}/${repo.name}-04-3way.png` });
 
+        // The editor must reach a DEFINITE state — 'noconflicts' or 'timeout'
+        // both fail, but the message tells WHICH half of the flow broke and
+        // carries the app's own diagnostics (renderer console, main stderr,
+        // visible page text).
+        const state = await waitForMergeEditor(app.page, 15000);
+        if (state !== 'editor') {
+          const diag = await app.diagnostics();
+          throw new Error(
+            `3-way merge editor did not open (state: ${state}).\n` +
+            `Expected the textarea, got ${state === 'noconflicts' ? 'the "no conflict markers" placeholder (diff3 found zero conflict regions)' : 'no editor at all (never mounted / stuck loading)'}.\n${diag}`
+          );
+        }
         const editor = app.page.locator('[data-testid="merge-result-textarea"]');
-        await expect(editor, '3-way merge editor must open').toBeVisible({ timeout: 15000 });
         // The editor carries the conflicted file content (with markers).
         const content = (await editor.inputValue().catch(() => editor.textContent())) ?? '';
         expect(content).toContain('<<<<<<<');

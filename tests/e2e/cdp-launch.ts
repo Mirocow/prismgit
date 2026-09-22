@@ -65,6 +65,11 @@ export interface CdpApp {
   child: ChildProcess;
   userDataDir: string;
   stderr: string;
+  /** Renderer console errors/warnings + page errors captured since launch. */
+  consoleErrors: string[];
+  /** Human-readable dump for failure messages — stderr tail, renderer
+   * console errors and a body-text snippet. Call when an expect() fails. */
+  diagnostics: () => Promise<string>;
   close: () => Promise<void>;
 }
 
@@ -123,6 +128,11 @@ export async function launchCdpApp(repo: { path: string; name: string }): Promis
   const stderrChunks: string[] = [];
   child.stderr?.on('data', (d: Buffer) => stderrChunks.push(d.toString()));
 
+  // Renderer-side console capture — React render crashes and unhandled IPC
+  // rejections otherwise fail SILENTLY: the test just times out with zero
+  // evidence. Captured from the moment CDP connects.
+  const consoleErrors: string[] = [];
+
   // Wait for the CDP endpoint to actually open (Electron boot takes a
   // moment) BEFORE connecting — connecting early gets ECONNREFUSED.
   await waitForPort(port, 20000).catch((e) => {
@@ -135,14 +145,42 @@ export async function launchCdpApp(repo: { path: string; name: string }): Promis
   });
   const ctx = browser.contexts()[0] || await browser.newContext();
   const page = ctx.pages()[0] || await ctx.newPage();
+  page.on('console', (msg) => {
+    if (msg.type() === 'error' || msg.type() === 'warning') {
+      consoleErrors.push(`[console.${msg.type()}] ${msg.text().slice(0, 400)}`);
+    }
+  });
+  page.on('pageerror', (err) => {
+    consoleErrors.push(`[pageerror] ${String(err).slice(0, 400)}`);
+  });
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(2500);
   // Open the repo from the welcome screen (recent list button).
+  // Budget: 12s — cold starts on loaded machines (e.g. a mac 60+ launches
+  // into a full e2e run) can exceed the old 6s and left tests asserting
+  // against the welcome screen.
   const btn = page.locator(`button:has-text("${repo.name}")`).first();
-  if (await btn.isVisible({ timeout: 6000 }).catch(() => false)) {
+  if (await btn.isVisible({ timeout: 12000 }).catch(() => false)) {
     await btn.click();
     await page.waitForTimeout(2000);
   }
+
+  const diagnostics = async (): Promise<string> => {
+    const parts: string[] = [];
+    parts.push(`url: ${page.url()}`);
+    try {
+      const bodyText = (await page.locator('body').innerText({ timeout: 2000 }).catch(() => '')) ?? '';
+      parts.push(`--- body text (first 900 chars) ---\n${bodyText.replace(/\n{2,}/g, '\n').slice(0, 900)}`);
+    } catch { /* page may be gone */ }
+    if (consoleErrors.length > 0) {
+      parts.push(`--- renderer console (${consoleErrors.length} entries, last 10) ---\n${consoleErrors.slice(-10).join('\n')}`);
+    }
+    const stderrTail = stderrChunks.join('').slice(-1200);
+    if (stderrTail.trim()) {
+      parts.push(`--- main process stderr (tail) ---\n${stderrTail}`);
+    }
+    return parts.join('\n');
+  };
 
   const close = async () => {
     try { await browser.close(); } catch { /* already gone */ }
@@ -150,7 +188,7 @@ export async function launchCdpApp(repo: { path: string; name: string }): Promis
     try { fs.rmSync(ud, { recursive: true, force: true }); } catch { /* ignore */ }
   };
 
-  return { page, browser, child, userDataDir: ud, stderr: stderrChunks.join(''), close };
+  return { page, browser, child, userDataDir: ud, stderr: stderrChunks.join(''), consoleErrors, diagnostics, close };
 }
 
 function killTree(child: ChildProcess): void {
@@ -172,6 +210,41 @@ async function killTreeAndWait(child: ChildProcess): Promise<void> {
       setTimeout(() => resolve(), 1500);
     });
   }
+}
+
+/**
+ * Wait for the 3-way merge editor to reach a definite state.
+ * Returns:
+ *   'editor'       — the editable Result textarea is visible (success)
+ *   'noconflicts'  — MergeEditor3Way mounted but found ZERO conflict regions
+ *                    (diff3/base-ours-theirs path produced no conflicts —
+ *                    the editor shows the "No conflict markers" placeholder)
+ *   'timeout'      — none of the above within `timeout` ms (never mounted or
+ *                    stuck in the loading state)
+ */
+export async function waitForMergeEditor(
+  page: Page,
+  timeout = 15000,
+): Promise<'editor' | 'noconflicts' | 'timeout'> {
+  const editor = page.locator('[data-testid="merge-result-textarea"]');
+  const noConflicts = page.locator('[data-testid="merge-editor-noconflicts"]');
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (await editor.isVisible().catch(() => false)) return 'editor';
+    if (await noConflicts.isVisible().catch(() => false)) return 'noconflicts';
+    await page.waitForTimeout(300).catch(() => {});
+  }
+  return 'timeout';
+}
+
+/**
+ * Locate a Diff-page file row by (partial) path. `getByText(path).first()`
+ * can resolve to the Diff title bar — it renders the selected path as plain
+ * text and swallows the click as a silent no-op. The row testid + data-path
+ * pin the real interactive row.
+ */
+export function diffFileRow(page: Page, filePath: string) {
+  return page.locator(`[data-testid="diff-file-row"][data-path*="${filePath}"]`).first();
 }
 
 /**

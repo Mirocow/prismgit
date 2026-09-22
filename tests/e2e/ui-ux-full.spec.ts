@@ -14,7 +14,7 @@
  * cleanup), and every step carries a REAL expect() assertion.
  */
 import { test, expect } from '@playwright/test';
-import { launchCdpApp, cdpNavigateTo, shotDir, FIXTURE_BASE } from './cdp-launch';
+import { launchCdpApp, cdpNavigateTo, waitForMergeEditor, diffFileRow, shotDir, FIXTURE_BASE } from './cdp-launch';
 
 const UI = `${FIXTURE_BASE}/ui-test`;
 const SHOTS = shotDir();
@@ -161,10 +161,16 @@ test.describe('UI/UX Full Test Suite', () => {
     try {
       await app.page.screenshot({ path: `${SHOTS}/ui-sidebar-01-default.png` });
       // Regular nav items carry aria-label — the sidebar is keyboard/a11y-ready.
+      // On failure, embed the app diagnostics — a missing sidebar almost
+      // always means the repo never opened (welcome screen still showing).
       for (const label of ['Changes', 'History', 'Diff', 'Branches', 'Tags']) {
-        await expect(
-          app.page.locator(`aside [role="button"][aria-label="${label}"]`).first()
-        ).toBeAttached({ timeout: 15000 });
+        const navItem = app.page.locator(`aside [role="button"][aria-label="${label}"]`).first();
+        if (!(await navItem.isVisible({ timeout: 15000 }).catch(() => false))) {
+          const diag = await app.diagnostics();
+          throw new Error(
+            `Sidebar nav item "${label}" not found — repo likely never opened.\n${diag}`
+          );
+        }
       }
       // Repo header shows the current branch
       await expect(app.page.locator('body')).toContainText('main', { timeout: 10000 });
@@ -190,14 +196,24 @@ test.describe('UI/UX Full Test Suite', () => {
       // SELECTING a conflicted file during a merge swaps the 2-way diff for
       // the 3-way ConflictMergeView automatically (no menu detour).
       await cdpNavigateTo(app.page, 'Diff');
-      const fileRow = app.page.getByText('config.ts', { exact: true }).first();
+      // Pin the interactive file ROW (getByText can match the title bar —
+      // silent no-op click).
+      const fileRow = diffFileRow(app.page, 'config.ts');
       await fileRow.waitFor({ state: 'visible', timeout: 15000 });
       await fileRow.click();
       await app.page.screenshot({ path: `${SHOTS}/ui-conflict-03-3way.png` });
 
-      // The merge editor renders (MergeResultEditor textarea testid)
+      // The merge editor renders (MergeResultEditor textarea testid). On
+      // failure the error carries WHICH editor state was reached + the
+      // app's own diagnostics.
+      const state = await waitForMergeEditor(app.page, 15000);
+      if (state !== 'editor') {
+        const diag = await app.diagnostics();
+        throw new Error(
+          `3-way merge editor did not open (state: ${state}).\n${diag}`
+        );
+      }
       const editor = app.page.locator('[data-testid="merge-result-textarea"]');
-      await expect(editor).toBeVisible({ timeout: 15000 });
       const content = (await editor.inputValue().catch(() => editor.textContent())) ?? '';
       // The conflicted file carries conflict markers from the stalled merge.
       expect(content).toContain('<<<<<<<');

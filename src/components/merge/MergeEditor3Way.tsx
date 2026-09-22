@@ -372,7 +372,7 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center" data-testid="merge-editor-loading">
         <div className="text-text-tertiary text-sm flex items-center gap-2">
           <Loader size={16} className="spin" />
           {t('changes.loadingConflict')}
@@ -383,7 +383,7 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
 
   if (conflicts.length === 0 && !dirty) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center" data-testid="merge-editor-noconflicts">
         <div className="text-center">
           <AlertCircle size={32} className="mx-auto mb-3 text-status-modified" />
           <div className="text-sm font-medium mb-1">{t('changes.noConflictMarkers')}</div>

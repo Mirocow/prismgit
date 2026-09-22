@@ -593,6 +593,8 @@ export function DiffPage() {
               {visibleFiles.slice(0, 200).map((f, i) => (
                 <div
                   key={i}
+                  data-testid="diff-file-row"
+                  data-path={f.path}
                   className={cn(
                     'flex items-center gap-1.5 px-2 py-1 text-2xs cursor-pointer hover:bg-bg-hover transition-colors',
                     selectedFileInList === f.path && 'bg-bg-selected'
