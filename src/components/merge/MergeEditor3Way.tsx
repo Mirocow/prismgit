@@ -24,7 +24,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { AlertCircle, Loader } from '../icons';
+import { CheckCircle, Loader } from '../icons';
 import { useRepositoryStore } from '../../stores/repositoryStore';
 import { useGitStore } from '../../stores/gitStore';
 import { useToastActions } from '../../stores/toastStore';
@@ -91,10 +91,51 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
     setLoading(true);
     setDirty(false);
     try {
-      // Verify file is actually in conflict state.
-      const lsOutput = await api.git.raw(repo.path, ['ls-files', '-u', '--', filePath]).catch(() => '');
+      // Verify file is actually in conflict state. Guard the return: some
+      // IPC transports resolve to undefined on early failure — every
+      // string consumer below must see a real string.
+      const lsOutput = (await api.git.raw(repo.path, ['ls-files', '-u', '--', filePath]).catch(() => '')) ?? '';
       if (!lsOutput.trim()) {
-        toast.warning(t('toast.conflict.notConflicted'), 'This file may have been resolved already.');
+        // ── No unmerged stages in the index ──
+        // Covers: the conflict was already resolved (stages collapsed to
+        // stage 0), a conflicted path that no longer has stages, or a file
+        // in a repo with NO COMMITS (unborn HEAD — `show :1:` / `:2:` / `:3:`
+        // all fail). The OLD behavior bailed out to a dead "No conflict
+        // markers found" placeholder. The requested behavior: show the
+        // BODY OF THE CHANGE itself — ours = HEAD version (empty when
+        // there are no commits), theirs/result = working tree content,
+        // fully editable in the center pane.
+        const [headRes, wtRes] = await Promise.all([
+          api.git.raw(repo.path, ['show', `HEAD:${filePath}`]).catch(() => ''),
+          api.fs.readFile(`${repo.path}/${filePath}`.replace(/\+/g, '/')).catch(() => ''),
+        ]);
+        // readFile may resolve to a plain string (docs contract) or an
+        // { text } object (IndexEditorDialog convention) — accept both.
+        const asText = (v: unknown): string => {
+          if (typeof v === 'string') return v;
+          if (v && typeof v === 'object' && 'text' in (v as Record<string, unknown>)) {
+            return String((v as { text?: unknown }).text ?? '');
+          }
+          return '';
+        };
+        const headContent = asText(headRes);
+        const wtContent = asText(wtRes);
+        setBaseContent(headContent);
+        setOursContent(headContent);
+        setTheirsContent(wtContent);
+        langRef.current = detectLang(filePath);
+        // diff3(HEAD, HEAD, worktree) classifies every edit as
+        // changed-theirs → auto-merge result == the working tree body.
+        const headLines = headContent.split('\n');
+        const wtLines = wtContent.split('\n');
+        const regions = diff3(headLines, headLines, wtLines);
+        const autoResult = buildAutoMergeResult(headLines, headLines, wtLines, regions);
+        const resultText = autoResult.join('\n');
+        setInitialResult(resultText);
+        setCurrentResult(resultText);
+        resultRef.current = resultText;
+        setConflicts([]);
+        setCurrentConflictIdx(0);
         setLoading(false);
         return;
       }
@@ -379,19 +420,17 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
         </div>
       </div>
     );
+
   }
 
-  if (conflicts.length === 0 && !dirty) {
-    return (
-      <div className="flex-1 flex items-center justify-center" data-testid="merge-editor-noconflicts">
-        <div className="text-center">
-          <AlertCircle size={32} className="mx-auto mb-3 text-status-modified" />
-          <div className="text-sm font-medium mb-1">{t('changes.noConflictMarkers')}</div>
-          <div className="text-xs text-text-tertiary">{t('changes.noConflictHint')}</div>
-        </div>
-      </div>
-    );
-  }
+  // NOTE: there is deliberately NO early-return "no conflicts" placeholder.
+  // Even when diff3 produced zero conflict regions — or the file has no
+  // unmerged stages at all (e.g. a repo with no commits) — the user still
+  // gets the FULL 3-pane editor with the BODY OF THE CHANGE in the editable
+  // center pane (user-reported: the dead-end "Маркеры конфликта не найдены"
+  // placeholder must never replace the content). The banner below is
+  // informational only; `merge-editor-noconflicts` stays as a state probe
+  // for the e2e waitForMergeEditor() helper (textarea is checked first).
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -429,6 +468,20 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
         }}
         onSave={handleSave}
       />
+
+      {/* Informational banner (NOT a dead end): zero conflict regions were
+          found, or the file has no unmerged stages — the change body below
+          is still shown and editable. Hidden once the user edits (dirty). */}
+      {conflicts.length === 0 && !dirty && (
+        <div
+          data-testid="merge-editor-noconflicts"
+          className="flex items-center gap-2 px-3 py-1.5 bg-status-added/10 border-b border-status-added/30 text-xs text-text-secondary flex-shrink-0"
+        >
+          <CheckCircle size={14} className="text-status-added flex-shrink-0" />
+          <span className="font-medium">{t('changes.noConflictMarkers')}</span>
+          <span className="text-text-tertiary truncate">{t('changes.noConflictsEditable')}</span>
+        </div>
+      )}
 
       {/* Optional Base peek pane (collapsible) */}
       {showBase && (

@@ -34,10 +34,13 @@ export function buildAutoMergeResult(
   const out: string[] = [];
   for (const r of regions) {
     if (r.kind === 'stable') {
-      // Take from base (which equals ours and theirs here).
+      // Stable = all three sides agree, OR ours == theirs (both sides made
+      // the SAME change / the same deletion). Take from OURS, not base:
+      // taking base would silently REVERT an agreed change (and lose
+      // add/add-same content, where baseLen is 0 but oursLen > 0).
       // `?? ''` — defensive: a region must never read past the array end
       // (undefined lines would crash every startsWith consumer downstream).
-      for (let k = 0; k < r.baseLen; k++) out.push(baseLines[r.baseStart + k] ?? '');
+      for (let k = 0; k < r.oursLen; k++) out.push(oursLines[r.oursStart + k] ?? '');
     } else if (r.kind === 'changed-ours') {
       // Only ours changed — take ours.
       for (let k = 0; k < r.oursLen; k++) out.push(oursLines[r.oursStart + k] ?? '');
@@ -46,10 +49,17 @@ export function buildAutoMergeResult(
       for (let k = 0; k < r.theirsLen; k++) out.push(theirsLines[r.theirsStart + k] ?? '');
     } else {
       // conflict — emit conflict markers (Git format).
+      // `?? ''` guards are LOAD-BEARING here: the other three branches were
+      // hardened earlier, but this one was not — an over-counted region
+      // (stale-anchor duplicate after mergeAdjacentRegions) pushed `undefined`
+      // lines into the Result, and the FIRST consumer that called
+      // `.startsWith()` on them crashed with:
+      //   TypeError: Cannot read properties of undefined (reading 'startsWith')
+      // surfaced as the "Failed to load conflict" toast (user-reported).
       out.push('<<<<<<< ours');
-      for (let k = 0; k < r.oursLen; k++) out.push(oursLines[r.oursStart + k]);
+      for (let k = 0; k < r.oursLen; k++) out.push(oursLines[r.oursStart + k] ?? '');
       out.push('=======');
-      for (let k = 0; k < r.theirsLen; k++) out.push(theirsLines[r.theirsStart + k]);
+      for (let k = 0; k < r.theirsLen; k++) out.push(theirsLines[r.theirsStart + k] ?? '');
       out.push('>>>>>>> theirs');
     }
   }
@@ -83,8 +93,10 @@ export function resolveHunk(
   if (!r) return resultLines;
   const startLine = conflictMarkersPositions[conflictIdx];
   // Find the end (the >>>>>>> line). Walk forward from startLine.
+  // `?? ''` — the Result array may contain undefined holes from legacy
+  // or hand-built regions; never let that crash the walk.
   let endLine = startLine + 1;
-  while (endLine < resultLines.length && !resultLines[endLine].startsWith('>>>>>>>')) {
+  while (endLine < resultLines.length && !(resultLines[endLine] ?? '').startsWith('>>>>>>>')) {
     endLine++;
   }
   endLine++; // include the >>>>>>> line itself
@@ -133,7 +145,7 @@ export function resolveHunk(
 export function findConflictMarkers(resultLines: string[]): number[] {
   const positions: number[] = [];
   for (let i = 0; i < resultLines.length; i++) {
-    if (resultLines[i].startsWith('<<<<<<<')) positions.push(i);
+    if ((resultLines[i] ?? '').startsWith('<<<<<<<')) positions.push(i);
   }
   return positions;
 }
@@ -143,5 +155,5 @@ export function findConflictMarkers(resultLines: string[]): number[] {
  * Returns true if the file is safe to stage (no markers).
  */
 export function isResultClean(resultLines: string[]): boolean {
-  return !resultLines.some((l) => l.startsWith('<<<<<<<') || l.startsWith('>>>>>>>'));
+  return !resultLines.some((l) => (l ?? '').startsWith('<<<<<<<') || (l ?? '').startsWith('>>>>>>>'));
 }

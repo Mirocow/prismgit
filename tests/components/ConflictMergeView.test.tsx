@@ -16,18 +16,28 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import * as React from 'react';
 
 // ===== Mocks =====
+// Path-aware: file.ts carries real unmerged stages; resolved.ts has NO
+// stages (already resolved / unborn HEAD — the fallback path).
 const mockGitRaw = vi.fn(async (repoPath: string, args: string[]) => {
   if (args[0] === 'ls-files' && args.includes('-u')) {
+    const file = args[args.length - 1];
+    if (file === 'resolved.ts' || file === 'nocommit.ts') return '';
     return '100644 abc123 1\tfile.ts\n100644 def456 2\tfile.ts\n100644 ghi789 3\tfile.ts\n';
   }
   const arg = args[args.length - 1];
   if (arg === ':1:file.ts') return 'base line';
   if (arg === ':2:file.ts') return 'ours line';
   if (arg === ':3:file.ts') return 'theirs line';
+  if (arg === 'HEAD:nocommit.ts') throw new Error('unknown revision: HEAD');
+  if (arg === 'HEAD:resolved.ts') return 'head version line';
   return '';
 });
 
-const mockFsReadFile = vi.fn(async () => {
+// Path-aware working-tree reader: plain content (no markers) for the
+// fallback files, marker content for file.ts.
+const mockFsReadFile = vi.fn(async (p: string) => {
+  if (String(p).endsWith('nocommit.ts')) return 'fresh worktree body\nsecond line';
+  if (String(p).endsWith('resolved.ts')) return 'resolved worktree body';
   return 'line1\n<<<<<<< HEAD\nours line\n=======\ntheirs line\n>>>>>>> feature\nline3\n';
 });
 
@@ -240,5 +250,95 @@ describe('ConflictMergeView (MergeEditor3Way)', () => {
     expect(pre).toBeTruthy();
     const preHtml = pre?.innerHTML || '';
     expect(preHtml).toContain('&lt;&lt;&lt;&lt;&lt;&lt;&lt;'); // HTML-escaped <<<<<<<
+  }, 10000);
+
+  // ─── User-reported issues (2026-09): no unmerged stages ───
+  // "В конфликтах если нет коммитов то должен выводится не 'Маркеры
+  //  конфликта не найдены…' а тело самого изменения"
+  it('NO unmerged stages (repo without commits) → shows the change BODY, editable, not the dead-end placeholder', async () => {
+    const { ConflictMergeView } = await import('../../src/components/ConflictMergeView');
+
+    render(React.createElement(ConflictMergeView, {
+      filePath: 'nocommit.ts',
+      onResolved: vi.fn(),
+    }));
+
+    // The editor (not a placeholder) must appear.
+    await waitFor(() => {
+      expect(screen.queryByTestId('merge-result-textarea')).toBeTruthy();
+    }, { timeout: 5000 });
+
+    // The center pane carries the working-tree body of the change — the
+    // fallback loaded HEAD (failed — unborn) + working tree content.
+    const editor = screen.getByTestId('merge-result-textarea') as HTMLTextAreaElement;
+    expect(editor.value).toContain('fresh worktree body');
+    expect(editor.value).toContain('second line');
+    // No conflict markers in this fallback — but the content IS shown.
+    expect(editor.value).not.toContain('<<<<<<<');
+
+    // The informational banner is present (state probe), the ERROR toast
+    // "Не удалось загрузить конфликт" must NOT fire.
+    expect(screen.queryByTestId('merge-editor-noconflicts')).toBeTruthy();
+
+    // The fallback read HEAD + working tree.
+    expect(mockGitRaw).toHaveBeenCalledWith('/test/repo', ['show', 'HEAD:nocommit.ts']);
+    expect(mockFsReadFile).toHaveBeenCalledWith('/test/repo/nocommit.ts');
+  }, 10000);
+
+  it('no unmerged stages (already resolved) → HEAD vs worktree shown, editable', async () => {
+    const { ConflictMergeView } = await import('../../src/components/ConflictMergeView');
+
+    render(React.createElement(ConflictMergeView, {
+      filePath: 'resolved.ts',
+      onResolved: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('merge-result-textarea')).toBeTruthy();
+    }, { timeout: 5000 });
+
+    // Result = the working tree body (the current resolution).
+    const editor = screen.getByTestId('merge-result-textarea') as HTMLTextAreaElement;
+    expect(editor.value).toContain('resolved worktree body');
+
+    // The panes loaded HEAD as ours (and base) + working tree as theirs.
+    expect(mockGitRaw).toHaveBeenCalledWith('/test/repo', ['show', 'HEAD:resolved.ts']);
+    expect(mockFsReadFile).toHaveBeenCalledWith('/test/repo/resolved.ts');
+  }, 10000);
+
+  it('zero conflict regions from real stages → editor STILL renders (no dead-end)', async () => {
+    // Both stages identical: diff3 finds zero conflict regions. The old
+    // code replaced the whole editor with the "Маркеры конфликта не
+    // найдены" placeholder. Now the editor + info banner must render.
+    const { ConflictMergeView } = await import('../../src/components/ConflictMergeView');
+
+    // Override the stage contents for this test (and the rest of the file
+    // — it is the last test): ours == theirs, so diff3 finds zero
+    // conflict regions.
+    mockGitRaw.mockImplementation(async (_p: string, args: string[]) => {
+      if (args[0] === 'ls-files' && args.includes('-u')) {
+        return '100644 abc123 1\tsame.ts\n100644 def456 2\tsame.ts\n100644 ghi789 3\tsame.ts\n';
+      }
+      const arg = args[args.length - 1];
+      if (arg === ':1:same.ts') return 'base';
+      if (arg === ':2:same.ts') return 'identical change';
+      if (arg === ':3:same.ts') return 'identical change';
+      return '';
+    });
+
+    render(React.createElement(ConflictMergeView, {
+      filePath: 'same.ts',
+      onResolved: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('merge-result-textarea')).toBeTruthy();
+    }, { timeout: 5000 });
+
+    // The editor shows the agreed content (not a placeholder, not base).
+    const editor = screen.getByTestId('merge-result-textarea') as HTMLTextAreaElement;
+    expect(editor.value).toContain('identical change');
+    // The info banner co-exists with the editor.
+    expect(screen.queryByTestId('merge-editor-noconflicts')).toBeTruthy();
   }, 10000);
 });

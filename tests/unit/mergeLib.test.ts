@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { diff3, countConflicts, hasConflicts } from '../../src/lib/merge/diff3';
 import { alignRows } from '../../src/lib/merge/alignRows';
+import type { Region } from '../../src/lib/merge/mergeTypes';
 import { buildAutoMergeResult, findConflictMarkers, isResultClean, resolveHunk } from '../../src/lib/merge/resolveConflicts';
 
 describe('diff3', () => {
@@ -68,6 +69,91 @@ describe('diff3', () => {
   it('handles empty base (no common ancestor)', () => {
     const r = diff3([], ['a', 'b'], ['c', 'd']);
     expect(hasConflicts(r)).toBe(true);
+  });
+});
+
+describe('buildAutoMergeResult hardening (user-reported crash)', () => {
+  // EXACT regression of the user-reported toast:
+  //   "Не удалось загрузить конфликт
+  //    TypeError: Cannot read properties of undefined (reading 'startsWith')"
+  // Root cause: the conflict branch of buildAutoMergeResult read
+  // ours/theirs lines WITHOUT the `?? ''` out-of-bounds guard that the
+  // other three branches already had. A conflict region with over-counted
+  // lengths (stale-anchor duplicate after mergeAdjacentRegions) pushed
+  // `undefined` into the Result; findConflictMarkers then called
+  // `.startsWith()` on it.
+  it('conflict regions that read past the array end never emit undefined lines', () => {
+    const base = ['a'];
+    const ours = ['b'];
+    const theirs = ['c'];
+    // Hand-crafted over-counted region: lens far beyond the 1-line arrays.
+    const bogus: Region[] = [{
+      kind: 'conflict', baseStart: 0, baseLen: 5,
+      oursStart: 0, oursLen: 9,
+      theirsStart: 0, theirsLen: 7,
+    }];
+    const result = buildAutoMergeResult(base, ours, theirs, bogus);
+    expect(result.every((l) => typeof l === 'string')).toBe(true);
+    // Markers still bracket the (padded) blocks — the editor stays usable.
+    expect(result[0]).toBe('<<<<<<< ours');
+    expect(result).toContain('=======');
+    expect(result[result.length - 1]).toBe('>>>>>>> theirs');
+    // The consumers that previously crashed must survive:
+    expect(() => findConflictMarkers(result)).not.toThrow();
+    expect(() => isResultClean(result)).not.toThrow();
+  });
+
+  it('all consumers tolerate undefined holes in the Result array', () => {
+    const lines = ['ctx', '<<<<<<< ours', undefined as unknown as string, '=======', '>>>>>>> theirs'];
+    expect(() => findConflictMarkers(lines)).not.toThrow();
+    expect(findConflictMarkers(lines)).toEqual([1]);
+    expect(() => isResultClean(lines)).not.toThrow();
+    expect(isResultClean(lines)).toBe(false);
+  });
+
+  it('resolveHunk end-walk tolerates undefined lines', () => {
+    const result = ['<<<<<<< ours', 'a', undefined as unknown as string, '=======', 'b', '>>>>>>> theirs', 'ctx'];
+    const regions: Region[] = [{
+      kind: 'conflict', baseStart: 0, baseLen: 0, oursStart: 0, oursLen: 1, theirsStart: 0, theirsLen: 1,
+    }];
+    expect(() => resolveHunk(result, [0], 0, 'ours', ['a'], ['b'], [], regions)).not.toThrow();
+  });
+});
+
+describe('buildAutoMergeResult stable semantics', () => {
+  it('keeps the AGREED change when both sides made the same edit (does not revert to base)', () => {
+    // Both branches changed 'b' → 'SAME'. git auto-resolves this; our
+    // merged Result must keep 'SAME', not silently take base's 'b'.
+    const base = ['a', 'b', 'c'];
+    const ours = ['a', 'SAME', 'c'];
+    const theirs = ['a', 'SAME', 'c'];
+    const regions = diff3(base, ours, theirs);
+    const result = buildAutoMergeResult(base, ours, theirs, regions);
+    expect(result).toEqual(['a', 'SAME', 'c']);
+    expect(result.join('\n')).not.toContain('<<<<<<<');
+  });
+
+  it('keeps the agreed content when base is empty (add/add with same content)', () => {
+    const base: string[] = [];
+    const ours = ['new file line 1', 'line 2'];
+    const theirs = ['new file line 1', 'line 2'];
+    const regions = diff3(base, ours, theirs);
+    const result = buildAutoMergeResult(base, ours, theirs, regions);
+    expect(result.every((l) => typeof l === 'string')).toBe(true);
+    expect(result).toContain('new file line 1');
+  });
+
+  it('fallback shape (HEAD, HEAD, worktree) yields the worktree body — the no-commit case', () => {
+    // When the file has no unmerged stages (e.g. a repo with NO COMMITS),
+    // MergeEditor3Way falls back to diff3(HEAD, HEAD, worktree) with
+    // HEAD='' (unborn). The auto-merge result must equal the worktree
+    // body so the editable center pane shows the change itself.
+    const head: string[] = [];
+    const worktree = ['hello', 'world'];
+    const regions = diff3(head, head, worktree);
+    const result = buildAutoMergeResult(head, head, worktree, regions);
+    expect(result.join('\n')).toBe(worktree.join('\n'));
+    expect(findConflictMarkers(result)).toHaveLength(0);
   });
 });
 

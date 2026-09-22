@@ -5,6 +5,7 @@
 #   macOS: native WindowServer display, no Xvfb needed:
 #     nohup bash scripts/run-e2e-full.sh > /tmp/e2e-full-run.log 2>&1 &
 cd "$(dirname "$0")/.."
+SCRIPT_TMP="$(mktemp -d)"
 echo "=== FULL E2E RUN — $(date -u '+%Y-%m-%d %H:%M:%S UTC') ==="
 echo "OS: $(uname -s) | HEAD: $(git rev-parse HEAD)"
 echo "=================================================="
@@ -23,8 +24,24 @@ npx playwright install chromium 2>/dev/null || npx playwright install chromium |
 # started by playwright for accessibility.test.ts.
 if [ "$(uname -s)" = "Darwin" ]; then
   npx playwright test
-else
+elif command -v xvfb-run >/dev/null 2>&1 && command -v xauth >/dev/null 2>&1; then
+  # xvfb-run REQUIRES xauth; minimal containers ship Xvfb without it
+  # ("xvfb-run: error: xauth command not found"). Fall back to a manual
+  # Xvfb on a private display when xauth is missing.
   xvfb-run -a npx playwright test
+else
+  echo "xvfb-run unavailable (no xauth?) — starting Xvfb manually on :99"
+  Xvfb :99 -screen 0 1920x1080x24 > "$SCRIPT_TMP/xvfb.log" 2>&1 &
+  XVFB_PID=$!
+  sleep 2
+  if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+    echo "FATAL: Xvfb failed to start on :99 (see $SCRIPT_TMP/xvfb.log)"
+    exit 1
+  fi
+  DISPLAY=:99 npx playwright test
+  STATUS=$?
+  kill "$XVFB_PID" 2>/dev/null
+  exit $STATUS
 fi
 STATUS=$?
 
