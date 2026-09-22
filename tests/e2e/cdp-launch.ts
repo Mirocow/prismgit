@@ -89,10 +89,18 @@ export async function launchCdpApp(repo: { path: string; name: string }): Promis
     windowState: { bounds: { x: 0, y: 0, width: 1600, height: 1000 }, isMaximized: false, isFullScreen: false },
   }, null, 2));
 
-  const electronBin = path.join(process.cwd(), 'node_modules/electron/dist/electron');
+  // Platform-aware Electron binary: Linux ships a plain 'electron' binary,
+  // macOS wraps it into an .app bundle. A hard-coded 'dist/electron' path
+  // made every CDP spec die with ENOENT on macOS.
+  const electronBin = process.platform === 'darwin'
+    ? path.join(process.cwd(), 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron')
+    : path.join(process.cwd(), 'node_modules/electron/dist/electron');
   const mainJs = path.join(process.cwd(), 'dist-electron/main.js');
   if (!fs.existsSync(mainJs)) {
     throw new Error(`dist-electron/main.js missing at ${mainJs} — run the build before e2e`);
+  }
+  if (!fs.existsSync(electronBin)) {
+    throw new Error(`Electron binary missing at ${electronBin} — run npm ci first`);
   }
   const port = nextPort();
   // Direct binary spawn — NO shell wrapper, so kill() hits Electron itself.
@@ -103,7 +111,9 @@ export async function launchCdpApp(repo: { path: string; name: string }): Promis
   ], {
     env: {
       ...process.env,
-      DISPLAY: process.env.DISPLAY || ':99', // inherit the ACTUAL Xvfb display
+      // Xvfb display — Linux containers only. macOS renders through the
+      // native WindowServer and has no DISPLAY; forcing one is noise.
+      ...(process.platform === 'linux' ? { DISPLAY: process.env.DISPLAY || ':99' } : {}),
       NODE_ENV: 'production',
       PRISMGIT_USER_DATA: ud,
       PRISMGIT_LOCALE: 'en',

@@ -1,15 +1,23 @@
 #!/bin/bash
-# Full comprehensive E2E run — Xvfb + nohup (user requirement).
-# Usage: nohup bash run-e2e-full.sh > /tmp/e2e-full-run.log 2>&1 &
-cd /home/z/my-project/gitclient
-export PATH=/home/z/my-project/bin:$PATH
+# Full comprehensive E2E run — cross-platform.
+#   Linux (headless container): Xvfb + nohup (user requirement):
+#     nohup bash scripts/run-e2e-full.sh > /tmp/e2e-full-run.log 2>&1 &
+#   macOS: native WindowServer display, no Xvfb needed:
+#     nohup bash scripts/run-e2e-full.sh > /tmp/e2e-full-run.log 2>&1 &
+cd "$(dirname "$0")/.."
 echo "=== FULL E2E RUN — $(date -u '+%Y-%m-%d %H:%M:%S UTC') ==="
-echo "HEAD: $(git rev-parse HEAD)"
+echo "OS: $(uname -s) | HEAD: $(git rev-parse HEAD)"
 echo "=================================================="
 
-# Run the ENTIRE e2e suite under Xvfb (auto display). The webServer (vite
-# renderer-only) is started by playwright for accessibility.test.ts.
-xvfb-run -a npx playwright test
+# Run the ENTIRE e2e suite. On Linux under Xvfb (auto display); on macOS
+# Electron renders through the native WindowServer — xvfb-run does not
+# exist there and is not needed. The webServer (vite renderer-only) is
+# started by playwright for accessibility.test.ts.
+if [ "$(uname -s)" = "Darwin" ]; then
+  npx playwright test
+else
+  xvfb-run -a npx playwright test
+fi
 STATUS=$?
 
 echo "=================================================="
