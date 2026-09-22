@@ -67,6 +67,12 @@ export function seedUserData(
       showReflogInHistory: false,
       maxHistoryLoad: 500,
       pullStrategy: 'merge',
+      // E2E FIX (root cause #1): without tourCompleted the first-run tour
+      // overlay renders as a fixed inset-0 z-[100] layer that intercepts
+      // EVERY click — which is why half the suite used to time out on its
+      // first locator.click(). Marking the tour done keeps the overlay
+      // from ever mounting.
+      tourCompleted: true,
     },
     repositories: reposData,
     repoMetadata: {} as Record<string, unknown>,
@@ -163,15 +169,64 @@ export async function launchApp(opts: {
   return { app, page, userDataDir, close };
 }
 
-/** Wait for a sidebar nav item by its label and click it */
+/** Wait for a sidebar nav item by its label and click it.
+ *
+ * E2E FIX (root cause #2): the old `aside button:has-text(label)` matcher
+ * broke three ways at once:
+ *   a) sidebar nav items are div[role=button] (they contain a NESTED
+ *      favorite-star button), not <button>;
+ *   b) the repo-header button's accessible name is "<repo> <branch>" — for
+ *      repos named like tools (the "tags"/"history"/"diff" fixtures)
+ *      :has-text matched the header first and clicked the wrong thing;
+ *   c) the nav groups (Working Tree/Workflows/Refs) start COLLAPSED
+ *      (projectPrefs DEFAULT_COLLAPSED_GROUPS), so items are not visible
+ *      until their group header is expanded.
+ *
+ * Strategy: target aria-label (nav items carry aria-label={item.label}),
+ * expanding any collapsed group header (title="Expand") that stands
+ * between us and the item; fall back to the nav~div area for Settings
+ * (which lives outside <nav>) and to a plain has-text match last.
+ */
 export async function navigateTo(page: Page, label: string): Promise<void> {
-  // Sidebar nav buttons live in <aside><nav>...</nav></aside>, but the
-  // Settings button lives in <aside><div>...</div></aside> at the bottom.
-  // Search both.
-  const navButton = page.locator(`aside button:has-text("${label}")`).first();
-  await navButton.waitFor({ state: 'visible', timeout: 15000 });
-  await navButton.click();
-  await page.waitForTimeout(800);
+  // 1. Preferred: aria-labeled nav item (exact match, no shadowing).
+  const byAria = page.locator(`aside [role="button"][aria-label="${label}"]`).first();
+  if (await byAria.isVisible({ timeout: 1500 }).catch(() => false)) {
+    await byAria.click();
+    await page.waitForTimeout(600);
+    return;
+  }
+
+  // 2. The item may sit in a COLLAPSED group — expand every collapsed
+  //    group header (title="Expand" while collapsed) and retry.
+  const expandable = page.locator('aside button[role="heading"][title="Expand"]');
+  const n = await expandable.count();
+  for (let i = 0; i < n; i++) {
+    const header = expandable.nth(i);
+    if (await header.isVisible().catch(() => false)) {
+      await header.click().catch(() => { /* toggle best-effort */ });
+    }
+  }
+  if (n > 0) await page.waitForTimeout(300);
+  if (await byAria.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await byAria.click();
+    await page.waitForTimeout(600);
+    return;
+  }
+
+  // 3. Settings & friends live in <aside><div> BELOW <nav> — try a plain
+  //    button there (scoped to the div, so the repo header can't shadow).
+  const asideBtn = page.locator('aside div button').filter({ hasText: label }).first();
+  if (await asideBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await asideBtn.click();
+    await page.waitForTimeout(600);
+    return;
+  }
+
+  // 4. Last resort: div[role=button] containing the label text.
+  const byText = page.locator(`aside div[role="button"]`).filter({ hasText: label }).first();
+  await byText.waitFor({ state: 'visible', timeout: 15000 });
+  await byText.click();
+  await page.waitForTimeout(600);
 }
 
 /** Wait for an element containing the given text to appear */
@@ -180,25 +235,34 @@ export async function waitForText(page: Page, text: string, timeout = 10000): Pr
 }
 
 /**
- * Enable an extra status filter in the Changes view via the quick-toggle chip.
+ * Enable an extra file-display category in the Changes view.
  *
- * Since b92f54d the default filter set is MADS (Modified, Added, Deleted,
- * Staged) — Untracked (U) and Unstaged (U2) are OFF by default, so e2e flows
- * that create fresh (untracked) files must enable the chip first. Verified by
- * the "Status: N filters" caption growing from 4 to 5.
+ * E2E FIX (root cause #3): since f1c4a35 the old MADS quick-toggle chips
+ * ("Show Untracked files" / "Show Unstaged files" + a "Status: N filters"
+ * caption) are GONE — replaced by the 8 SmartGit-style display-flag icon
+ * buttons in the Changes toolbar. Default ON: subdirectories + unversioned
+ * (untracked). Wait — unversioned DEFAULT ON means fresh untracked files
+ * are always listed; the button toggles the flag regardless, so tests can
+ * still force it on and verify the active state (bg-accent-muted class).
+ *
+ * 'Unstaged' no longer exists as a separate flag (unstaged/changed files
+ * are ALWAYS visible in the union model), so it is a no-op kept for API
+ * compatibility with the older specs.
  */
 export async function enableStatusFilter(page: Page, label: 'Untracked' | 'Unstaged'): Promise<void> {
-  const title = label === 'Untracked' ? 'Show Untracked files' : 'Show Unstaged files';
+  if (label === 'Unstaged') return; // always visible in the SmartGit union model
+  const title = 'Show Unversioned (untracked) Files';
   const chip = page.locator(`button[title="${title}"]`).first();
   await chip.waitFor({ state: 'visible', timeout: 10000 });
-  const statusButton = page.locator('button', { hasText: 'Status:' }).first();
-  // applyProjectPrefs may asynchronously apply the MADS default AFTER launch
-  // and overwrite an early toggle — retry the whole click until the caption
-  // confirms the filter stuck (MADS=4 -> 5).
-  await expect(async () => {
+  // If the flag is already active (accent-tinted), nothing to do.
+  const active = await chip.evaluate((el) => el.className.includes('bg-accent-muted'));
+  if (!active) {
     await chip.click();
-    await expect(statusButton).toContainText('5 filters');
-  }).toPass({ timeout: 15_000 });
+    // The button gains bg-accent-muted when the flag is ON.
+    await expect
+      .poll(async () => chip.evaluate((el) => el.className.includes('bg-accent-muted')), { timeout: 10_000 })
+      .toBe(true);
+  }
 }
 
 /** Take a screenshot for debugging test failures */

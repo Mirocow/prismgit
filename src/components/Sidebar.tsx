@@ -912,6 +912,12 @@ export function Sidebar() {
                       }
                     }}
                     title={NAV_DESCRIPTIONS[item.path] || item.label}
+                    // A11y parity with regular nav items (which already carry
+                    // aria-label): favorite items are div[role=button] and
+                    // relied on text content alone — a nested favorite-star
+                    // button polluted their accessible name. Exact aria-label
+                    // keeps e2e targeting and screen readers deterministic.
+                    aria-label={item.label}
                   >
                     <Icon size={15} />
                     <span>{item.label}</span>

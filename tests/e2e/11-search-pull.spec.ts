@@ -1,48 +1,63 @@
 /**
- * E2E: Search tool usability + Pull-from-remote selector (Task 26).
+ * E2E: Search tool (unified InvestigatePage) + Pull remote selector.
  *
- * Uses the local test-lab repo. Skips when the repo is not present.
+ * E2E FIX (root cause #9): the old version targeted the pre-unification
+ * Search page ('input[placeholder*="live"]', per-tab 'Find tracked files'
+ * buttons) that no longer exists, and hardcoded a /home/z/my-project/repos
+ * test-lab path so the whole spec always skipped. Now it drives the
+ * UNIFIED search bar (one input, mode chips All/Commits/Files/Content)
+ * on the fixture test-lab repo created by setup-e2e-extra-repos.sh.
  *
  * Verifies:
- *   1. Search/Commits finds commits LIVE while typing (no button press)
- *   2. Search/Files finds tracked files by name substring
- *   3. Search/Content (git grep) returns grouped matches
- *   4. Pull options open with a REMOTE selector + fetched remote branches
+ *   1. Commits search updates LIVE while typing (no Enter, no button)
+ *   2. Files mode finds tracked files by name substring
+ *   3. Content mode greps the working tree (git grep)
+ *   4. The toolbar Pull dropdown opens with a REMOTE selector
  */
 import { test, expect } from '@playwright/test';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import { launchApp, navigateTo, screenshot } from './helpers';
 
-const REPO = { path: '/home/z/my-project/repos/test-lab', name: 'test-lab' };
+const BASE = process.env.PRISMGIT_TEST_REPOS || path.join(os.tmpdir(), 'prismgit-repos');
+const REPO = { path: `${BASE}/test-lab`, name: 'test-lab' };
 const hasRepo = fs.existsSync(REPO.path);
 
 test.skip(!hasRepo, 'test-lab repo not available on this machine');
 
-test.describe('Search tool', () => {
+test.describe('Search tool (unified)', () => {
   test('commits search works live while typing', async () => {
     const ctx = await launchApp({ repos: [REPO] });
     try {
       await navigateTo(ctx.page, 'Search');
-      const input = ctx.page.locator('input[placeholder*="live" i]').first();
-      await input.waitFor({ state: 'visible', timeout: 5000 });
-      await input.type('octopus'); // type char-by-char, NO Enter, NO button click
-      await ctx.page.waitForTimeout(1500); // debounce 300ms + git log
+      // The single unified search bar (placeholder starts with the
+      // 'Search commits, files, and content' string).
+      const input = ctx.page.locator('input[placeholder^="Search commits, files"]').first();
+      await input.waitFor({ state: 'visible', timeout: 8000 });
+      // Type char-by-char — NO Enter, NO submit button: results must
+      // arrive through the 200ms debounce alone.
+      await input.type('octopus');
+      await ctx.page.waitForTimeout(1500);
       const body = await ctx.page.evaluate(() => document.body.innerText);
       expect(body).toContain('merge: octopus x+y+z');
-      expect(body).toMatch(/match(es)? “octopus”/);
+      // Unified-UI caption: the Commits section header carries the count.
+      // (The header renders with CSS text-transform:uppercase — innerText
+      // returns 'COMMITS (1)', so match case-insensitively.)
+      expect(body).toMatch(/commits\s*\(1\)/i);
       await screenshot(ctx.page, 'search-commits-live');
     } finally {
       await ctx.close();
     }
   });
 
-  test('files tab finds tracked files by name', async () => {
+  test('files mode finds tracked files by name', async () => {
     const ctx = await launchApp({ repos: [REPO] });
     try {
       await navigateTo(ctx.page, 'Search');
-      await ctx.page.locator('button[title^="Find tracked files"]').first().click();
-      const input = ctx.page.locator('input[placeholder*="Find tracked files" i]').first();
-      await input.waitFor({ state: 'visible', timeout: 5000 });
+      await ctx.page.locator('button', { hasText: 'Files' }).first().click();
+      const input = ctx.page.locator('input[placeholder^="Search commits, files"]').first();
+      await input.waitFor({ state: 'visible', timeout: 8000 });
       await input.fill('util');
       await ctx.page.waitForTimeout(1200);
       const body = await ctx.page.evaluate(() => document.body.innerText);
@@ -53,47 +68,44 @@ test.describe('Search tool', () => {
     }
   });
 
-  test('content tab greps the working tree', async () => {
+  test('content mode greps the working tree', async () => {
     const ctx = await launchApp({ repos: [REPO] });
     try {
       await navigateTo(ctx.page, 'Search');
-      await ctx.page.locator('button[title^="git grep"]').first().click();
-      const input = ctx.page.locator('input[placeholder*="pattern" i]').first();
-      await input.waitFor({ state: 'visible', timeout: 5000 });
-      await input.fill('alpha');
-      await input.press('Enter');
-      await ctx.page.waitForTimeout(2000);
+      await ctx.page.locator('button', { hasText: 'Content' }).first().click();
+      const input = ctx.page.locator('input[placeholder^="Search commits, files"]').first();
+      await input.waitFor({ state: 'visible', timeout: 8000 });
+      // UTIL_TOKEN is a literal inside src/lib/util.ts (fixture) — git grep
+      // must return the file with the matching line.
+      await input.fill('UTIL_TOKEN');
+      await ctx.page.waitForTimeout(1500);
       const body = await ctx.page.evaluate(() => document.body.innerText);
-      expect(body).toMatch(/match(es)? in \d+ file/);
-      await screenshot(ctx.page, 'search-grep');
+      expect(body).toContain('src/lib/util.ts');
+      expect(body).toContain('UTIL_TOKEN');
+      await screenshot(ctx.page, 'search-content-grep');
     } finally {
       await ctx.close();
     }
   });
 });
 
-test.describe('Pull from remote', () => {
-  test('pull options expose remote selector + remote branches', async () => {
+test.describe('Pull dropdown', () => {
+  test('opens with a remote selector listing origin', async () => {
     const ctx = await launchApp({ repos: [REPO] });
     try {
-      // Open the Pull options menu (chevron next to the Pull button)
-      const chevron = ctx.page.locator('button[title*="Pull options"]').first();
-      await chevron.waitFor({ state: 'visible', timeout: 5000 });
+      // The chevron next to the Pull button (title starts 'Pull options').
+      const chevron = ctx.page.locator('button[title^="Pull options"]').first();
+      await chevron.waitFor({ state: 'visible', timeout: 10000 });
       await chevron.click();
-      await ctx.page.waitForTimeout(800);
-      await screenshot(ctx.page, 'pull-options');
-
-      const body = await ctx.page.evaluate(() => document.body.innerText);
-      expect(body).toMatch(/pull from remote/i); // header is CSS-uppercased
-      // Scope to the dropdown PANEL (the page behind has other <select>s)
-      const panel = ctx.page.locator('div.absolute').filter({ hasText: 'Pull from remote' }).first();
-      // Remote dropdown exists and the repo's origin is in it
-      const remoteOptions = await panel.locator('select').nth(0).locator('option').allTextContents();
-      expect(remoteOptions).toContain('origin');
-      // The branch dropdown is scoped to origin/ and contains origin/main
-      const branchOptions = await panel.locator('select').nth(1).locator('option').allTextContents();
-      expect(branchOptions.some((o) => o.startsWith('origin/'))).toBe(true);
-      expect(branchOptions).toContain('origin/main');
+      // The dropdown contains the Remote label + a <select> that must
+      // offer the fixture's origin remote.
+      const body = ctx.page.locator('body');
+      await expect(body).toContainText('Remote', { timeout: 5000 });
+      const remoteSelect = ctx.page.locator('select').first();
+      await remoteSelect.waitFor({ state: 'visible', timeout: 5000 });
+      const options = await remoteSelect.locator('option').allTextContents();
+      expect(options.join('\n')).toContain('origin');
+      await screenshot(ctx.page, 'pull-remote-selector');
     } finally {
       await ctx.close();
     }

@@ -210,6 +210,18 @@ export function diff3(
     const baseEnd = p.baseIdx;
     const oursEnd = p.oursIdx;
     const theirsEnd = p.theirsIdx;
+    // STALE-ANCHOR GUARD: an anchor whose baseIdx sits BEHIND the walk
+    // cursor was already consumed by a previous stable block. This happens
+    // with the trailing empty line that `content.split('\n')` produces:
+    // the anchor at the second-to-last line consumes BOTH the line and the
+    // trailing '', and the NEXT anchor (inside that block) would emit a
+    // duplicate stable region. After mergeAdjacentRegions the duplicated
+    // lengths overcount and buildAutoMergeResult reads past the array end
+    // (undefined lines → 'Cannot read properties of undefined'). Skip the
+    // point entirely — its content is already covered.
+    if (baseEnd < prevBase) continue;
+    if (oursEnd !== null && oursEnd < (prevOurs ?? 0)) continue;
+    if (theirsEnd !== null && theirsEnd < (prevTheirs ?? 0)) continue;
     // Only emit a region if the chunk is non-empty on at least one side.
     const baseLen = baseEnd - prevBase;
     const oursLen = oursEnd !== null && prevOurs !== null ? oursEnd - prevOurs : 0;

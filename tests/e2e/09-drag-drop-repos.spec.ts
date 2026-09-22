@@ -90,7 +90,11 @@ test.describe('Drag-and-drop repositories', () => {
     }
   });
 
-  test('drops a valid git repo and adds it to the list', async ({ skip }) => {
+  test('drops a valid git repo and adds it to the list', async () => {
+    // E2E FIX (root cause #7): `async ({ skip })` destructured a fixture
+    // named `skip` that does not exist in @playwright/test — the test file
+    // failed to LOAD at all. The opt-in gate is `test.skip()` inside the
+    // body, which is the supported pattern.
     // This test exercises the same drop-on-window code path as before
     // (the drop is dispatched on `window`, but the handler now checks
     // `event.target.closest('[data-testid="repo-tree"]')`).

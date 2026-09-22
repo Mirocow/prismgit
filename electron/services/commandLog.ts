@@ -130,6 +130,25 @@ export interface GitCommandLoggerOptions {
   onEntry?: (entry: CommandLogEntry) => void;
 }
 
+export type GitSpawnListener = (args: string[], cwd: string) => void;
+
+const spawnListeners: GitSpawnListener[] = [];
+
+/**
+ * Register a listener fired for every git spawn the interceptor observes
+ * (args are credential-sanitized; cwd defaults to process.cwd()). Returns
+ * an unregister function. Used by git.ts's write detector (PERF-2) so read
+ * coalescing caches are invalidated no matter WHICH git instance — cached,
+ * ad-hoc LFS/SSH, or a raw spawn helper — launches a write command.
+ */
+export function addGitSpawnListener(cb: GitSpawnListener): () => void {
+  spawnListeners.push(cb);
+  return () => {
+    const i = spawnListeners.indexOf(cb);
+    if (i >= 0) spawnListeners.splice(i, 1);
+  };
+}
+
 /**
  * Install the spawn interceptor. Must be called once, before any git work
  * (i.e. at the very start of the app's ready handler). Idempotent.
@@ -172,7 +191,20 @@ export function installGitCommandLogger(options: GitCommandLoggerOptions = {}): 
     ) => childProcess.ChildProcess;
     const child = spawnFn.call(this, command, args as string[], opts);
     try {
-      if (isGitBinary(command)) recordSpawn(command, args, opts, child);
+      if (isGitBinary(command)) {
+        recordSpawn(command, args, opts, child);
+        // PERF-2 write detector: dispatch every observed git spawn to
+        // registered listeners (git.ts uses this to invalidate its read
+        // coalescing caches when ANY git instance spawns a write —
+        // including ad-hoc instances that bypass the wrapper).
+        if (spawnListeners.length > 0) {
+          const argv = normalizeArgs(args).map(sanitizeArg);
+          const cwd = (opts && typeof opts.cwd === 'string' && opts.cwd) || process.cwd();
+          for (const l of spawnListeners) {
+            try { l(argv, cwd); } catch { /* never break spawning */ }
+          }
+        }
+      }
     } catch {
       /* logging must never break spawning */
     }

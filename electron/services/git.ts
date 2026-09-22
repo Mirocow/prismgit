@@ -16,6 +16,7 @@ import {
 // duplicate had drifted from the renderer version once already). The
 // shared module exports identical types, so no conversion is needed.
 import { parseDiff as parseDiffShared, type ParsedDiff } from '../../src/lib/diffParser';
+import { addGitSpawnListener } from './commandLog.js';
 import { buildSshEnv } from './ssh.js';
 import { getSetting } from './storage.js';
 
@@ -141,6 +142,7 @@ async function withOperationLog<T>(
 }
 
 function getGit(repoPath: string): SimpleGit {
+  installWriteDetector();
   let git = gitCache.get(repoPath);
   if (!git) {
     git = simpleGit({
@@ -157,9 +159,403 @@ function getGit(repoPath: string): SimpleGit {
       trimmed: false,
       ...GIT_UNSAFE_OPTIONS,
     });
-    gitCache.set(repoPath, git);
+    gitCache.set(repoPath, installReadCoalescing(repoPath, git));
   }
-  return git;
+  return gitCache.get(repoPath)!;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PERF-2: Read coalescing layer
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// A command trace on the live 4.7k-commit repo showed 81 git subprocesses
+// within ~3s of opening it: status×5, stash list×4, numstat×3+3,
+// rev-list --branches/--remotes ×2, for-each-ref/rev-parse ×many — all
+// spawned by independent renderer effects that ask for the SAME data at
+// the same moment. simple-git's maxConcurrentProcesses queue only
+// serialises them; it never deduplicates them.
+//
+// This layer wraps every cached getGit() instance with:
+//   1. IN-FLIGHT COALESCING for identical reads — concurrent callers of
+//      the same command share ONE subprocess (both get the same value).
+//      Applies to ALL reads, content-sensitive included.
+//   2. 1s TTL micro-cache for METADATA reads only (for-each-ref,
+//      remote -v, config --get*, stash list, …) — data that cannot change
+//      unless somebody runs a git WRITE.
+//   3. Content-sensitive reads (status/diff/log/show/rev-list/…) are
+//      NEVER TTL-cached — the filesystem can change under them (external
+//      editors, shells, tests mutating via raw `git` commands the app
+//      never sees). They still get in-flight coalescing.
+//   4. WRITE INVALIDATION, belt & suspenders:
+//      a) convenience WRITES (add/commit/tag/…) executed through the
+//         wrapper always invalidate — required under vitest, where the
+//         child_process spawn hook may not see simple-git's spawn realm;
+//      b) installWriteDetector() hooks child_process.spawn globally (the
+//         same trick commandLog.ts uses) and invalidates the repo's read
+//         cache when ANY git instance — including ad-hoc LFS/SSH ones —
+//         spawns a write command.
+//
+// The design is deliberately conservative: classifyGitCommand() returns
+// 'write' for anything it does not positively recognise as a read, so an
+// unknown command can never be served from a stale cache.
+
+export type GitCommandKind = 'read' | 'meta' | 'write';
+
+/** Metadata reads: safe to TTL-cache for READ_TTL_MS (1s). */
+const META_COMMANDS = new Set([
+  'for-each-ref', 'show-ref', 'check-ref-format', 'ls-remote',
+]);
+
+/**
+ * Content-sensitive reads: in-flight coalescing only, NEVER TTL-cached —
+ * filesystem writes (external editors, shells, tests) can change their
+ * result at any time.
+ */
+const READ_COMMANDS = new Set([
+  'status', 'diff', 'log', 'show', 'rev-list', 'rev-parse', 'cat-file',
+  'ls-files', 'ls-tree', 'blame', 'merge-base', 'name-rev', 'describe',
+  'shortlog', 'whatchanged', 'reflog', 'grep', 'cherry', 'count-objects',
+  'verify-commit', 'verify-tag', 'check-attr', 'check-ignore', 'var',
+  'diff-index', 'diff-tree', 'diff-files', 'hash-object', 'mktree',
+]);
+
+/** Global git options that consume the NEXT argv slot as a value. */
+const GLOBAL_OPTS_WITH_VALUE = new Set(['-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env']);
+
+/** subcommands of `git config` that READ (anything else writes). */
+const CONFIG_GETTER_FLAGS = new Set(['--get', '--get-all', '--get-regexp', '--get-url', '--get-color', '--get-colorbool', '-l', '--list', '--show-origin', '--show-scope', '--get-native-worktree']);
+
+/**
+ * Conservative git-argv classifier.
+ *
+ *  'meta'  — metadata read, TTL-cacheable (refs/config/remotes listings)
+ *  'read'  — content-sensitive read, in-flight coalescing only
+ *  'write' — anything that can mutate repo state (or is unknown!)
+ *
+ * UNKNOWN IS ALWAYS 'write' — an unrecognised command must never be
+ * served from a cache it might invalidate.
+ */
+export function classifyGitCommand(argv: string[]): GitCommandKind {
+  // Skip leading global options (e.g. ['-c','x=y','status',…]).
+  let i = 0;
+  while (i < argv.length) {
+    const a = argv[i];
+    if (a === '--' || a === undefined) break;
+    if (a.startsWith('-')) {
+      if (GLOBAL_OPTS_WITH_VALUE.has(a)) { i += 2; continue; }
+      if (a.startsWith('--') && a.includes('=')) { i += 1; continue; }
+      i += 1; continue;
+    }
+    break; // first positional = the subcommand
+  }
+  const cmd = argv[i];
+  if (!cmd) {
+    // Bare flags only (e.g. ['--version'] at startup) — harmless reads.
+    return argv.some((a) => a === '--version' || a === '--help' || a === '--exec-path' || a === '--man-path' || a === '--info-path')
+      ? 'read'
+      : 'write';
+  }
+  const rest = argv.slice(i + 1);
+  const flags = rest.filter((a) => typeof a === 'string' && a.startsWith('-'));
+  const positionals = rest.filter((a) => typeof a === 'string' && !a.startsWith('-'));
+
+  switch (cmd) {
+    case 'config':
+      // Config getters are READS but NEVER TTL-cacheable: .git/config is
+      // a global file other processes (terminals, other tools, tests) write
+      // freely without any git subprocess we could observe — an external
+      // write followed by an immediate read must not see stale data
+      // (integration test smartgitFeatures caught exactly this).
+      return rest.some((a) => CONFIG_GETTER_FLAGS.has(a)) ? 'read' : 'write';
+    case 'remote':
+      // `remote` / `remote -v` / `remote show X` read; add/rm/rename/… write.
+      return positionals.some((p) =>
+        ['add', 'remove', 'rm', 'rename', 'set-url', 'set-head', 'prune', 'update', 'set-branches'].includes(p)
+      ) ? 'write' : 'meta';
+    case 'stash':
+      // Only `stash list` is a read.
+      return positionals[0] === 'list' ? 'meta' : 'write';
+    case 'symbolic-ref':
+      // 0–1 positionals → query; 2+ positionals → write HEAD.
+      return positionals.length <= 1 ? 'meta' : 'write';
+    case 'branch':
+      // `branch` / `branch -a -v` / `branch --list …` read; creating renames/deletes write.
+      return flags.some((f) => f === '--list' || f === '-l' || f === '--show-current' || f === '-a' || f === '--all' || f === '-v' || f === '--verbose')
+        && !positionals.some((p) => ['--delete', '-d', '-D', '-m', '-M', '-c', '-C', '--edit-description'].includes(p))
+        ? 'meta'
+        : positionals.length === 0 && flags.length === 0 ? 'meta' : 'write';
+    case 'tag':
+      // `tag` / `tag -l` / `tag -n` read; `tag <name>` / `tag -d` write.
+      return flags.some((f) => f === '--list' || f === '-l' || f === '-n' || f.startsWith('-n'))
+        && positionals.every((p) => !p.startsWith('refs/')) ? 'meta' : 'write';
+    case 'worktree':
+      return positionals[0] === 'list' ? 'meta' : 'write';
+    case 'notes':
+      return positionals[0] === 'list' || positionals[0] === 'show' || rest.length === 0 ? 'read' : 'write';
+    case 'help':
+    case 'version':
+      return 'read';
+    default:
+      if (META_COMMANDS.has(cmd)) return 'meta';
+      if (READ_COMMANDS.has(cmd)) return 'read';
+      return 'write'; // unknown → conservative
+  }
+}
+
+/** TTL for metadata reads. 1s: coalesces the repo-open burst without
+ * ever showing stale data for more than a second after an external write. */
+export const READ_TTL_MS = 1_000;
+
+/** Cap on cached metadata entries per repo (pruned by insert). */
+const META_CACHE_MAX = 64;
+
+export interface ReadCoalesceStats {
+  rawCalls: number;        // raw() invocations that reached the wrapper
+  convenienceCalls: number;
+  coalescedInflight: number; // calls that joined an in-flight subprocess
+  ttlHits: number;         // calls served from the TTL cache
+  writeInvalidations: number; // cache drops caused by writes
+  subprocesses: number;    // actual subprocess launches observed via raw/convenience
+}
+
+interface ReadCoalesceState {
+  inflight: Map<string, Promise<unknown>>;
+  meta: Map<string, { value: unknown; ts: number }>;
+  stats: ReadCoalesceStats;
+}
+
+const readCoalesceStates = new Map<string, ReadCoalesceState>();
+
+function getCoalesceState(repoPath: string): ReadCoalesceState {
+  let s = readCoalesceStates.get(repoPath);
+  if (!s) {
+    s = {
+      inflight: new Map(),
+      meta: new Map(),
+      stats: { rawCalls: 0, convenienceCalls: 0, coalescedInflight: 0, ttlHits: 0, writeInvalidations: 0, subprocesses: 0 },
+    };
+    readCoalesceStates.set(repoPath, s);
+  }
+  return s;
+}
+
+/** Test/observability hook: counters for one repo. */
+export function __readCoalescingStats(repoPath: string): ReadCoalesceStats | undefined {
+  return readCoalesceStates.get(repoPath)?.stats;
+}
+
+/** Test hook: drop all coalescing state (fresh counters, empty caches). */
+export function __resetReadCoalescingForTests(): void {
+  readCoalesceStates.clear();
+}
+
+/** Invalidate the read cache for one repo (or all repos when omitted). */
+export function invalidateReadCache(repoPath?: string): void {
+  if (repoPath) {
+    const s = readCoalesceStates.get(repoPath);
+    if (s) {
+      s.meta.clear();
+      s.inflight.clear();
+    }
+  } else {
+    for (const s of readCoalesceStates.values()) {
+      s.meta.clear();
+      s.inflight.clear();
+    }
+  }
+}
+
+/** Redact credentials before using argv in a cache key (never cache secrets). */
+function cacheKeyOf(argv: string[]): string {
+  return argv.join(' ');
+}
+
+/**
+ * Wrap a SimpleGit instance with read coalescing. Only affects the methods
+ * the app actually calls on cached instances (raw + the handful of
+ * convenience methods); everything else passes through bound to the target.
+ */
+function installReadCoalescing(repoPath: string, git: SimpleGit): SimpleGit {
+  const state = getCoalesceState(repoPath);
+  // The REAL raw, bound to the un-proxied target (simple-git's overloaded
+  // raw signature resists .call — go through a minimal structural type).
+  const realRaw = (git as unknown as { raw: (a: string[]) => Promise<string> }).raw.bind(git);
+
+  const coalescedRaw = (args: string[]): Promise<string> => {
+    const kind = classifyGitCommand(args);
+    if (kind === 'write') {
+      // Writes always execute and drop the repo's read caches (in vitest
+      // the global spawn hook cannot always see simple-git's realm, so
+      // the wrapper itself must invalidate).
+      state.stats.rawCalls++;
+      state.stats.writeInvalidations++;
+      state.meta.clear();
+      state.inflight.clear();
+      state.stats.subprocesses++;
+      return realRaw(args);
+    }
+    const key = 'raw|' + cacheKeyOf(args);
+    if (kind === 'meta') {
+      const hit = state.meta.get(key);
+      if (hit && Date.now() - hit.ts < READ_TTL_MS) {
+        state.stats.rawCalls++;
+        state.stats.ttlHits++;
+        return hit.value as Promise<string>;
+      }
+    }
+    let p = state.inflight.get(key) as Promise<string> | undefined;
+    if (!p) {
+      state.stats.subprocesses++;
+      const base = realRaw(args);
+      // The shared promise: cleans up in-flight bookkeeping on settle and
+      // seeds the TTL cache for metadata reads. Cache the BASE promise —
+      // it resolves to the same value the derived one forwards.
+      const shared: Promise<string> = base.then(
+        (value) => {
+          if (kind === 'meta') {
+            state.meta.set(key, { value: base, ts: Date.now() });
+            if (state.meta.size > META_CACHE_MAX) {
+              // Prune oldest expired entries (Map preserves insert order).
+              const now = Date.now();
+              for (const [k, v] of state.meta) {
+                if (state.meta.size <= META_CACHE_MAX) break;
+                if (now - v.ts >= READ_TTL_MS) state.meta.delete(k);
+              }
+              if (state.meta.size > META_CACHE_MAX) {
+                const first = state.meta.keys().next().value;
+                if (first !== undefined) state.meta.delete(first);
+              }
+            }
+          }
+          state.inflight.delete(key);
+          return value;
+        },
+        (err) => {
+          state.inflight.delete(key);
+          throw err;
+        },
+      );
+      // The base promise must never become an unhandled rejection when
+      // its last consumer detaches — attach a no-op guard.
+      base.catch(() => { /* shared-promise guard */ });
+      state.inflight.set(key, shared);
+      state.stats.rawCalls++;
+      return shared;
+    }
+    state.stats.rawCalls++;
+    state.stats.coalescedInflight++;
+    return p;
+  };
+
+  // Convenience methods that READ — coalesced like raw, TTL only for the
+  // metadata-ish ones (getRemotes/stashList). status/log/diff are content-
+  // sensitive: in-flight only.
+  const CONVENIENCE_READS: Record<string, 'read' | 'meta'> = {
+    status: 'read', log: 'read', diff: 'read', getRemotes: 'meta',
+    stashList: 'meta', checkIsRepo: 'read',
+  };
+  // Convenience methods that WRITE — always execute, always invalidate.
+  // NOTE: checkIsRepo is NOT here — it only reads (rev-parse) and runs on
+  // nearly every directory listing; treating it as a write would thrash
+  // the caches constantly.
+  const CONVENIENCE_WRITES = new Set([
+    'add', 'commit', 'checkout', 'push', 'pull', 'fetch', 'tag', 'stash',
+    'merge', 'rebase', 'cherryPick', 'revert', 'branch', 'addRemote',
+    'removeRemote', 'renameRemote', 'rm', 'mv', 'clean', 'reset', 'init',
+    'submodule', 'applyPatch',
+  ]);
+
+  return new Proxy(git, {
+    get(target: SimpleGit, prop: string | symbol): unknown {
+      if (prop === 'raw') return coalescedRaw;
+      if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(CONVENIENCE_READS, prop)) {
+        const kind = CONVENIENCE_READS[prop]!;
+        const orig = (target as unknown as Record<string, unknown>)[prop];
+        if (typeof orig !== 'function') return orig;
+        return (...callArgs: unknown[]): Promise<unknown> => {
+          state.stats.convenienceCalls++;
+          const key = 'conv|' + prop + '|' + JSON.stringify(callArgs);
+          if (kind === 'meta') {
+            const hit = state.meta.get(key);
+            if (hit && Date.now() - hit.ts < READ_TTL_MS) {
+              state.stats.ttlHits++;
+              return hit.value as Promise<unknown>;
+            }
+          }
+          let p = state.inflight.get(key) as Promise<unknown> | undefined;
+          if (!p) {
+            state.stats.subprocesses++;
+            p = Promise.resolve((orig as (...a: unknown[]) => unknown).apply(target, callArgs));
+            state.inflight.set(key, p);
+            const cleanup = () => state.inflight.delete(key);
+            p.then(
+              (value) => {
+                if (kind === 'meta') state.meta.set(key, { value: p, ts: Date.now() });
+                cleanup();
+                return value;
+              },
+              () => { cleanup(); },
+            );
+            p.catch(() => { /* shared-promise guard */ });
+          } else {
+            state.stats.coalescedInflight++;
+          }
+          return p;
+        };
+      }
+      if (typeof prop === 'string' && CONVENIENCE_WRITES.has(prop)) {
+        const orig = (target as unknown as Record<string, unknown>)[prop];
+        if (typeof orig !== 'function') return orig;
+        return (...callArgs: unknown[]): Promise<unknown> => {
+          state.stats.convenienceCalls++;
+          state.stats.writeInvalidations++;
+          state.meta.clear();
+          state.inflight.clear();
+          state.stats.subprocesses++;
+          return Promise.resolve((orig as (...a: unknown[]) => unknown).apply(target, callArgs));
+        };
+      }
+      const v = Reflect.get(target, prop) as unknown;
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+  });
+}
+
+/**
+ * Global write detector: invalidates a repo's read cache whenever ANY git
+ * subprocess with write intent spawns — including from ad-hoc simple-git
+ * instances (LFS/SSH helpers) that bypass the coalescing wrapper. Uses the
+ * same child_process.spawn patch mechanism as commandLog.ts, so the two
+ * hooks compose safely regardless of install order.
+ */
+let writeDetectorInstalled = false;
+export function installWriteDetector(): void {
+  if (writeDetectorInstalled) return;
+  writeDetectorInstalled = true;
+  addGitSpawnListener((args: string[], cwd: string) => {
+    try {
+      if (classifyGitCommand(args) !== 'write') return;
+      let hit = false;
+      for (const repoPath of readCoalesceStates.keys()) {
+        if (repoPath === cwd || cwd.startsWith(repoPath + '/') || cwd.startsWith(repoPath + '\\')) {
+          const s = readCoalesceStates.get(repoPath);
+          if (s) {
+            s.stats.writeInvalidations++;
+            s.meta.clear();
+            s.inflight.clear();
+          }
+          hit = true;
+        }
+      }
+      if (!hit) {
+        // Unknown cwd (subprocess from an unrelated directory) — drop
+        // everything rather than risk staleness.
+        invalidateReadCache();
+      }
+    } catch {
+      /* detector must never break the caller */
+    }
+  });
 }
 
 /**
@@ -209,6 +605,8 @@ function invalidateCache(repoPath?: string) {
     gitDirCache.delete(repoPath);
     headTreeCache.delete(repoPath);
     pollCache.delete(repoPath);
+    remotesCache.delete(repoPath); // PERF-P0 remotes TTL cache
+    invalidateReadCache(repoPath); // PERF-2 read coalescing
     // diffCache already has its own invalidation path, but be safe.
     invalidateDiffCache(repoPath);
   } else {
@@ -216,6 +614,8 @@ function invalidateCache(repoPath?: string) {
     gitDirCache.clear();
     headTreeCache.clear();
     pollCache.clear();
+    remotesCache.clear();
+    invalidateReadCache();
     diffCache.clear();
   }
   // Always drop the remoteAuth cache — credentials may have changed in
@@ -2639,6 +3039,17 @@ export function clearPollCache(repoPath?: string): void {
     pollCache.delete(repoPath);
   } else {
     pollCache.clear();
+  }
+  // PERF-2: tests mutate repos through raw `git` commands the app never
+  // sees — the read coalescing caches must go the same way, or subsequent
+  // assertions would observe pre-mutation cached reads.
+  invalidateReadCache(repoPath);
+  // remotesCache keys are '<repoPath>|<withRefs>' — drop both variants.
+  if (repoPath) {
+    remotesCache.delete(repoPath + '|1');
+    remotesCache.delete(repoPath + '|0');
+  } else {
+    remotesCache.clear();
   }
 }
 

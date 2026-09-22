@@ -14,9 +14,18 @@
  */
 import { test, expect } from '@playwright/test';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import { launchApp, navigateTo, screenshot } from './helpers';
 
-const REPO = { path: '/home/z/my-project/repos/test-lab', name: 'test-lab' };
+// E2E FIX (root cause #9): the test-lab repo used to be a hardcoded
+// /home/z/my-project/repos/test-lab path that only existed on one dev
+// machine — everywhere else BOTH 10-history-merge-tags and 11-search-pull
+// skipped. The fixture is now created by
+// tests/fixtures/setup-e2e-extra-repos.sh under the PRISMGIT_TEST_REPOS
+// base (playwright.config.ts) on every run.
+const BASE = process.env.PRISMGIT_TEST_REPOS || path.join(os.tmpdir(), 'prismgit-repos');
+const REPO = { path: `${BASE}/test-lab`, name: 'test-lab' };
 const hasRepo = fs.existsSync(REPO.path);
 
 test.skip(!hasRepo, 'test-lab repo not available on this machine');

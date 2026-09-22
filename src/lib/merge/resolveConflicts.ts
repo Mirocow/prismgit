@@ -35,13 +35,15 @@ export function buildAutoMergeResult(
   for (const r of regions) {
     if (r.kind === 'stable') {
       // Take from base (which equals ours and theirs here).
-      for (let k = 0; k < r.baseLen; k++) out.push(baseLines[r.baseStart + k]);
+      // `?? ''` — defensive: a region must never read past the array end
+      // (undefined lines would crash every startsWith consumer downstream).
+      for (let k = 0; k < r.baseLen; k++) out.push(baseLines[r.baseStart + k] ?? '');
     } else if (r.kind === 'changed-ours') {
       // Only ours changed — take ours.
-      for (let k = 0; k < r.oursLen; k++) out.push(oursLines[r.oursStart + k]);
+      for (let k = 0; k < r.oursLen; k++) out.push(oursLines[r.oursStart + k] ?? '');
     } else if (r.kind === 'changed-theirs') {
       // Only theirs changed — take theirs.
-      for (let k = 0; k < r.theirsLen; k++) out.push(theirsLines[r.theirsStart + k]);
+      for (let k = 0; k < r.theirsLen; k++) out.push(theirsLines[r.theirsStart + k] ?? '');
     } else {
       // conflict — emit conflict markers (Git format).
       out.push('<<<<<<< ours');

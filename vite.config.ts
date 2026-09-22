@@ -6,43 +6,50 @@ import { resolve } from 'path';
 export default defineConfig({
   plugins: [
     react(),
-    electron({
-      main: {
-        entry: 'electron/main.ts',
-        vite: {
-          // __BUILD_DATE__ is baked into the main-process bundle and shown
-          // in the About window ("Build date" row).
-          define: {
-            __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
-          },
-          build: {
-            outDir: 'dist-electron',
-            rollupOptions: {
-              external: [
-                'electron',
-                'simple-git',
-                'chokidar',
-                'https',
-                'http',
-                'url',
-                'fs',
-                'path',
-                'os',
-              ],
+    // PRISMGIT_E2E_WEBSERVER: serve the RENDERER ONLY for the playwright
+    // webServer (a11y audit) — no main-process build, no stray Electron
+    // window fighting the tests for the DISPLAY.
+    ...(process.env.PRISMGIT_E2E_WEBSERVER
+      ? []
+      : [
+          electron({
+            main: {
+              entry: 'electron/main.ts',
+              vite: {
+                // __BUILD_DATE__ is baked into the main-process bundle and shown
+                // in the About window ("Build date" row).
+                define: {
+                  __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
+                },
+                build: {
+                  outDir: 'dist-electron',
+                  rollupOptions: {
+                    external: [
+                      'electron',
+                      'simple-git',
+                      'chokidar',
+                      'https',
+                      'http',
+                      'url',
+                      'fs',
+                      'path',
+                      'os',
+                    ],
+                  },
+                },
+              },
             },
-          },
-        },
-      },
-      preload: {
-        input: 'electron/preload.ts',
-        vite: {
-          build: {
-            outDir: 'dist-electron',
-          },
-        },
-      },
-      renderer: {},
-    }),
+            preload: {
+              input: 'electron/preload.ts',
+              vite: {
+                build: {
+                  outDir: 'dist-electron',
+                },
+              },
+            },
+            renderer: {},
+          }),
+        ]),
   ],
   base: './',
   root: '.',

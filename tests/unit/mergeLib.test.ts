@@ -17,6 +17,35 @@ describe('diff3', () => {
     expect(r[0].kind).toBe('stable');
   });
 
+  // REGRESSION (found by the e2e conflict-resolution run): with the
+  // trailing '' that `content.split('\n')` produces from `git show`
+  // output, a stale anchor behind the walk cursor emitted a duplicate
+  // stable region; after merging, the region lengths overcounted and
+  // buildAutoMergeResult read past the array end (undefined lines →
+  // 'Cannot read properties of undefined (reading startsWith)' toast in
+  // MergeEditor3Way → "No conflict markers found").
+  it('trailing-newline input (git show output) never overruns the arrays', () => {
+    const base = 'original line 1\noriginal line 2\noriginal line 3\n'.split('\n');
+    const ours = 'original line 1\nMAIN changed this line\noriginal line 3\n'.split('\n');
+    const theirs = 'original line 1\nFEATURE changed this line\noriginal line 3\n'.split('\n');
+    const regions = diff3(base, ours, theirs);
+    // Every region stays within all three arrays.
+    for (const r of regions) {
+      expect(r.baseStart + r.baseLen).toBeLessThanOrEqual(base.length);
+      expect(r.oursStart + r.oursLen).toBeLessThanOrEqual(ours.length);
+      expect(r.theirsStart + r.theirsLen).toBeLessThanOrEqual(theirs.length);
+    }
+    expect(countConflicts(regions)).toBe(1);
+    const auto = buildAutoMergeResult(base, ours, theirs, regions);
+    // No undefined lines ever leak into the result.
+    expect(auto.every((l) => typeof l === 'string')).toBe(true);
+    // The conflict markers survive — the 3-way editor needs them.
+    const markers = findConflictMarkers(auto);
+    expect(markers).toHaveLength(1);
+    expect(auto.join('\n')).toContain('<<<<<<<');
+    expect(auto.join('\n')).toContain('>>>>>>>');
+  });
+
   it('classifies conflict when both sides changed the same line differently', () => {
     const r = diff3(['a', 'b', 'c'], ['a', 'OURS', 'c'], ['a', 'THEIRS', 'c']);
     expect(countConflicts(r)).toBe(1);
