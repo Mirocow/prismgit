@@ -6,7 +6,7 @@
  * Monolithic Node.js test script (ESM) built on the native
  * `node:test` runner + `node:assert`. Implements the scenario
  * matrix "МАКСИМАЛЬНАЯ АРХИТЕКТУРНАЯ СПЕЦИФИКАЦИЯ" (12 blocks)
- * and the full testing scenario (sections 0–23, ~167 cases).
+ * and the full testing scenario (sections 0–26, ~240 cases).
  *
  * Environment guarantees:
  *   - Zero external network: every "remote" is a local `git init --bare`
@@ -26,6 +26,10 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   simpleGit,
+  gitP,
+  pathspec,
+  grepQueryBuilder,
+  DiffNameStatus,
   CleanOptions,
   CheckRepoActions,
   ResetMode,
@@ -2516,6 +2520,329 @@ describe('B12: планировщик под нагрузкой', () => {
     }
     // no EMFILE / no timeout — reaching this line means the queue drained
     assert.ok(true);
+  });
+});
+
+/* =============================================================
+ * SECTION 24 — Файловые операции низкого уровня
+ * (mv / rm / rmKeepLocal / hashObject / catFile / binaryCatFile /
+ *  showBuffer / show / checkIgnore / countObjects / firstCommit)
+ * ============================================================= */
+
+describe('S24: файловые операции низкого уровня', () => {
+  const ctx = sandbox();
+  const BIN = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0x02, 0xff, 0x00]);
+  let git, repo;
+
+  before(async () => {
+    repo = path.join(ctx.root, 'repo');
+    fs.mkdirSync(path.join(repo, 'dir'), { recursive: true });
+    fs.mkdirSync(path.join(repo, 'sub'), { recursive: true });
+    git = await initRepo(repo);
+    write(repo, 'a.txt', 'alpha\n');
+    write(repo, 'b.txt', 'bravo\n');
+    write(repo, 'dir/c.txt', 'charlie\n');
+    write(repo, 'bin.bin', BIN);
+    write(repo, '.gitignore', 'ignored.txt\n');
+    await git.add('.');
+    await git.commit('seed');
+    write(repo, 'ignored.txt', 'never tracked\n');
+  });
+
+  test('24.1 mv одиночного файла — MoveResult.moves + переименование на диске', async () => {
+    const res = await git.mv('a.txt', 'renamed.txt');
+    assert.deepEqual(res.moves, [{ from: 'a.txt', to: 'renamed.txt' }]);
+    assert.ok(exists(repo, 'renamed.txt') && !exists(repo, 'a.txt'));
+    const st = await git.status();
+    assert.ok(st.renamed.some((r) => r.from === 'a.txt' && r.to === 'renamed.txt'));
+    await git.raw(['reset', '--hard', 'HEAD']);
+  });
+
+  test('24.2 mv массива файлов в каталог — пути назначения с префиксом каталога', async () => {
+    const res = await git.mv(['b.txt', 'dir/c.txt'], 'sub');
+    assert.deepEqual(res.moves, [
+      { from: 'b.txt', to: 'sub/b.txt' },
+      { from: 'dir/c.txt', to: 'sub/c.txt' },
+    ]);
+    assert.ok(exists(repo, 'sub/b.txt'));
+    await git.raw(['reset', '--hard', 'HEAD']);
+  });
+
+  test('24.3 rm — файл удалён из рабочего дерева, удаление в индексе', async () => {
+    await git.rm('b.txt');
+    assert.ok(!exists(repo, 'b.txt'), 'file removed from disk');
+    const st = await git.status();
+    assert.ok(st.deleted.includes('b.txt'), 'staged deletion');
+    await git.raw(['reset', '--hard', 'HEAD']);
+  });
+
+  test('24.4 rmKeepLocal — удаление из индекса, файл остаётся на диске', async () => {
+    await git.rmKeepLocal('b.txt');
+    assert.ok(exists(repo, 'b.txt'), 'file kept on disk');
+    const st = await git.status();
+    assert.ok(st.deleted.includes('b.txt'), 'staged deletion');
+    await git.raw(['reset', '--hard', 'HEAD']);
+  });
+
+  test('24.5 hashObject без записи — SHA-1 совпадает с git hash-object', async () => {
+    const h = await git.hashObject('a.txt');
+    assert.match(h.trim(), /^[0-9a-f]{40}$/);
+    const rawH = (await git.raw(['hash-object', 'a.txt'])).trim();
+    assert.equal(h.trim(), rawH);
+  });
+
+  test('24.6 hashObject(path, true) — объект записан в базу, cat-file читает его', async () => {
+    const h = (await git.hashObject('a.txt', true)).trim();
+    const content = await git.raw(['cat-file', '-p', h]);
+    assert.equal(content, 'alpha\n');
+  });
+
+  test('24.7 catFile(["-t","HEAD"]) — тип объекта', async () => {
+    const t = await git.catFile(['-t', 'HEAD']);
+    assert.equal(t, 'commit\n');
+  });
+
+  test('24.8 catFile(["-p","HEAD:a.txt"]) — содержимое blob', async () => {
+    const p = await git.catFile(['-p', 'HEAD:a.txt']);
+    assert.equal(p, 'alpha\n');
+  });
+
+  test('24.9 binaryCatFile(["-p","HEAD:bin.bin"]) — побайтовое бинарное содержимое', async () => {
+    const buf = await git.binaryCatFile(['-p', 'HEAD:bin.bin']);
+    assert.ok(Buffer.isBuffer(buf), 'returns Buffer');
+    assert.ok(buf.equals(BIN), 'byte-exact content');
+  });
+
+  test('24.10 showBuffer("HEAD:bin.bin") — бинарный вывод git show', async () => {
+    const buf = await git.showBuffer('HEAD:bin.bin');
+    assert.ok(Buffer.isBuffer(buf), 'returns Buffer');
+    assert.ok(buf.equals(BIN), 'byte-exact content');
+  });
+
+  test('24.11 show(["-s","--format=%s","HEAD"]) — тема коммита', async () => {
+    const s = await git.show(['-s', '--format=%s', 'HEAD']);
+    assert.equal(s, 'seed\n');
+  });
+
+  test('24.12 checkIgnore игнорируемого пути — список содержит путь', async () => {
+    const res = await git.checkIgnore('ignored.txt');
+    assert.deepEqual(res, ['ignored.txt']);
+  });
+
+  test('24.13 checkIgnore массива — возвращаются только игнорируемые', async () => {
+    const res = await git.checkIgnore(['a.txt', 'ignored.txt']);
+    assert.deepEqual(res, ['ignored.txt']);
+  });
+
+  test('24.14 checkIgnore не-игнорируемого пути — пустой массив (exit code 1 не ошибка)', async () => {
+    const res = await git.checkIgnore('a.txt');
+    assert.deepEqual(res, []);
+  });
+
+  test('24.15 countObjects — все поля числовые, count > 0', async () => {
+    const co = await git.countObjects();
+    for (const key of ['count', 'garbage', 'inPack', 'packs', 'prunePackable', 'size', 'sizeGarbage', 'sizePack']) {
+      assert.equal(typeof co[key], 'number', `field ${key} is numeric`);
+    }
+    assert.ok(co.count > 0);
+  });
+
+  test('24.16 firstCommit — корневой коммит, стабилен после новых коммитов', async () => {
+    const fc = (await git.firstCommit()).trim();
+    const root0 = (await git.raw(['rev-list', '--max-parents=0', 'HEAD'])).trim();
+    assert.equal(fc, root0);
+    await git.raw(['commit', '--allow-empty', '-m', 'later']);
+    assert.equal((await git.firstCommit()).trim(), root0);
+  });
+});
+
+/* =============================================================
+ * SECTION 25 — Расширения remote/tag
+ * (listRemote / pushTags / updateServerInfo / checkoutLatestTag)
+ * ============================================================= */
+
+describe('S25: расширения remote/tag', () => {
+  const ctx = sandbox();
+  let git, repo, bare, bareGit, clone, cloneGit;
+  let mainTip;
+
+  before(async () => {
+    repo = path.join(ctx.root, 'repo');
+    git = await seedRepo(repo, { 'f.js': 'one\n' }, 'c1');
+    write(repo, 'f.js', 'two\n');
+    await git.add('.');
+    await git.commit('c2');
+    bare = await makeBare(ctx.root);
+    await git.addRemote('origin', bare);
+    await git.push('origin', 'main', { '--set-upstream': null });
+    // Тег с ТОЧКОЙ в имени (иначе tags().latest === null — парсер ищет ".")
+    // и на ПРЕДЫДУЩЕМ коммите — чтобы отличить checkout тега от кончика main.
+    await git.raw(['tag', 'v1.0.0', 'HEAD~1']);
+    await git.pushTags('origin');
+    bareGit = simpleGit({ baseDir: bare, config: CFG });
+    clone = path.join(ctx.root, 'clone');
+    await simpleGit({ baseDir: ctx.root, config: CFG }).clone(bare, clone);
+    cloneGit = simpleGit({ baseDir: clone, config: CFG });
+    mainTip = (await cloneGit.revparse(['main'])).trim();
+  });
+
+  test('25.1 listRemote() — HEAD и refs/heads/main из origin', async () => {
+    const out = await cloneGit.listRemote();
+    assert.match(out, /^[0-9a-f]{40}\tHEAD$/m);
+    assert.ok(out.includes('refs/heads/main'));
+    assert.ok(out.includes(mainTip));
+  });
+
+  test('25.2 pushTags(remote) — PushResult.pushed с tag:true, новый тег доставлен в origin', async () => {
+    await cloneGit.raw(['tag', 'v1.5.0', 'HEAD~1']);
+    const res = await cloneGit.pushTags('origin');
+    assert.ok(Array.isArray(res.pushed));
+    const item = res.pushed.find((p) => p.local === 'refs/tags/v1.5.0');
+    assert.ok(item, 'pushed item for the new tag');
+    assert.equal(item.tag, true);
+    assert.equal(item.new, true);
+    assert.equal(item.deleted, false);
+    const bareTags = await bareGit.tags();
+    assert.ok(bareTags.all.includes('v1.0.0') && bareTags.all.includes('v1.5.0'));
+  });
+
+  test('25.3 listRemote(["--tags"]) — только refs/tags, без heads', async () => {
+    const out = await cloneGit.listRemote(['--tags']);
+    assert.ok(out.includes('refs/tags/v1.0.0'));
+    assert.ok(out.includes('refs/tags/v1.5.0'));
+    assert.ok(!out.includes('refs/heads'), 'no heads in --tags output');
+  });
+
+  test('25.4 updateServerInfo в bare-репозитории — создаёт info/refs', async () => {
+    await bareGit.updateServerInfo();
+    assert.ok(fs.existsSync(path.join(bare, 'info', 'refs')), 'info/refs created');
+  });
+
+  test('25.5 checkoutLatestTag (callback API) — вся цепочка pull→tags→checkout, detached HEAD на теге', async () => {
+    // Callback-форма — детерминированная: колбэк вызывается после ПОЛНОЙ цепочки.
+    const latest = 'v1.5.0'; // latest = последний тег с точкой в имени
+    const tagRev = (await cloneGit.revparse([latest])).trim();
+    assert.notEqual(tagRev, mainTip, 'tag must point to the older commit');
+    await new Promise((resolve, reject) => {
+      cloneGit.checkoutLatestTag((err) => (err ? reject(err) : resolve()));
+    });
+    const st = await cloneGit.status();
+    assert.equal(st.current, 'HEAD', 'detached HEAD');
+    assert.equal(st.detached, true);
+    assert.equal((await cloneGit.revparse(['HEAD'])).trim(), tagRev);
+  });
+
+  test('25.6 checkoutLatestTag (promise API) — резолвится после pull, цепочка завершается асинхронно', async () => {
+    // Известный quirks simple-git: promise-обёртка резолвится по ПЕРВОЙ задаче
+    // (pull), внутренние tags → checkout догоняют асинхронно.
+    await cloneGit.checkout('main');
+    await cloneGit.checkoutLatestTag();
+    const tagRev = (await cloneGit.revparse(['v1.5.0'])).trim();
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      if ((await cloneGit.revparse(['HEAD'])).trim() === tagRev) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    assert.equal((await cloneGit.revparse(['HEAD'])).trim(), tagRev, 'HEAD reached the tag commit');
+  });
+});
+
+/* =============================================================
+ * SECTION 26 — Экспортируемые фабрики и хелперы
+ * (gitP / pathspec / grepQueryBuilder / DiffNameStatus)
+ * ============================================================= */
+
+describe('S26: экспортируемые фабрики и хелперы', () => {
+  const ctx = sandbox();
+  let git, repo;
+  let seenArgs = [];
+
+  before(async () => {
+    repo = path.join(ctx.root, 'repo');
+    fs.mkdirSync(path.join(repo, 'sub'), { recursive: true });
+    git = await initRepo(repo);
+    write(repo, 'a.txt', 'one\n');
+    write(repo, 'sub/b.txt', 'two\n');
+    write(repo, 'n.log', 'log\n');
+    await git.add('.');
+    await git.commit('seed');
+    git.outputHandler((_cmd, _out, _err, args) => { seenArgs.push(args.join(' ')); });
+  });
+
+  test('26.1 gitP — независимая promise-фабрика с полной поверхностью API', async () => {
+    assert.notEqual(gitP, simpleGit, 'separate factory export');
+    const g = gitP({ baseDir: repo, config: CFG });
+    const st = await g.status();
+    assert.equal(st.isClean(), true);
+    assert.equal(st.current, 'main');
+    for (const m of ['raw', 'status', 'commit', 'diff', 'log', 'branch']) {
+      assert.equal(typeof g[m], 'function', `gitP instance has .${m}`);
+    }
+  });
+
+  test('26.2 pathspec в diff — суффикс-плагин переставляет аргумент после "--"', async () => {
+    write(repo, 'a.txt', 'one-changed\n');
+    write(repo, 'sub/b.txt', 'two-changed\n');
+    write(repo, 'sub/new.log', 'new\n');
+    await git.add('.');
+    await git.commit('changes');
+    // plain '*.txt' в git-pathspec без магии — '*' пересекает '/'
+    const out = await git.diff(['--name-only', 'HEAD~1', 'HEAD', pathspec('*.txt')]);
+    assert.deepEqual(out.trim().split('\n').sort(), ['a.txt', 'sub/b.txt']);
+    assert.ok(seenArgs.some((a) => a.endsWith('diff --name-only HEAD~1 HEAD -- *.txt')),
+      `pathspec moved after --, seen: ${seenArgs.at(-1)}`);
+  });
+
+  test('26.3 pathspec с магией ":(glob)**" и путь-каталогом', async () => {
+    const glob = await git.diff(['--name-only', 'HEAD~1', 'HEAD', pathspec(':(glob)**/*.txt')]);
+    assert.deepEqual(glob.trim().split('\n').sort(), ['a.txt', 'sub/b.txt']);
+    const dir = await git.diff(['--name-only', 'HEAD~1', 'HEAD', pathspec('sub')]);
+    assert.deepEqual(dir.trim().split('\n').sort(), ['sub/b.txt', 'sub/new.log']);
+    assert.ok(seenArgs.some((a) => a.endsWith('diff --name-only HEAD~1 HEAD -- :(glob)**/*.txt')));
+  });
+
+  test('26.4 pathspec в raw-командах — ls-files фильтруется', async () => {
+    const out = await git.raw(['ls-files', '--', pathspec('*.log')]);
+    assert.deepEqual(out.trim().split('\n').sort(), ['n.log', 'sub/new.log']);
+  });
+
+  test('26.5 grepQueryBuilder — param / and / без совпадений / запрещённый -h', async () => {
+    write(repo, 'search.js', 'const needle = 1; // TODO needle\n');
+    write(repo, 'other.js', 'needle again\n');
+    await git.add('.');
+    await git.commit('searchable');
+
+    const r1 = await git.grep(grepQueryBuilder('needle'));
+    assert.ok(r1.paths.has('search.js') && r1.paths.has('other.js'), 'plain term matches both');
+
+    const r2 = await git.grep(grepQueryBuilder().param('needle').and('TODO'));
+    assert.ok(r2.paths.has('search.js'), 'AND narrows to the file with both terms');
+    assert.ok(!r2.paths.has('other.js'));
+    assert.ok(r2.results['search.js'][0].preview.includes('needle'));
+    assert.equal(typeof r2.results['search.js'][0].line, 'number');
+
+    const r3 = await git.grep(grepQueryBuilder('nothing-matches-xyz'));
+    assert.equal(r3.paths.size, 0);
+
+    await assert.rejects(() => git.grep('x', ['-h']), TaskConfigurationError);
+  });
+
+  test('26.6 DiffNameStatus + diffSummary --name-status — коды статусов A/M/R', async () => {
+    assert.equal(DiffNameStatus.ADDED, 'A');
+    assert.equal(DiffNameStatus.DELETED, 'D');
+    assert.equal(DiffNameStatus.MODIFIED, 'M');
+    assert.equal(DiffNameStatus.RENAMED, 'R');
+    await git.mv('a.txt', 'a-moved.txt');
+    write(repo, 'other.js', 'needle again — changed\n');
+    await git.add('.');
+    await git.commit('rename and modify');
+    const d = await git.diffSummary(['--name-status', 'HEAD~1', 'HEAD']);
+    const byFile = new Map(d.files.map((f) => [f.file, f]));
+    const moved = byFile.get('a-moved.txt');
+    assert.equal(moved.status, DiffNameStatus.RENAMED);
+    assert.equal(moved.from, 'a.txt');
+    assert.equal(byFile.get('other.js').status, DiffNameStatus.MODIFIED);
+    assert.equal(typeof moved.similarity, 'number');
   });
 });
 
