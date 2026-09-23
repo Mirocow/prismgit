@@ -32,7 +32,7 @@ import { clearProjectPrefs, loadProjectPrefs, saveProjectPrefs } from './lib/pro
 import { useAuthStore } from './stores/authStore';
 import { useCommandLogStore } from './stores/commandLogStore';
 import { initOperationLogIpcListener } from './stores/operationLogStore';
-import { useGitStore } from './stores/gitStore';
+import { useGitStore, surfaceConflictedState } from './stores/gitStore';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSelectionStore } from './stores/selectionStore';
 import { useSettingsStore } from './stores/settingsStore';
@@ -653,7 +653,13 @@ export default function App() {
           useGitStore.getState().refreshStatus(repo.path);
           window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
         })
-        .catch((e) => toast.error(i18nT('toast.git.pullFailed'), String(e)));
+        .catch(async (e) => {
+          // smartPull can end mid-rebase ("could not apply …") or mid-merge —
+          // detect from the repo state and surface the Conflicts UI instead
+          // of a transient error toast (user-reported "ничего не произошло").
+          const conflicted = await surfaceConflictedState(repo.path);
+          if (!conflicted) toast.error(i18nT('toast.git.pullFailed'), String(e));
+        });
     };
     const handleFetch = () => {
       const repo = useRepositoryStore.getState().currentRepo;

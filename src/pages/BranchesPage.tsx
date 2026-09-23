@@ -12,7 +12,7 @@ import { generateBranchNames, type LLMProvider } from '../lib/aiCommitMessages';
 import type { AppSettings } from '../../electron/types/settings-api';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
@@ -846,7 +846,11 @@ export function BranchesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error(t('branches.pullFailed', { name: pullRemote }), String(e));
+      // A conflicted pull leaves the repo mid-merge — surface the Conflicts
+      // UI (state-based detection, see gitStore.surfaceConflictedState)
+      // instead of only a transient error toast.
+      const conflicted = await surfaceConflictedState(repo.path);
+      if (!conflicted) toast.error(t('branches.pullFailed', { name: pullRemote }), String(e));
     } finally {
       setPullBusy(false);
     }

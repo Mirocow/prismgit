@@ -10,6 +10,7 @@
  */
 
 import { api } from './api';
+import { surfaceConflictedState } from '../stores/gitStore';
 import { useSettingsStore } from '../stores/settingsStore';
 
 // ── Configurable limits (read from AppSettings at runtime) ──────────────
@@ -601,6 +602,12 @@ export const gitPullTool: AITool = {
       if (stashed) {
         try { await api.git.stashPop(repoPath, 0); } catch { /* ignore — the pull error is more important */ }
       }
+      // Keep the UI in sync with the real repo state — a conflicted pull
+      // leaves the repo mid-merge, and without a status refresh the app
+      // would keep showing the pre-merge state (user-reported "ничего не
+      // произошло"). surfaceConflictedState also warns + navigates to the
+      // Conflicts UI when a merge is in progress.
+      try { await surfaceConflictedState(repoPath); } catch { /* best-effort */ }
       const msg = String(e);
       // Friendly error messages for common failures.
       if (msg.includes('unstaged changes')) {
@@ -608,6 +615,9 @@ export const gitPullTool: AITool = {
       }
       if (msg.includes('index.lock')) {
         return `Pull failed: git index is locked (.git/index.lock exists). Another git operation may be running — wait a moment and retry.\n\nOriginal error: ${msg}`;
+      }
+      if (/CONFLICT|Automatic merge failed|could not apply/i.test(msg)) {
+        return `Pull hit merge conflicts — the repo is now in a merge-in-progress state. Conflicted files are visible in the Changes tool; resolve them there, then commit. Conflicted files are also listed by \`git diff --name-only --diff-filter=U\`.\n\nOriginal error: ${msg}`;
       }
       return `Pull failed: ${msg}`;
     }

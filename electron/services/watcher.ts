@@ -117,18 +117,38 @@ function debounce(entry: WatcherEntry, eventType: string) {
 }
 
 /**
- * Watch a single git state file. Uses fs.watch (cheap, single-file).
- * chokidar is overkill for individual files.
+ * Watch a single git state file. Uses fs.watch (cheap, single-file) when
+ * the file exists. When it does NOT exist yet — MERGE_HEAD, CHERRY_PICK_HEAD,
+ * REVERT_HEAD, BISECT_LOG, the rebase dirs — falls back to chokidar, which
+ * supports not-yet-existing paths (it observes the parent directory and
+ * emits when the target is created or deleted).
+ *
+ * This fixes a real staleness bug: fs.watch + existsSync meant optional
+ * state files that were absent at watcher start were NEVER watched —
+ * (a) a conflicted merge that started externally (or via a tool that
+ * didn't refresh) produced no watcher event at all, and (b) after a merge
+ * was committed/aborted, the MERGE_HEAD deletion was invisible and the
+ * "merge in progress" banner stayed up.
  */
 function watchFile(repoPath: string, filePath: string, entry: WatcherEntry, eventType: string) {
   try {
-    if (!fs.existsSync(filePath)) return;
-    const watcher = fs.watch(filePath, { persistent: false }, () => {
-      debounce(entry, eventType);
+    if (fs.existsSync(filePath)) {
+      const watcher = fs.watch(filePath, { persistent: false }, () => {
+        debounce(entry, eventType);
+      });
+      entry.watchers.push(watcher);
+      return;
+    }
+    // Not there yet — watch for its creation AND deletion via chokidar.
+    const watcher = chokidar.watch(filePath, {
+      persistent: false,
+      ignoreInitial: true,
+      awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
     });
+    watcher.on('all', () => debounce(entry, eventType));
     entry.watchers.push(watcher);
   } catch {
-    // File may not exist or be inaccessible
+    // File may not be exist or be inaccessible
   }
 }
 
@@ -151,11 +171,12 @@ export const __watcherTestHooks = {
 
 /**
  * Watch a directory (e.g. .git/refs, rebase-merge state) with chokidar.
- * Small scope, no ignore filter needed.
+ * Small scope, no ignore filter needed. Handles directories that do not
+ * exist yet (rebase-apply / rebase-merge are created when a rebase starts,
+ * long after the watcher started — see watchFile).
  */
 function watchDirectory(repoPath: string, dirPath: string, entry: WatcherEntry, eventType: string) {
   try {
-    if (!fs.existsSync(dirPath)) return;
     const watcher = chokidar.watch(dirPath, {
       persistent: false,
       ignoreInitial: true,
@@ -166,7 +187,7 @@ function watchDirectory(repoPath: string, dirPath: string, entry: WatcherEntry, 
     watcher.on('all', () => debounce(entry, eventType));
     entry.watchers.push(watcher);
   } catch {
-    // Directory may not exist
+    // Directory may not exist or be inaccessible
   }
 }
 
@@ -198,15 +219,13 @@ export function startWatching(repoPath: string): void {
   // atomic `mv` would leave the watcher pointing at the stale inode).
   watchDirectory(repoPath, path.join(gitDir, 'refs'), entry, 'refs');
 
-  // Watch for rebase state
+  // Watch for rebase state — the dirs usually do NOT exist yet when the
+  // watcher starts (they are created the moment a rebase begins). chokidar
+  // handles not-yet-existing paths, so their creation is observed too.
   const rebaseApplyDir = path.join(gitDir, 'rebase-apply');
   const rebaseMergeDir = path.join(gitDir, 'rebase-merge');
-  if (fs.existsSync(rebaseApplyDir)) {
-    watchDirectory(repoPath, rebaseApplyDir, entry, 'rebase');
-  }
-  if (fs.existsSync(rebaseMergeDir)) {
-    watchDirectory(repoPath, rebaseMergeDir, entry, 'rebase');
-  }
+  watchDirectory(repoPath, rebaseApplyDir, entry, 'rebase');
+  watchDirectory(repoPath, rebaseMergeDir, entry, 'rebase');
 
   // Watch working tree with chokidar + ignore patterns.
   // Key wins:

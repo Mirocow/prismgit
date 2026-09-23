@@ -42,6 +42,46 @@ interface GitState {
   fetch: (repoPath: string, remote?: string, prune?: boolean) => Promise<void>;
 }
 
+/**
+ * Unified post-pull conflict surfacing (user-reported: "И ничего не произошло").
+ *
+ * A pull that hits conflicts exits 1 — but detecting that from the ERROR
+ * MESSAGE is brittle (git streams the CONFLICT lines to stdout; the thrown
+ * error shape varies by git version / simple-git internals). The REPO STATE
+ * is the source of truth: if MERGE_HEAD exists / `git status` reports
+ * conflicted files, the pull produced a merge-in-progress state that the
+ * user must see — regardless of which tool ran the pull.
+ *
+ * This helper re-reads the status and, when a conflicted merge is in
+ * progress, navigates to the Changes page (the Conflicts section +
+ * RepoStateBanner live there — SmartGit likewise switches to its conflict
+ * view when a pull conflicts) and fires a warning toast. Returns whether
+ * the repo is in a conflicted state.
+ *
+ * Used by: gitStore.pull, the Toolbar Pull dialog, the one-click Git
+ * Toolbar pull, the app-menu smartPull handler — so EVERY pull entry point
+ * reacts identically.
+ */
+export async function surfaceConflictedState(repoPath: string): Promise<boolean> {
+  try {
+    await useGitStore.getState().refreshStatus(repoPath);
+  } catch {
+    /* status itself failed — nothing more to surface */
+  }
+  const st = useGitStore.getState().status;
+  const conflicted = !!(st && (st.isMerging || (st.conflicted?.length ?? 0) > 0));
+  if (conflicted) {
+    // Bring the user to where the conflicts are actually shown.
+    // (hash routing — same navigation pattern as HistoryPage / ChangesPage.)
+    window.location.hash = '#/changes';
+    useToastStore.getState().warning(
+      i18nT('toast.git.pullConflicts'),
+      i18nT('pages.pullConflictsHint', { defaultValue: 'Resolve them in the Changes tool' }),
+    );
+  }
+  return conflicted;
+}
+
 export const useGitStore = create<GitState>((set, get) => ({
   status: null,
   loading: false,
@@ -182,6 +222,11 @@ export const useGitStore = create<GitState>((set, get) => ({
       }
     } catch (e) {
       log.failOp(opId, String(e));
+      // A conflicted pull leaves the repo mid-merge — detect it from the
+      // REPO STATE (not the error text) and take the user to the Conflicts
+      // UI. Without this, pull exit 1 was only a transient error toast and
+      // the user saw "ничего не произошло" (user-reported).
+      await surfaceConflictedState(repoPath);
       throw e;
     }
   },

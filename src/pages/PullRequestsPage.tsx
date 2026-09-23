@@ -8,7 +8,7 @@ import { useI18n } from '../lib/i18n';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { cn, formatDate } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useProviderStore } from '../stores/providerStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -390,13 +390,10 @@ export function PullRequestsPage() {
       await refreshStatus(repo.path);
       toast.success(t('pages.pulledFrom', { remote }));
     } catch (e) {
-      const msg = String(e);
-      if (msg.includes('CONFLICT') || msg.includes('conflict')) {
-        toast.warning(t('pages.pullConflicts'), t('pages.pullConflictsHint'));
-        refreshStatus(repo.path);
-      } else {
-        toast.error(t('pages.pullFailed'), msg);
-      }
+      // State-based conflict detection (message matching is brittle — git
+      // streams CONFLICT lines to stdout): navigate to the Conflicts UI.
+      const conflicted = await surfaceConflictedState(repo.path);
+      if (!conflicted) toast.error(t('pages.pullFailed'), String(e));
     } finally {
       setSyncing(null);
     }

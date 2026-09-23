@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api, type BranchInfo, type RemoteInfo } from '../lib/api';
 import { useI18n } from '../lib/i18n';
+import { pickDefaultPullBranch, pickDefaultPushBranch } from '../lib/pullPushDefaults';
 import { describePushResult } from '../lib/pushResult';
 import { getRepoInProgressState, isRepoBusy } from '../lib/repoState';
 import { getThemeMeta } from '../lib/themes';
 import { cn } from '../lib/utils';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -456,13 +457,17 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
     if (!currentRepo) return;
     api.git.branches(currentRepo.path).then(brs => {
       setBranches(brs.filter(b => !b.remote));
-      // Default to the globally selected branch (from Branches page) when it
-      // exists locally, otherwise the current branch. Auto -u when the chosen
-      // branch has no upstream yet.
-      const globallySelected = useSelectionStore.getState().selectedBranch;
-      const chosen = globallySelected && brs.some(b => b.name === globallySelected && !b.remote)
-        ? brs.find(b => b.name === globallySelected)
-        : brs.find(b => b.current);
+      // UNIFIED STATE: default to the CURRENT checked-out branch — the
+      // working copy is what Push acts on. The global selection (Branches/
+      // History browsing) is a VIEW filter, not an operation target: it used
+      // to win here, so after browsing feature/v1 with feature/v3 checked
+      // out, Push pre-filled v1 (user-reported "инструменты без единого
+      // состояния"). It now only serves as a detached-HEAD fallback.
+      const chosenName = pickDefaultPushBranch(
+        brs.filter(b => !b.remote).map(b => ({ name: b.name, current: b.current })),
+        useSelectionStore.getState().selectedBranch,
+      );
+      const chosen = brs.find(b => b.name === chosenName);
       setSelectedBranch(chosen?.name || '');
       setSetUpstream(!!chosen && !chosen.tracking);
     }).catch(() => {});
@@ -707,30 +712,34 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
   }, [currentRepo]);
 
   // Remote branches load on mount + when the menu opens or the remote changes.
-  const loadRemoteBranches = useCallback(async () => {
+  // `resetDefault` — when the dropdown (re)OPENS we re-resolve the default from
+  // the CURRENT checked-out branch (unified state). Within an open session
+  // (e.g. after an in-dialog Fetch refreshes the branch list) the user's
+  // explicit dropdown pick is preserved.
+  const loadRemoteBranches = useCallback(async (opts?: { resetDefault?: boolean }) => {
     if (!currentRepo || !selectedRemote) { setRemoteBranches([]); return; }
     try {
       const brs = await api.git.branches(currentRepo.path);
       const prefix = `${selectedRemote}/`;
       const rem = brs.filter(b => b.remote && b.name.startsWith(prefix));
       setRemoteBranches(rem);
-      // Default: remote branch matching the GLOBALLY selected branch (from
-      // Branches/History — the pull target follows the app-wide selection),
-      // then upstream-tracking of the CURRENT branch, then the first branch.
-      setSelectedBranch(prev => {
-        if (prev && rem.some(b => b.name === prev)) return prev;
-        const globallySelected = useSelectionStore.getState().selectedBranch;
-        const gMatch = globallySelected
-          ? rem.find(r => r.name === `${prefix}${globallySelected}`)
-          : undefined;
-        if (gMatch) return gMatch.name;
-        const cur = brs.find(b => b.current);
-        const match = cur ? rem.find(r => r.name === `${prefix}${cur.name}`) : undefined;
-        return match?.name || rem[0]?.name || '';
-      });
+      // UNIFIED STATE: the default pull target is the remote counterpart of
+      // the CURRENT checked-out branch. The GLOBAL selection (Branches/
+      // History browsing) used to win here — after the user browsed
+      // feature/v1 while feature/v3 was checked out, Pull pre-filled v1 and
+      // `git pull origin feature/v1` merged the wrong branch into the
+      // working tree (user-reported).
+      setSelectedBranch(prev =>
+        pickDefaultPullBranch(
+          rem.map(b => b.name),
+          brs.find(b => b.current)?.name ?? null,
+          prev,
+          !!opts?.resetDefault,
+        ),
+      );
     } catch { setRemoteBranches([]); }
   }, [currentRepo, selectedRemote]);
-  useEffect(() => { loadRemoteBranches(); }, [loadRemoteBranches, open]);
+  useEffect(() => { loadRemoteBranches({ resetDefault: true }); }, [loadRemoteBranches, open]);
 
   const fetchRemoteNow = async () => {
     if (!currentRepo || !selectedRemote) return;
@@ -787,13 +796,13 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
         ? t('shell.pulledFromRebase', { branch: selectedBranch })
         : t('shell.pulledFromMerge', { branch: selectedBranch }));
     } catch (e) {
-      // Don't crash — show error, let user resolve conflicts via ConflictSolver
-      const msg = String(e);
-      if (msg.includes('CONFLICT') || msg.includes('conflict')) {
-        toast.warning(t('shell.pullConflicts'), t('shell.useResolveConflicts'));
-        refreshStatus(currentRepo.path);
-      } else {
-        toast.error(t('shell.pullFailed'), msg);
+      // Don't crash — detect a conflicted pull from the REPO STATE (git
+      // streams CONFLICT lines to stdout, so message-matching is brittle)
+      // and take the user to the Conflicts UI. A plain transient toast was
+      // reported as "ничего не произошло".
+      const conflicted = await surfaceConflictedState(currentRepo.path);
+      if (!conflicted) {
+        toast.error(t('shell.pullFailed'), String(e));
       }
     }
     setOpen(false);
@@ -1028,12 +1037,11 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
       toast.success(`Pulled ${shouldRebase ? '(rebase)' : '(merge)'}`);
       window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
     } catch (e) {
-      const msg = String(e);
-      if (msg.includes('CONFLICT') || msg.includes('conflict')) {
-        toast.warning(t('toast.git.pullConflicts'), 'Use "Resolve Conflicts" button');
-        refreshStatus(currentRepo.path);
-      } else {
-        toast.error(t('toast.git.pullFailed'), msg);
+      // Conflicted pull → repo is mid-merge — detect from repo state and
+      // open the Conflicts UI (toast + navigation handled centrally).
+      const conflicted = await surfaceConflictedState(currentRepo.path);
+      if (!conflicted) {
+        toast.error(t('toast.git.pullFailed'), String(e));
       }
     }
   };
