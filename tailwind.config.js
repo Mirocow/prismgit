@@ -16,6 +16,13 @@ module.exports = {
         },
         border: {
           DEFAULT: 'var(--border-default)',
+          // BUGFIX: 261 call sites use `border-border-default` /
+          // `bg-border-default` (lowercase 'default'). Tailwind only maps
+          // DEFAULT → the bare `border-border` class, so those classes
+          // generate NO CSS and fall back to the light-gray preflight
+          // color. Register the lowercase alias so both spellings resolve
+          // to the theme variable.
+          default: 'var(--border-default)',
           subtle: 'var(--border-subtle)',
           strong: 'var(--border-strong)',
           focused: 'var(--border-focused)',
@@ -29,6 +36,9 @@ module.exports = {
         },
         accent: {
           DEFAULT: 'var(--accent)',
+          // text on accent-colored buttons (shadcn-style naming) — 7 call
+          // sites use text-accent-foreground / bg-accent-foreground.
+          foreground: 'var(--text-inverse)',
           hover: 'var(--accent-hover)',
           active: 'var(--accent-active)',
           muted: 'var(--accent-muted)',
@@ -51,6 +61,19 @@ module.exports = {
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'monospace'],
+      },
+      // BUGFIX (dark-theme borders, user-reported ×4): Tailwind preflight
+      // emits
+      //   *, ::before, ::after { border-color: theme('borderColor.DEFAULT') }
+      // and borderColor.DEFAULT defaults to gray-200 (#e5e7eb — LIGHT)
+      // unless overridden. That made every bare `border` / `border-b` /
+      // `border-t` / `divide-*` utility in the app render BRIGHT LIGHT-GRAY
+      // lines on dark backgrounds in ALL dark themes — the theme palette
+      // vars were already muted but these utilities never referenced them.
+      // Point the default at the theme variable so all structural borders
+      // follow the active theme. divide-* utilities inherit this too.
+      borderColor: {
+        DEFAULT: 'var(--border-default)',
       },
       fontSize: {
         '2xs': ['0.6875rem', { lineHeight: '1rem' }],

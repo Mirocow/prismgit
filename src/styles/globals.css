@@ -2,6 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   BUGFIX — theme-aware default border color (dark-theme borders, ×4 reports).
+
+   Tailwind's preflight hard-codes `border-color: #e5e7eb` (light gray) on
+   *, ::before, ::after via borderColor.DEFAULT (gray-200). Every bare
+   border-width utility in the app (border / border-b / border-t / border-r /
+   border-l / divide-*) therefore rendered BRIGHT LIGHT-GRAY lines on dark
+   backgrounds in ALL dark themes — the "dividers between areas are too
+   bright / still light" bug.
+
+   tailwind.config.js now maps borderColor.DEFAULT → var(--border-default);
+   this base-layer rule is the belt-and-suspenders twin: it re-asserts the
+   theme variable AFTER preflight so every element's default border color
+   follows the active theme regardless of Tailwind version internals.
+   Explicit utilities (border-border-subtle, border-status-*, …) live in
+   the utilities layer and still win.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border-default);
+  }
+}
+
 /*
  * Ollama-code inspired theme (Ayu Dark palette)
  * Background: #0b0e14 (deep blue-black)
