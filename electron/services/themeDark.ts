@@ -25,6 +25,11 @@ export const DARK_THEMES: ReadonlySet<string> = new Set([
   'slack-dark',
   'discord',
   'purple',
+  'midnight',
+  'kanagawa',
+  'rose-pine',
+  'everforest',
+  'vercel-dark',
 ]);
 
 /** Light-window fallback (Ayu Light bg-primary). */

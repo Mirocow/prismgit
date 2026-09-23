@@ -10,6 +10,8 @@ import {
   GIT_ENV_LFS_SKIP,
   GIT_SSH_UNSAFE_OPTIONS,
   GIT_UNSAFE_OPTIONS,
+  gitChildEnv,
+  withMergedGitEnv,
 } from './git-env.js';
 // D12: parseDiff is shared with the renderer via src/lib/diffParser.ts so
 // both processes use the SAME parser implementation (the previous in-file
@@ -159,6 +161,10 @@ function getGit(repoPath: string): SimpleGit {
       trimmed: false,
       ...GIT_UNSAFE_OPTIONS,
     });
+    // simple-git silently ignores an `env` option — apply the LFS/perf
+    // overrides (layered over a snapshot of process.env) through the
+    // supported .env() builder so they actually reach the spawned git.
+    withMergedGitEnv(git);
     gitCache.set(repoPath, installReadCoalescing(repoPath, git));
   }
   return gitCache.get(repoPath)!;
@@ -681,7 +687,7 @@ async function detectRepoState(repoPath: string, git?: SimpleGit) {
 
 export async function isRepo(targetPath: string): Promise<boolean> {
   try {
-    const git = simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS });
+    const git = withMergedGitEnv(simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS }));
     return await git.checkIsRepo();
   } catch {
     return false;
@@ -928,8 +934,7 @@ export async function restore(repoPath: string, files: string[], staged = false)
     // the real binary), but the REST of the files are restored correctly.
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes('git-lfs') || msg.includes('filter-process')) {
-      const gitNoLfs = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS })
-        .env({ GIT_LFS_SKIP_SMUDGE: '1' });
+      const gitNoLfs = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }));
       await gitNoLfs.raw(args);
     } else {
       throw e;
@@ -1906,20 +1911,23 @@ async function networkGit(
     // ALL git operations of the repository — the reported
     // "git operations became slow after the LFS problems". A dedicated
     // short-lived instance keeps slow downloads out of the local queue.
-    const git = simpleGit({
-      baseDir: repoPath,
-      binary: 'git',
-      maxConcurrentProcesses: 4,
-      trimmed: false,
-      ...GIT_SSH_UNSAFE_OPTIONS,
-    }).env({
-      ...env,
-      // Never let git block on a terminal credential prompt — PrismGit is a
-      // GUI: HTTP(S) auth is injected via remoteNetworkArgs (-c overrides),
-      // SSH auth via GIT_SSH_COMMAND / SSH_ASKPASS. An unanswered prompt can
-      // otherwise hang the command invisibly (matches the push path).
-      GIT_TERMINAL_PROMPT: '0',
-    });
+    const git = withMergedGitEnv(
+      simpleGit({
+        baseDir: repoPath,
+        binary: 'git',
+        maxConcurrentProcesses: 4,
+        trimmed: false,
+        ...GIT_SSH_UNSAFE_OPTIONS,
+      }),
+      {
+        ...env,
+        // Never let git block on a terminal credential prompt — PrismGit is a
+        // GUI: HTTP(S) auth is injected via remoteNetworkArgs (-c overrides),
+        // SSH auth via GIT_SSH_COMMAND / SSH_ASKPASS. An unanswered prompt can
+        // otherwise hang the command invisibly (matches the push path).
+        GIT_TERMINAL_PROMPT: '0',
+      }
+    );
     return { git, cleanup: ssh.cleanup };
   } catch {
     return { git: getGit(repoPath), cleanup: () => {} };
@@ -3033,8 +3041,10 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
       // checked remote — key selection is per-repo, so the env is identical
       // for every remote of this repository.
       const ssh = await networkSshEnv(repoPath, checked[0]);
-      const fetchGit = simpleGit({ baseDir: repoPath, binary: 'git', ...GIT_SSH_UNSAFE_OPTIONS })
-        .env({ ...GIT_ENV_LFS_SKIP, ...ssh.env, GIT_TERMINAL_PROMPT: '0' });
+      const fetchGit = withMergedGitEnv(
+        simpleGit({ baseDir: repoPath, binary: 'git', ...GIT_SSH_UNSAFE_OPTIONS }),
+        { ...ssh.env, GIT_TERMINAL_PROMPT: '0' }
+      );
       const perRemote = async (name: string): Promise<void> => {
         const authArgs = await remoteNetworkArgs(repoPath, name);
         await Promise.race([
@@ -4172,7 +4182,7 @@ export async function submodules(repoPath: string): Promise<SubmoduleInfo[]> {
     let currentCommit = '';
     let trackedCommit = '';
     try {
-      const subGit = simpleGit({ baseDir: absSubPath, ...GIT_UNSAFE_OPTIONS });
+      const subGit = withMergedGitEnv(simpleGit({ baseDir: absSubPath, ...GIT_UNSAFE_OPTIONS }));
       const subStatus = await subGit.status();
       upToDate = subStatus.isClean();
       currentCommit = await subGit.revparse(['HEAD']);
@@ -4322,7 +4332,7 @@ export async function clone(
 }
 
 export async function init(targetPath: string, bare = false): Promise<void> {
-  const git = simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS });
+  const git = withMergedGitEnv(simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS }));
   await git.init(bare);
   // Ensure the initial branch is `main` — modern git default since 2.28,
   // but git only uses it when init.defaultBranch is set globally. We force
@@ -4357,7 +4367,7 @@ export async function applyGitIdentity(repoPath: string): Promise<boolean> {
   const email = String(getSetting('gitUserEmail') ?? '').trim();
   if (!name && !email) return false;
   try {
-    const git = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS });
+    const git = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }));
     if (name) await git.raw(['config', 'user.name', name]);
     if (email) await git.raw(['config', 'user.email', email]);
     return true;
@@ -4453,8 +4463,7 @@ export async function raw(repoPath: string, args: string[]): Promise<string> {
     // git-lfs is not installed on the user's machine.
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes('git-lfs') || msg.includes('filter-process')) {
-      const gitNoLfs = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS })
-        .env({ GIT_LFS_SKIP_SMUDGE: '1' });
+      const gitNoLfs = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }));
       return await gitNoLfs.raw(args);
     }
     throw e;
@@ -4962,7 +4971,7 @@ export async function editCommitMessage(
       // simple-git blocks `-c core.editor` on the default instance — the
       // non-HEAD reword path silently always failed. An unsafe instance is
       // required for interactive-rebase automation.
-      const gitUnsafe = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
+      const gitUnsafe = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }));
       // Rewording the ROOT commit: rebase needs --root there (same parent-
       // counting probe as squashCommits — rev-parse --quiet never throws).
       let rootCase = false;
@@ -5055,7 +5064,7 @@ const CONFIG_WRITE_UNSAFE_FLAGS = {
 };
 
 function gitWithUnsafeConfigWrites(repoPath: string): SimpleGit {
-  return simpleGit({
+  return withMergedGitEnv(simpleGit({
     baseDir: repoPath,
     binary: 'git',
     maxConcurrentProcesses: 2,
@@ -5065,7 +5074,7 @@ function gitWithUnsafeConfigWrites(repoPath: string): SimpleGit {
       ...GIT_UNSAFE_OPTIONS.unsafe,
       ...CONFIG_WRITE_UNSAFE_FLAGS,
     },
-  });
+  }));
 }
 
 export async function configSet(
@@ -5329,7 +5338,33 @@ export async function extractRepoInfo(
 
 // ============= LFS Support =============
 
+/**
+ * Hard kill-switch for the whole LFS integration: `PRISMGIT_LFS_DISABLE=1`
+ * makes every LFS call report "not installed" / degrade to safe defaults,
+ * regardless of whether git-lfs exists on PATH. Lets users force-disable
+ * the integration and lets the test suite exercise the graceful-degradation
+ * code paths deterministically on machines where git-lfs IS installed.
+ */
+function lfsDisabledByEnv(): boolean {
+  return process.env.PRISMGIT_LFS_DISABLE === '1';
+}
+
+/** Not-installed message reused by every LFS preflight. */
+const LFS_NOT_INSTALLED_MSG =
+  'Git LFS is not installed (or disabled with PRISMGIT_LFS_DISABLE=1). ' +
+  'Install it from https://git-lfs.com and run "git lfs install" from a terminal, then retry.';
+
+/**
+ * Preflight for mutating LFS operations: throws the standard clear error
+ * when LFS is unavailable (env kill-switch OR binary missing on PATH).
+ */
+async function assertLfsAvailable(repoPath: string): Promise<void> {
+  if (lfsDisabledByEnv()) throw new Error(LFS_NOT_INSTALLED_MSG);
+  if (!await isLfsInstalled(repoPath)) throw new Error(LFS_NOT_INSTALLED_MSG);
+}
+
 export async function lfsStatus(repoPath: string): Promise<{ installed: boolean; files: { path: string; size: string; status: string }[] }> {
+  if (lfsDisabledByEnv()) return { installed: false, files: [] };
   const git = getGit(repoPath);
   try {
     // Check if LFS is initialized — `git lfs version` exits non-zero when
@@ -5367,6 +5402,7 @@ export async function lfsStatus(repoPath: string): Promise<{ installed: boolean;
  * expected when git-lfs is not installed.
  */
 export async function isLfsInstalled(repoPath: string): Promise<boolean> {
+  if (lfsDisabledByEnv()) return false;
   try {
     // Use ASYNC spawn instead of execFileSync — execFileSync BLOCKS the entire
     // main process (Electron event loop) for up to 5s on repos where git-lfs
@@ -5390,6 +5426,7 @@ export async function isLfsInstalled(repoPath: string): Promise<boolean> {
 }
 
 export async function lfsPull(repoPath: string, files?: string[]): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   const args = ['lfs', 'pull'];
   if (files && files.length > 0) args.push('--include', files.join(','));
@@ -5397,11 +5434,13 @@ export async function lfsPull(repoPath: string, files?: string[]): Promise<void>
 }
 
 export async function lfsPush(repoPath: string): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   await git.raw(['lfs', 'push', 'origin', '--all']);
 }
 
 export async function lfsFetch(repoPath: string): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   await git.raw(['lfs', 'fetch']);
 }
@@ -5410,12 +5449,7 @@ export async function lfsInstall(repoPath: string): Promise<void> {
   // Check if git-lfs is installed FIRST — if not, give a clear error
   // message instead of letting simple-git throw a raw "git: 'lfs' is not
   // a git command" error.
-  if (!await isLfsInstalled(repoPath)) {
-    throw new Error(
-      'Git LFS is not installed on this system. Install it from https://git-lfs.com ' +
-      'and run "git lfs install" from a terminal, then retry.'
-    );
-  }
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   await git.raw(['lfs', 'install']);
 }
@@ -5574,6 +5608,7 @@ export async function removeLfsFilter(repoPath: string): Promise<number> {
 }
 
 export async function lfsTrack(repoPath: string, patterns: string[]): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   for (const p of patterns) {
     await git.raw(['lfs', 'track', p]);
@@ -5585,6 +5620,7 @@ export async function lfsTrack(repoPath: string, patterns: string[]): Promise<vo
  * Removes the pattern from .gitattributes (LFS-managed section).
  */
 export async function lfsUntrack(repoPath: string, pattern: string): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   await git.raw(['lfs', 'untrack', pattern]);
 }
@@ -5594,6 +5630,9 @@ export async function lfsUntrack(repoPath: string, pattern: string): Promise<voi
  * LFS objects. Returns { ok, output } where ok=true means no issues.
  */
 export async function lfsFsck(repoPath: string): Promise<{ ok: boolean; output: string }> {
+  if (lfsDisabledByEnv()) {
+    return { ok: false, output: LFS_NOT_INSTALLED_MSG };
+  }
   const git = getGit(repoPath);
   try {
     const output = await git.raw(['lfs', 'fsck']);
@@ -5608,6 +5647,7 @@ export async function lfsFsck(repoPath: string): Promise<{ ok: boolean; output: 
 }
 
 export async function lfsList(repoPath: string): Promise<string[]> {
+  if (lfsDisabledByEnv()) return [];
   const git = getGit(repoPath);
   const result = await git.raw(['lfs', 'ls-files']).catch(() => '');
   return result.split('\n').filter(Boolean).map(l => l.split(' * ').pop() || l);
@@ -5620,7 +5660,7 @@ export async function splitCommit(repoPath: string, hash: string): Promise<{ sta
   // Dedicated instance with unsafe.allowUnsafeEditor: simple-git blocks
   // `-c sequence.editor=...` on the default instance, which made splitCommit
   // fail silently (always {started:false}) despite valid git commands.
-  const gitUnsafe = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
+  const gitUnsafe = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }));
   // Start an interactive rebase with "edit" for the target commit
   // This will stop at the commit, allowing the user to split it
   try {
@@ -6050,7 +6090,7 @@ export async function showBuffer(repoPath: string, args: string[]): Promise<Buff
  * Returns when the clone is complete.
  */
 export async function mirror(remoteUrl: string, targetPath: string): Promise<void> {
-  const git = simpleGit(GIT_UNSAFE_OPTIONS);
+  const git = withMergedGitEnv(simpleGit(GIT_UNSAFE_OPTIONS));
   await git.mirror(remoteUrl, targetPath);
 }
 
@@ -6134,8 +6174,7 @@ export async function lsRemoteUrl(
 ): Promise<string> {
   const ssh = buildSshEnv(url, '');
   const httpArgs = buildHttpAuthArgs(url, undefined);
-  const git = simpleGit(GIT_SSH_UNSAFE_OPTIONS).env({
-    ...GIT_ENV_LFS_SKIP,
+  const git = withMergedGitEnv(simpleGit(GIT_SSH_UNSAFE_OPTIONS), {
     ...ssh.env,
     // GUI: never block on a terminal prompt for an unreachable/private host.
     GIT_TERMINAL_PROMPT: '0',
@@ -6609,6 +6648,13 @@ export async function subtreeRemove(repoPath: string, name: string): Promise<voi
 
 /** List LFS locks. local=true reads only local locks (no server round-trip). */
 export async function lfsLocks(repoPath: string, local = false): Promise<LfsLockInfo[]> {
+  try {
+    await assertLfsAvailable(repoPath);
+  } catch (e) {
+    // Keep the established "Failed to list LFS locks:" prefix for every
+    // failure mode of this read (unavailable binary included).
+    throw new Error(`Failed to list LFS locks: ${e instanceof Error ? e.message : String(e)}`);
+  }
   const git = getGit(repoPath);
   const args = ['lfs', 'locks'];
   if (local) args.push('--local');
@@ -6639,12 +6685,14 @@ export async function lfsLocks(repoPath: string, local = false): Promise<LfsLock
 
 /** Lock a file on the LFS server for exclusive editing. */
 export async function lfsLock(repoPath: string, file: string): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   await git.raw(['lfs', 'lock', file]);
 }
 
 /** Unlock a file; force removes a lock owned by someone else (requires permissions). */
 export async function lfsUnlock(repoPath: string, file: string, force = false): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   const args = ['lfs', 'unlock'];
   if (force) args.push('--force');
@@ -6672,7 +6720,34 @@ export async function formatPatch(
     throw new Error('formatPatch requires a commit or a from..to range');
   }
   const out = await git.raw(args);
-  return out.split('\n').map((l) => l.trim()).filter(Boolean);
+  // git prints the created file paths to stdout, but the EXACT form varies
+  // across git versions and platforms (absolute vs repo-relative, /var vs
+  // /private/var on macOS, …). Trust a printed line ONLY when the file
+  // really exists on disk; otherwise fall back to scanning the output
+  // directory (sorted for determinism). Never return a path that cannot be
+  // read — an empty string silently broke consumers (bug: "expected '' to
+  // contain 'From '").
+  const printed = out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .filter((l) => {
+      try {
+        return fs.statSync(l).isFile();
+      } catch {
+        return false;
+      }
+    });
+  if (printed.length > 0) return printed;
+  const written = fs
+    .readdirSync(opts.outputDir)
+    .filter((f) => f.endsWith('.patch'))
+    .sort()
+    .map((f) => path.join(opts.outputDir, f));
+  if (written.length > 0) return written;
+  throw new Error(
+    `git format-patch produced no patch files in ${opts.outputDir}. git output was:\n${out}`
+  );
 }
 
 // =====================================================================
@@ -7004,6 +7079,7 @@ export async function recyclableCommits(repoPath: string): Promise<RecyclableCom
 }
 
 export async function lfsListLocks(repoPath: string, remote = 'origin'): Promise<LfsLock[]> {
+  if (lfsDisabledByEnv()) return [];
   const git = getGit(repoPath);
   try {
     const out = await git.raw(['lfs', 'locks', '--remote=' + remote, '--json']);
@@ -7129,7 +7205,7 @@ export async function clonePartial(
   if (options?.branch) args.push('--branch=' + options.branch);
   if (options?.recursive) args.push('--recursive');
   const ssh = buildSshEnv(url, '');
-  const git = simpleGit(GIT_SSH_UNSAFE_OPTIONS).env({ ...GIT_ENV_LFS_SKIP, ...ssh.env });
+  const git = withMergedGitEnv(simpleGit(GIT_SSH_UNSAFE_OPTIONS), ssh.env);
   try {
     const result = await git.raw(args);
     invalidateCache();
@@ -7145,7 +7221,7 @@ export async function setupCredentialHelper(repoPath: string): Promise<void> {
   // ("Configuring credential.helper is not permitted without enabling
   // allowUnsafeCredentialHelper") — the old code swallowed that error, so this
   // function silently did nothing. Use an unsafe instance and actually set it.
-  const git = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeCredentialHelper: true } }).env(GIT_ENV_LFS_SKIP);
+  const git = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeCredentialHelper: true } }));
   try {
     await git.addConfig('credential.helper', 'store', false /* replace-all */, 'local');
   } catch {
@@ -7343,7 +7419,7 @@ export async function squashCommits(
     // pitfall splitCommit documents) — an unsafe instance is MANDATORY here,
     // otherwise the rebase always fails with "Configuring core.editor is not
     // permitted without enabling allowUnsafeEditor".
-    const gitUnsafe = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }).env(GIT_ENV_LFS_SKIP);
+    const gitUnsafe = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }));
     // fromHash may be the ROOT commit — rebase needs --root there. NOTE: a
     // `rev-parse --verify --quiet <hash>^` probe does NOT work: it exits 1
     // with EMPTY output and simple-git resolves that (no stderr → no throw).

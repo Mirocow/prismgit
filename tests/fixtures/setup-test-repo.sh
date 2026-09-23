@@ -1,6 +1,13 @@
 #!/bin/bash
-# Creates /home/z/my-project/repos/test-repo fixture expected by
-# tests/integration/gitService.real.test.ts.
+# Creates the test-repo fixture expected by the integration suites.
+#
+# Usage: setup-test-repo.sh [fixture-name]
+#   fixture-name (default: test-repo) — subdirectory of $BASE to create.
+#   Each vitest file that runs this script MUST pass its OWN name: vitest
+#   runs test files in PARALLEL workers, and a shared fixture path means
+#   one worker's `rm -rf` races another worker's in-flight git commands
+#   ("fatal: unable to get current working directory"). Per-file names
+#   make the suites fully parallel-safe.
 #
 # Invariants the suite relies on:
 #   - author "Test User" <test@test.com> on every commit
@@ -22,7 +29,7 @@ set -e
 # Default: $TMPDIR/repos (macOS) or /tmp/repos (Linux)
 BASE="${PRISMGIT_TEST_REPOS:-${TMPDIR:-/tmp}/prismgit-repos}"
 mkdir -p "$BASE"
-REPO="$BASE/test-repo"
+REPO="$BASE/${1:-test-repo}"
 
 rm -rf "$REPO"
 mkdir -p "$REPO/src"

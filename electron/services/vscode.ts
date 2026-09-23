@@ -28,7 +28,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import simpleGit, { type SimpleGit } from 'simple-git';
-import { GIT_UNSAFE_OPTIONS } from './git-env.js';
+import { GIT_UNSAFE_OPTIONS, withMergedGitEnv } from './git-env.js';
 import { getSetting } from './storage.js';
 
 export interface VsCodeDetection {
@@ -467,7 +467,7 @@ export interface DiffToolStatus {
 }
 
 function gitFor(repoPath: string): SimpleGit {
-  return simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS });
+  return withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }));
 }
 
 export async function getDiffToolStatus(repoPath: string): Promise<DiffToolStatus> {

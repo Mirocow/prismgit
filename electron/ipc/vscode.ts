@@ -3,7 +3,7 @@
  */
 import { ipcMain } from 'electron';
 import simpleGit from 'simple-git';
-import { GIT_UNSAFE_OPTIONS } from '../services/git-env.js';
+import { GIT_UNSAFE_OPTIONS, withMergedGitEnv } from '../services/git-env.js';
 import {
   detectVsCodeCached,
   openInVsCode,
@@ -20,7 +20,7 @@ import {
 
 /** Create a SimpleGit instance with the correct unsafe options. */
 function sg(repoPath: string) {
-  return simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS });
+  return withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }));
 }
 
 export function registerVscodeIpc(): void {

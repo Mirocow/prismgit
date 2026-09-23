@@ -12,9 +12,13 @@
  *    - commit() must retry once with the default identity as -c overrides
  *      when git refuses with "Please tell me who you are".
  *
- * Global/system git config is neutralized via GIT_CONFIG_GLOBAL /
- * GIT_CONFIG_SYSTEM=/dev/null so the tests don't depend on the machine's
- * ~/.gitconfig (requires git 2.32+).
+ * Global/system git config is neutralized so the tests don't depend on the
+ * machine's ~/.gitconfig. TWO mechanisms are combined on purpose:
+ *   - GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM = /dev/null (git ≥ 2.32)
+ *   - HOME pointed at an EMPTY temp directory (any git version: the global
+ *     config lookup path $HOME/.gitconfig simply doesn't exist there)
+ * A machine with a global identity AND git < 2.32 previously leaked
+ * "Mirocow <mirocow@…>" into commits and made both fallback tests fail.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -28,6 +32,10 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'prismgit-identity-d
 process.env.PRISMGIT_USER_DATA = TEST_DATA_DIR;
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_SYSTEM = '/dev/null';
+// Empty HOME — belt-and-braces for git < 2.32 (see header comment).
+const REAL_HOME = process.env.HOME;
+const EMPTY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'prismgit-identity-home-'));
+process.env.HOME = EMPTY_HOME;
 
 const storage = await import('../../electron/services/storage');
 const gitService = await import('../../electron/services/git');
@@ -41,6 +49,13 @@ function makeTempRepo(): string {
   execSync('git init', { cwd: dir, stdio: 'ignore' });
   return dir;
 }
+
+// Restore the environment for whichever test file runs next in this worker.
+afterAll(() => {
+  if (REAL_HOME === undefined) delete process.env.HOME;
+  else process.env.HOME = REAL_HOME;
+  fs.rmSync(EMPTY_HOME, { recursive: true, force: true });
+});
 
 describe('configSet with simple-git "unsafe" keys (gpg.program)', () => {
   let repo: string;

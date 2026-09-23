@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * BUGFIX "не получаю все ветки хотя в Remotes они есть" — refspec helpers.
@@ -78,7 +79,7 @@ describe('singleBranchRemotes', () => {
 // detection + remediation against a REAL repository.
 describe('git service surface (type contract)', () => {
   it('api surface declares remoteFetchSpecs/fetchAllBranches (ipc + preload + type stay in sync)', () => {
-    const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
     const preload = readFileSync(path.join(root, 'electron/preload.ts'), 'utf8');
     const ipc = readFileSync(path.join(root, 'electron/ipc/git.ts'), 'utf8');
     const types = readFileSync(path.join(root, 'electron/types/git-api.ts'), 'utf8');

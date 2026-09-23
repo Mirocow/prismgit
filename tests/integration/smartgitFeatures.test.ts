@@ -126,21 +126,14 @@ describe('Subtrees', () => {
 describe('formatPatch', () => {
   it('writes patch files for a commit and a range', async () => {
     const outDir = path.join(os.tmpdir(), `prismgit-patch-${Date.now()}`);
+    // formatPatch() now only returns paths that exist on disk (it verifies
+    // git's printed paths and falls back to scanning the output dir), so a
+    // space-in-path or /var-vs-/private/var mismatch on macOS can no longer
+    // produce an unreadable path (bug: "expected '' to contain 'From '").
     const files = await formatPatch(repoDir, { outputDir: outDir, commit: 'HEAD' });
     expect(files.length).toBe(1);
-    // On macOS, the file path from git format-patch may differ slightly
-    // (e.g. /private/var vs /var). Resolve to find the actual file.
-    const patchFile = files[0];
-    let content = '';
-    try {
-      content = fs.readFileSync(patchFile, 'utf-8');
-    } catch {
-      // If direct read fails, try listing the output directory
-      const dirFiles = fs.readdirSync(outDir).filter(f => f.endsWith('.patch'));
-      if (dirFiles.length > 0) {
-        content = fs.readFileSync(path.join(outDir, dirFiles[0]), 'utf-8');
-      }
-    }
+    expect(fs.existsSync(files[0])).toBe(true);
+    const content = fs.readFileSync(files[0], 'utf-8');
     expect(content).toContain('From ');
     expect(content).toContain('Subject: [PATCH] second commit');
 

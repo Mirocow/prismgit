@@ -7,7 +7,7 @@
  * any pair that fails AA (≥4.5:1 for normal text).
  *
  * Usage:
- *   node /home/z/my-project/repos/prismgit/scripts/audit-contrast.mjs
+ *   node scripts/audit-contrast.mjs
  *
  * Exit code:
  *   0 if every theme passes AA; 1 otherwise. Plug into CI.
@@ -15,9 +15,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const CSS_PATH = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   '../src/styles/globals.css',
 );
 

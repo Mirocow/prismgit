@@ -1,6 +1,7 @@
 import * as os from "os";
 import * as path from "path";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 /**
  * Comprehensive test — ALL 103 checks from the test plan.
  *
@@ -17,21 +18,31 @@ import { MemoryRouter } from 'react-router-dom';
 import * as gitService from '../../electron/services/git';
 
 // We test against the test-repo (small, controlled) for mutations
-// and ollama-code for performance checks
-const TEST_REPO = path.join(os.tmpdir(), 'prismgit-repos', 'test-repo');
+// and ollama-code for performance checks.
+// Per-suite fixture name + import.meta.url script resolution: vitest runs test
+// files in PARALLEL workers — a shared fixture path made one worker's
+// `rm -rf` race another's in-flight git commands, and `cwd: process.cwd()`
+// broke when vitest was launched from another directory (or a path with
+// spaces).
+const FIXTURE_NAME = 'test-repo-comprehensive';
+const TEST_REPO = path.join(os.tmpdir(), 'prismgit-repos', FIXTURE_NAME);
+const SETUP_SCRIPT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../fixtures/setup-test-repo.sh',
+);
 const OLLAMA_REPO = '/home/z/my-project/repos/ollama-code';
 // Optional large-repo fixture: ollama-dependent tests are skipped when absent.
 const OLLAMA_REPO_EXISTS = require('fs').existsSync(`${OLLAMA_REPO}/.git`);
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const shell = (cmd: string, cwd = TEST_REPO) => execSync(cmd, { cwd, encoding: 'utf-8' }).trim();
 const fs = require('fs');
 // path and os are already imported as ESM at the top of the file
 
 // Ensure test repo exists and is clean
 beforeAll(() => {
-  // ALWAYS recreate: e2e suites share this fixture and may leave it dirty
+  // ALWAYS recreate: e2e suites may leave the fixture dirty
   // (extra branches, moved main). The script is deterministic and fast.
-  execSync('bash tests/fixtures/setup-test-repo.sh', { encoding: 'utf-8', cwd: process.cwd() });
+  execFileSync('bash', [SETUP_SCRIPT, FIXTURE_NAME], { encoding: 'utf-8' });
   shell('git checkout main 2>/dev/null || true');
   shell('git reset --hard 2>/dev/null || true');
 });

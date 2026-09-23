@@ -36,7 +36,13 @@ export type ThemeId =
   | 'designer-light'    // Figma-inspired light theme with coral accent
   | 'purple'            // Purple accent on dark navy background
   | 'simple-light'      // Minimal light theme (black/white/grey)
-  | 'material';         // Material Design light (Indigo + grey)
+  | 'material'          // Material Design light (Indigo + grey)
+  | 'midnight'          // OLED true-black dark theme (calm blue accent)
+  | 'kanagawa'          // Kanagawa Wave — Japanese ink-blue dark theme
+  | 'rose-pine'         // Rosé Pine — muted warm dark theme (rose accent)
+  | 'everforest'        // Everforest — calm green-tinged dark theme
+  | 'vercel-dark'       // Vercel/Geist — neutral dark theme (blue accent)
+  | 'nord-light';       // Nord Light — frost-blue on snow-white light theme
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -311,6 +317,85 @@ export const THEMES: ThemeMeta[] = [
       textPrimary: '#212121', textSecondary: '#757575',
       accent: '#3F51B5', border: '#E0E0E0',
       statusAdded: '#4CAF50', statusModified: '#FF9800', statusDeleted: '#F44336',
+    },
+  },
+  // ─── New themes (2026-09) ──────────────────────────────────────────────
+  // Midnight — OLED/true-black dark theme. Near-black surfaces, calm blue
+  // accent; ideal for OLED panels and low-light environments.
+  {
+    id: 'midnight',
+    labelKey: 'settings.themeMidnight',
+    isDark: true,
+    preview: {
+      bgPrimary: '#050608', bgSecondary: '#0a0b10', bgTertiary: '#101218',
+      textPrimary: '#e6e8f0', textSecondary: '#a0a3b2',
+      accent: '#6ea8fe', border: '#1a1c26',
+      statusAdded: '#5dd397', statusModified: '#e5c07b', statusDeleted: '#f07178',
+    },
+  },
+  // Kanagawa Wave — Japanese ukiyo-e inspired dark theme. Ink-blue
+  // backgrounds, warm paper text, crystal-blue accent.
+  {
+    id: 'kanagawa',
+    labelKey: 'settings.themeKanagawa',
+    isDark: true,
+    preview: {
+      bgPrimary: '#1f1f28', bgSecondary: '#16161d', bgTertiary: '#24242e',
+      textPrimary: '#dcd7ba', textSecondary: '#a6a1b8',
+      accent: '#7e9cd8', border: '#2c2c3a',
+      statusAdded: '#98bb6c', statusModified: '#e6c384', statusDeleted: '#ff5d62',
+    },
+  },
+  // Rosé Pine — muted warm dark theme. Deep ink-violet backgrounds, soft
+  // cream text, muted rose accent.
+  {
+    id: 'rose-pine',
+    labelKey: 'settings.themeRosePine',
+    isDark: true,
+    preview: {
+      bgPrimary: '#191724', bgSecondary: '#1f1d2e', bgTertiary: '#26233a',
+      textPrimary: '#e0def4', textSecondary: '#908caa',
+      accent: '#eb6f92', border: '#2b2844',
+      statusAdded: '#74c69d', statusModified: '#f6c177', statusDeleted: '#eb6f92',
+    },
+  },
+  // Everforest — calm green-tinged dark theme. Soothing forest tones, warm
+  // paper text, sage-green accent.
+  {
+    id: 'everforest',
+    labelKey: 'settings.themeEverforest',
+    isDark: true,
+    preview: {
+      bgPrimary: '#2d353b', bgSecondary: '#262d33', bgTertiary: '#3a454c',
+      textPrimary: '#d3c6aa', textSecondary: '#9da9a0',
+      accent: '#a7c080', border: '#3f4a52',
+      statusAdded: '#a7c080', statusModified: '#dbbc7f', statusDeleted: '#e67e80',
+    },
+  },
+  // Vercel Dark — neutral cool-gray dark theme (Geist palette). Minimal
+  // monochrome surfaces with Vercel blue accent.
+  {
+    id: 'vercel-dark',
+    labelKey: 'settings.themeVercelDark',
+    isDark: true,
+    preview: {
+      bgPrimary: '#09090b', bgSecondary: '#111113', bgTertiary: '#18181d',
+      textPrimary: '#fafafa', textSecondary: '#a1a1aa',
+      accent: '#3291ff', border: '#24242c',
+      statusAdded: '#42d392', statusModified: '#f5a623', statusDeleted: '#ff5c5c',
+    },
+  },
+  // Nord Light — the light sibling of Nord (Snow Storm). Frost-blue accent
+  // on snow-white surfaces.
+  {
+    id: 'nord-light',
+    labelKey: 'settings.themeNordLight',
+    isDark: false,
+    preview: {
+      bgPrimary: '#eceff4', bgSecondary: '#e5e9f0', bgTertiary: '#dfe4ec',
+      textPrimary: '#2e3440', textSecondary: '#4c566a',
+      accent: '#5e81ac', border: '#d3dae4',
+      statusAdded: '#3d7d4f', statusModified: '#a3721c', statusDeleted: '#bf616a',
     },
   },
 ];

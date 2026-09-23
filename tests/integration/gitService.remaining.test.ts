@@ -1187,9 +1187,22 @@ describe('editCommitMessage (non-HEAD reword)', () => {
 });
 
 // =====================================================================
-// LFS family — git-lfs binary is NOT installed here; graceful degradation
+// LFS family — graceful degradation when git-lfs is unavailable.
+// The service exposes a kill-switch (PRISMGIT_LFS_DISABLE=1) so this suite
+// is deterministic on ANY machine — including dev boxes where git-lfs IS
+// installed (which used to make lfsStatus report installed:true and fail
+// these tests).
 // =====================================================================
 describe('LFS without git-lfs binary (graceful degradation)', () => {
+  const REAL_LFS_DISABLE = process.env.PRISMGIT_LFS_DISABLE;
+  beforeAll(() => {
+    process.env.PRISMGIT_LFS_DISABLE = '1';
+  });
+  afterAll(() => {
+    if (REAL_LFS_DISABLE === undefined) delete process.env.PRISMGIT_LFS_DISABLE;
+    else process.env.PRISMGIT_LFS_DISABLE = REAL_LFS_DISABLE;
+  });
+
   it('lfsStatus / lfsList / lfsFsck / lfsListLocks degrade to safe defaults', async () => {
     const repo = await mkRepo('lfs-graceful');
     expect(await gitService.lfsStatus(repo)).toEqual({ installed: false, files: [] });

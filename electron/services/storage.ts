@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../types/settings-api.js';
 import simpleGit from 'simple-git';
 import { SimpleStore } from './simpleStore.js';
-import { GIT_UNSAFE_OPTIONS } from './git-env.js';
+import { GIT_UNSAFE_OPTIONS, withMergedGitEnv } from './git-env.js';
 import {
   splitSettingSecrets,
   rehydrateSettingSecrets,
@@ -356,7 +356,7 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
   try {
     // Use GIT_UNSAFE_OPTIONS from git-env.ts (static import — no circular dep).
     // Without these env overrides, git-lfs smudge filters run on every file.
-    const git = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS });
+    const git = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }));
 
     // PERF (v3): run all reads in parallel — they are independent.
     // The old flow ran FIVE subprocesses, two of them redundant:

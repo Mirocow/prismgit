@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * BUGFIX "тёмные темы не адаптированы + разделители слишком яркие" —
@@ -19,7 +20,7 @@ import path from 'node:path';
  */
 import { THEMES, isThemeDark } from '../../src/lib/themes';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const css = readFileSync(path.join(ROOT, 'src/styles/globals.css'), 'utf8');
 const indexHtml = readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 

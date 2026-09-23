@@ -1330,6 +1330,436 @@
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.22);
 }
 
+/* ===========================================================================
+ * New themes (2026-09) — six fully-adapted palettes. Every block defines the
+ * COMPLETE token set (bg/borders/text/accent/status/diff/tag/warning/graph/
+ * shadows/scrollbars/splitter), passes the WCAG AA audit (text-tertiary on
+ * bg-tertiary ≥ 4.5:1 — run scripts/audit-contrast.mjs) and keeps separators
+ * muted (border-default ≤ 1.45 luminance ratio vs bg-primary — see
+ * tests/unit/themeRegistry.test.ts).
+ * ===========================================================================
+ */
+
+/* Midnight — OLED/true-black dark theme. Pure near-black backgrounds with a
+ * calm blue accent; ideal for OLED panels and low-light environments. */
+[data-theme="midnight"] {
+  --bg-primary: #050608;
+  --bg-secondary: #0a0b10;
+  --bg-tertiary: #101218;
+  --bg-elevated: #14151c;
+  --bg-hover: rgba(224, 226, 240, 0.05);
+  --bg-active: rgba(110, 168, 254, 0.14);
+  --bg-selected: rgba(110, 168, 254, 0.20);
+  --bg-sidebar-selected: rgba(110, 168, 254, 0.14);
+  --border-default: #1a1c26;
+  --border-subtle: #101218;
+  --border-strong: #262938;
+  --border-focused: #6ea8fe;
+  --text-primary: #e6e8f0;
+  --text-secondary: #a0a3b2;
+  --text-tertiary: #8f90a0; /* A11Y-3: AA contrast (5.94:1) */
+  --text-inverse: #050608;
+  --text-link: #6ea8fe;
+  --accent: #6ea8fe;
+  --accent-hover: #8dbdfe;
+  --accent-active: #5285d6;
+  --accent-muted: rgba(110, 168, 254, 0.16);
+  --accent-light-blue: #8dbdfe;
+  --accent-purple: #b7a5fe;
+  --accent-cyan: #79c1fe;
+  --accent-green: #5dd397;
+  --accent-yellow: #e5c07b;
+  --accent-yellow-dim: #8f7a4a;
+  --accent-red: #f07178;
+  --accent-red-dim: #91454a;
+  --status-added: #5dd397;
+  --status-modified: #e5c07b;
+  --status-deleted: #f07178;
+  --status-renamed: #6ea8fe;
+  --status-untracked: #79c1fe;
+  --status-conflict: #ff9e64;
+  --status-success: #5dd397;
+  --status-warning: #e5c07b;
+  --status-error: #f07178;
+  --status-info: #6ea8fe;
+  --diff-added-bg: rgba(93, 211, 151, 0.16);
+  --diff-removed-bg: rgba(240, 113, 120, 0.16);
+  --diff-added-line: rgba(93, 211, 151, 0.08);
+  --diff-removed-line: rgba(240, 113, 120, 0.08);
+  --diff-added-word: rgba(93, 211, 151, 0.32);
+  --diff-removed-word: rgba(240, 113, 120, 0.32);
+  --tag-bg: rgba(110, 168, 254, 0.12);
+  --tag-border: rgba(110, 168, 254, 0.30);
+  --tag-text: #6ea8fe;
+  --warning-bg: rgba(229, 192, 123, 0.10);
+  --warning-icon: #e5c07b;
+  --warning-border: rgba(229, 192, 123, 0.28);
+  --comment: #565b6e;
+  --graph-line: #1a1c26;
+  --graph-node-fill: #050608;
+  --graph-node-border: #a0a3b2;
+  --graph-node-selected: #6ea8fe;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.65);
+  --scrollbar-track: #0a0b10;
+  --scrollbar-thumb: rgba(160, 163, 178, 0.14);
+  --scrollbar-thumb-hover: rgba(160, 163, 178, 0.28);
+  --splitter-color: #14151c;
+  --splitter-color-hover: #6ea8fe;
+}
+
+/* Kanagawa — Japanese ukiyo-e inspired dark theme (Kanagawa Wave palette).
+ * Ink-blue backgrounds, warm paper text, crystal-blue accent. */
+[data-theme="kanagawa"] {
+  --bg-primary: #1f1f28;
+  --bg-secondary: #16161d;
+  --bg-tertiary: #24242e;
+  --bg-elevated: #2a2a37;
+  --bg-hover: rgba(220, 215, 186, 0.05);
+  --bg-active: rgba(126, 156, 216, 0.15);
+  --bg-selected: rgba(126, 156, 216, 0.20);
+  --bg-sidebar-selected: rgba(126, 156, 216, 0.15);
+  --border-default: #2c2c3a;
+  --border-subtle: #24242e;
+  --border-strong: #3a3a4c;
+  --border-focused: #7e9cd8;
+  --text-primary: #dcd7ba;
+  --text-secondary: #a6a1b8;
+  --text-tertiary: #9d9a8d; /* A11Y-3: AA contrast (5.44:1) */
+  --text-inverse: #1f1f28;
+  --text-link: #7e9cd8;
+  --accent: #7e9cd8;
+  --accent-hover: #8faee2;
+  --accent-active: #6a88c0;
+  --accent-muted: rgba(126, 156, 216, 0.15);
+  --accent-light-blue: #7aa89f;
+  --accent-purple: #957fb8;
+  --accent-cyan: #7aa89f;
+  --accent-green: #98bb6c;
+  --accent-yellow: #c0a36e;
+  --accent-yellow-dim: #7d6a48;
+  --accent-red: #c34043;
+  --accent-red-dim: #7a2f33;
+  --status-added: #98bb6c;
+  --status-modified: #e6c384;
+  --status-deleted: #ff5d62;
+  --status-renamed: #7e9cd8;
+  --status-untracked: #7aa89f;
+  --status-conflict: #ffa066;
+  --status-success: #98bb6c;
+  --status-warning: #e6c384;
+  --status-error: #ff5d62;
+  --status-info: #7e9cd8;
+  --diff-added-bg: rgba(152, 187, 108, 0.16);
+  --diff-removed-bg: rgba(255, 93, 98, 0.16);
+  --diff-added-line: rgba(152, 187, 108, 0.08);
+  --diff-removed-line: rgba(255, 93, 98, 0.08);
+  --diff-added-word: rgba(152, 187, 108, 0.32);
+  --diff-removed-word: rgba(255, 93, 98, 0.32);
+  --tag-bg: rgba(126, 156, 216, 0.12);
+  --tag-border: rgba(126, 156, 216, 0.30);
+  --tag-text: #7e9cd8;
+  --warning-bg: rgba(230, 195, 132, 0.10);
+  --warning-icon: #e6c384;
+  --warning-border: rgba(230, 195, 132, 0.28);
+  --comment: #54546d;
+  --graph-line: #2c2c3a;
+  --graph-node-fill: #1f1f28;
+  --graph-node-border: #a6a1b8;
+  --graph-node-selected: #7e9cd8;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-track: #16161d;
+  --scrollbar-thumb: rgba(166, 161, 184, 0.16);
+  --scrollbar-thumb-hover: rgba(166, 161, 184, 0.32);
+  --splitter-color: #24242e;
+  --splitter-color-hover: #7e9cd8;
+}
+
+/* Rosé Pine — muted warm dark theme (Rosé Pine palette). Deep ink-violet
+ * backgrounds, soft cream text, muted rose accent. */
+[data-theme="rose-pine"] {
+  --bg-primary: #191724;
+  --bg-secondary: #1f1d2e;
+  --bg-tertiary: #26233a;
+  --bg-elevated: #34304f;
+  --bg-hover: rgba(224, 222, 244, 0.05);
+  --bg-active: rgba(235, 111, 146, 0.14);
+  --bg-selected: rgba(235, 111, 146, 0.20);
+  --bg-sidebar-selected: rgba(235, 111, 146, 0.14);
+  --border-default: #2b2844;
+  --border-subtle: #26233a;
+  --border-strong: #3f3b5e;
+  --border-focused: #eb6f92;
+  --text-primary: #e0def4;
+  --text-secondary: #908caa;
+  --text-tertiary: #a09ebd; /* A11Y-3: AA contrast (5.87:1) */
+  --text-inverse: #191724;
+  --text-link: #c4a7e7;
+  --accent: #eb6f92;
+  --accent-hover: #f28fae;
+  --accent-active: #d5587c;
+  --accent-muted: rgba(235, 111, 146, 0.15);
+  --accent-light-blue: #9ccfd8;
+  --accent-purple: #c4a7e7;
+  --accent-cyan: #9ccfd8;
+  --accent-green: #74c69d;
+  --accent-yellow: #f6c177;
+  --accent-yellow-dim: #9c7a4a;
+  --accent-red: #eb6f92;
+  --accent-red-dim: #8f4358;
+  --status-added: #74c69d;
+  --status-modified: #f6c177;
+  --status-deleted: #eb6f92;
+  --status-renamed: #c4a7e7;
+  --status-untracked: #9ccfd8;
+  --status-conflict: #ebbcba;
+  --status-success: #74c69d;
+  --status-warning: #f6c177;
+  --status-error: #eb6f92;
+  --status-info: #c4a7e7;
+  --diff-added-bg: rgba(116, 198, 157, 0.14);
+  --diff-removed-bg: rgba(235, 111, 146, 0.14);
+  --diff-added-line: rgba(116, 198, 157, 0.07);
+  --diff-removed-line: rgba(235, 111, 146, 0.07);
+  --diff-added-word: rgba(116, 198, 157, 0.30);
+  --diff-removed-word: rgba(235, 111, 146, 0.30);
+  --tag-bg: rgba(196, 167, 231, 0.12);
+  --tag-border: rgba(196, 167, 231, 0.30);
+  --tag-text: #c4a7e7;
+  --warning-bg: rgba(246, 193, 119, 0.10);
+  --warning-icon: #f6c177;
+  --warning-border: rgba(246, 193, 119, 0.28);
+  --comment: #6e6a86;
+  --graph-line: #2b2844;
+  --graph-node-fill: #191724;
+  --graph-node-border: #908caa;
+  --graph-node-selected: #eb6f92;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --scrollbar-track: #1f1d2e;
+  --scrollbar-thumb: rgba(144, 140, 170, 0.16);
+  --scrollbar-thumb-hover: rgba(144, 140, 170, 0.32);
+  --splitter-color: #26233a;
+  --splitter-color-hover: #eb6f92;
+}
+
+/* Everforest — calm green-tinged dark theme (Everforest palette). Soothing
+ * forest tones with warm paper text and a sage-green accent. */
+[data-theme="everforest"] {
+  --bg-primary: #2d353b;
+  --bg-secondary: #262d33;
+  --bg-tertiary: #3a454c;
+  --bg-elevated: #414b52;
+  --bg-hover: rgba(211, 198, 170, 0.05);
+  --bg-active: rgba(167, 192, 128, 0.14);
+  --bg-selected: rgba(167, 192, 128, 0.20);
+  --bg-sidebar-selected: rgba(167, 192, 128, 0.14);
+  --border-default: #3f4a52;
+  --border-subtle: #3a454c;
+  --border-strong: #4f5a62;
+  --border-focused: #a7c080;
+  --text-primary: #d3c6aa;
+  --text-secondary: #9da9a0;
+  --text-tertiary: #b4bcb0; /* A11Y-3: AA contrast (5.04:1) */
+  --text-inverse: #2d353b;
+  --text-link: #7fbbb3;
+  --accent: #a7c080;
+  --accent-hover: #b8d190;
+  --accent-active: #93a96d;
+  --accent-muted: rgba(167, 192, 128, 0.15);
+  --accent-light-blue: #7fbbb3;
+  --accent-purple: #d699b6;
+  --accent-cyan: #83c092;
+  --accent-green: #a7c080;
+  --accent-yellow: #dbbc7f;
+  --accent-yellow-dim: #8f7d55;
+  --accent-red: #e67e80;
+  --accent-red-dim: #8f5254;
+  --status-added: #a7c080;
+  --status-modified: #dbbc7f;
+  --status-deleted: #e67e80;
+  --status-renamed: #7fbbb3;
+  --status-untracked: #83c092;
+  --status-conflict: #e69875;
+  --status-success: #a7c080;
+  --status-warning: #dbbc7f;
+  --status-error: #e67e80;
+  --status-info: #7fbbb3;
+  --diff-added-bg: rgba(167, 192, 128, 0.15);
+  --diff-removed-bg: rgba(230, 126, 128, 0.15);
+  --diff-added-line: rgba(167, 192, 128, 0.08);
+  --diff-removed-line: rgba(230, 126, 128, 0.08);
+  --diff-added-word: rgba(167, 192, 128, 0.32);
+  --diff-removed-word: rgba(230, 126, 128, 0.32);
+  --tag-bg: rgba(127, 187, 179, 0.12);
+  --tag-border: rgba(127, 187, 179, 0.30);
+  --tag-text: #7fbbb3;
+  --warning-bg: rgba(219, 188, 127, 0.10);
+  --warning-icon: #dbbc7f;
+  --warning-border: rgba(219, 188, 127, 0.28);
+  --comment: #7a8478;
+  --graph-line: #3f4a52;
+  --graph-node-fill: #2d353b;
+  --graph-node-border: #9da9a0;
+  --graph-node-selected: #a7c080;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.40);
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.55);
+  --scrollbar-track: #262d33;
+  --scrollbar-thumb: rgba(157, 169, 160, 0.18);
+  --scrollbar-thumb-hover: rgba(157, 169, 160, 0.34);
+  --splitter-color: #3a454c;
+  --splitter-color-hover: #a7c080;
+}
+
+/* Vercel Dark — neutral cool-gray dark theme (Geist palette). Minimal,
+ * high-contrast monochrome surfaces with Vercel blue accent. */
+[data-theme="vercel-dark"] {
+  --bg-primary: #09090b;
+  --bg-secondary: #111113;
+  --bg-tertiary: #18181d;
+  --bg-elevated: #1e1e24;
+  --bg-hover: rgba(250, 250, 250, 0.05);
+  --bg-active: rgba(50, 145, 255, 0.14);
+  --bg-selected: rgba(50, 145, 255, 0.18);
+  --bg-sidebar-selected: rgba(50, 145, 255, 0.14);
+  --border-default: #24242c;
+  --border-subtle: #18181d;
+  --border-strong: #30303a;
+  --border-focused: #3291ff;
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #8b8b96; /* A11Y-3: AA contrast (5.25:1) */
+  --text-inverse: #09090b;
+  --text-link: #3291ff;
+  --accent: #3291ff;
+  --accent-hover: #66b0ff;
+  --accent-active: #1a79e6;
+  --accent-muted: rgba(50, 145, 255, 0.15);
+  --accent-light-blue: #66b0ff;
+  --accent-purple: #bd7fe0;
+  --accent-cyan: #6ec5e8;
+  --accent-green: #42d392;
+  --accent-yellow: #f5a623;
+  --accent-yellow-dim: #96690f;
+  --accent-red: #ff5c5c;
+  --accent-red-dim: #8f3537;
+  --status-added: #42d392;
+  --status-modified: #f5a623;
+  --status-deleted: #ff5c5c;
+  --status-renamed: #3291ff;
+  --status-untracked: #6ec5e8;
+  --status-conflict: #ff8a4c;
+  --status-success: #42d392;
+  --status-warning: #f5a623;
+  --status-error: #ff5c5c;
+  --status-info: #3291ff;
+  --diff-added-bg: rgba(66, 211, 146, 0.15);
+  --diff-removed-bg: rgba(255, 92, 92, 0.15);
+  --diff-added-line: rgba(66, 211, 146, 0.08);
+  --diff-removed-line: rgba(255, 92, 92, 0.08);
+  --diff-added-word: rgba(66, 211, 146, 0.32);
+  --diff-removed-word: rgba(255, 92, 92, 0.32);
+  --tag-bg: rgba(50, 145, 255, 0.12);
+  --tag-border: rgba(50, 145, 255, 0.30);
+  --tag-text: #3291ff;
+  --warning-bg: rgba(245, 166, 35, 0.10);
+  --warning-icon: #f5a623;
+  --warning-border: rgba(245, 166, 35, 0.28);
+  --comment: #52525b;
+  --graph-line: #24242c;
+  --graph-node-fill: #09090b;
+  --graph-node-border: #a1a1aa;
+  --graph-node-selected: #3291ff;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 0 2px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.65);
+  --scrollbar-track: #111113;
+  --scrollbar-thumb: rgba(161, 161, 170, 0.14);
+  --scrollbar-thumb-hover: rgba(161, 161, 170, 0.28);
+  --splitter-color: #18181d;
+  --splitter-color-hover: #3291ff;
+}
+
+/* Nord Light — the light sibling of the Nord palette (Polar Night ↔ Snow
+ * Storm). Frost-blue accent on snow-white surfaces. */
+[data-theme="nord-light"] {
+  --bg-primary: #eceff4;
+  --bg-secondary: #e5e9f0;
+  --bg-tertiary: #dfe4ec;
+  --bg-elevated: #d8dee9;
+  --bg-hover: rgba(46, 52, 64, 0.05);
+  --bg-active: rgba(94, 129, 172, 0.14);
+  --bg-selected: rgba(94, 129, 172, 0.18);
+  --bg-sidebar-selected: rgba(94, 129, 172, 0.14);
+  --border-default: #d3dae4;
+  --border-subtle: #dfe4ec;
+  --border-strong: #c0cbd9;
+  --border-focused: #5e81ac;
+  --text-primary: #2e3440;
+  --text-secondary: #4c566a;
+  --text-tertiary: #556075; /* A11Y-3: AA contrast (4.96:1) */
+  --text-inverse: #eceff4;
+  --text-link: #5e81ac;
+  --accent: #5e81ac;
+  --accent-hover: #81a1c1;
+  --accent-active: #4c6e96;
+  --accent-muted: rgba(94, 129, 172, 0.14);
+  --accent-light-blue: #81a1c1;
+  --accent-purple: #b48ead;
+  --accent-cyan: #6d8b99;
+  --accent-green: #3d7d4f;
+  --accent-yellow: #a3721c;
+  --accent-yellow-dim: #7a5f16;
+  --accent-red: #bf616a;
+  --accent-red-dim: #a04b53;
+  --status-added: #3d7d4f;
+  --status-modified: #a3721c;
+  --status-deleted: #bf616a;
+  --status-renamed: #5e81ac;
+  --status-untracked: #6a8ba1;
+  --status-conflict: #bf6f5f;
+  --status-success: #3d7d4f;
+  --status-warning: #a3721c;
+  --status-error: #bf616a;
+  --status-info: #5e81ac;
+  --diff-added-bg: rgba(61, 125, 79, 0.14);
+  --diff-removed-bg: rgba(191, 97, 106, 0.14);
+  --diff-added-line: rgba(61, 125, 79, 0.08);
+  --diff-removed-line: rgba(191, 97, 106, 0.08);
+  --diff-added-word: rgba(61, 125, 79, 0.28);
+  --diff-removed-word: rgba(191, 97, 106, 0.28);
+  --tag-bg: rgba(94, 129, 172, 0.12);
+  --tag-border: rgba(94, 129, 172, 0.30);
+  --tag-text: #5e81ac;
+  --warning-bg: rgba(163, 114, 28, 0.10);
+  --warning-icon: #a3721c;
+  --warning-border: rgba(163, 114, 28, 0.28);
+  --comment: #7b88a1;
+  --graph-line: #d3dae4;
+  --graph-node-fill: #eceff4;
+  --graph-node-border: #4c566a;
+  --graph-node-selected: #5e81ac;
+  --shadow: 0 1px 3px rgba(46, 52, 64, 0.10);
+  --shadow-sm: 0 0 2px rgba(46, 52, 64, 0.08);
+  --shadow-md: 0 4px 12px rgba(46, 52, 64, 0.12);
+  --shadow-lg: 0 8px 24px rgba(46, 52, 64, 0.16);
+  --scrollbar-track: #e5e9f0;
+  --scrollbar-thumb: rgba(46, 52, 64, 0.18);
+  --scrollbar-thumb-hover: rgba(46, 52, 64, 0.32);
+  --splitter-color: #dfe4ec;
+  --splitter-color-hover: #5e81ac;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

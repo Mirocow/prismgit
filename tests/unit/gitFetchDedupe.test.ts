@@ -20,7 +20,9 @@ vi.mock('simple-git', () => {
   const getRemotes = vi
     .fn()
     .mockResolvedValue([{ name: 'origin', refs: { fetch: 'http://example.com/r.git', push: '' } }]);
-  const simpleGit = vi.fn(() => ({ raw, getRemotes }));
+  // env: the service pipes the merged child environment through the
+  // supported .env() builder — the mock must accept (and ignore) it.
+  const simpleGit = vi.fn(() => ({ raw, getRemotes, env: vi.fn().mockReturnThis() }));
   // Expose the shared mocked methods — every getGit() instance returns them.
   return { default: simpleGit, __mocks: { raw, getRemotes } };
 });
