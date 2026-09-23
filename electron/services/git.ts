@@ -2263,6 +2263,80 @@ export function fetchAll(repoPath: string, prune = false): Promise<void> {
   });
 }
 
+/**
+ * BUGFIX "не получаю все ветки хотя в Remotes они есть":
+ * Read the configured fetch refspecs (`remote.<name>.fetch`) for every
+ * remote. A clone made with `--depth N` (git implies `--single-branch`)
+ * or an explicit `--single-branch` configures a refspec that covers ONE
+ * branch instead of `+refs/heads/*:refs/remotes/<name>/*`. Every later
+ * `git fetch` respects that refspec, so refs/remotes/ only ever contains
+ * that single branch — while the Remotes page (live `ls-remote`) happily
+ * shows them all. The Branches page then looks "incomplete".
+ *
+ * Returns { remoteName: [refspec, ...] } — the renderer combines this with
+ * isSingleBranchRefspec() (src/lib/remoteSpecs.ts) to detect the situation
+ * and offer `fetchAllBranches` as the one-click remediation.
+ */
+export async function remoteFetchSpecs(repoPath: string): Promise<Record<string, string[]>> {
+  const git = getGit(repoPath);
+  // `git config --get-regexp` exits 1 when nothing matches (fresh repo with
+  // no remotes) — simple-git turns that into a rejection; treat as empty.
+  const out = await git
+    .raw(['config', '--get-regexp', '^remote\\..*\\.fetch$'])
+    .catch(() => '');
+  const specs: Record<string, string[]> = {};
+  for (const line of String(out).split('\n').filter(Boolean)) {
+    // "remote.origin.fetch +refs/heads/main:refs/remotes/origin/main"
+    const m = line.match(/^remote\.(.+)\.fetch\s+(.+)$/);
+    if (m) {
+      const name = m[1].trim();
+      (specs[name] ??= []).push(m[2].trim());
+    }
+  }
+  return specs;
+}
+
+/**
+ * One-click remediation for a single-branch clone: widen the remote's fetch
+ * refspec back to the full wildcard (`git remote set-branches <remote> '*'
+ * — REPLACES the refspec list, exactly what SmartGit does), then fetch so
+ * all remote branches land in refs/remotes/. Skips the set-branches call
+ * when the refspec already covers all heads (custom multi-refspec configs
+ * are left untouched).
+ */
+export function fetchAllBranches(repoPath: string, remote = 'origin'): Promise<void> {
+  return runExclusiveFetch(repoPath, null, async () => {
+    const git = getGit(repoPath);
+    try {
+      const current = await git.raw(['config', '--get-all', `remote.${remote}.fetch`]).catch(() => '');
+      const full = new RegExp(`^\\+?refs/heads/\\*:refs/remotes/${remote.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\*$`);
+      const alreadyFull = String(current)
+        .split('\n')
+        .filter(Boolean)
+        .some((s) => full.test(s.trim()));
+      if (!alreadyFull) {
+        // '*' is passed through literally — git stores it as the wildcard
+        // refspec (no glob expansion happens in the shell-less spawn).
+        await git.raw(['remote', 'set-branches', remote, '*']);
+      }
+    } catch {
+      // No refspec at all (fresh remote) — set-branches below is still the
+      // right move; fall through to the unconditional fetch.
+      try { await git.raw(['remote', 'set-branches', remote, '*']); } catch { /* remote missing → fetch will report */ }
+    }
+    // Fetch through the credential-aware network path (same as fetch()).
+    const { git: netGit, cleanup } = await networkGit(repoPath, remote);
+    const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'fetch', '--prune', remote];
+    try {
+      await netGit.raw(args);
+    } catch (e) {
+      throw describeNetworkError(e, 'fetch');
+    } finally {
+      cleanup();
+    }
+  });
+}
+
 export async function log(
   repoPath: string,
   options: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean } = {}
@@ -4198,7 +4272,14 @@ export async function clone(
   // a follow-up — for now the timeout is the safety net.
   const CLONE_TIMEOUT_MS = options.timeoutMs ?? 30 * 60 * 1000;
   const args: string[] = ['clone'];
-  if (options.depth) args.push('--depth', String(options.depth));
+  // BUGFIX "не получаю все ветки": `git clone --depth N` IMPLIES
+  // --single-branch — the clone's remote.origin.fetch refspec then covers
+  // exactly ONE branch, every later fetch keeps that refspec, and the
+  // Branches page never shows the rest of the remote's branches even though
+  // they exist (the Remotes page lists them via live ls-remote). Depth
+  // should limit HISTORY, not branch visibility — add --no-single-branch so
+  // a shallow clone still fetches all branch refs at that depth.
+  if (options.depth) args.push('--depth', String(options.depth), '--no-single-branch');
   if (options.branch) args.push('--branch', options.branch);
   if (options.recursive) args.push('--recursive');
   if (options.shallowSubmodules) args.push('--shallow-submodules');
@@ -7040,8 +7121,12 @@ export async function clonePartial(
   options?: { depth?: number; branch?: string; recursive?: boolean }
 ): Promise<string> {
   const args = ['clone', '--filter=' + filter, url, targetPath];
-  if (options?.depth) args.push('--depth=' + options.depth);
-  if (options?.branch) args.push('--branch=' + options.branch, '--single-branch');
+  if (options?.depth) args.push('--depth=' + options.depth, '--no-single-branch');
+  // BUGFIX "не получаю все ветки": --single-branch here limited the partial
+  // clone to ONE branch's refs. --filter only filters BLOBS from history;
+  // branch visibility should stay complete (SmartGit/SourceTree behavior),
+  // so a branch checkout no longer implies single-branch refs.
+  if (options?.branch) args.push('--branch=' + options.branch);
   if (options?.recursive) args.push('--recursive');
   const ssh = buildSshEnv(url, '');
   const git = simpleGit(GIT_SSH_UNSAFE_OPTIONS).env({ ...GIT_ENV_LFS_SKIP, ...ssh.env });

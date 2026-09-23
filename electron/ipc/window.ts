@@ -5,6 +5,18 @@ export function registerWindowIpc(): void {
     BrowserWindow.fromWebContents(e.sender)?.minimize();
   });
 
+  // BUGFIX "тёмные темы не адаптированы": keep the NATIVE window background
+  // in sync with the active theme (dark themes must not flash/resize through
+  // a white frame). Color is validated — only #rrggbb hex is accepted.
+  ipcMain.on('window:setBackgroundColor', (e, color: unknown) => {
+    if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) return;
+    try {
+      BrowserWindow.fromWebContents(e.sender)?.setBackgroundColor(color);
+    } catch {
+      /* window may already be destroyed — ignore */
+    }
+  });
+
   ipcMain.on('window:maximize', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win) return;

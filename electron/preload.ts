@@ -54,6 +54,11 @@ const api = {
     fetchAll: (repoPath: string, prune?: boolean) => ipcRenderer.invoke('git:fetchAll', repoPath, prune),
     fetchDeepen: (repoPath: string, remote?: string, commits?: number) =>
       ipcRenderer.invoke('git:fetchDeepen', repoPath, remote, commits),
+    /** BUGFIX "не получаю все ветки": refspec map for single-branch detection. */
+    remoteFetchSpecs: (repoPath: string) => ipcRenderer.invoke('git:remoteFetchSpecs', repoPath),
+    /** One-click remediation: `git remote set-branches <remote> '*'` + fetch. */
+    fetchAllBranches: (repoPath: string, remote?: string) =>
+      ipcRenderer.invoke('git:fetchAllBranches', repoPath, remote),
     setFetchDepth: (repoPath: string, remote?: string, depth?: number) =>
       ipcRenderer.invoke('git:setFetchDepth', repoPath, remote, depth),
     remoteProperties: (repoPath: string, name: string) =>
@@ -524,6 +529,8 @@ const api = {
     maximize: () => ipcRenderer.send('window:maximize'),
     close: () => ipcRenderer.send('window:close'),
     isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+    /** Keep the native window background in sync with the active theme. */
+    setBackgroundColor: (color: string) => ipcRenderer.send('window:setBackgroundColor', color),
     onMaximizeChange: (cb: (maximized: boolean) => void) => {
       const listener = (_: unknown, value: boolean) => cb(value);
       ipcRenderer.on('window:maximizeChanged', listener);

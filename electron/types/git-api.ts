@@ -327,6 +327,19 @@ export interface GitApi {
   fetchAll: (repoPath: string, prune?: boolean) => Promise<void>;
   /** Deepen a shallow clone by N commits (git fetch --deepen=N). */
   fetchDeepen: (repoPath: string, remote?: string, commits?: number) => Promise<void>;
+  /**
+   * BUGFIX "не получаю все ветки": configured fetch refspecs per remote
+   * (`remote.<name>.fetch` values). Combine with isSingleBranchRefspec()
+   * (src/lib/remoteSpecs.ts) to detect single-branch clones whose
+   * refs/remotes will never contain all remote branches.
+   */
+  remoteFetchSpecs: (repoPath: string) => Promise<Record<string, string[]>>;
+  /**
+   * One-click remediation for single-branch clones: widen the refspec
+   * (`git remote set-branches <remote> '*'`) then fetch, so all remote
+   * branches appear in the Branches page.
+   */
+  fetchAllBranches: (repoPath: string, remote?: string) => Promise<void>;
   /** Set shallow fetch depth (git fetch --depth=N); depth <= 0 → --unshallow. */
   setFetchDepth: (repoPath: string, remote?: string, depth?: number) => Promise<void>;
   /** Read real remote properties (URLs, HEAD branch, tracking branches, config). */

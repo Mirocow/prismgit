@@ -15,7 +15,8 @@ import { cleanupTempCopies } from './services/vscode.js';
 import { installGitCommandLogger } from './services/commandLog.js';
 import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
 import { SimpleStore } from './services/simpleStore.js';
-import { migratePlaintextSecrets, flushSettings } from './services/storage.js';
+import { migratePlaintextSecrets, flushSettings, getSetting } from './services/storage.js';
+import { windowBackgroundForTheme } from './services/themeDark.js';
 import { migrateLegacyGithubToken, flushGithubStore } from './services/github.js';
 import { migrateLegacyGitLabToken, flushGitlabStore } from './services/gitlab.js';
 import { flushSecrets } from './services/secrets.js';
@@ -155,7 +156,11 @@ function createWindow(): BrowserWindow {
     y: bounds.y,
     minWidth: 1024,
     minHeight: 640,
-    backgroundColor: '#f8f9fa',
+    // BUGFIX "тёмные темы не адаптированы": match the persisted theme so a
+    // dark theme doesn't flash a white native window before the renderer
+    // paints (the renderer keeps it in sync afterwards via
+    // window:setBackgroundColor whenever the theme changes).
+    backgroundColor: windowBackgroundForTheme(getSetting('theme') as string | undefined),
     frame: false,
     title: 'PrismGit',
     icon: resolveResourceIcon('icon-512.png'),

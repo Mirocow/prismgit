@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { api, type AppSettings } from '../lib/api';
 import { type ThemeId, THEMES, getThemeMeta, DEFAULT_THEME, isThemeDark } from '../lib/themes';
+import { computeContrastOverrides, cssVarName, CONTRAST_TOKENS, type ContrastToken } from '../lib/contrast';
 
 export type Theme = ThemeId;
 
@@ -95,6 +96,15 @@ function applyThemeToDOM(theme: Theme) {
   // Each [data-theme="..."] block overrides the default :root / .dark
   // variables with theme-specific colors.
   html.setAttribute('data-theme', theme);
+  // Keep the NATIVE window background in sync so dark themes don't flash a
+  // white frame on (re)load / resize. Uses the theme's own bg color.
+  try {
+    const bg = meta?.preview?.bgPrimary;
+    if (bg && typeof window !== 'undefined') {
+      const w = window as unknown as { smartgit?: { window?: { setBackgroundColor?: (c: string) => void } } };
+      w.smartgit?.window?.setBackgroundColor?.(bg);
+    }
+  } catch { /* non-Electron / Tauri — ignore */ }
   // Persist for next load
   try {
     localStorage.setItem('prismgit-theme', theme);
@@ -152,67 +162,45 @@ function applyZoomToDOM(zoomPct: number) {
 }
 
 function applyContrastToDOM(contrast: number) {
-  const clamped = Math.max(50, Math.min(150, contrast));
   const root = document.documentElement;
   const isDark = root.classList.contains('dark');
 
-  // Calculate blend percentage (0 at contrast=100, max 0.5 at contrast=50 or 150)
-  const shift = Math.abs(clamped - 100) / 100; // 0.0 to 0.5
+  // Read BASE values: strip OUR OWN inline overrides FIRST.
+  // getComputedStyle() resolves inline styles with the highest priority,
+  // so without this the blend would COMPOUND on every slider tick (borders
+  // marching toward white in dark themes) and a theme switch would keep
+  // the previous theme's blended --border-* over the new [data-theme]
+  // block — the root cause of "тёмные темы не адаптированы, разделители
+  // слишком яркие".
+  for (const token of CONTRAST_TOKENS) root.style.removeProperty(cssVarName(token));
 
-  // High-contrast target: push text/borders toward the extreme
-  const extremeColor = isDark ? '255, 255, 255' : '0, 0, 0';
-  // Low-contrast target: fade text/borders toward the background
-  const bgColor = isDark ? '11, 14, 20' : '247, 248, 250'; // --bg-primary
-
-  // For contrast > 100: blend toward extreme (darker in light, lighter in dark)
-  // For contrast < 100: blend toward background (faded)
-  const target = clamped > 100 ? extremeColor : bgColor;
-
-  // Helper: blend a hex color toward the target by `shift` amount
-  function blend(hex: string): string {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    const [tr, tg, tb] = target.split(', ').map(Number);
-    const nr = Math.round(r + (tr - r) * shift);
-    const ng = Math.round(g + (tg - g) * shift);
-    const nb = Math.round(b + (tb - b) * shift);
-    return `#${nr.toString(16).padStart(2, '0')}${ng.toString(16).padStart(2, '0')}${nb.toString(16).padStart(2, '0')}`;
-  }
-
-  // Read the CURRENT (default) colors from computed style — these are the
-  // base values we blend FROM. We read from :root so we get the theme's
-  // default (not the previously-adjusted value).
   const style = getComputedStyle(root);
-  const textPrimary = style.getPropertyValue('--text-primary').trim();
-  const textSecondary = style.getPropertyValue('--text-secondary').trim();
-  const textTertiary = style.getPropertyValue('--text-tertiary').trim();
-  const borderDefault = style.getPropertyValue('--border-default').trim();
-  const borderSubtle = style.getPropertyValue('--border-subtle').trim();
-  const borderStrong = style.getPropertyValue('--border-strong').trim();
+  const read = (token: ContrastToken): string | undefined => {
+    const v = style.getPropertyValue(cssVarName(token)).trim();
+    return v.startsWith('#') ? v : undefined;
+  };
+  const overrides = computeContrastOverrides({
+    contrast,
+    isDark,
+    bgPrimary: style.getPropertyValue('--bg-primary').trim(),
+    colors: {
+      textPrimary: read('textPrimary'),
+      textSecondary: read('textSecondary'),
+      textTertiary: read('textTertiary'),
+      borderDefault: read('borderDefault'),
+      borderSubtle: read('borderSubtle'),
+      borderStrong: read('borderStrong'),
+    },
+  });
 
-  // Only apply overrides if contrast != 100%
-  if (clamped === 100) {
-    // Remove overrides — restore defaults
-    root.style.removeProperty('--text-primary');
-    root.style.removeProperty('--text-secondary');
-    root.style.removeProperty('--text-tertiary');
-    root.style.removeProperty('--border-default');
-    root.style.removeProperty('--border-subtle');
-    root.style.removeProperty('--border-strong');
-  } else {
-    // Parse hex colors and blend
-    if (textPrimary.startsWith('#')) root.style.setProperty('--text-primary', blend(textPrimary));
-    if (textSecondary.startsWith('#')) root.style.setProperty('--text-secondary', blend(textSecondary));
-    if (textTertiary.startsWith('#')) root.style.setProperty('--text-tertiary', blend(textTertiary));
-    if (borderDefault.startsWith('#')) root.style.setProperty('--border-default', blend(borderDefault));
-    if (borderSubtle.startsWith('#')) root.style.setProperty('--border-subtle', blend(borderSubtle));
-    if (borderStrong.startsWith('#')) root.style.setProperty('--border-strong', blend(borderStrong));
+  // applyContrastToDOM(100) → no overrides → base theme values restored.
+  for (const [token, value] of Object.entries(overrides) as [ContrastToken, string][]) {
+    root.style.setProperty(cssVarName(token), value);
   }
 
   // Persist for next load
   try {
-    localStorage.setItem('prismgit-contrast', String(clamped));
+    localStorage.setItem('prismgit-contrast', String(Math.max(50, Math.min(150, contrast))));
   } catch {
     /* ignore */
   }
@@ -378,7 +366,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   applyTheme: () => {
-    const { theme } = get();
+    const { theme, settings } = get();
     applyThemeToDOM(theme);
+    // Re-derive the contrast overrides from the NEW theme's tokens. Without
+    // this, inline --text-*/--border-* values blended from the PREVIOUS
+    // theme survive the switch and override the new [data-theme] block
+    // (light-gray separators on a dark theme — "не адаптировано").
+    applyContrastToDOM(settings.contrast ?? 100);
   },
 }));

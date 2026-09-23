@@ -70,6 +70,9 @@ export function TagsPage() {
   // SmartGit Manual: Tag-Grouping toggle
   const [groupByPattern, setGroupByPattern] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  // "Show all" past the initial 200-row page — the OLD code silently hid
+  // every tag after #200 (same class of bug as the branch list).
+  const [showAll, setShowAll] = useState(false);
   // Globally selected tag — written on click, highlighted in the list, shown
   // as a chip in the Toolbar so other tools see the same tag selection.
   const selectedTag = useSelectionStore((s) => s.selectedTag);
@@ -319,12 +322,7 @@ export function TagsPage() {
           </>
         ) : (
           <>
-            {tags.length > 200 && (
-              <div className="px-3 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
-                {t('tags.showingFirst200', { count: tags.length })}
-              </div>
-            )}
-            {tags.slice(0, 200).map((t) => (
+            {(showAll ? tags : tags.slice(0, 200)).map((t) => (
               <TagRow
                 key={t.name}
                 tag={t}
@@ -338,8 +336,16 @@ export function TagsPage() {
                 showContextMenu={showContextMenu}
                 selected={selectedTag === t.name}
               />
-            ))
-            }
+            ))}
+            {tags.length > 200 && !showAll && (
+              <button
+                className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-2xs text-accent bg-bg-secondary border-b border-border-subtle hover:bg-bg-hover"
+                onClick={() => setShowAll(true)}
+              >
+                <ChevronDown size={10} />
+                {t('branches.showAll', { count: tags.length })}
+              </button>
+            )}
           </>
         )}
       </div>

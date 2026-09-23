@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConflictMergeView } from '../components/ConflictMergeView';
 import { DiffViewer } from '../components/DiffViewer';
-import { FileText, RefreshCw, Search } from '../components/icons';
+import { FileText, RefreshCw, Search, ChevronDown } from '../components/icons';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { api, type BranchInfo, type CommitFile, type DiffResult, type LogEntry } from '../lib/api';
@@ -71,6 +71,9 @@ export function DiffPage() {
   const [recentCommits, setRecentCommits] = useState<LogEntry[]>([]);
   // File list for multi-file diff (when filePath === '.')
   const [changedFiles, setChangedFiles] = useState<CommitFile[]>([]);
+  // "Show all" past the initial 200-row page — the OLD code silently
+  // hid every file after #200 (same class of bug as the branch list).
+  const [fileListShowAll, setFileListShowAll] = useState(false);
   // Filter box above the file list — with 200+ changed files, scrolling to
   // find one path is not something a human should do.
   const [fileListFilter, setFileListFilter] = useState('');
@@ -590,7 +593,7 @@ export function DiffPage() {
               {visibleFiles.length === 0 && changedFiles.length > 0 && (
                 <div className="px-2 py-2 text-2xs text-text-tertiary">{t('diff.noFilesMatch', { filter: fileListFilter.trim() })}</div>
               )}
-              {visibleFiles.slice(0, 200).map((f, i) => (
+              {(fileListShowAll ? visibleFiles : visibleFiles.slice(0, 200)).map((f, i) => (
                 <div
                   key={i}
                   data-testid="diff-file-row"
@@ -624,10 +627,14 @@ export function DiffPage() {
                   <span className="flex-1 truncate font-mono text-text-secondary">{f.path}</span>
                 </div>
               ))}
-              {changedFiles.length > 200 && (
-                <div className="px-2 py-1 text-2xs text-text-tertiary border-t border-border-subtle">
-                  {t('diff.showingFirst200', { count: changedFiles.length })}
-                </div>
+              {visibleFiles.length > 200 && !fileListShowAll && (
+                <button
+                  className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-2xs text-accent bg-bg-secondary border-t border-border-subtle hover:bg-bg-hover"
+                  onClick={() => setFileListShowAll(true)}
+                >
+                  <ChevronDown size={10} />
+                  {t('branches.showAll', { count: visibleFiles.length })}
+                </button>
               )}
             </div>
             {/* Resizable splitter between file list and diff viewer — fixes the

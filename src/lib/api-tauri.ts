@@ -228,11 +228,18 @@ export const tauriApi = {
     branches: async (repoPath: string): Promise<RawBranchInfo[]> => {
       const out = await callGit('git_branches', repoPath);
       return out.split('\n').filter(Boolean).map(line => {
-        const [head, name, tracking, hashAbbrev, date] = line.split('\x00');
+        // Rust git_branches format: refname \x1f refname:short \x1f upstream:short
+        // \x1f objectname:short \x1f committerdate:iso \x1f HEAD-marker.
+        // BUGFIX: the parser used to split on \x00 while the Rust side joins
+        // fields with \x1f (every field came back undefined), and
+        // `remote: name.includes('/')` misclassified local feature/x
+        // branches as remote. Detect via the full refname prefix instead.
+        const [refname, short, tracking, hashAbbrev, date, headMarker] = line.split('\x1f');
+        const isRemote = refname.startsWith('refs/remotes/');
         return {
-          name,
-          remote: name.includes('/'),
-          current: head === '*',
+          name: short,
+          remote: isRemote,
+          current: headMarker === '*',
           tracking: tracking || undefined,
           hashAbbrev: hashAbbrev || undefined,
           date: date || undefined,
@@ -369,6 +376,29 @@ export const tauriApi = {
       const args = ['fetch', '--deepen=' + (commits ?? 1)];
       if (remote) args.push(remote);
       await callGit('git_raw', repoPath, args);
+    },
+    /** BUGFIX "не получаю все ветки": refspec map for single-branch detection. */
+    remoteFetchSpecs: async (repoPath: string): Promise<Record<string, string[]>> => {
+      // `git config --get-regexp` exits 1 on no match — callGit throws;
+      // treat as "no remotes configured".
+      let out: string;
+      try {
+        out = await callGit('git_raw', repoPath, ['config', '--get-regexp', '^remote\\..*\\.fetch$']);
+      } catch {
+        return {};
+      }
+      const specs: Record<string, string[]> = {};
+      for (const line of out.split('\n').filter(Boolean)) {
+        const m = line.match(/^remote\.(.+)\.fetch\s+(.+)$/);
+        if (m) (specs[m[1].trim()] ??= []).push(m[2].trim());
+      }
+      return specs;
+    },
+    /** One-click remediation: `git remote set-branches <remote> '*'` + fetch. */
+    fetchAllBranches: async (repoPath: string, remote?: string): Promise<void> => {
+      const name = remote || 'origin';
+      await callGit('git_raw', repoPath, ['remote', 'set-branches', name, '*']);
+      await callGit('git_raw', repoPath, ['fetch', '--prune', name]);
     },
     setFetchDepth: async (repoPath: string, remote?: string, depth?: number): Promise<void> => {
       const args = ['fetch'];

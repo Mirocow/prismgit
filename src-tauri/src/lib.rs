@@ -71,7 +71,9 @@ mod commands {
 
     #[tauri::command]
     pub fn git_branches(repo_path: String) -> Result<GitCommandResult, String> {
-        let format = "%(refname)\x1f%(refname:short)\x1f%(upstream:short)\x1f%(objectname:short)\x1f%(committerdate:iso)";
+        // Last field is the HEAD marker ('*' for the checked-out branch) —
+        // the JS parser in src/lib/api-tauri.ts splits on \x1f and reads it.
+        let format = "%(refname)\x1f%(refname:short)\x1f%(upstream:short)\x1f%(objectname:short)\x1f%(committerdate:iso)\x1f%(HEAD)";
         git_raw_impl(repo_path, vec![
             "for-each-ref".into(),
             format!("--format={}", format),

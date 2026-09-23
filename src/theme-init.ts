@@ -8,9 +8,28 @@
 //      React mounts. We can't apply it here because the CSS variables aren't
 //      defined yet (they're in globals.css which loads after this module).
 //      The settingsStore.loadSettings() call will apply it.
+//
+// BUGFIX "тёмные темы не адаптированы": the dark-theme list below used to be
+// a hard-coded subset that drifted from src/lib/themes.ts — slack-dark,
+// discord and purple were missing, so at boot those themes ran WITHOUT the
+// .dark class and every token their [data-theme] block doesn't define
+// (diff/tag/warning/graph colors, shadows, …) resolved to the :root LIGHT
+// values. Deriving the list from the registry keeps it in sync forever.
+import { THEMES } from './lib/themes';
+
+const registryDarkThemes: string[] = THEMES.filter((t) => t.isDark).map((t) => t.id);
+const registryLightThemes: string[] = THEMES.filter((t) => !t.isDark).map((t) => t.id);
+// Fallback if reading the registry ever throws (defensive — same content).
+const fallbackDarkThemes = [
+  'dark', 'github-dark', 'dracula', 'monokai', 'solarized-dark', 'nord',
+  'tokyo-night', 'catppuccin-mocha', 'one-dark', 'gruvbox-dark',
+  'slack-dark', 'discord', 'purple',
+];
+
 try {
   var theme = localStorage.getItem('prismgit-theme') || 'light';
-  var knownDarkThemes = ['dark', 'github-dark', 'dracula', 'monokai', 'solarized-dark', 'nord', 'tokyo-night', 'catppuccin-mocha', 'one-dark', 'gruvbox-dark'];
+  var knownDarkThemes = registryDarkThemes.length > 0 ? registryDarkThemes : fallbackDarkThemes;
+  var knownLightThemes = registryLightThemes;
   // 4.2 — "Automatically select light/dark": before React mounts we can't
   // compute the exact theme pair, but we can avoid a light flash when the
   // OS is dark. If the saved theme is light and the system prefers dark,
@@ -22,9 +41,8 @@ try {
       window.matchMedia &&
       window.matchMedia('(prefers-color-scheme: dark)').matches
     ) {
-      var knownLightPrefixes = ['light', 'github-light', 'solarized-light'];
       var isKnownDark = knownDarkThemes.indexOf(theme) >= 0;
-      if (!isKnownDark && knownLightPrefixes.some(function (p) { return theme.indexOf(p) === 0; })) {
+      if (!isKnownDark && knownLightThemes.indexOf(theme) >= 0) {
         theme = 'dark';
       }
     }

@@ -31,6 +31,7 @@ import { describePushResult } from '../lib/pushResult';
 import { getRepoInProgressState } from '../lib/repoState';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { filterSymbolicHeads, filterSymbolicHeadNames } from '../lib/branchFilter';
+import { isSingleBranchRefspec } from '../lib/remoteSpecs';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { confirmWithRemember, CONFIRMATION_IDS } from '../lib/confirmations';
 import { useI18n } from '../lib/i18n';
@@ -105,6 +106,14 @@ export function BranchesPage() {
   const [renameTarget, setRenameTarget] = useState<{ kind: 'branch' | 'remote'; oldName: string } | null>(null);
   const [configRemote, setConfigRemote] = useState<{ mode: 'configure' | 'add'; name?: string } | null>(null);
   const [remotesMap, setRemotesMap] = useState<Record<string, RemoteInfo>>({});
+  // BUGFIX "не получаю все ветки": configured fetch refspecs per remote —
+  // used to detect single-branch clones whose refs/remotes will never
+  // contain all branches that exist on the remote (Remotes page shows them
+  // via live ls-remote, Branches page only shows locally fetched refs).
+  const [fetchSpecs, setFetchSpecs] = useState<Record<string, string[]>>({});
+  // Groups expanded past the initial render page ("Show all N" button) —
+  // previously items past the first 200 per group were SILENTLY invisible.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [remoteBusy, setRemoteBusy] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [draggedBranch, setDraggedBranch] = useState<string | null>(null);
@@ -163,27 +172,51 @@ export function BranchesPage() {
   // Esc clears branch multi-selection (when no dialog is open)
   useEscapeKey(selectedBranches.size > 0, () => clearBranches());
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
-      const [branchList, remoteList, tagList, stashList] = await Promise.all([
+      const [branchList, remoteList, tagList, stashList, specMap] = await Promise.all([
         api.git.branches(repo.path),
         api.git.remotes(repo.path).catch(() => [] as RemoteInfo[]),
         api.git.tags(repo.path).catch(() => [] as TagInfo[]),
         api.git.stashList(repo.path).catch(() => [] as StashEntry[]),
+        api.git.remoteFetchSpecs(repo.path).catch(() => ({}) as Record<string, string[]>),
       ]);
       setBranches(branchList);
       setRemotesMap(Object.fromEntries(remoteList.map((r) => [r.name, r])));
       setTags(tagList);
       setStashes(stashList);
+      setFetchSpecs(specMap);
     } catch (e) {
-      toast.error(t('branches.loadFailed'), String(e));
+      if (!silent) toast.error(t('branches.loadFailed'), String(e));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [repo.path, toast]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Live refresh: background fetches (useBackgroundFetch) update
+  // refs/remotes while the user sits on this page — without this, newly
+  // fetched remote branches only appear after navigating away/back or
+  // pressing Refresh. Debounced 3s; silent (no spinner, no error toast) so
+  // background churn never interrupts the user. Optional-chained: the Tauri
+  // adapter has no watcher.onChanged — live refresh degrades gracefully.
+  const watcherTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const off = api.watcher?.onChanged?.(() => {
+      if (watcherTimer.current) clearTimeout(watcherTimer.current);
+      watcherTimer.current = setTimeout(() => {
+        watcherTimer.current = null;
+        load(true);
+      }, 3000);
+    });
+    return () => {
+      if (watcherTimer.current) clearTimeout(watcherTimer.current);
+      watcherTimer.current = null;
+      off?.();
+    };
+  }, [load]);
 
   // 2.1 — SmartGit "Warn when checkout changes submodule configuration".
   // Resolves true when checkout may proceed: the setting is off, the target
@@ -419,6 +452,24 @@ export function BranchesPage() {
     try {
       await api.git.fetch(repo.path, name, true);
       toast.success(t('branches.fetchedWithPrune', { name }));
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error(t('branches.fetchFailed', { name }), String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
+  };
+
+  // BUGFIX "не получаю все ветки": one-click remediation for single-branch
+  // clones — widens remote.<name>.fetch to '*' (git remote set-branches)
+  // then fetches, so every branch that exists on the remote lands in
+  // refs/remotes and becomes visible in this list.
+  const handleFetchAllBranches = async (name: string) => {
+    setRemoteBusy(name);
+    try {
+      await api.git.fetchAllBranches(repo.path, name);
+      toast.success(t('branches.fetchAllBranchesDone', { name }));
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
@@ -1318,6 +1369,9 @@ export function BranchesPage() {
   // the one the user originally clicked on.
   useEffect(() => {
     lastClickedIndex.current = null;
+    // Filtering re-partitions groups — collapse any "Show all" expansion
+    // so the filtered view starts from its first page again.
+    setExpandedGroups(new Set());
   }, [search]);
   const filteredTags = tags.filter(t => t.name.toLowerCase().includes(search.toLowerCase()));
   const filteredStashes = stashes.filter(s => s.message.toLowerCase().includes(search.toLowerCase()));
@@ -1770,14 +1824,22 @@ export function BranchesPage() {
           <span className="text-text-tertiary">({count})</span>
           {headerExtra}
         </div>
-        {/* Render only first 200 items to avoid perf issues on large repos.
-            Lazy loading: show first 200, "Load more" button reveals next 200. */}
-        {!collapsed && items.length > 200 && (
-          <div className="px-2 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
-            {t('branches.showingFirst200', { count: items.length })}
-          </div>
+        {/* Perf guard for huge repos: render the first 200 rows, then a
+            real "Show all N" button (the OLD code silently dropped rows
+            past #200 — the hint claimed scrolling would reveal them, but
+            nothing did; branches existed but were unreachable in the UI). */}
+        {!collapsed && (
+          expandedGroups.has(groupKey) ? items.map(rowRenderer) : items.slice(0, 200).map(rowRenderer)
         )}
-        {!collapsed && items.slice(0, 200).map(rowRenderer)}
+        {!collapsed && items.length > 200 && !expandedGroups.has(groupKey) && (
+          <button
+            className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-2xs text-accent bg-bg-secondary border-b border-border-subtle hover:bg-bg-hover"
+            onClick={() => setExpandedGroups((prev) => new Set(prev).add(groupKey))}
+          >
+            <ChevronDown size={10} />
+            {t('branches.showAll', { count: items.length })}
+          </button>
+        )}
       </div>
     );
   };
@@ -1789,11 +1851,39 @@ export function BranchesPage() {
     // otherwise it looks like the remote is missing entirely. While a filter is
     // active, missing branches just mean "nothing matches", so no hint then.
     const EMPTY_HINT = '__empty-remote__';
-    const rows: BranchInfo[] = items.length > 0 ? items : (search.trim()
-      ? []
-      : [{ name: EMPTY_HINT, remote: true, current: false, tracking: null, hash: '', hashAbbrev: '', subject: '', author: { name: '', email: '', date: '', timestamp: 0 }, committer: { name: '', email: '', date: '', timestamp: 0 }, date: '' } as unknown as BranchInfo]);
+    // BUGFIX "не получаю все ветки хотя в Remotes они есть": when the remote's
+    // fetch refspec is single-branch (clone made with --depth / --single-branch),
+    // refs/remotes only ever holds that one branch no matter how often you
+    // fetch. Render a warning row with the one-click remediation.
+    const SINGLE_HINT = '__single-branch__';
+    const singleBranch = !search.trim() && isSingleBranchRefspec(remoteName, fetchSpecs[remoteName]);
+    const rows: BranchInfo[] = [];
+    if (singleBranch) {
+      rows.push({ name: SINGLE_HINT, remote: true, current: false } as unknown as BranchInfo);
+    }
+    if (items.length > 0) rows.push(...items);
+    else if (!search.trim() && !singleBranch) {
+      rows.push({ name: EMPTY_HINT, remote: true, current: false, tracking: null, hash: '', hashAbbrev: '', subject: '', author: { name: '', email: '', date: '', timestamp: 0 }, committer: { name: '', email: '', date: '', timestamp: 0 }, date: '' } as unknown as BranchInfo);
+    }
     const rowRenderer = (b: BranchInfo) =>
-      b.name === EMPTY_HINT ? (
+      b.name === SINGLE_HINT ? (
+        <div
+          key={`${groupKey}-single-branch-hint`}
+          className="flex items-center gap-2 px-3 py-1.5 border-b border-border-subtle bg-status-warning/10"
+        >
+          <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+          <span className="flex-1 min-w-0 text-2xs text-text-secondary">
+            {t('branches.singleBranchClone', { name: remoteName })}
+          </span>
+          <button
+            className="flex-shrink-0 text-2xs font-medium text-accent hover:underline disabled:opacity-50"
+            disabled={remoteBusy === remoteName}
+            onClick={(e) => { e.stopPropagation(); handleFetchAllBranches(remoteName); }}
+          >
+            {remoteBusy === remoteName ? t('common.loading') : t('branches.fetchAllBranches')}
+          </button>
+        </div>
+      ) : b.name === EMPTY_HINT ? (
         <div
           key={`${groupKey}-empty-hint`}
           className="flex items-center gap-2 px-3 py-1.5 text-2xs text-text-tertiary border-b border-border-subtle"
@@ -1940,7 +2030,7 @@ export function BranchesPage() {
             placeholder={t('branches.filterPlaceholder')}
             ariaLabel={t('branches.filterPlaceholder')}
           />
-          <button className="icon-btn !w-6 !h-6" title={t('common.refresh')} onClick={load}>
+          <button className="icon-btn !w-6 !h-6" title={t('common.refresh')} onClick={() => load()}>
             <RefreshCw size={12} />
           </button>
           <button className="btn btn-primary text-2xs !py-1 !px-2.5" onClick={() => setShowNewDialog(true)}>

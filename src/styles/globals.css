@@ -257,7 +257,7 @@
   --bg-active: rgba(56, 139, 253, 0.15);
   --bg-selected: rgba(56, 139, 253, 0.20);
   --bg-sidebar-selected: rgba(56, 139, 253, 0.15);
-  --border-default: #30363d;
+  --border-default: #282d34; /* BUGFIX: приглушен — «разделители слишком яркие» (ratio vs bg было #30363d → #282d34, ≈1.35 вместо 1.5–1.8) */
   --border-subtle: #21262d;
   --border-strong: #424a53;
   --border-focused: #2f81f7;
@@ -323,7 +323,7 @@
   --bg-active: rgba(189, 147, 249, 0.15);
   --bg-selected: rgba(189, 147, 249, 0.20);
   --bg-sidebar-selected: rgba(189, 147, 249, 0.15);
-  --border-default: #44475a;
+  --border-default: #3d3f51; /* BUGFIX: приглушен — «разделители слишком яркие» (ratio vs bg было #44475a → #3d3f51, ≈1.35 вместо 1.5–1.8) */
   --border-subtle: #343746;
   --border-strong: #565f77;
   --border-focused: #bd93f9;
@@ -389,7 +389,7 @@
   --bg-active: rgba(166, 226, 46, 0.15);
   --bg-selected: rgba(166, 226, 46, 0.20);
   --bg-sidebar-selected: rgba(166, 226, 46, 0.15);
-  --border-default: #49483e;
+  --border-default: #3e3e35; /* BUGFIX: приглушен — «разделители слишком яркие» (ratio vs bg было #49483e → #3e3e35, ≈1.35 вместо 1.5–1.8) */
   --border-subtle: #3e3d32;
   --border-strong: #5c5b4e;
   --border-focused: #a6e22e;
@@ -523,7 +523,7 @@
   --bg-sidebar-selected: rgba(38, 139, 210, 0.18);
   --border-default: #073642;
   --border-subtle: #0d4350;
-  --border-strong: #1a56670;
+  --border-strong: #1a5667; /* 7-digit hex typo — was invalid CSS, resolved to currentColor */
   --border-focused: #268bd2;
   --text-primary: #93a1a1;
   --text-secondary: #657b83;
@@ -587,7 +587,7 @@
   --bg-active: rgba(136, 192, 208, 0.15);
   --bg-selected: rgba(136, 192, 208, 0.20);
   --bg-sidebar-selected: rgba(136, 192, 208, 0.15);
-  --border-default: #4c566a;
+  --border-default: #40495a; /* BUGFIX: приглушен — «разделители слишком яркие» (ratio vs bg было #4c566a → #40495a, ≈1.35 вместо 1.5–1.8) */
   --border-subtle: #3b4252;
   --border-strong: #5e6779;
   --border-focused: #88c0d0;
@@ -719,7 +719,7 @@
   --bg-active: rgba(137, 180, 250, 0.15);
   --bg-selected: rgba(137, 180, 250, 0.22);
   --bg-sidebar-selected: rgba(137, 180, 250, 0.15);
-  --border-default: #45475a;
+  --border-default: #343547; /* BUGFIX: приглушен — «разделители слишком яркие» (ratio vs bg было #45475a → #343547, ≈1.35 вместо 1.5–1.8) */
   --border-subtle: #313244;
   --border-strong: #585b70;
   --border-focused: #89b4fa;
@@ -851,7 +851,7 @@
   --bg-active: rgba(250, 189, 47, 0.15);
   --bg-selected: rgba(250, 189, 47, 0.22);
   --bg-sidebar-selected: rgba(250, 189, 47, 0.15);
-  --border-default: #504945;
+  --border-default: #423d3b; /* BUGFIX: приглушен — «разделители слишком яркие» (ratio vs bg было #504945 → #423d3b, ≈1.35 вместо 1.5–1.8) */
   --border-subtle: #3c3836;
   --border-strong: #665c54;
   --border-focused: #fabd2f;
@@ -922,7 +922,7 @@
   --bg-active: #3a3d41;
   --bg-selected: #4a1448;
 
-  --border-default: #3a3d41;
+  --border-default: #323539; /* BUGFIX: приглушен — «разделители слишком яркие» (ratio vs bg было #3a3d41 → #323539, ≈1.35 вместо 1.5–1.8) */
   --border-subtle: #2a2d31;
   --border-strong: #52555a;
   --border-focused: #611f69;
@@ -955,6 +955,34 @@
   --scrollbar-track: #1a1d21;
   --scrollbar-thumb: rgba(240, 240, 240, 0.15);
   --scrollbar-thumb-hover: rgba(240, 240, 240, 0.30);
+
+  /* BUGFIX "тёмные темы не адаптированы": these tokens were missing — they
+     fell back to Ayu Dark values (cyan tints on an aubergine theme). */
+  --bg-sidebar-selected: rgba(97, 31, 105, 0.28);
+  --status-success: #2eb886;
+
+  --diff-added-bg: rgba(46, 184, 134, 0.18);
+  --diff-removed-bg: rgba(224, 30, 90, 0.18);
+  --diff-added-line: rgba(46, 184, 134, 0.08);
+  --diff-removed-line: rgba(224, 30, 90, 0.08);
+  --diff-added-word: rgba(46, 184, 134, 0.35);
+  --diff-removed-word: rgba(224, 30, 90, 0.35);
+
+  --tag-bg: rgba(54, 197, 240, 0.10);
+  --tag-border: rgba(54, 197, 240, 0.3);
+  --tag-text: #36c5f0;
+
+  --warning-bg: rgba(242, 199, 68, 0.10);
+  --warning-icon: #f2c744;
+  --warning-border: rgba(242, 199, 68, 0.25);
+
+  --graph-line: #3a3d41;
+  --graph-node-fill: #1a1d21;
+  --graph-node-border: #c8c8c8;
+  --graph-node-selected: #36c5f0;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 /* ===========================================================================
@@ -1005,6 +1033,34 @@
   --scrollbar-track: #2f3136;
   --scrollbar-thumb: rgba(220, 221, 222, 0.10);
   --scrollbar-thumb-hover: rgba(220, 221, 222, 0.20);
+
+  /* BUGFIX "тёмные темы не адаптированы": these tokens were missing — they
+     fell back to Ayu Dark values (cyan tints on a blurple theme). */
+  --bg-sidebar-selected: rgba(88, 101, 242, 0.24);
+  --status-success: #3ba55c;
+
+  --diff-added-bg: rgba(59, 165, 92, 0.18);
+  --diff-removed-bg: rgba(237, 66, 69, 0.18);
+  --diff-added-line: rgba(59, 165, 92, 0.08);
+  --diff-removed-line: rgba(237, 66, 69, 0.08);
+  --diff-added-word: rgba(59, 165, 92, 0.35);
+  --diff-removed-word: rgba(237, 66, 69, 0.35);
+
+  --tag-bg: rgba(88, 101, 242, 0.12);
+  --tag-border: rgba(88, 101, 242, 0.35);
+  --tag-text: #7984ff;
+
+  --warning-bg: rgba(250, 166, 26, 0.10);
+  --warning-icon: #faa61a;
+  --warning-border: rgba(250, 166, 26, 0.3);
+
+  --graph-line: #292b30;
+  --graph-node-fill: #36393f;
+  --graph-node-border: #b9bbbe;
+  --graph-node-selected: #5865f2;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
 /* ===========================================================================
@@ -1172,6 +1228,42 @@
   --scrollbar-track: #15162a;
   --scrollbar-thumb: rgba(155, 109, 255, 0.20);
   --scrollbar-thumb-hover: rgba(155, 109, 255, 0.35);
+
+  /* BUGFIX "тёмные темы не адаптированы": these tokens were missing — the
+     worst offender was the splitter hover flashing Ayu CYAN (#39BAE6) on a
+     purple theme; sidebar-selected/active/tag/warning also rendered with
+     foreign (Ayu) colors. */
+  --bg-active: rgba(155, 109, 255, 0.18);
+  --border-strong: #3a3b6a;
+  --border-focused: #9b6dff;
+  --splitter-color-hover: #9b6dff;
+
+  --text-inverse: #1a1b2e;
+  --text-link: #b18cff;
+  --accent-hover: #b18cff;
+  --accent-active: #7d4fe0;
+
+  --diff-added-bg: rgba(94, 255, 142, 0.16);
+  --diff-removed-bg: rgba(255, 94, 122, 0.16);
+  --diff-added-line: rgba(94, 255, 142, 0.07);
+  --diff-removed-line: rgba(255, 94, 122, 0.07);
+  --diff-added-word: rgba(94, 255, 142, 0.32);
+  --diff-removed-word: rgba(255, 94, 122, 0.32);
+
+  --tag-bg: rgba(155, 109, 255, 0.12);
+  --tag-border: rgba(155, 109, 255, 0.35);
+  --tag-text: #b18cff;
+
+  --warning-bg: rgba(255, 213, 94, 0.10);
+  --warning-icon: #ffd55e;
+  --warning-border: rgba(255, 213, 94, 0.3);
+
+  --graph-line: #25264a;
+  --graph-node-border: #c8c9e8;
+  --graph-node-selected: #9b6dff;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 /* ===========================================================================

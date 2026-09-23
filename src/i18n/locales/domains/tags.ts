@@ -33,7 +33,6 @@ export const en: Record<string, string> = {
   'tags.groupCount': '({count} tags)',
   'tags.latest': 'latest: {name}',
   'tags.otherGroup': 'Other',
-  'tags.showingFirst200': 'Showing first 200 of {count} tags',
   // New Tag dialog
   'tags.nameLabel': 'Name',
   'tags.refLabel': 'Reference',
@@ -92,7 +91,6 @@ export const ru: Record<string, string> = {
   'tags.groupCount': '(тегов: {count})',
   'tags.latest': 'последний: {name}',
   'tags.otherGroup': 'Другие',
-  'tags.showingFirst200': 'Показаны первые 200 из {count} тегов',
   // New Tag dialog
   'tags.nameLabel': 'Имя',
   'tags.refLabel': 'Ссылка',
@@ -151,7 +149,6 @@ export const zh: Record<string, string> = {
   'tags.groupCount': '（{count} 个标签）',
   'tags.latest': '最新：{name}',
   'tags.otherGroup': '其他',
-  'tags.showingFirst200': '显示前 200 个，共 {count} 个标签',
   // New Tag dialog
   'tags.nameLabel': '名称',
   'tags.refLabel': '引用',
@@ -210,7 +207,6 @@ export const de: Record<string, string> = {
   'tags.groupCount': '({count} Tags)',
   'tags.latest': 'neuester: {name}',
   'tags.otherGroup': 'Andere',
-  'tags.showingFirst200': 'Erste 200 von {count} Tags',
   // New Tag dialog
   'tags.nameLabel': 'Name',
   'tags.refLabel': 'Referenz',

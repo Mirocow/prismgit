@@ -44,6 +44,9 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<{ subject: string; author: string } | null>(null);
+  // "Show all" past the initial 500-row page — repos with thousands of
+  // branches used to silently hide everything after row 200 here.
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -94,9 +97,22 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
     let list = filterSymbolicHeads(branches);
     if (action === 'checkout') list = list; // remote branches can be checked out too (creates local tracking)
     if (meta.branchOnly) list = list.filter((b) => !b.remote);
-    if (!q) return list.slice(0, 200);
-    return list.filter((b) => b.name.toLowerCase().includes(q)).slice(0, 200);
+    if (!q) return list;
+    return list.filter((b) => b.name.toLowerCase().includes(q));
   }, [branches, query, action, meta.branchOnly]);
+
+  // Re-query → re-page: collapse the "Show all" expansion so the filtered
+  // list starts from its first page again.
+  useEffect(() => { setShowAll(false); }, [query]);
+
+  // Initial page: 500 rows render instantly even on huge repos; the
+  // remainder is one click away (and fully reachable, unlike the old
+  // hard slice(0, 200) which made branches UNREACHABLE in this dialog).
+  const PAGE = 500;
+  const visible = useMemo(
+    () => (showAll ? filtered : filtered.slice(0, PAGE)),
+    [filtered, showAll],
+  );
 
   const run = useCallback(async () => {
     const target = selected?.trim();
@@ -170,7 +186,7 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-[120px]">
-          {filtered.map((b) => (
+          {visible.map((b) => (
             <button
               key={b.name}
               onClick={() => {
@@ -204,6 +220,14 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
               )}
             </button>
           ))}
+          {filtered.length > PAGE && !showAll && (
+            <button
+              onClick={() => setShowAll(true)}
+              className="w-full text-center px-3 py-2 text-2xs text-accent hover:bg-surface-hover rounded"
+            >
+              {t('branches.showAll', { count: filtered.length })}
+            </button>
+          )}
           {filtered.length === 0 && query && (
             <div className="px-3 py-4 text-xs text-text-tertiary">
               {t('dialogs.noMatchingBranch', { query })}

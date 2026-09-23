@@ -165,7 +165,10 @@
           root.style.setProperty('--boot-text-dim', t.dim);
           root.style.setProperty('--boot-accent', t.accent);
           // Light themes get stronger borders + opaque tip background.
-          var isLight = ['light', 'github-light', 'solarized-light'].indexOf(saved) >= 0;
+          // BUGFIX "тёмные темы не адаптированы": the list used to miss the
+          // 5 newer light themes — their boot screen got DARK borders
+          // (rgba white) on a LIGHT background.
+          var isLight = ['light', 'github-light', 'solarized-light', 'light-dim-sidebar', 'github-light-dim', 'designer-light', 'simple-light', 'material'].indexOf(saved) >= 0;
           if (isLight) {
             root.style.setProperty('--boot-border', 'rgba(0, 0, 0, 0.08)');
             root.style.setProperty('--boot-tip-bg', 'rgba(0, 0, 0, 0.04)');

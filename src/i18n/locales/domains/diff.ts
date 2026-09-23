@@ -30,7 +30,6 @@ export const en: Record<string, string> = {
   'diff.filterFiles': 'Filter files...',
   'diff.noFilesMatch': "No files match '{filter}'",
   'diff.fileRowTooltip': 'Click to load diff · Right-click for more actions',
-  'diff.showingFirst200': 'Showing first 200 of {count}',
   'diff.selectRefs': 'Select base and compare refs to see diff',
   // DiffViewer
   'diff.unstagedLine': 'Unstaged {count} line',
@@ -112,7 +111,6 @@ export const ru: Record<string, string> = {
   'diff.filterFiles': 'Фильтр файлов...',
   'diff.noFilesMatch': "Нет файлов по фильтру '{filter}'",
   'diff.fileRowTooltip': 'Клик — загрузить diff · Правый клик — другие действия',
-  'diff.showingFirst200': 'Показаны первые 200 из {count}',
   'diff.selectRefs': 'Выберите базу и ссылку сравнения, чтобы увидеть diff',
   // DiffViewer
   'diff.unstagedLine': 'Убрано из индекса: {count} строка',
@@ -194,7 +192,6 @@ export const zh: Record<string, string> = {
   'diff.filterFiles': '筛选文件...',
   'diff.noFilesMatch': "没有文件匹配“{filter}”",
   'diff.fileRowTooltip': '点击加载差异 · 右键查看更多操作',
-  'diff.showingFirst200': '显示前 200 个，共 {count} 个',
   'diff.selectRefs': '请选择基准与比较引用以查看差异',
   // DiffViewer
   'diff.unstagedLine': '已取消暂存 {count} 行',
@@ -276,7 +273,6 @@ export const de: Record<string, string> = {
   'diff.filterFiles': 'Dateien filtern...',
   'diff.noFilesMatch': "Keine Dateien passen zu '{filter}'",
   'diff.fileRowTooltip': 'Klick: Diff laden · Rechtsklick: weitere Aktionen',
-  'diff.showingFirst200': 'Erste 200 von {count}',
   'diff.selectRefs': 'Basis- und Vergleichsreferenz wählen, um den Diff zu sehen',
   // DiffViewer
   'diff.unstagedLine': '{count} Zeile ungestaget',
