@@ -28,11 +28,24 @@ interface WatcherEntry {
   repoPath: string;
   watchers: Array<FSWatcher | fs.FSWatcher>;
   debounceTimer: NodeJS.Timeout | null;
+  /** Guarantees a flush within DEBOUNCE_MAX_WAIT_MS of the FIRST event in a
+   *  burst — see `debounce()` below. */
+  maxWaitTimer: NodeJS.Timeout | null;
 }
 
 const watchers = new Map<string, WatcherEntry>();
 
 const DEBOUNCE_MS = 500;
+/**
+ * PERF/latency guard (v3): the old debounce restarted its 500ms timer on
+ * EVERY event, so a sustained event stream (git checkout of many files,
+ * `git gc`, IDE auto-save on a watched dir) postponed the notification
+ * FOREVER — the renderer's status could stay minutes stale while events
+ * kept arriving. The max-wait cap guarantees the FIRST event of a burst is
+ * delivered at most 2s later, no matter how many events follow it.
+ * (Mirrors the renderer's leading+trailing strategy in App.tsx.)
+ */
+const DEBOUNCE_MAX_WAIT_MS = 2_000;
 
 /**
  * Directories and files that never affect git status, but generate a
@@ -75,12 +88,31 @@ function notifyRenderer(repoPath: string, eventType: string) {
 }
 
 function debounce(entry: WatcherEntry, eventType: string) {
+  // Start the max-wait timer on the FIRST event of a burst — it guarantees
+  // a flush even if events keep arriving without pause (timer-restart
+  // starvation). Later events only reset the SHORT trailing timer.
+  if (!entry.maxWaitTimer) {
+    entry.maxWaitTimer = setTimeout(() => {
+      entry.maxWaitTimer = null;
+      if (entry.debounceTimer) {
+        clearTimeout(entry.debounceTimer);
+        entry.debounceTimer = null;
+      }
+      notifyRenderer(entry.repoPath, eventType);
+    }, DEBOUNCE_MAX_WAIT_MS);
+    (entry.maxWaitTimer as unknown as { unref?: () => void }).unref?.();
+  }
   if (entry.debounceTimer) {
     clearTimeout(entry.debounceTimer);
   }
   entry.debounceTimer = setTimeout(() => {
-    notifyRenderer(entry.repoPath, eventType);
     entry.debounceTimer = null;
+    // The burst ended normally — cancel the max-wait guard.
+    if (entry.maxWaitTimer) {
+      clearTimeout(entry.maxWaitTimer);
+      entry.maxWaitTimer = null;
+    }
+    notifyRenderer(entry.repoPath, eventType);
   }, DEBOUNCE_MS);
 }
 
@@ -99,6 +131,23 @@ function watchFile(repoPath: string, filePath: string, entry: WatcherEntry, even
     // File may not exist or be inaccessible
   }
 }
+
+/**
+ * Test-only seam for the debounce logic (see tests/unit/watcherDebounce.test.ts).
+ * Exposes entry construction + the debounce function so unit tests can drive
+ * event bursts deterministically without real filesystem events, plus timer
+ * cleanup so a test can assert "no late notification fired".
+ */
+export const __watcherTestHooks = {
+  makeEntry(repoPath: string): WatcherEntry {
+    return { repoPath, watchers: [], debounceTimer: null, maxWaitTimer: null };
+  },
+  debounce: (entry: WatcherEntry, eventType: string) => debounce(entry, eventType),
+  clearTimers: (entry: WatcherEntry) => {
+    if (entry.debounceTimer) { clearTimeout(entry.debounceTimer); entry.debounceTimer = null; }
+    if (entry.maxWaitTimer) { clearTimeout(entry.maxWaitTimer); entry.maxWaitTimer = null; }
+  },
+};
 
 /**
  * Watch a directory (e.g. .git/refs, rebase-merge state) with chokidar.
@@ -132,6 +181,7 @@ export function startWatching(repoPath: string): void {
     repoPath,
     watchers: [],
     debounceTimer: null,
+    maxWaitTimer: null,
   };
 
   // Watch key Git state files (single-file fs.watch — cheap)
@@ -201,6 +251,9 @@ export function stopWatching(repoPath: string): void {
   }
   if (entry.debounceTimer) {
     clearTimeout(entry.debounceTimer);
+  }
+  if (entry.maxWaitTimer) {
+    clearTimeout(entry.maxWaitTimer);
   }
   watchers.delete(repoPath);
 }

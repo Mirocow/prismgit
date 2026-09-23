@@ -358,14 +358,20 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
     // Without these env overrides, git-lfs smudge filters run on every file.
     const git = simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS });
 
-    // Run all reads in parallel — they are independent.
-    const [logRaw, branchResult, remotes, commitCountStr, headHash] = await Promise.all([
+    // PERF (v3): run all reads in parallel — they are independent.
+    // The old flow ran FIVE subprocesses, two of them redundant:
+    //   - `git.revparse('HEAD')` duplicated the hash that `git log -1`
+    //     already returns (log -1 without a rev IS HEAD) — and on the
+    //     unborn-HEAD repo both calls fail anyway, so it added nothing;
+    //   - branchLocal() + getRemotes() + rev-list --count + log -1 are the
+    //     four genuinely distinct reads.
+    // 5 spawns → 4 per repo, on every repo open / push / pull / fetch.
+    const [logRaw, branchResult, remotes, commitCountStr] = await Promise.all([
       // PERF: git.raw instead of git.log — avoids simple-git's full LogEntry parsing
       git.raw(['log', '-1', '--format=%H%x1f%s%x1f%cI']).catch(() => ''),
       git.branchLocal().catch(() => ({ all: [] as string[] })),
       git.getRemotes(true).catch(() => []),
       git.raw(['rev-list', '--count', 'HEAD']).catch(() => '0'),
-      git.revparse('HEAD').catch(() => undefined),
     ]);
 
     // Parse the raw log output: hash\x1fsubject\x1fdate
@@ -403,9 +409,10 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
     }
 
     const updates: Partial<RepositoryMetadata> = {
-      // Prefer revparse for the hash (always available even when log is empty
-      // for a fresh repo with one unborn commit) but fall back to log's hash.
-      lastCommitHash: (headHash && headHash.trim()) || latest?.hash,
+      // `git log -1` (no rev) resolves HEAD itself — the removed redundant
+      // `revparse('HEAD')` returned the exact same hash (and also failed on
+      // unborn HEAD, where log -1 fails too, so latest stays null there).
+      lastCommitHash: latest?.hash,
       lastCommitDate: latest?.date,
       lastCommitMessage: latest?.message,
       branchCount: (branchResult as { all: string[] }).all.length,
@@ -434,21 +441,33 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
  * incoming/outgoing counters — but NOT the cached branch count / last
  * commit / commit count / provider info, which made the row look "stuck").
  *
- * Runs each refresh sequentially to avoid spawning N concurrent git
- * subprocesses (would saturate the system on large repo lists).
+ * PERF (v3): used to run each repo SEQUENTIALLY — with 10 repos that's 10
+ × ~150-400ms serialized spawn chains (1.5-4s of wall time the sidebar
+ * blocks). Now a bounded worker pool of 3 keeps concurrency safe (the old
+ * comment's concern about saturating the process table) while cutting wall
+ * time to ~⌈N/3⌉ rounds.
  */
+const REPO_STATS_CONCURRENCY = 3;
+
 export async function refreshAllRepoStats(): Promise<{ refreshed: number; errors: Record<string, string> }> {
   const repos = (store.get('repositories') || []) as RepositoryEntry[];
   const errors: Record<string, string> = {};
   let refreshed = 0;
-  for (const r of repos) {
-    try {
-      await refreshRepoStats(r.path);
-      refreshed++;
-    } catch (e) {
-      errors[r.path] = e instanceof Error ? e.message : String(e);
+  const queue = repos.slice();
+  const worker = async (): Promise<void> => {
+    while (queue.length > 0) {
+      const r = queue.shift()!;
+      try {
+        await refreshRepoStats(r.path);
+        refreshed++;
+      } catch (e) {
+        errors[r.path] = e instanceof Error ? e.message : String(e);
+      }
     }
-  }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(REPO_STATS_CONCURRENCY, repos.length) }, () => worker())
+  );
   return { refreshed, errors };
 }
 

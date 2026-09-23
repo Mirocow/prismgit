@@ -310,14 +310,12 @@ export function HistoryPage() {
       // trickle in and update the row styling.
       void (async () => {
         try {
-          // Run both rev-lists in parallel — they're independent and
-          // previously ran sequentially, doubling latency.
-          // localList is fetched but not currently used (kept for parity
-          // with the original code which also computed it; may be needed
-          // when we add "local-only" tinting in a future iteration).
-          const [, remoteOnly] = await Promise.all([
-            api.git.raw(repo.path, ['rev-list', '--branches']),
-            api.git.raw(repo.path, ['rev-list', '--remotes', '--not', '--branches']),
+          // PERF (v3): this block used to ALSO run `rev-list --branches`
+          // (full local-branch graph walk) whose result was discarded —
+          // a pure waste of one subprocess + graph walk on every History
+          // load (500ms+ on the 4.7k-commit live repo). Removed.
+          const remoteOnly = await api.git.raw(repo.path, [
+            'rev-list', '--remotes', '--not', '--branches',
           ]);
           // Commits reachable from remote-tracking branches but NOT from local branches
           // = commits that exist on the remote but haven't been pulled yet

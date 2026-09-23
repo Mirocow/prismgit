@@ -690,28 +690,37 @@ export async function isRepo(targetPath: string): Promise<boolean> {
 
 export async function status(repoPath: string): Promise<StatusResult> {
   const git = getGit(repoPath);
-  // ─── Fast unborn-HEAD check ────────────────────────────────────────────
-  // On a fresh repo with NO commits, simple-git's `.status()` throws because
-  // git internally runs `rev-parse --abbrev-ref HEAD` which exits 128.
-  // Previously we tried to catch that error AFTER `.status()` was called —
-  // but that meant git had ALREADY done the expensive status work (including
-  // LFS smudge checks, submodule discovery, index refresh) before throwing.
-  // On a repo with LFS this was 5-10s wasted PER failed status call.
+  // ─── Unborn-HEAD handling ───────────────────────────────────────────
+  // PERF (v3): a fresh `git init`'d repo (no commits) used to cost TWO
+  // git subprocesses here — a `rev-parse --verify -q HEAD` preflight plus
+  // the status call itself — because the code assumed simple-git's
+  // `.status()` throws on unborn HEAD. It does NOT (verified against
+  // simple-git 3.27: `status --porcelain -b -z` reports
+  // `## No commits yet on <branch>` which simple-git parses into
+  // current='<branch>', tracking=null). The preflight was therefore a pure
+  // waste of one subprocess on the MOST-INVOKED API of the whole app
+  // (watcher refresh every 5s, every page switch, every repo open).
   //
-  // Now we check for unborn HEAD FIRST with a cheap `rev-parse --verify HEAD`.
-  // If HEAD doesn't exist, we go directly to the porcelain path — ONE git
-  // call total, not two.
-  let hasHead = true;
+  // We now call `.status()` directly and keep the raw-porcelain fallback
+  // ONLY in the catch path — if some exotic git/simple-git combination
+  // ever does throw, behavior is identical to the old preflight design.
+  // The parsed status from simple-git (its public type is only reachable
+  // via ReturnType — the runtime class StatusSummary isn't exported).
+  let s: Awaited<ReturnType<SimpleGit['status']>>;
   try {
-    await git.raw(['rev-parse', '--verify', '-q', 'HEAD']);
+    // Normal repo with commits — use simple-git's status with
+    // --ignore-submodules=all to skip the `.gitmodules` check that git
+    // does on EVERY status call (even on repos without .gitmodules).
+    // This was the #1 source of command-log spam: `git config --file
+    // .gitmodules --get-regexp ^submodule\..*\.path$` running every 5
+    // seconds. PrismGit has its own Submodules page that reads
+    // .gitmodules directly via fs.
+    s = await git.status(['--ignore-submodules=all']);
   } catch {
-    hasHead = false;
-  }
-
-  if (!hasHead) {
-    // Unborn HEAD — repo was just `git init`'d with no commits.
-    // Use `--ignore-submodules=all` to skip the `.gitmodules` check
-    // (git checks for submodules even on repos without .gitmodules).
+    // Unborn HEAD (or a repo simple-git can't summarise) — fall back to
+    // the single raw porcelain call. Use `--ignore-submodules=all` to skip
+    // the `.gitmodules` check (git checks for submodules even on repos
+    // without .gitmodules).
     const rawFiles = await git.raw(['status', '--porcelain', '-z', '--ignore-submodules=all']);
     const files: { path: string; index: string; working_dir: string }[] = [];
     for (const entry of rawFiles.split('\u0000').filter(Boolean)) {
@@ -743,15 +752,6 @@ export async function status(repoPath: string): Promise<StatusResult> {
       isClean: () => files.length === 0,
     } as unknown as StatusResult;
   }
-
-  // Normal repo with commits — use simple-git's status with
-  // --ignore-submodules=all to skip the `.gitmodules` check that git
-  // does on EVERY status call (even on repos without .gitmodules).
-  // This was the #1 source of command-log spam: `git config --file
-  // .gitmodules --get-regexp ^submodule\..*\.path$` running every 5
-  // seconds. PrismGit has its own Submodules page that reads
-  // .gitmodules directly via fs.
-  const s = await git.status(['--ignore-submodules=all']);
   const state = await detectRepoState(repoPath, git);
   const gitDir = await resolveGitDir(repoPath, git);
   // Cherry-pick details — which commit is being picked and whether the pick has
@@ -2421,7 +2421,15 @@ export async function findCommit(repoPath: string, query: string): Promise<LogEn
 
 export async function branches(repoPath: string): Promise<BranchInfo[]> {
   const git = getGit(repoPath);
-  const current = await git.status(['--ignore-submodules=all']);
+  // PERF (v3): this used to run a FULL `git status` here just to learn the
+  // current branch's tracking/ahead/behind — a whole extra subprocess
+  // (1–5s on LFS repos) whose data `for-each-ref` below ALREADY provides
+  // via %(upstream:short) / %(upstream:track) / %(HEAD). The status call
+  // was only "more authoritative" for an unborn HEAD — where there are no
+  // refs/heads entries at all, so the fields are never consumed. The extra
+  // `rev-parse refs/remotes/<upstream>` gone-probe is equally redundant:
+  // %(upstream:track) reports "gone" exactly when the configured upstream
+  // ref no longer exists.
 
   // Use for-each-ref to get all branches in a single git call.
   // Note: simple-git passes args through to git as-is, so we use real tab characters,
@@ -2540,25 +2548,23 @@ export async function branches(repoPath: string): Promise<BranchInfo[]> {
 
       if (!isRemote && isCurrent) {
         // For the CURRENT branch, keep the `tracking` field name in sync
-        // with git status (used elsewhere in the UI — Toolbar Pull/
-        // Push dropdowns, HistoryPage head+upstream resolution).
-        branchInfo.tracking = current.tracking || upstream;
-        // git status already computes ahead/behind for the current
-        // branch — use it (more authoritative than the for-each-ref
-        // track field, which doesn't account for an unborn HEAD or
-        // uncommitted index state).
-        branchInfo.ahead = current.ahead ?? trackInfo.ahead;
-        branchInfo.behind = current.behind ?? trackInfo.behind;
-        // 'gone' detection: prefer git status's view (tracking ref
-        // was deleted on remote). The track field also reports 'gone'
-        // when the upstream ref no longer exists — fall back to that.
-        if (current.tracking) {
-          const remoteRefs = await git.raw(['rev-parse', '--verify', '-q', `refs/remotes/${current.tracking}`]).catch(() => '');
-          if (!remoteRefs.trim()) {
-            branchInfo.gone = true;
-          }
-        } else if (trackInfo.gone) {
+        // with the rest of the UI — Toolbar Pull/Push dropdowns and
+        // HistoryPage head+upstream resolution read it. %(upstream:short)
+        // is the same `branch.<name>.merge` + remote pair git status
+        // would report; ahead/behind come from %(upstream:track) (same
+        // rev-list counts git status computes internally).
+        branchInfo.tracking = upstream;
+        if (trackInfo.gone) {
           branchInfo.gone = true;
+        } else if (upstream) {
+          // In-sync semantics for the CURRENT branch: `git status` (the
+          // old data source here) reports EXPLICIT 0/0 when the branch
+          // matches its upstream, while an empty %(upstream:track) gives
+          // undefined/undefined. Downstream consumers (gitBranchesTrack
+          // integration test, Push/Pull toolbar enablement) treat the
+          // current branch's 0 as "nothing to push" — normalize it.
+          branchInfo.ahead = trackInfo.ahead ?? 0;
+          branchInfo.behind = trackInfo.behind ?? 0;
         }
       } else if (!isRemote && upstream) {
         // Non-current local branch with an upstream.
@@ -2989,47 +2995,30 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
     }
   }
 
-  // 3. Current branch — SKIP on unborn HEAD repos to avoid the exit-128
-  //    spam in the command log. We check HEAD exists first (cheap), then
-  //    only call rev-parse if HEAD is valid. On unborn HEAD, branch=null.
-  //
-  //    Optimization: use `git symbolic-ref --short -q HEAD` instead of
-  //    `rev-parse --verify` + `rev-parse --abbrev-ref`. symbolic-ref is
-  //    a SINGLE git invocation that:
-  //      - returns the branch name (e.g. 'main') when HEAD points at a
-  //        branch ref that exists
-  //      - returns exit=1 + NOTHING on stderr when HEAD is unborn or
-  //        detached (-q suppresses the error)
-  //    The previous two-step probe spawned TWO git subprocesses per poll
-  //    on every repo, and on unborn repos it produced the 'fatal: ambiguous
-  //    argument HEAD' noise the user reported in the command log.
-  try {
-    const name = (await git.raw(['symbolic-ref', '--short', '-q', 'HEAD'])).trim();
-    summary.branch = name || null; // empty → detached
-  } catch {
-    // Unborn HEAD (fresh repo, no commits) OR detached HEAD — no branch
-    // name to report. Detached is rare in the sidebar list (we only poll
-    // repos the user has opened), so we treat this as 'no branch'.
-    summary.branch = null;
-  }
-
-  // 4. Incoming: commits reachable from remote-tracking branches but not from
-  //    any local branch. Outgoing is the mirror image. These aggregates don't
-  //    require an upstream to be configured and cover all branches at once.
-  try {
-    summary.incoming = await countRevList(git, ['rev-list', '--count', '--remotes', '--not', '--branches']);
-  } catch { /* keep 0 */ }
-  try {
-    summary.outgoing = await countRevList(git, ['rev-list', '--count', '--branches', '--not', '--remotes']);
-  } catch { /* keep 0 */ }
-
-  // 5. Working tree changes (local only, cheap)
-  try {
-    // --ignore-submodules=all: skip submodule discovery (the .gitmodules
-    // check that spams the command log on repos without submodules).
-    const status = await git.raw(['status', '--porcelain', '--ignore-submodules=all']);
-    summary.dirty = status.split('\n').filter((line) => line.trim().length > 0).length;
-  } catch { /* keep 0 */ }
+  // 3+4+5. PERF (v3): these four reads (symbolic-ref, two rev-list counts,
+  //    status --porcelain) are completely INDEPENDENT but used to run
+  //    sequentially — 4 round-trips of subprocess spawn+exec per repo per
+  //    poll. On a sidebar with 10 repos that's 40 serialized spawns per
+  //    poll cycle. They now run in one Promise.all: wall time drops from
+  //    sum(...) to max(...) (the getGit queue allows 4 concurrent).
+  const [branchName, incomingRaw, outgoingRaw, dirtyRaw] = await Promise.all([
+    git.raw(['symbolic-ref', '--short', '-q', 'HEAD'])
+      .then((out) => out.trim())
+      .catch(() => ''),
+    countRevList(git, ['rev-list', '--count', '--remotes', '--not', '--branches'])
+      .then((n) => n)
+      .catch(() => 0),
+    countRevList(git, ['rev-list', '--count', '--branches', '--not', '--remotes'])
+      .then((n) => n)
+      .catch(() => 0),
+    git.raw(['status', '--porcelain', '--ignore-submodules=all'])
+      .then((status) => status.split('\n').filter((line) => line.trim().length > 0).length)
+      .catch(() => 0),
+  ]);
+  summary.branch = branchName || null; // empty → detached or unborn
+  summary.incoming = incomingRaw;
+  summary.outgoing = outgoingRaw;
+  summary.dirty = dirtyRaw;
 
   summary.checkedAt = Date.now();
   // Cache the result so the next poll within POLL_CACHE_TTL_MS returns
@@ -3272,28 +3261,25 @@ export async function diffCommit(
 ): Promise<DiffResult> {
   const git = getGit(repoPath);
 
-  // Preflight: verify the commit (and optional parent) exist before invoking
-  // `git diff`. When a commit becomes unreachable (e.g. after `git reset --hard`,
-  // `git commit --amend`, force-push, or `git gc --prune=now`), the hash in the
-  // History list may no longer resolve — `git diff` would throw
-  // `fatal: bad object <hash>`. We swallow that case and return an empty diff
-  // so the UI shows "No changes" instead of an IPC error popup.
-  if (!(await commitExists(repoPath, hash))) {
-    return {
-      oldContent: '', newContent: '',
-      oldPath: hash, newPath: hash,
-      hunks: [], binary: false,
-      newFile: false, deletedFile: false, renamedFile: false,
-    };
-  }
-  if (parentHash && !(await commitExists(repoPath, parentHash))) {
-    return {
-      oldContent: '', newContent: '',
-      oldPath: hash, newPath: hash,
-      hunks: [], binary: false,
-      newFile: false, deletedFile: false, renamedFile: false,
-    };
-  }
+  // PERF (v3): the old flow spawned up to FOUR sequential subprocesses here:
+  //   commitExists(hash) → commitExists(parentHash) →
+  //   rev-list --parents → diff/show
+  // Both existence preflights are redundant: every subsequent git call below
+  // ALREADY fails with `fatal: bad object <hash>` on an unreachable/gc'd
+  // commit, and each of those failures is caught and mapped to the exact
+  // same empty-DiffResult the preflights used to return. Removing them
+  // saves two subprocesses on EVERY diff view while keeping the degraded
+  // behavior identical (bad hash → empty diff, no IPC error popup).
+  //
+  // The rev-list --parents call stays: it is load-bearing for the root-commit
+  // case (a root commit has no parent, so `<hash>^..<hash>` is invalid —
+  // `git show <hash>` handles it) and for first-parent diffs.
+  const emptyDiff = (): DiffResult => ({
+    oldContent: '', newContent: '',
+    oldPath: hash, newPath: hash,
+    hunks: [], binary: false,
+    newFile: false, deletedFile: false, renamedFile: false,
+  });
 
   // Resolve the diff range.
   // Bug fix: the previous code did `${hash}^..${hash}` when no parentHash
@@ -3337,14 +3323,9 @@ export async function diffCommit(
       rawDiff = await git.raw(['diff', '--no-color', ...extraArgs, range]);
     }
   } catch {
-    // Race: commit may have been gc'd between the preflight and the diff.
+    // Race: commit may have been gc'd between the rev-list and the diff.
     // Return an empty diff rather than propagating the error.
-    return {
-      oldContent: '', newContent: '',
-      oldPath: hash, newPath: hash,
-      hunks: [], binary: false,
-      newFile: false, deletedFile: false, renamedFile: false,
-    };
+    return emptyDiff();
   }
   const parsed: ParsedDiff = parseDiffShared(rawDiff);
   return {
@@ -3398,41 +3379,54 @@ export async function commitExists(repoPath: string, hash: string): Promise<bool
 export async function commitFiles(repoPath: string, hash: string): Promise<CommitFile[]> {
   const git = getGit(repoPath);
 
-  // Preflight: verify the commit exists. If the user clicked on a commit hash
-  // from a stale History list (e.g., the commit was force-pushed away or
-  // gc'd), `git show` would throw `fatal: bad object <hash>`. We catch that
-  // case here and return an empty file list — the UI shows "No files" which
-  // is the correct degraded behavior (and avoids the IPC error popup).
-  if (!(await commitExists(repoPath, hash))) {
-    return [];
-  }
-
-  // MERGE commits: `git show <merge>` prints a COMBINED diff which lists NO
-  // files for a clean merge — the History panel showed "Files (0)" for every
-  // merge commit (octopus merges too). SmartGit shows the changes the merge
-  // introduced relative to its FIRST parent — the union of everything the
-  // merged branches brought in (plus conflict resolutions). Detect merges via
-  // `rev-list --parents` and diff `<merge>^1..<merge>` for them.
+  // PERF (v3): the old flow spawned FOUR sequential subprocesses here:
+  //   commitExists (rev-parse --verify) → rev-list --parents →
+  //   show --name-status → show --numstat
+  // `rev-list --parents -n 1 <hash>` already fails with `fatal: bad object`
+  // on an unreachable/gc'd hash — making the dedicated commitExists
+  // preflight redundant (it existed to avoid the show throwing, but the
+  // show is already wrapped in try/catch returning []).
+  //
+  // New flow: rev-list (existence + merge detection) → then name-status
+  // and numstat in PARALLEL — they're independent git reads of the same
+  // commit. 4 sequential spawns → 1 + 2 concurrent ≈ 2× faster wall time
+  // on every commit click in History.
   let parentCount = 1;
   try {
     const parentsOut = await git.raw(['rev-list', '--parents', '-n', '1', hash]);
     parentCount = parentsOut.trim().split(/\s+/).length - 1;
-  } catch { /* default to non-merge handling */ }
-  const isMerge = parentCount > 1;
-
-  // Get file list with status. Wrap in try/catch as defense-in-depth — even
-  // with the preflight check, a race condition (commit gc'd between the check
-  // and the show) would otherwise throw.
-  // `-c core.quotePath=false` keeps non-ASCII filenames readable (raw UTF-8
-  // instead of C-escaped octal) so path matching + clicking work.
-  let raw: string;
-  try {
-    raw = isMerge
-      ? await git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--name-status', `${hash}^1`, hash])
-      : await git.raw(['-c', 'core.quotePath=false', 'show', '--no-color', '--name-status', '--format=', hash]);
   } catch {
+    // Unreachable commit (gc'd / force-pushed away) or bad hash — the UI
+    // shows "No files", the correct degraded behavior (same as the old
+    // commitExists preflight path).
     return [];
   }
+  const isMerge = parentCount > 1;
+
+  // Get file list with status AND numstat — two independent reads of the
+  // same commit, run in PARALLEL (previously sequential: 4 spawns total,
+  // now 3 with 2 concurrent ≈ half the wall time).
+  // Defense-in-depth stays: even with the rev-list validation above, a race
+  // (commit gc'd between the check and the show) is caught and returns [].
+  // `-c core.quotePath=false` keeps non-ASCII filenames readable (raw UTF-8
+  // instead of C-escaped octal) so path matching + clicking work.
+  //
+  // NB: `--name-status` and `--numstat` CANNOT be merged into one git call —
+  // git treats them as mutually exclusive diff formats (the later flag
+  // silently overrides the earlier one; verified empirically) — so this
+  // stays two calls, just parallel instead of sequential.
+  const [rawResult, numstatResult] = await Promise.allSettled([
+    isMerge
+      ? git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--name-status', `${hash}^1`, hash])
+      : git.raw(['-c', 'core.quotePath=false', 'show', '--no-color', '--name-status', '--format=', hash]),
+    isMerge
+      ? git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--numstat', `${hash}^1`, hash])
+      : git.raw(['-c', 'core.quotePath=false', 'show', '--numstat', '--format=', hash]),
+  ]);
+  if (rawResult.status !== 'fulfilled') {
+    return [];
+  }
+  const raw = rawResult.value;
   const result: CommitFile[] = [];
   const lines = raw.split('\n').filter(Boolean);
   for (const line of lines) {
@@ -3468,10 +3462,8 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
   // Previously each file triggered its own `git show --numstat <file>` spawn,
   // which on a 200-file merge commit meant 200 sequential git invocations
   // (~2-6 seconds on Windows). Now: 1 call, O(lines) parse.
-  try {
-    const numstatRaw = isMerge
-      ? await git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--numstat', `${hash}^1`, hash])
-      : await git.raw(['-c', 'core.quotePath=false', 'show', '--numstat', '--format=', hash]);
+  if (numstatResult.status === 'fulfilled') {
+    const numstatRaw = numstatResult.value;
     // Build a path → stat lookup. numstat format: "<add>\t<del>\t<path>"
     // (for renames: "<add>\t<del>\t<old>\t<new>" — but the last column is
     // always the resulting path, matching `result[i].path`).
@@ -3497,8 +3489,6 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
         f.binary = s.binary;
       }
     }
-  } catch {
-    /* ignore — numstat is best-effort */
   }
   return result;
 }

@@ -3,16 +3,29 @@
  * This tests the actual electron/services/git.ts code (not mocked).
  */
 import { describe, it, expect, beforeAll } from 'vitest';
+import { execSync } from 'node:child_process';
 import * as gitService from '../../electron/services/git';
 
 const OLLAMA_REPO = '/home/z/my-project/repos/ollama-code';
 
 // Optional large-repo fixture: suite is skipped when the repo is absent so the
-// rest of the verification stays green. To run it locally:
-//   git clone https://github.com/ollama/ollama /home/z/my-project/repos/ollama-code
+// rest of the verification stays green. To run it locally, clone ANY
+// ollama-code-sized repo (upstream github.com/ollama/ollama or an internal
+// mirror) to /home/z/my-project/repos/ollama-code — the assertions below
+// derive their expectations from the repo itself, so both work.
 const OLLAMA_REPO_EXISTS = require('fs').existsSync(`${OLLAMA_REPO}/.git`);
 
-describe.skipIf(!OLLAMA_REPO_EXISTS)('git service — ollama-code integration (5731 commits, 591 tags)', () => {
+/** Git-CLI truth for repo facts (tag list, remote URL) — keeps the tests
+ *  independent of WHICH clone lives at OLLAMA_REPO. */
+function gitFact(args: string[]): string {
+  try {
+    return execSync(args.join(' '), { cwd: OLLAMA_REPO, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch {
+    return '';
+  }
+}
+
+describe.skipIf(!OLLAMA_REPO_EXISTS)('git service — ollama-code integration (large repo, shape-agnostic)', () => {
   beforeAll(() => {
     // Ensure repo exists
     if (!require('fs').existsSync(`${OLLAMA_REPO}/.git`)) {
@@ -56,9 +69,15 @@ describe.skipIf(!OLLAMA_REPO_EXISTS)('git service — ollama-code integration (5
     expect(main!.current).toBe(true);
   });
 
-  it('tags returns 500+ tags (for-each-ref, no N+1)', async () => {
+  it('tags returns the full tag list (for-each-ref, no N+1)', async () => {
+    // Repo-shape-agnostic: upstream ollama/ollama has 591 tags; internal
+    // mirrors differ. Count refs via git CLI and require parity.
+    const expected = gitFact(['git', 'for-each-ref', '--format=x', 'refs/tags'])
+      .split('\n')
+      .filter(Boolean).length;
     const tags = await gitService.tags(OLLAMA_REPO);
-    expect(tags.length).toBeGreaterThan(100);
+    expect(expected).toBeGreaterThan(0);
+    expect(tags.length).toBe(expected);
     // Check both types
     const annotated = tags.find(t => !t.lightweight);
     const lightweight = tags.find(t => t.lightweight);
@@ -122,8 +141,20 @@ describe.skipIf(!OLLAMA_REPO_EXISTS)('git service — ollama-code integration (5
     expect(branch).toBeDefined();
   });
 
-  it('findRef finds tags (v0)', async () => {
-    const refs = await gitService.findRef(OLLAMA_REPO, 'v0');
+  it('findRef finds a real tag by prefix', async () => {
+    // Repo-shape-agnostic: take the FIRST actual tag and search a unique
+    // prefix of it (upstream had a literal 'v0' tag; mirrors may not).
+    // NB: plain `git tag` — for-each-ref --format=%(refname:short) would
+    // hit /bin/sh's paren parsing via execSync's string command.
+    const firstTag = gitFact(['git', 'tag'])
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)[0] || '';
+    expect(firstTag).toBeTruthy();
+    // Use a prefix long enough to be unique but short enough to exercise
+    // prefix matching (min 2 chars).
+    const prefix = firstTag.slice(0, Math.max(2, Math.min(4, firstTag.length)));
+    const refs = await gitService.findRef(OLLAMA_REPO, prefix);
     expect(refs.length).toBeGreaterThan(0);
     const tag = refs.find(r => r.type === 'tag');
     expect(tag).toBeDefined();
@@ -141,11 +172,26 @@ describe.skipIf(!OLLAMA_REPO_EXISTS)('git service — ollama-code integration (5
     expect(result.conflicts).toHaveLength(0);
   });
 
-  it('extractRepoInfo detects GitHub', async () => {
+  it('extractRepoInfo classifies the remote provider from its URL', async () => {
+    // Repo-shape-agnostic: upstream ollama/ollama → github; a GitLab-hosted
+    // mirror → gitlab; a bare-IP internal server → unknown. Derive the
+    // expectation from the actual origin URL.
+    const url = gitFact(['git', 'remote', 'get-url', 'origin']).trim();
+    expect(url).toBeTruthy();
+    const expectGithub = /github/i.test(url);
+    const expectGitlab = !expectGithub && /gitlab/i.test(url);
     const info = await gitService.extractRepoInfo(OLLAMA_REPO);
-    expect(info.provider).toBe('github');
-    expect(info.owner).toBe('ollama');
-    expect(info.repo).toBe('ollama');
+    if (expectGithub) {
+      expect(info.provider).toBe('github');
+      expect(info.owner).toBeTruthy();
+      expect(info.repo).toBeTruthy();
+    } else if (expectGitlab) {
+      expect(info.provider).toBe('gitlab');
+    } else {
+      // Unknown hosts (e.g. http://178.140.10.58:8082/...) are classified
+      // as unknown — the UI offers manual GitHub/GitLab selection.
+      expect(info.provider).toBe('unknown');
+    }
   });
 
   it('configList returns entries', async () => {
