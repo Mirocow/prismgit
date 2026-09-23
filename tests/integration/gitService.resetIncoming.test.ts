@@ -38,8 +38,10 @@ describe('hard reset → incoming commits display', () => {
     process.env.GIT_CONFIG_GLOBAL = path.join(ROOT, 'empty-gitconfig');
     fs.writeFileSync(process.env.GIT_CONFIG_GLOBAL, '');
 
-    // Bare origin + clone.
-    shell('git init -q --bare origin.git', ROOT);
+    // Bare origin + clone. `-b main` pins the initial branch — the machine's
+    // init.defaultBranch (master on stock git, main if configured) must not
+    // matter (same convention as tests/fixtures/setup-test-repo.sh).
+    shell('git init -q --bare -b main origin.git', ROOT);
     shell(`git clone -q ${path.join(ROOT, 'origin.git')} work`, ROOT);
     const work = path.join(ROOT, 'work');
     shell('git config user.name "Ivan Testov"', work);
@@ -53,7 +55,12 @@ describe('hard reset → incoming commits display', () => {
     }
     const branch = shell('git symbolic-ref --short HEAD', work);
     shell(`git push -q -u origin ${branch}`, work);
-    if (branch !== 'main') shell('git branch -q -m main', work);
+    // Defensive: force the local branch name to `main` regardless of what
+    // the clone checked out (keeps the expectations below portable).
+    if (branch !== 'main') {
+      shell(`git branch -q -m main ${branch}`, work);
+      shell('git push -q -u origin main', work);
+    }
   });
 
   afterAll(() => {
