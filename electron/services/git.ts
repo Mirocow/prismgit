@@ -5536,18 +5536,31 @@ export async function detectLfsConfigured(repoPath: string): Promise<boolean> {
   } catch { /* ignore */ }
 
   // 2. Check git config for filter.lfs.* entries
+  // ⚠️ MUST be scoped with --local: the app's own env (git-env.ts
+  // GIT_CONFIG_COUNT) injects EMPTY `filter.lfs.process/smudge/clean`
+  // overrides into EVERY git command to bypass LFS filters. A plain
+  // `git config --get-regexp '^filter\.lfs\.'` matches those env entries
+  // (exit 0, empty values) for EVERY repository — making detectLfsConfigured
+  // return true on repos with zero LFS traces and popping the "Git LFS is
+  // configured but not installed" modal on every repo open (broke the whole
+  // e2e suite: the modal intercepted every click). --local reads only
+  // .git/config, immune to the env overrides; genuine repo-scoped LFS
+  // installs (`git lfs install --local`) still show up there.
   try {
     const git = getGit(repoPath);
-    const config = await git.raw(['config', '--get-regexp', '^filter\\.lfs\\.']).catch(() => '');
+    const config = await git.raw(['config', '--local', '--get-regexp', '^filter\\.lfs\\.']).catch(() => '');
     if (config.trim()) return true;
   } catch { /* ignore */ }
 
   // 3. Check for LFS hooks in .git/hooks/
   try {
-    // Resolve hooks dir — may be overridden by core.hookspath
+    // Resolve hooks dir — may be overridden by core.hookspath.
+    // --local for the same reason as check #2: the app env injects an EMPTY
+    // core.hooksPath override, and a plain --get would return that instead
+    // of the repo's real value.
     const git = getGit(repoPath);
     let hooksDir = path.join(repoPath, '.git', 'hooks');
-    const hooksPathConfig = await git.raw(['config', '--get', 'core.hookspath']).catch(() => '');
+    const hooksPathConfig = await git.raw(['config', '--local', '--get', 'core.hookspath']).catch(() => '');
     if (hooksPathConfig.trim()) {
       // core.hookspath is relative to the repo root
       hooksDir = path.isAbsolute(hooksPathConfig.trim())
