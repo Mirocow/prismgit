@@ -26,6 +26,17 @@ export interface StatusResult {
   behind: number;
   current?: string;
   tracking?: string;
+  /**
+   * Full SHA-1 of the commit HEAD points at; `undefined` on unborn HEAD.
+   *
+   * The History graph subscribes to this: `git reset --hard`, commit, rebase,
+   * pull etc. all move HEAD WITHOUT changing `current` (branch name) or
+   * `tracking` — so those two fields alone cannot detect "HEAD moved, the
+   * commit graph is stale". Any change in this hash must reload the graph.
+   * (User-reported: after `git reset --hard` the remote commits still
+   * rendered as if merged into the local branch.)
+   */
+  head?: string;
   files: FileStatus[];
   isClean: boolean;
   isMerging: boolean;

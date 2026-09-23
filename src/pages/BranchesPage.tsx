@@ -697,6 +697,10 @@ export function BranchesPage() {
       setResetTarget(null);
       await load();
       await refreshStatus(repo.path);
+      // The History graph shows this branch's commits + decorations — a
+      // reset moved the ref, so the graph (labels, incoming markers, lanes)
+      // is now stale. Reload it too.
+      window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
     } catch (e) {
       toast.error(t('branches.resetFailed'), String(e));
     } finally {

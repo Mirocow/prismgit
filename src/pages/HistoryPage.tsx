@@ -34,6 +34,7 @@ import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { linkifyCommitMessage } from '../lib/bugtraq';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { filterSymbolicHeads } from '../lib/branchFilter';
+import { incomingRevListArgs, parseRevList } from '../lib/incomingCommits';
 import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
 import { useI18n } from '../lib/i18n';
@@ -298,32 +299,44 @@ export function HistoryPage() {
       // Otherwise assume more exist (we'll discover the end on the next fetch).
       setHasMore(result.length >= PAGE_SIZE);
       // Compute incoming commits: reachable from remote-tracking refs
-      // (refs/remotes/*) but NOT from any local branch (refs/heads/*).
-      // These are "not yet pulled" commits — drawn dashed/hollow in graph.
+      // but NOT from the local branch(es). Drawn dashed/hollow in graph.
+      //
+      // Scope depends on the view (see lib/incomingCommits.ts):
+      //   - head+upstream: `git rev-list <current>..<upstream>` — commits
+      //     the upstream has that the CURRENT branch lacks. The global
+      //     `--remotes --not --branches` variant is contaminated when ANY
+      //     other local branch (backup/feature) contains the remote
+      //     commits, which made incoming commits render as plain local
+      //     history after `git reset --hard` (user-reported).
+      //   - other views: the global set (remote-only w.r.t. all branches).
       //
       // Run AFTER setEntries so the commit list renders immediately — the
       // incoming hashes are only used to TINT the rows that are remote-only,
       // which is a visual nicety the user can wait ~200ms for. Doing these
       // calls before setEntries was delaying the first paint by 500ms-2s on
-      // large repos (rev-list --remotes --not --branches walks the entire
-      // commit graph). Now: entries paint first, then incoming hashes
-      // trickle in and update the row styling.
+      // large repos (rev-list walks the entire commit graph). Now: entries
+      // paint first, then incoming hashes trickle in and update the styling.
+      const incomingScope = (
+        branchFilter === 'head+upstream'
+          ? { mode: 'head+upstream' as const, currentBranch: status?.current, upstream: status?.tracking }
+          : { mode: 'global' as const }
+      );
       void (async () => {
         try {
           // PERF (v3): this block used to ALSO run `rev-list --branches`
           // (full local-branch graph walk) whose result was discarded —
           // a pure waste of one subprocess + graph walk on every History
           // load (500ms+ on the 4.7k-commit live repo). Removed.
-          const remoteOnly = await api.git.raw(repo.path, [
-            'rev-list', '--remotes', '--not', '--branches',
-          ]);
-          // Commits reachable from remote-tracking branches but NOT from local branches
-          // = commits that exist on the remote but haven't been pulled yet
-          const incoming = new Set<string>();
-          for (const line of remoteOnly.trim().split('\n')) {
-            if (line.trim()) incoming.add(line.trim());
-          }
-          setIncomingHashes(incoming);
+          // Scope-aware rev-list (lib/incomingCommits.ts): in head+upstream
+          // view this is `<current>..<upstream>`. The global
+          // `--remotes --not --branches` variant is contaminated when ANY
+          // other local branch (backup/feature) contains the remote
+          // commits — which made incoming commits render as plain local
+          // history after `git reset --hard` (user-reported).
+          const remoteOnly = await api.git.raw(repo.path, incomingRevListArgs(incomingScope));
+          // Commits reachable from the remote side but not from the local
+          // branch = commits that exist on the remote but haven't been pulled yet
+          setIncomingHashes(parseRevList(remoteOnly));
         } catch {
           setIncomingHashes(new Set());
         }
@@ -356,13 +369,32 @@ export function HistoryPage() {
       }
     } catch (e) { toast.error(t('toast.history.loadFailed'), String(e)); }
     finally { setLoading(false); }
-    // RACE FIX: status?.current / status?.tracking are intentionally
-    // EXCLUDED from deps. They change on every watcher tick (5s) which
-    // would recreate loadHistory → re-run the effect → infinite git log
-    // calls. Instead, we read them at call-time from the store via
-    // useGitStore.getState().status — this gets the CURRENT value when
-    // loadHistory actually runs, without subscribing to changes.
-  }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit]);
+    // NOTE on deps — the graph must reload whenever the WALKED REFS move,
+    // not only when their NAMES change:
+    //   - status?.current / status?.tracking — branch switch changes the
+    //     refs the head+upstream filter resolves.
+    //   - status?.head — `git reset --hard`, commit, amend, rebase, pull all
+    //     move HEAD without changing the branch name. Without this dep the
+    //     graph kept the pre-reset decorations after a hard reset and remote
+    //     commits still rendered as if merged into the local branch
+    //     (user-reported). The watcher re-runs `git status` on .git/refs
+    //     changes, which now flows into a graph reload.
+    //   - status?.ahead / status?.behind — a background fetch moves
+    //     refs/remotes/* without moving HEAD; the divergence counters are
+    //     what changes then, and the graph must pick up the new incoming
+    //     commits + moved origin/<branch> label.
+    //
+    // RACE FIX (kept from v3): these deps are all PRIMITIVES compared by
+    // value (Object.is) — the watcher replaces the whole `status` object
+    // every tick, but the effect only re-runs when one of these VALUES
+    // actually changes. So there is no 5s-tick loop, and no refresh loop is
+    // possible at all: `git log` / `git rev-list` are read-only and do not
+    // touch .git/index or refs (the old "вечный рефреш" loop came from
+    // status→log chains on WRITE commands, now dispatched as one-shot
+    // `smartgit:history-refresh` events). Branch-name / upstream reads
+    // inside the effect still use call-time `useGitStore.getState().status`
+    // (see RACE FIX above) so they can never be stale even mid-render.
+  }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit, status?.current, status?.tracking, status?.head, status?.ahead, status?.behind]);
 
   // ── Lazy-load older commits on scroll ───────────────────────────────────
   // When the user scrolls near the bottom of the commit list, fetch the
@@ -1904,12 +1936,18 @@ export function HistoryPage() {
 
                         {row.node && (
                           <>
+                            {/* Commits that are remote-only ("incoming", not yet
+                                pulled) get a dashed lane segment too — the
+                                whole remote chain then reads as distinct from
+                                the solid local history (VS Code style). */}
+                            {(() => { const inc = incomingHashes.has(row.node!.entry.hash); return (
+                            <>
                             {/* Closing curves — smooth bezier into node */}
                             {row.node.closing.map((c, ci) => (
                               <path key={`c-${start + idx}-${ci}`}
                                 d={bezierPath(x(c.lane), rowY, x(row.node!.lane), cy)}
                                 stroke={laneColor(c.color)} strokeWidth={2} fill="none" opacity={0.7}
-                                strokeDasharray={strokeDash(c.dashed)} strokeLinecap="round" />
+                                strokeDasharray={strokeDash(c.dashed || inc)} strokeLinecap="round" />
                             ))}
 
                             {/* Incoming vertical line (top → node center) */}
@@ -1917,8 +1955,8 @@ export function HistoryPage() {
                               <line
                                 x1={x(row.node.lane)} y1={rowY}
                                 x2={x(row.node.lane)} y2={cy}
-                                stroke={laneColor(row.node.color)} strokeWidth={2} opacity={0.7}
-                                strokeDasharray={strokeDash(row.node.firstParentDashed)} strokeLinecap="round" />
+                                stroke={laneColor(row.node.color)} strokeWidth={2} opacity={inc ? 0.55 : 0.7}
+                                strokeDasharray={strokeDash(row.node.firstParentDashed || inc)} strokeLinecap="round" />
                             )}
 
                             {/* Continues vertical line (node center → bottom) */}
@@ -1926,8 +1964,8 @@ export function HistoryPage() {
                               <line
                                 x1={x(row.node.lane)} y1={cy}
                                 x2={x(row.node.lane)} y2={rowY + ROW_HEIGHT}
-                                stroke={laneColor(row.node.color)} strokeWidth={2} opacity={0.7}
-                                strokeDasharray={strokeDash(row.node.firstParentDashed)} strokeLinecap="round" />
+                                stroke={laneColor(row.node.color)} strokeWidth={2} opacity={inc ? 0.55 : 0.7}
+                                strokeDasharray={strokeDash(row.node.firstParentDashed || inc)} strokeLinecap="round" />
                             )}
 
                             {/* Merge curves — smooth bezier from node to parent lane */}
@@ -1935,8 +1973,10 @@ export function HistoryPage() {
                               <path key={`m-${idx}-${mi}`}
                                 d={bezierPath(x(row.node!.lane), cy, x(m.lane), rowY + ROW_HEIGHT)}
                                 stroke={laneColor(m.color)} strokeWidth={2} fill="none" opacity={0.7}
-                                strokeDasharray={strokeDash(m.dashed)} strokeLinecap="round" />
+                                strokeDasharray={strokeDash(m.dashed || inc)} strokeLinecap="round" />
                             ))}
+                            </>
+                            ); })()}
 
                             {/* Node circle — VS Code style: solid filled, colored ring */}
                             {(() => {

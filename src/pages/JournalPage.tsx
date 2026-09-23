@@ -88,6 +88,9 @@ export function JournalPage() {
       toast.success(t('pages.resetToHash', { hash: shortHash(entry.hash) }));
       await refreshStatus(repo.path);
       await load();
+      // History graph is stale after the reset — reload it so the moved HEAD,
+      // ref labels and incoming markers render correctly.
+      window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
     } catch (e) {
       toast.error(t('pages.resetFailed'), String(e));
     }

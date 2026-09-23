@@ -664,6 +664,53 @@ async function resolveGitDir(repoPath: string, git: SimpleGit): Promise<string> 
   return dir;
 }
 
+/**
+ * Resolve the commit SHA that HEAD points at, PURELY via filesystem reads —
+ * no git subprocess. `status()` is the most-invoked API in the app (watcher
+ * tick every ~5s), so the HEAD hash needed for reset/rebase/commit detection
+ * (renderer reloads the History graph when it changes) must NOT cost another
+ * subprocess — the PERF (v3) rework explicitly removed the `rev-parse HEAD`
+ * preflight for exactly that reason.
+ *
+ * Handles symbolic refs (`ref: refs/heads/x`), packed refs, detached HEAD
+ * (raw SHA stored in the HEAD file), and unborn HEAD (missing ref →
+ * undefined). Worktrees/submodules are covered because callers pass the
+ * gitdir resolved by `resolveGitDir` (which follows `gitdir:` pointer files
+ * via `rev-parse --absolute-git-dir`).
+ *
+ * A failed/unreadable ref resolves to undefined — the renderer treats a
+ * hash→undefined transition as "HEAD moved" (repo just became unborn) which
+ * is correct; a steady undefined (fresh repo) triggers nothing.
+ */
+function resolveHeadSha(gitDir: string): string | undefined {
+  try {
+    const headRaw = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    if (!headRaw) return undefined;
+    // Detached HEAD: the file stores the raw commit SHA.
+    if (!headRaw.startsWith('ref:')) {
+      return /^[0-9a-f]{40,64}$/i.test(headRaw) ? headRaw : undefined;
+    }
+    // Symbolic ref: resolve refs/heads/<branch> — loose ref first, then packed-refs.
+    const refName = headRaw.slice(4).trim();
+    const loosePath = path.join(gitDir, ...refName.split('/'));
+    if (fs.existsSync(loosePath)) {
+      const sha = fs.readFileSync(loosePath, 'utf8').trim();
+      if (/^[0-9a-f]{40,64}$/i.test(sha)) return sha;
+    }
+    const packedPath = path.join(gitDir, 'packed-refs');
+    if (fs.existsSync(packedPath)) {
+      for (const line of fs.readFileSync(packedPath, 'utf8').split('\n')) {
+        if (line.startsWith('#') || line.startsWith('^')) continue;
+        const [sha, name] = line.trim().split(' ');
+        if (name === refName && /^[0-9a-f]{40,64}$/i.test(sha)) return sha;
+      }
+    }
+  } catch {
+    /* unborn or unreadable — fall through to undefined */
+  }
+  return undefined;
+}
+
 async function detectRepoState(repoPath: string, git?: SimpleGit) {
   const gitDir = await resolveGitDir(repoPath, git ?? getGit(repoPath));
   const isMerging = fs.existsSync(path.join(gitDir, 'MERGE_HEAD'));
@@ -760,6 +807,11 @@ export async function status(repoPath: string): Promise<StatusResult> {
   }
   const state = await detectRepoState(repoPath, git);
   const gitDir = await resolveGitDir(repoPath, git);
+  // Full HEAD hash (fs-only read, see resolveHeadSha) — the renderer's
+  // History graph watches this field to detect `git reset --hard` /
+  // commit / rebase / pull: all of those move HEAD WITHOUT changing the
+  // branch name or tracking pair, so only the hash proves the graph is stale.
+  const headHash = resolveHeadSha(gitDir);
   // Cherry-pick details — which commit is being picked and whether the pick has
   // become EMPTY (its changes are already applied to HEAD, so there is nothing
   // to commit). SmartGit surfaces this as "The working tree is in
@@ -859,6 +911,7 @@ export async function status(repoPath: string): Promise<StatusResult> {
     behind: s.behind,
     current: s.current || undefined,
     tracking: s.tracking || undefined,
+    head: headHash,
     files: s.files.map((f) => ({
       path: f.path,
       index: f.index as StatusResult['files'][number]['index'],

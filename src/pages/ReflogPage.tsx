@@ -116,6 +116,9 @@ export function ReflogPage() {
       toast.success(t('pages.reflogResetDone', { hash: shortHash(selectedEntry.hash) }));
       await refreshStatus();
       await load();
+      // History graph is stale after the reset (HEAD moved, upstream is now
+      // ahead) — ask it to reload so incoming commits render correctly.
+      window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
     } catch (e) {
       toast.error(t('pages.reflogResetFailed'), String(e));
     }
