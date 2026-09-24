@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, net } from 'electron';
 import * as ai from '../services/ai.js';
 import type { AiProviderConfig } from '../services/ai.js';
 import { loadAIMemory, saveAIMemoryEntry, buildMemorySummary } from '../services/aiMemory.js';
@@ -257,7 +257,19 @@ export function registerAiIpc(): void {
         if (httpMethod !== 'GET' && httpMethod !== 'HEAD' && config.body) {
           fetchOpts.body = config.body;
         }
-        const res = await fetch(config.url, fetchOpts);
+        // net.fetch rides Chromium's network stack — system proxy, system
+        // DNS and the OS trust store; the things Node's global fetch
+        // (undici) IGNORES on macOS. This is the fix for cloud LLM
+        // providers dying behind a system proxy: undici attempted a DIRECT
+        // connection, failed, and the renderer's direct-fetch fallback was
+        // blocked by the page CSP — leaving "Failed to connect" as the
+        // only possible outcome. Falls back to globalThis.fetch when net
+        // is unavailable (non-Electron hosts).
+        const useNetFetch =
+          typeof net !== 'undefined' && typeof net.fetch === 'function';
+        const res = useNetFetch
+          ? await net.fetch(config.url, fetchOpts)
+          : await globalThis.fetch(config.url, fetchOpts);
         const text = await res.text();
         return { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
       } catch (e) {

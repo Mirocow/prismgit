@@ -51,18 +51,29 @@ import { api } from './api';
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 2000;
 
-/** Detect Ollama "model not loaded" / "model loading" responses. */
-function isModelLoading(status: number, body: string): boolean {
-  // HTTP 404 + "model not found" — older Ollama signature.
-  // HTTP 503 — newer Ollama when another worker is loading the model.
+/**
+ * Detect Ollama "model is loading" responses that are worth retrying.
+ *
+ * Retryable (transient — the model will become available):
+ *  - HTTP 503 — newer Ollama while another worker is loading the model.
+ *  - HTTP 200 with an {"error":"... loading ..."} body (rare).
+ *  - HTTP 404 + "model ... loading" — LEGACY Ollama loading signature.
+ *
+ * NOT retryable (permanent — the user must act):
+ *  - HTTP 404 + "not found" / "try pulling" — the path or model genuinely
+ *    doesn't exist. Retrying burned 2+4+8 s of backoff before surfacing an
+ *    error the user had to act on anyway, which made a misconfigured
+ *    endpoint look like a 14-second hang. (This exact storm fired when
+ *    callOllama POSTed to the server root and real Ollama answered
+ *    404 "path '/' not found".)
+ *
+ * Exported for unit tests.
+ */
+export function isModelLoading(status: number, body: string): boolean {
   if (status === 503) return true;
   if (status === 404) {
     const lower = body.toLowerCase();
-    return (
-      lower.includes('not found') ||
-      lower.includes('try pulling') ||
-      lower.includes('model ') && lower.includes(' loading')
-    );
+    return lower.includes('model ') && lower.includes(' loading');
   }
   // Some Ollama versions return 200 but with an error body (rare).
   if (status === 200) {

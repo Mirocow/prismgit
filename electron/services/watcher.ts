@@ -52,19 +52,27 @@ const DEBOUNCE_MAX_WAIT_MS = 2_000;
  * firehose of filesystem events. Excluded from the working-tree watch.
  *
  * Notes:
- *  - `.git/objects` and `.git/logs` are extremely write-heavy (every git
- *    operation touches them) and never affect `git status` output — skip.
+ *  - The ENTIRE `.git` directory is ignored by the workdir watcher: every
+ *    git-state file that matters (HEAD, index, MERGE_HEAD, refs/, rebase
+ *    dirs) is covered by the TARGETED watchers in startWatching(). The
+ *    rest of .git is noise — including `fsmonitor--daemon.ipc`, a Unix
+ *    DOMAIN SOCKET that fs.watch CANNOT observe on some macOS volumes:
+ *    watching it produced `UNKNOWN: unknown error` → chokidar 5's async
+ *    error handler → unhandled promise rejection → app crash (fixed
+ *    together with the blanket 'error' listeners below).
  *  - `node_modules`, `dist`, `build`, `target`, `.next`, `.cache` are common
  *    build output directories whose save events are noise to git.
- *  - `.git/index.lock`, `*.log`, `*.swp` are file-level noise.
+ *  - `*.log`, `*.swp`, `*.lock` are file-level noise.
  */
-const WORKTREE_IGNORED = (testPath: string): boolean => {
+export const WORKTREE_IGNORED = (testPath: string): boolean => {
   // chokidar passes both absolute and relative paths depending on the
   // platform; match segment-wise to be robust.
   // Match: <sep>node_modules<sep>, <sep>dist<sep>, etc. anywhere in the path.
+  // `.git` must match BOTH the directory form (<sep>.git<sep>) and the
+  // FILE form (<sep>.git$ — submodule gitdir pointers).
   return (
     /(^|[/\\])(node_modules|dist|build|target|out|\.next|\.cache|\.turbo|\.parcel-cache|coverage)([/\\]|$)/.test(testPath) ||
-    /(^|[/\\])\.git[/\\](objects|logs|refs[/\\]stash|packed-refs\.lock)([/\\]|$)/.test(testPath) ||
+    /(^|[/\\])\.git([/\\]|$)/.test(testPath) ||
     /(^|[/\\])\.DS_Store$/.test(testPath) ||
     /\.log$/.test(testPath) ||
     /\.swp$/.test(testPath) ||
@@ -136,6 +144,12 @@ function watchFile(repoPath: string, filePath: string, entry: WatcherEntry, even
       const watcher = fs.watch(filePath, { persistent: false }, () => {
         debounce(entry, eventType);
       });
+      // fs.watch failures fire LATER as 'error' events on the FSWatcher
+      // (git atomically replacing the file, permission races). Without a
+      // listener, EventEmitter 'error' semantics THROW — an uncaught
+      // exception. Swallow: a dead single-file watch only means "no more
+      // events for this file", never a crash.
+      watcher.on('error', () => { /* degrade silently */ });
       entry.watchers.push(watcher);
       return;
     }
@@ -146,6 +160,12 @@ function watchFile(repoPath: string, filePath: string, entry: WatcherEntry, even
       awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
     });
     watcher.on('all', () => debounce(entry, eventType));
+    // chokidar 5's internal fs.watch error handler is an ASYNC function —
+    // any throw it triggers (including our own missing 'error' listener)
+    // becomes an UNHANDLED PROMISE REJECTION. Attach a no-op 'error'
+    // listener to every chokidar watcher: emit('error') then resolves
+    // normally instead of crashing the app.
+    watcher.on('error', () => { /* degrade silently */ });
     entry.watchers.push(watcher);
   } catch {
     // File may not be exist or be inaccessible
@@ -185,6 +205,9 @@ function watchDirectory(repoPath: string, dirPath: string, entry: WatcherEntry, 
       awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
     });
     watcher.on('all', () => debounce(entry, eventType));
+    // See watchFile — prevents chokidar 5's async error path from turning
+    // an fs.watch backend failure into an unhandled rejection.
+    watcher.on('error', () => { /* degrade silently */ });
     entry.watchers.push(watcher);
   } catch {
     // Directory may not exist or be inaccessible
@@ -245,6 +268,12 @@ export function startWatching(repoPath: string): void {
       awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
     });
     workdirWatcher.on('all', () => debounce(entry, 'worktree'));
+    // See watchFile — chokidar 5 crashes the process (unhandled rejection)
+    // when its fs.watch backend fails on exotic entries (unix sockets on
+    // macOS external volumes, permission races) and no 'error' listener
+    // is attached. The .git blanket-ignore above prevents the known
+    // trigger; this listener is the safety net for everything else.
+    workdirWatcher.on('error', () => { /* degrade silently */ });
     entry.watchers.push(workdirWatcher);
   } catch {
     // Some platforms / repo paths (e.g. permission denied) can't be watched

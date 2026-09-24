@@ -2,7 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-rHZYBR2S6xa/ZHKGCt/R7oDAJkfqVPAfkAmmhDBMPKw='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.github.com https://github.com https://www.gravatar.com ws: wss:;" />
+    <!-- CSP notes (AI + watchdog):
+         - connect-src allows http://localhost:* and http://127.0.0.1:* so the
+           renderer can reach LOCAL LLM servers (Ollama, LM Studio, vLLM) for
+           real token streaming and as a proxyFetch fallback. Cloud LLM hosts
+           are intentionally NOT listed: they have no CORS headers and are
+           proxied through the main process (ai:chat IPC) instead.
+         - worker-src 'self' blob: unblocks the white-screen watchdog, whose
+           worker is created from a Blob URL (CSP worker-src falls back to
+           script-src, which does not allow blob: — the watchdog has been
+           silently dead since the CSP was introduced). -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-rHZYBR2S6xa/ZHKGCt/R7oDAJkfqVPAfkAmmhDBMPKw='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* https://api.github.com https://github.com https://www.gravatar.com ws: wss:; worker-src 'self' blob:;" />
     <meta name="csp-nonce" content="boot-screen-inline" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PrismGit</title>

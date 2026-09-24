@@ -13,6 +13,7 @@
  */
 
 import { proxyFetch } from './aiChat';
+import { deriveChatUrl, deriveAnthropicUrl, deriveOllamaChatUrl } from './aiUtils';
 
 export interface LLMProvider {
   id: string;
@@ -275,7 +276,16 @@ async function callOpenAICompatible(
   userPrompt: string,
   maxTokens: number
 ): Promise<string> {
-  const url = provider.url || 'https://api.openai.com/v1/chat/completions';
+  // Derive the chat-completions endpoint from whatever URL shape the
+  // provider registry stored. The presets are deliberately inconsistent:
+  // some store the FULL endpoint (OpenAI, Groq, Z.ai: ".../chat/completions"),
+  // others the BASE (OpenRouter: "https://openrouter.ai/api/v1") — and a
+  // custom provider may hold either. Using provider.url as-is made every
+  // base-URL entry POST to a non-endpoint → 404 → "AI doesn't work" while
+  // the chat page (which derives) kept working. Same derivation everywhere.
+  const url = provider.url
+    ? deriveChatUrl(provider.url)
+    : 'https://api.openai.com/v1/chat/completions';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -317,7 +327,10 @@ async function callAnthropic(
   userPrompt: string,
   maxTokens: number
 ): Promise<string> {
-  const url = provider.url || 'https://api.anthropic.com/v1/messages';
+  // See callOpenAICompatible — derive /v1/messages from base or full URLs.
+  const url = provider.url
+    ? deriveAnthropicUrl(provider.url)
+    : 'https://api.anthropic.com/v1/messages';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
@@ -354,7 +367,17 @@ async function callOllama(
   userPrompt: string,
   maxTokens: number
 ): Promise<string> {
-  const url = provider.url || 'http://localhost:11434/api/chat';
+  // THE AI-COMMIT-SUGGESTER FIX. The Ollama preset and the provider
+  // registry store the BASE url ("http://localhost:11434" — no path).
+  // Using provider.url as-is POSTed to the server ROOT: real Ollama
+  // answers 404 ("path '/' not found"), which proxyFetch then misread
+  // as "model loading" and retried 3x with 2-8 s backoff — 14 s of
+  // silence followed by "AI generation failed" for every Ollama user,
+  // while the auto-suggest banner silently never appeared at all.
+  // deriveOllamaChatUrl normalizes ALL stored shapes (bare base,
+  // ".../api/chat", ".../chat/completions") to {base}/api/chat — the
+  // same normalization the AI-chat path has always done.
+  const url = deriveOllamaChatUrl(provider.url || 'http://localhost:11434');
   const body = {
     model: provider.model,
     messages: [
@@ -659,7 +682,10 @@ export async function* callLLMStream(
 
   // --- OpenAI-compatible (OpenAI / Custom / GitHub / Mistral) ---
   async function* streamOpenAICompatible(): AsyncGenerator<string> {
-    const url = provider.url || 'https://api.openai.com/v1/chat/completions';
+    // See callOpenAICompatible — derive the endpoint from any stored shape.
+    const url = provider.url
+      ? deriveChatUrl(provider.url)
+      : 'https://api.openai.com/v1/chat/completions';
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
@@ -722,7 +748,10 @@ export async function* callLLMStream(
 
   // --- Anthropic (Claude) ---
   async function* streamAnthropic(): AsyncGenerator<string> {
-    const url = provider.url || 'https://api.anthropic.com/v1/messages';
+    // See callAnthropic — derive /v1/messages from any stored shape.
+    const url = provider.url
+      ? deriveAnthropicUrl(provider.url)
+      : 'https://api.anthropic.com/v1/messages';
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'anthropic-version': '2023-06-01',
@@ -782,11 +811,10 @@ export async function* callLLMStream(
 
   // --- Ollama (NDJSON — one JSON object per line) ---
   async function* streamOllama(): AsyncGenerator<string> {
-    // Normalize: strip trailing /, /api/chat, and /chat/completions,
-    // then append /api/chat. Prevents double-suffix bug when the stored
-    // URL already contains /api/chat (e.g. from the provider registry).
-    const base = (provider.url || 'http://localhost:11434').replace(/\/+$/, '').replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '');
-    const url = `${base}/api/chat`;
+    // See callOllama — derive /api/chat from any stored URL shape (base,
+    // /api/chat, /chat/completions). Preserves the old inline behavior
+    // but shares ONE implementation with the batch path.
+    const url = deriveOllamaChatUrl(provider.url || 'http://localhost:11434');
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const body = JSON.stringify({
       model: provider.model,
