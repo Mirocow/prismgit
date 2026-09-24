@@ -874,10 +874,11 @@ export async function status(repoPath: string): Promise<StatusResult> {
   // git subprocesses here — a `rev-parse --verify -q HEAD` preflight plus
   // the status call itself — because the code assumed simple-git's
   // `.status()` throws on unborn HEAD. It does NOT (verified against
-  // simple-git 3.27: `status --porcelain -b -z` reports
+  // simple-git 3.36: `status --porcelain -b -z` reports
   // `## No commits yet on <branch>` which simple-git parses into
-  // current='<branch>', tracking=null). The preflight was therefore a pure
-  // waste of one subprocess on the MOST-INVOKED API of the whole app
+  // current='<branch>', tracking=null; pinned by
+  // tests/integration/gitServicePerf.test.ts). The preflight was therefore
+  // a pure waste of one subprocess on the MOST-INVOKED API of the whole app
   // (watcher refresh every 5s, every page switch, every repo open).
   //
   // We now call `.status()` directly and keep the raw-porcelain fallback
