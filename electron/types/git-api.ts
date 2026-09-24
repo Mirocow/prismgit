@@ -700,6 +700,15 @@ export interface GitApi {
    * across the session.
    */
   invalidateCache: (repoPath?: string) => Promise<void>;
+  /**
+   * PERF (v3.1, repo-switch): soft trim — LRU-cap the per-repo caches
+   * (SimpleGit instances, gitDir, remotes, poll, read-coalescing states)
+   * without destroying them. Called by the renderer on repo switch-away /
+   * close so switching back to a recently-used repo is warm. Hard
+   * invalidation of a specific repo (removal, credential change) stays
+   * with invalidateCache.
+   */
+  trimRepoCaches: () => Promise<void>;
 }
 
 /** Recyclable commit (unreachable reflog commit). */

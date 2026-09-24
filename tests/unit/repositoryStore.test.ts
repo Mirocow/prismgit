@@ -30,6 +30,7 @@ vi.mock('../../src/lib/api', () => ({
       raw: vi.fn().mockResolvedValue(''),
       pollRemoteSummaries: vi.fn().mockResolvedValue({}),
       invalidateCache: vi.fn().mockResolvedValue(undefined),
+      trimRepoCaches: vi.fn().mockResolvedValue(undefined),
     },
     fs: {
       openRepositoryPicker: vi.fn(),
@@ -122,6 +123,144 @@ describe('repositoryStore', () => {
       // The toast is shown via useToastStore — verified separately.
       expect(useToastStore.getState().toasts.length).toBeGreaterThan(0);
     });
+
+    // ── PERF (v3.1, repo-switch) behaviors ──────────────────────────
+
+    it('re-click on the CURRENT repo is a no-op (no addRepo, no state churn)', async () => {
+      useRepositoryStore.setState({
+        currentRepo: { path: '/repo', name: 'repo', lastOpened: 0 },
+      });
+      vi.mocked(api.settings.addRepo).mockClear();
+
+      await useRepositoryStore.getState().openRepository('/repo');
+
+      // No settings write, no loading flicker, currentRepo identity UNCHANGED
+      // (a new object identity would re-trigger the App's watcher effect —
+      // chokidar teardown + worktree re-walk).
+      expect(api.settings.addRepo).not.toHaveBeenCalled();
+      expect(api.git.trimRepoCaches).not.toHaveBeenCalled();
+      expect(useRepositoryStore.getState().loading).toBe(false);
+      const current = useRepositoryStore.getState().currentRepo;
+      expect(current?.path).toBe('/repo');
+      expect(current?.lastOpened).toBe(0); // unchanged — no re-set happened
+    });
+
+    it('switching away calls trimRepoCaches (soft) — NOT invalidateCache', async () => {
+      useRepositoryStore.setState({
+        currentRepo: { path: '/repo-a', name: 'a', lastOpened: 0 },
+      });
+      vi.mocked(api.git.isRepo).mockResolvedValue(true);
+      vi.mocked(api.fs.pathBasename).mockResolvedValue('b');
+      vi.mocked(api.settings.addRepo).mockResolvedValue(undefined);
+      vi.mocked(api.settings.getRepos).mockResolvedValue([]);
+
+      await useRepositoryStore.getState().openRepository('/repo-b');
+
+      expect(api.git.trimRepoCaches).toHaveBeenCalledTimes(1);
+      expect(api.git.invalidateCache).not.toHaveBeenCalled();
+      expect(api.watcher.stop).toHaveBeenCalledWith('/repo-a');
+      expect(useRepositoryStore.getState().currentRepo?.path).toBe('/repo-b');
+    });
+
+    it('defers refreshRepoStats (background stats no longer compete with the open burst)', async () => {
+      vi.useFakeTimers();
+      try {
+        useRepositoryStore.setState({ currentRepo: null, metadata: {} });
+        vi.mocked(api.git.isRepo).mockResolvedValue(true);
+        vi.mocked(api.fs.pathBasename).mockResolvedValue('r');
+        vi.mocked(api.settings.addRepo).mockResolvedValue(undefined);
+        // The repo must be in the list — loadMetadata → loadRepos auto-closes
+        // a currentRepo that vanished from the list (deleted-from-disk guard).
+        vi.mocked(api.settings.getRepos).mockResolvedValue([
+          { path: '/deferred', name: 'r', lastOpened: 0 },
+        ]);
+        vi.mocked(api.settings.refreshRepoStats).mockClear();
+
+        await useRepositoryStore.getState().openRepository('/deferred');
+        // NOT called synchronously — the old behavior fired 4 git spawns
+        // (log -1 / branchLocal / getRemotes / rev-list --count) immediately,
+        // competing with the foreground status/numstat/ls-files burst.
+        expect(api.settings.refreshRepoStats).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1_300);
+        expect(api.settings.refreshRepoStats).toHaveBeenCalledWith('/deferred');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('skips refreshRepoStats entirely when metadata is fresh (<60s)', async () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+      try {
+        useRepositoryStore.setState({
+          currentRepo: null,
+          metadata: { '/fresh': { path: '/fresh', updatedAt: now - 5_000 } },
+        });
+        vi.mocked(api.git.isRepo).mockResolvedValue(true);
+        vi.mocked(api.fs.pathBasename).mockResolvedValue('fresh');
+        vi.mocked(api.settings.addRepo).mockResolvedValue(undefined);
+        vi.mocked(api.settings.refreshRepoStats).mockClear();
+
+        await useRepositoryStore.getState().openRepository('/fresh');
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        // Rapid switch-back to a recently-refreshed repo: zero stat spawns.
+        expect(api.settings.refreshRepoStats).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('abandoned switch: no stats refresh for a repo the user already left', async () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+      try {
+        useRepositoryStore.setState({ currentRepo: null, metadata: {} });
+        vi.mocked(api.git.isRepo).mockResolvedValue(true);
+        vi.mocked(api.fs.pathBasename).mockResolvedValue('x');
+        vi.mocked(api.settings.addRepo).mockResolvedValue(undefined);
+        // '/other' stays in the list so the auto-close guard doesn't fire —
+        // this test isolates the ABANDONED-switch guard in openRepository.
+        vi.mocked(api.settings.getRepos).mockResolvedValue([
+          { path: '/other', name: 'other', lastOpened: 0 },
+        ]);
+        vi.mocked(api.settings.refreshRepoStats).mockClear();
+
+        await useRepositoryStore.getState().openRepository('/abandoned');
+        // Switch away before the deferred stats timer fires.
+        useRepositoryStore.setState({
+          currentRepo: { path: '/other', name: 'other', lastOpened: 0 },
+        });
+        await vi.advanceTimersByTimeAsync(1_300);
+
+        expect(api.settings.refreshRepoStats).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('dedupes concurrent opens of the SAME path (double-click guard)', async () => {
+      let resolveIsRepo: (v: boolean) => void = () => {};
+      vi.mocked(api.git.isRepo).mockImplementation(
+        () => new Promise<boolean>((res) => { resolveIsRepo = res; }),
+      );
+      vi.mocked(api.fs.pathBasename).mockResolvedValue('dbl');
+      vi.mocked(api.settings.addRepo).mockResolvedValue(undefined);
+      vi.mocked(api.settings.getRepos).mockResolvedValue([]);
+      useRepositoryStore.setState({ currentRepo: null, metadata: {} });
+
+      const p1 = useRepositoryStore.getState().openRepository('/dbl');
+      const p2 = useRepositoryStore.getState().openRepository('/dbl');
+      resolveIsRepo(true);
+      await Promise.all([p1, p2]);
+
+      // ONE open sequence — a second addRepo write would churn settings and
+      // re-set currentRepo (new identity → watcher effect re-runs).
+      expect(api.settings.addRepo).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('closeRepository', () => {
@@ -133,6 +272,17 @@ describe('repositoryStore', () => {
       useRepositoryStore.getState().closeRepository();
 
       expect(useRepositoryStore.getState().currentRepo).toBeNull();
+    });
+
+    it('soft-trims caches (trimRepoCaches), keeps hard invalidateCache for mutations', () => {
+      useRepositoryStore.setState({
+        currentRepo: { path: '/repo', name: 'repo', lastOpened: 0 },
+      });
+
+      useRepositoryStore.getState().closeRepository();
+
+      expect(api.git.trimRepoCaches).toHaveBeenCalledTimes(1);
+      expect(api.git.invalidateCache).not.toHaveBeenCalled();
     });
   });
 

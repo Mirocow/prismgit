@@ -360,6 +360,9 @@ const api = {
     // (closes its child process pool). Called by repositoryStore.closeRepository.
     invalidateCache: (repoPath?: string) =>
       ipcRenderer.invoke('git:invalidateCache', repoPath),
+    // PERF (v3.1, repo-switch): soft trim — LRU-cap per-repo caches without
+    // destroying them (warm switch-back). Called on repo switch-away/close.
+    trimRepoCaches: () => ipcRenderer.invoke('git:trimRepoCaches'),
   } as GitApi,
 
   // GitHub integration

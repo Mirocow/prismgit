@@ -516,4 +516,12 @@ export function registerGitIpc(): void {
   // process pool) per repo ever opened for the entire session, leaking
   // memory on every repo switch.
   ipcMain.handle('git:invalidateCache', (_e, p?: string) => { gitService.invalidateCache(p); });
+
+  // PERF (v3.1, repo-switch): soft trim — LRU-cap the per-repo caches
+  // WITHOUT destroying them. The renderer calls this on repo switch-away /
+  // close instead of invalidateCache, so switching back to a recently-used
+  // repo is warm (isRepo / gitDir / remotes already resolved). Real
+  // mutations (removeRepo, credential changes) still go through
+  // invalidateCache for a hard drop.
+  ipcMain.handle('git:trimRepoCaches', () => { gitService.trimRepoCaches(); });
 }

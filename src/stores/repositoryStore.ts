@@ -58,6 +58,16 @@ interface RepositoryState {
   refreshAllStats: () => Promise<void>;
 }
 
+/**
+ * PERF (v3.1, repo-switch): in-flight open dedupe, keyed by path.
+ * A double-click on a sidebar row fires openRepository() twice before
+ * currentRepo updates — the second call re-ran the whole open sequence
+ * (isRepo + addRepo + stats fan-out) and re-set currentRepo with a NEW
+ * object identity, which re-triggered the App's watcher effect (a full
+ * chokidar teardown + worktree re-walk for nothing).
+ */
+let openRepoInFlight: { path: string; promise: Promise<void> } | null = null;
+
 export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   repos: [],
   groups: [],
@@ -141,67 +151,108 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   },
 
   openRepository: async (path: string) => {
-    set({ loading: true, error: null });
-    try {
-      // RACE/LEAK FIX: if another repo is currently open, tear down its
-      // watcher and invalidate its cached SimpleGit instance BEFORE
-      // switching. Previously, opening B while A was active left A's
-      // watcher firing (its `git status` results would land in a stale
-      // store slot when the user came back to A) and A's SimpleGit child
-      // process pool lingered in the main process for the whole session.
-      const prev = get().currentRepo;
-      if (prev && prev.path !== path) {
-        api.watcher.stop(prev.path).catch(() => { /* ignore */ });
-        api.git.invalidateCache(prev.path).catch(() => { /* ignore */ });
-      }
-      // Perf: validity check and basename are independent — run them in one
-      // round-trip instead of two sequential IPC hops (repo open latency).
-      const [isRepo, name] = await Promise.all([
-        api.git.isRepo(path),
-        api.fs.pathBasename(path),
-      ]);
-      if (!isRepo) {
-        // Show a friendly toast directly — the ONLY toast the user sees.
-        useToastStore.getState().error(
-          'Not a Git repository',
-          `The selected directory is not a Git repository:\n${path}\n\nInitialize one with 'git init' or select a different directory.`,
-        );
-        set({ loading: false });
-        // Return WITHOUT throwing — the toast is shown, the state is reset.
-        // Throwing would propagate to callers that don't .catch(), triggering
-        // the global unhandledrejection handler which shows a SECOND generic
-        // "Operation failed (unhandled)" toast — confusing.
-        return;
-      }
-      await api.settings.addRepo({ path, name });
-      // Refresh stats in background (don't block UI)
-      api.settings.refreshRepoStats(path).then(() => {
-        get().loadMetadata();
-      }).catch(() => { /* ignore */ });
+    // PERF (v3.1, repo-switch): re-click on the CURRENT repo — nothing to
+    // open. The old flow re-set currentRepo with a new object identity,
+    // which re-ran the App's watcher effect (chokidar teardown + full
+    // worktree re-walk), re-wrote settings (addRepo) and re-fired the
+    // stats fan-out — all for a repo that was already open.
+    const cur = get().currentRepo;
+    if (cur && cur.path === path) return;
+    // Dedupe concurrent opens of the SAME path (double-click guard).
+    if (openRepoInFlight?.path === path) return openRepoInFlight.promise;
 
-      const repo: RepositoryEntry = { path, name, lastOpened: Date.now() };
-      // Set currentRepo IMMEDIATELY — don't wait for loadMetadata().
-      set({ currentRepo: repo, currentMetadata: null, loading: false });
-      // Load metadata in the background — non-blocking.
-      // RACE FIX: capture the path so if the user switches to repo B
-      // before this completes, we don't overwrite B's metadata with A's.
-      const targetPath = path;
-      void get().loadMetadata().then(() => {
-        // Only update currentMetadata if we're STILL on the same repo.
-        if (get().currentRepo?.path === targetPath) {
-          const metadata = get().metadata[targetPath] || null;
-          set({ currentMetadata: metadata });
+    const run = (async () => {
+      set({ loading: true, error: null });
+      try {
+        // RACE/LEAK FIX: if another repo is currently open, tear down its
+        // watcher BEFORE switching. Previously, opening B while A was active
+        // left A's watcher firing (its `git status` results would land in a
+        // stale store slot when the user came back to A).
+        const prev = get().currentRepo;
+        if (prev && prev.path !== path) {
+          api.watcher.stop(prev.path).catch(() => { /* ignore */ });
+          // PERF (v3.1): switch-away is a SOFT trim now — the previous repo's
+          // caches stay warm (LRU-capped in the main process: gitDir,
+          // remotes TTL, read-coalescing, isRepo) so A → B → A switching
+          // doesn't re-pay the cold-open subprocesses. invalidateCache stays
+          // reserved for real mutations (removeRepo, credential changes)
+          // where cached data would be WRONG, not merely possibly stale.
+          api.git.trimRepoCaches?.().catch(() => { /* ignore */ });
         }
-      });
-    } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      set({ error: errMsg, loading: false });
-      // Re-throw WITHOUT the Error object — just the message string.
-      // Callers that do `.catch((e) => toast.error(..., e))` get the string
-      // directly. Callers that DON'T catch will still propagate, but the
-      // global unhandledrejection handler will show a clean toast instead
-      // of a raw Error stack trace.
-      throw errMsg;
+        // Perf: validity check and basename are independent — run them in one
+        // round-trip instead of two sequential IPC hops (repo open latency).
+        // isRepo() hits a positive-only session cache in the main process —
+        // zero subprocesses for known repos.
+        const [isRepo, name] = await Promise.all([
+          api.git.isRepo(path),
+          api.fs.pathBasename(path),
+        ]);
+        if (!isRepo) {
+          // Show a friendly toast directly — the ONLY toast the user sees.
+          useToastStore.getState().error(
+            'Not a Git repository',
+            `The selected directory is not a Git repository:\n${path}\n\nInitialize one with 'git init' or select a different directory.`,
+          );
+          set({ loading: false });
+          // Return WITHOUT throwing — the toast is shown, the state is reset.
+          // Throwing would propagate to callers that don't .catch(), triggering
+          // the global unhandledrejection handler which shows a SECOND generic
+          // "Operation failed (unhandled)" toast — confusing.
+          return;
+        }
+        await api.settings.addRepo({ path, name });
+        // PERF (v3.1): background stats refresh is DEFERRED (~1.2s) and
+        // freshness-gated. Its 4 parallel git spawns (log -1 / branchLocal /
+        // getRemotes / rev-list --count) used to fire the instant a repo
+        // opened — competing with the foreground status / numstat /
+        // ls-files burst the user is actually waiting for. Metadata that was
+        // refreshed within the last 60s (rapid switch-backs) skips the
+        // spawns entirely.
+        const meta = get().metadata[path];
+        const statsFresh = !!meta && Date.now() - (meta.updatedAt ?? 0) < 60_000;
+        if (!statsFresh) {
+          setTimeout(() => {
+            // The user may have switched away before the timer fired —
+            // refreshing an abandoned repo would spawn 4 subprocesses that
+            // compete with whatever repo is open NOW.
+            if (useRepositoryStore.getState().currentRepo?.path !== path) return;
+            api.settings.refreshRepoStats(path).then(() => {
+              get().loadMetadata();
+            }).catch(() => { /* ignore */ });
+          }, 1_200);
+        }
+
+        const repo: RepositoryEntry = { path, name, lastOpened: Date.now() };
+        // Set currentRepo IMMEDIATELY — don't wait for loadMetadata().
+        set({ currentRepo: repo, currentMetadata: null, loading: false });
+        // Load metadata in the background — non-blocking.
+        // RACE FIX: capture the path so if the user switches to repo B
+        // before this completes, we don't overwrite B's metadata with A's.
+        const targetPath = path;
+        void get().loadMetadata().then(() => {
+          // Only update currentMetadata if we're STILL on the same repo.
+          if (get().currentRepo?.path === targetPath) {
+            const metadata = get().metadata[targetPath] || null;
+            set({ currentMetadata: metadata });
+          }
+        });
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        set({ error: errMsg, loading: false });
+        // Re-throw WITHOUT the Error object — just the message string.
+        // Callers that do `.catch((e) => toast.error(..., e))` get the string
+        // directly. Callers that DON'T catch will still propagate, but the
+        // global unhandledrejection handler will show a clean toast instead
+        // of a raw Error stack trace.
+        throw errMsg;
+      }
+    })();
+
+    openRepoInFlight = { path, promise: run };
+    try {
+      await run;
+    } finally {
+      if (openRepoInFlight?.promise === run) openRepoInFlight = null;
     }
   },
 
@@ -217,19 +268,20 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   },
 
   closeRepository: () => {
-    // Stop file watchers, clear git cache, release memory.
+    // Stop file watchers; caches get a SOFT trim (LRU-capped in the main
+    // process) so reopening the repo shortly after is warm.
     const cur = get().currentRepo;
     if (cur) {
       // Stop watcher (no-op if not running)
       api.watcher.stop(cur.path).catch(() => { /* ignore */ });
-      // Invalidate the cached SimpleGit instance — closes its child-process
-      // pool. Previously the cache retained a SimpleGit instance per repo
-      // ever opened, leaking memory across the session. With this call the
-      // main process releases the git subprocess pipeline immediately.
-      api.git.invalidateCache(cur.path).catch(() => { /* ignore */ });
+      // PERF (v3.1): soft trim instead of invalidateCache — closing a repo
+      // is not a mutation; its gitDir path is immutable, its remotes/poll
+      // entries are TTL'd, and its read-coalescing entries expire in 1s.
+      // Reopening the same repo skips isRepo + rev-parse --git-dir.
+      api.git.trimRepoCaches?.().catch(() => { /* ignore */ });
     }
-    // Clear all state — the git cache in the main process was just
-    // invalidated above, so the next repo open will create a fresh instance.
+    // Clear all state — the main-process caches were soft-trimmed above
+    // (LRU-capped), so the next repo open reuses or recreates as needed.
     set({ currentRepo: null, currentMetadata: null });
     // Clear global selections too — they were specific to this repo
     // (import here would create a cycle, so we use a window event)

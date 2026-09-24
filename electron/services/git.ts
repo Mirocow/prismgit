@@ -146,8 +146,16 @@ async function withOperationLog<T>(
 function getGit(repoPath: string): SimpleGit {
   installWriteDetector();
   let git = gitCache.get(repoPath);
-  if (!git) {
-    git = simpleGit({
+  if (git) {
+    // LRU touch: re-insert so insertion order reflects recency — the
+    // eviction in trimRepoCaches() then drops the LEAST recently used
+    // instance, not the oldest CREATED one (a repo opened at app start and
+    // actively used all day would otherwise be evicted first).
+    gitCache.delete(repoPath);
+    gitCache.set(repoPath, git);
+    return git;
+  }
+  git = simpleGit({
       baseDir: repoPath,
       binary: 'git',
       // maxConcurrentProcesses=4 (was 2). With 2, every git command queued
@@ -166,7 +174,6 @@ function getGit(repoPath: string): SimpleGit {
     // supported .env() builder so they actually reach the spawned git.
     withMergedGitEnv(git);
     gitCache.set(repoPath, installReadCoalescing(repoPath, git));
-  }
   return gitCache.get(repoPath)!;
 }
 
@@ -334,14 +341,18 @@ const readCoalesceStates = new Map<string, ReadCoalesceState>();
 
 function getCoalesceState(repoPath: string): ReadCoalesceState {
   let s = readCoalesceStates.get(repoPath);
-  if (!s) {
-    s = {
-      inflight: new Map(),
-      meta: new Map(),
-      stats: { rawCalls: 0, convenienceCalls: 0, coalescedInflight: 0, ttlHits: 0, writeInvalidations: 0, subprocesses: 0 },
-    };
+  if (s) {
+    // LRU touch (see trimRepoCaches).
+    readCoalesceStates.delete(repoPath);
     readCoalesceStates.set(repoPath, s);
+    return s;
   }
+  s = {
+    inflight: new Map(),
+    meta: new Map(),
+    stats: { rawCalls: 0, convenienceCalls: 0, coalescedInflight: 0, ttlHits: 0, writeInvalidations: 0, subprocesses: 0 },
+  };
+  readCoalesceStates.set(repoPath, s);
   return s;
 }
 
@@ -613,6 +624,7 @@ function invalidateCache(repoPath?: string) {
     pollCache.delete(repoPath);
     remotesCache.delete(repoPath); // PERF-P0 remotes TTL cache
     invalidateReadCache(repoPath); // PERF-2 read coalescing
+    isRepoCache.delete(repoPath);
     // diffCache already has its own invalidation path, but be safe.
     invalidateDiffCache(repoPath);
   } else {
@@ -622,11 +634,81 @@ function invalidateCache(repoPath?: string) {
     pollCache.clear();
     remotesCache.clear();
     invalidateReadCache();
+    isRepoCache.clear();
     diffCache.clear();
   }
   // Always drop the remoteAuth cache — credentials may have changed in
   // Settings, and the next getStoredCredential call should re-read them.
   remoteAuthCache = null;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// PERF (v3.1, repo-switch): soft cache trim — the switch-away counterpart
+// of invalidateCache().
+//
+// The renderer used to call invalidateCache(prevPath) when switching away
+// from a repo, destroying ALL of its caches — so every A → B → A switch
+// re-paid the full cold-open cost (isRepo spawn, rev-parse --git-dir,
+// remotes listing, read-coalescing warm-up). But every one of those caches
+// is ALREADY staleness-safe on its own terms:
+//   - gitDirCache     — .git dir path, immutable for a session
+//   - headTreeCache   — keyed by HEAD hash, hash-validated before use, LRU-4
+//   - remotesCache    — 60s TTL (refresh remotes / addRemote invalidate)
+//   - pollCache       — 60s TTL
+//   - readCoalesce    — 1s TTL + global write-detector invalidation
+//   - diffCache       — own TTL + mutation invalidation, capped at 64
+// The only genuine issue with KEEPING them was the ST-P4 memory leak —
+// unbounded growth as the user opens repo after repo. That is solved here
+// by LRU caps instead of destruction: switching back to a recently-used
+// repo is warm, memory stays bounded, staleness stays handled by the
+// per-cache TTLs/validation.
+// ═══════════════════════════════════════════════════════════════════
+
+/** LRU caps enforced by trimRepoCaches(). */
+const GIT_INSTANCE_CACHE_MAX = 4;   // idle SimpleGit instances hold no child procs
+const GIT_DIR_CACHE_MAX = 16;       // one short string per repo
+const REMOTES_CACHE_MAX = 32;       // TTL'd entries
+const POLL_CACHE_MAX = 32;          // TTL'd entries
+const READ_COALESCE_STATES_MAX = 8; // stats + 1s-TTL meta map per repo
+
+function evictMapToCap<V>(map: Map<string, V>, cap: number): void {
+  // Map iterates in insertion order; getGit/resolveGitDir/getCoalesceState
+  // re-insert on use, so insertion order ≈ recency order (LRU).
+  while (map.size > cap) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
+/** Soft trim: keep the most recently used repos' caches, evict the rest.
+ *  Called on repo switch-away / close instead of invalidateCache. */
+function trimRepoCaches(): void {
+  evictMapToCap(gitCache, GIT_INSTANCE_CACHE_MAX);
+  evictMapToCap(gitDirCache, GIT_DIR_CACHE_MAX);
+  evictMapToCap(remotesCache, REMOTES_CACHE_MAX);
+  evictMapToCap(pollCache, POLL_CACHE_MAX);
+  evictMapToCap(readCoalesceStates, READ_COALESCE_STATES_MAX);
+  // headTreeCache and diffCache already enforce their own caps on insert.
+}
+
+/** Test/observability hook: per-repo cache sizes + membership (repo-switch
+ *  warm-cache tests assert what survives trimRepoCaches vs invalidateCache). */
+export function __repoCacheSizesForTests(repoPath?: string): {
+  gitInstances: number; gitDirs: number; remotes: number; polls: number;
+  coalesceStates: number; isRepoCached: number;
+  gitDirCached: boolean; isRepoEntryCached: boolean;
+} {
+  return {
+    gitInstances: gitCache.size,
+    gitDirs: gitDirCache.size,
+    remotes: remotesCache.size,
+    polls: pollCache.size,
+    coalesceStates: readCoalesceStates.size,
+    isRepoCached: isRepoCache.size,
+    gitDirCached: repoPath ? gitDirCache.has(repoPath) : false,
+    isRepoEntryCached: repoPath ? isRepoCache.has(repoPath) : false,
+  };
 }
 
 // State detection helpers
@@ -644,15 +726,40 @@ const REMOTES_CACHE_TTL_MS = 60_000;
 async function getCachedRemotes(repoPath: string, withRefs: boolean): Promise<Array<{ name: string; refs?: { fetch: string; push?: string } }>> {
   const key = repoPath + '|' + (withRefs ? '1' : '0');
   const cached = remotesCache.get(key);
-  if (cached && Date.now() - cached.ts < REMOTES_CACHE_TTL_MS) return cached.value as Array<{ name: string; refs?: { fetch: string; push?: string } }>;
+  if (cached && Date.now() - cached.ts < REMOTES_CACHE_TTL_MS) {
+    // LRU touch (see trimRepoCaches).
+    remotesCache.delete(key);
+    remotesCache.set(key, cached);
+    return cached.value as Array<{ name: string; refs?: { fetch: string; push?: string } }>;
+  }
+  // PERF (v3.1, repo-switch): in-flight coalescing. On every repo switch the
+  // Push-dialog AND Pull-dialog effects both call api.git.remotes() at the
+  // same instant; a plain TTL check lets both miss and spawn the SAME
+  // `git remote -v` twice. Sharing the in-flight promise halves the burst.
+  const existing = remotesInFlight.get(key);
+  if (existing) return existing;
   const git = getGit(repoPath);
-  const value = (withRefs ? await git.getRemotes(true) : await git.getRemotes(false)) as Array<{ name: string; refs?: { fetch: string; push?: string } }>;
-  remotesCache.set(key, { value, ts: Date.now() });
-  return value;
+  const promise = (async () => {
+    try {
+      const value = (withRefs ? await git.getRemotes(true) : await git.getRemotes(false)) as Array<{ name: string; refs?: { fetch: string; push?: string } }>;
+      remotesCache.set(key, { value, ts: Date.now() });
+      return value;
+    } finally {
+      remotesInFlight.delete(key);
+    }
+  })();
+  remotesInFlight.set(key, promise);
+  return promise;
 }
+const remotesInFlight = new Map<string, Promise<Array<{ name: string; refs?: { fetch: string; push?: string } }>>>();
 async function resolveGitDir(repoPath: string, git: SimpleGit): Promise<string> {
   const cached = gitDirCache.get(repoPath);
-  if (cached) return cached;
+  if (cached) {
+    // LRU touch (see trimRepoCaches).
+    gitDirCache.delete(repoPath);
+    gitDirCache.set(repoPath, cached);
+    return cached;
+  }
   let dir = path.join(repoPath, '.git');
   try {
     const out = (await git.raw(['rev-parse', '--absolute-git-dir'])).trim();
@@ -732,10 +839,29 @@ async function detectRepoState(repoPath: string, git?: SimpleGit) {
   return { isMerging, isRebasing, isCherryPicking, isReverting, isBisecting };
 }
 
+/**
+ * PERF (v3.1, repo-switch): positive-only session cache for isRepo().
+ *
+ * openRepository() awaits isRepo() on the critical path of EVERY repo
+ * open/switch — a fresh SimpleGit instance plus a `git rev-parse
+ * --is-inside-work-tree` subprocess, before the UI can even start loading
+ * status. A directory that validated as a repo stays a repo for the
+ * session: external deletion is already handled elsewhere (getRepos()
+ * prunes missing paths, and every git call on a vanished repo fails with
+ * a clear error). Caching TRUE results turns every subsequent open /
+ * switch of a known repo into a zero-subprocess IPC round-trip.
+ * Negative results are NOT cached — `git init` in a plain folder must be
+ * picked up by the next attempt.
+ */
+const isRepoCache = new Set<string>();
+
 export async function isRepo(targetPath: string): Promise<boolean> {
+  if (isRepoCache.has(targetPath)) return true;
   try {
     const git = withMergedGitEnv(simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS }));
-    return await git.checkIsRepo();
+    const ok = await git.checkIsRepo();
+    if (ok) isRepoCache.add(targetPath);
+    return ok;
   } catch {
     return false;
   }
@@ -5529,8 +5655,22 @@ export async function lfsStatus(repoPath: string): Promise<{ installed: boolean;
  * show as an error in the Output panel even though the failure is
  * expected when git-lfs is not installed.
  */
+/**
+ * PERF (v3.1, repo-open): machine-wide session cache for isLfsInstalled().
+ * `git lfs version` is a machine property — the answer cannot differ per
+ * repository — yet the check ran on EVERY repo open (with a 3s timeout,
+ * the worst-case open penalty). One spawn per session (TTL 10min) instead
+ * of one per repo open. Repo-scoped LFS CONFIG detection is separate
+ * (detectLfsConfigured) and stays per-repo.
+ */
+const lfsInstalledCache: { value: boolean; ts: number } = { value: false, ts: 0 };
+const LFS_INSTALLED_TTL_MS = 10 * 60_000;
+
 export async function isLfsInstalled(repoPath: string): Promise<boolean> {
   if (lfsDisabledByEnv()) return false;
+  if (lfsInstalledCache.ts > 0 && Date.now() - lfsInstalledCache.ts < LFS_INSTALLED_TTL_MS) {
+    return lfsInstalledCache.value;
+  }
   try {
     // Use ASYNC spawn instead of execFileSync — execFileSync BLOCKS the entire
     // main process (Electron event loop) for up to 5s on repos where git-lfs
@@ -5543,9 +5683,17 @@ export async function isLfsInstalled(repoPath: string): Promise<boolean> {
         timeout: 3000,
         windowsHide: true,
       }, (err: unknown, stdout: string) => {
-        if (err) { resolve(false); return; }
-        resolve(!!stdout.trim());
+        // Cache BOTH outcomes (installed AND not-installed) — the
+        // not-installed case is the COMMON one for most users and the slow
+        // one (spawn + non-zero exit). A 10-min TTL covers a user
+        // installing git-lfs while the app runs.
+        const installed = !err && !!stdout.trim();
+        lfsInstalledCache.value = installed;
+        lfsInstalledCache.ts = Date.now();
+        resolve(installed);
       });
+      // Process-level failure (git binary itself missing / ENOENT) — do NOT
+      // cache; it's transient and unrelated to LFS availability.
       child.on('error', () => resolve(false));
     });
   } catch {
@@ -8131,4 +8279,4 @@ export async function importConfig(
   }
 }
 
-export { invalidateCache };
+export { invalidateCache, trimRepoCaches };

@@ -428,8 +428,27 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     return () => clearTimeout(timer);
   }, [selectedFile, status, loadDiff]);
 
+  // PERF (v3.1, repo-open): the journal is COLLAPSED by default (Task 9),
+  // yet its `git log -20` spawn fired in the same burst as status /
+  // numstat / ls-files — competing with the data the user actually sees
+  // first. Defer the initial load: longer when the panel is collapsed
+  // (content invisible — only the header count updates late), short when
+  // it's expanded (user is looking at it). Uses journalLoadTimerRef so an
+  // expand-click CANCELS the pending timer and loads immediately (no
+  // double spawn), and the debounce path (stage/commit events) behaves
+  // exactly as before.
   useEffect(() => {
-    loadJournal();
+    const initialDelay = journalCollapsed ? 700 : 120;
+    journalLoadTimerRef.current = setTimeout(() => {
+      journalLoadTimerRef.current = null;
+      void loadJournal();
+    }, initialDelay);
+    return () => {
+      if (journalLoadTimerRef.current) {
+        clearTimeout(journalLoadTimerRef.current);
+        journalLoadTimerRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo.path]); // Only reload journal when repo changes — NOT on every status refresh
 
@@ -2552,7 +2571,21 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
               <button
                 className="flex items-center gap-1 text-2xs font-semibold uppercase text-text-secondary hover:text-text-primary transition-colors"
-                onClick={() => setJournalCollapsed(!journalCollapsed)}
+                onClick={() => {
+                  const expanding = journalCollapsed;
+                  setJournalCollapsed(!journalCollapsed);
+                  // PERF (v3.1): the journal load is deferred while collapsed
+                  // (repo-open burst relief) — if the user expands it before
+                  // the deferred timer fired, load NOW and cancel the timer
+                  // (the user is looking at the panel; no double spawn).
+                  if (expanding && journal.length === 0 && !journalLoading) {
+                    if (journalLoadTimerRef.current) {
+                      clearTimeout(journalLoadTimerRef.current);
+                      journalLoadTimerRef.current = null;
+                    }
+                    void loadJournal();
+                  }
+                }}
                 title={journalCollapsed ? t('changes.expandJournal') : t('changes.collapseJournal')}
               >
                 {journalCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
