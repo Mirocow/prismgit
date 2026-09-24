@@ -30,7 +30,7 @@ interface MergeViewportOptions {
 
 interface MergeViewport {
   /** Ref to attach to the single scroll container. */
-  scrollRef: React.RefObject<HTMLDivElement>;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
   /** 0-based [start, end) of the visible row range (inclusive start, exclusive end). */
   visibleRange: { start: number; end: number };
   /** Total scrollable height in px — for the spacer div. */

@@ -253,12 +253,12 @@ export function ReflogPage() {
                   {/* Checkbox (for future multi-select / batch operations) */}
                   <input
                     type="checkbox"
-                    className="flex-shrink-0 cursor-pointer"
+                    className="shrink-0 cursor-pointer"
                     onClick={(e) => e.stopPropagation()}
                     onChange={() => { /* future: add to multi-set */ }}
                   />
                   {/* Hash */}
-                  <code className="font-mono text-text-tertiary flex-shrink-0 w-16 text-xs">
+                  <code className="font-mono text-text-tertiary shrink-0 w-16 text-xs">
                     {entry.hashAbbrev || shortHash(entry.hash)}
                   </code>
                   {/* Operation / message (truncated) */}
@@ -266,7 +266,7 @@ export function ReflogPage() {
                     {entry.message}
                   </span>
                   {/* Relative time */}
-                  <span className="text-text-tertiary text-2xs flex-shrink-0">
+                  <span className="text-text-tertiary text-2xs shrink-0">
                     {fmtDate(entry.date)}
                   </span>
                 </div>
@@ -326,7 +326,7 @@ export function ReflogPage() {
                         className="flex items-center gap-3 px-3 py-1 border-b border-border-subtle last:border-b-0 text-xs hover:bg-bg-hover"
                       >
                         <span
-                          className="font-mono font-bold w-4 text-center flex-shrink-0"
+                          className="font-mono font-bold w-4 text-center shrink-0"
                           style={{
                             color: f.status === 'A' ? 'var(--status-added)'
                               : f.status === 'D' ? 'var(--status-deleted)'
@@ -341,13 +341,13 @@ export function ReflogPage() {
                           {f.oldPath && <span className="text-text-tertiary"> ← {f.oldPath}</span>}
                         </span>
                         {!f.binary && (
-                          <span className="flex items-center gap-2 flex-shrink-0 text-2xs">
+                          <span className="flex items-center gap-2 shrink-0 text-2xs">
                             <span className="text-status-added">+{f.additions}</span>
                             <span className="text-status-deleted">-{f.deletions}</span>
                           </span>
                         )}
                         {f.binary && (
-                          <span className="text-text-tertiary text-2xs flex-shrink-0">binary</span>
+                          <span className="text-text-tertiary text-2xs shrink-0">binary</span>
                         )}
                       </div>
                     ))}

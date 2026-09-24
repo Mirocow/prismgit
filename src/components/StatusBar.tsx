@@ -115,7 +115,7 @@ export function StatusBar({
 
   if (!currentRepo) {
     return (
-      <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
+      <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary shrink-0">
         <span className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-status-success inline-block" />
           {t('shell.ready')}
@@ -134,7 +134,7 @@ export function StatusBar({
   const staged = status?.staged.length ?? 0;
 
   return (
-    <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
+    <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary shrink-0">
       <div className="flex items-center gap-3">
         {/* HEAD indicator — always visible, shows where you are.
             Bright accent background + ">" makes the current branch

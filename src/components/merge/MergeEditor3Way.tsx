@@ -475,9 +475,9 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
       {conflicts.length === 0 && !dirty && (
         <div
           data-testid="merge-editor-noconflicts"
-          className="flex items-center gap-2 px-3 py-1.5 bg-status-added/10 border-b border-status-added/30 text-xs text-text-secondary flex-shrink-0"
+          className="flex items-center gap-2 px-3 py-1.5 bg-status-added/10 border-b border-status-added/30 text-xs text-text-secondary shrink-0"
         >
-          <CheckCircle size={14} className="text-status-added flex-shrink-0" />
+          <CheckCircle size={14} className="text-status-added shrink-0" />
           <span className="font-medium">{t('changes.noConflictMarkers')}</span>
           <span className="text-text-tertiary truncate">{t('changes.noConflictsEditable')}</span>
         </div>
@@ -548,7 +548,7 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
       </div>
 
       {/* Bottom status bar */}
-      <div className="flex items-center justify-between px-3 py-1 bg-bg-secondary border-t border-border-default text-2xs text-text-tertiary flex-shrink-0 h-6">
+      <div className="flex items-center justify-between px-3 py-1 bg-bg-secondary border-t border-border-default text-2xs text-text-tertiary shrink-0 h-6">
         <span className="flex items-center gap-1">
           {dirty ? '● ' : '✓ '}
           {t('conflict.editableCenterHint')}

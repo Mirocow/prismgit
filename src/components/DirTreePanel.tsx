@@ -25,7 +25,7 @@ function ChangeBadge({ count }: { count: number }) {
   const { t } = useI18n();
   return (
     <span
-      className="ml-auto flex-shrink-0 min-w-[18px] text-center rounded-full bg-accent-muted text-accent text-2xs font-bold px-1.5 leading-[14px]"
+      className="ml-auto shrink-0 min-w-[18px] text-center rounded-full bg-accent-muted text-accent text-2xs font-bold px-1.5 leading-[14px]"
       title={count === 1 ? t('changes.changedFileCountOne', { count }) : t('changes.changedFileCountMany', { count })}
     >
       {count}
@@ -78,7 +78,7 @@ function DirRows({
         {hasChildren ? (
           <button
             className={cn(
-              'w-4 h-4 grid place-items-center rounded-sm flex-shrink-0 transition-colors',
+              'w-4 h-4 grid place-items-center rounded-sm shrink-0 transition-colors',
               isIgnored ? 'text-text-tertiary' : 'text-text-tertiary hover:text-text-primary hover:bg-bg-hover',
             )}
             onClick={(e) => {
@@ -90,17 +90,17 @@ function DirRows({
             {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           </button>
         ) : (
-          <span className="w-4 flex-shrink-0" />
+          <span className="w-4 shrink-0" />
         )}
         {open ? (
           <FolderOpen
             size={13}
-            className={cn('flex-shrink-0', hasChanges ? 'text-accent' : isIgnored ? 'text-text-tertiary' : 'text-text-tertiary')}
+            className={cn('shrink-0', hasChanges ? 'text-accent' : isIgnored ? 'text-text-tertiary' : 'text-text-tertiary')}
           />
         ) : (
           <Folder
             size={13}
-            className={cn('flex-shrink-0', hasChanges ? 'text-accent' : isIgnored ? 'text-text-tertiary' : 'text-text-tertiary')}
+            className={cn('shrink-0', hasChanges ? 'text-accent' : isIgnored ? 'text-text-tertiary' : 'text-text-tertiary')}
           />
         )}
         <span className={cn(
@@ -148,7 +148,7 @@ export function DirTreePanel(p: DirTreePanelProps) {
         title={t('changes.showAllChanged')}
       >
         <button
-          className="w-4 h-4 grid place-items-center rounded-sm text-text-tertiary hover:text-text-primary hover:bg-bg-hover flex-shrink-0 transition-colors"
+          className="w-4 h-4 grid place-items-center rounded-sm text-text-tertiary hover:text-text-primary hover:bg-bg-hover shrink-0 transition-colors"
           onClick={(e) => {
             e.stopPropagation();
             p.onToggleExpand(ROOT_KEY);
@@ -157,7 +157,7 @@ export function DirTreePanel(p: DirTreePanelProps) {
         >
           {rootOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         </button>
-        {rootOpen ? <FolderGitOpen size={14} className="text-accent flex-shrink-0" /> : <FolderGit size={14} className="text-accent flex-shrink-0" />}
+        {rootOpen ? <FolderGitOpen size={14} className="text-accent shrink-0" /> : <FolderGit size={14} className="text-accent shrink-0" />}
         <span className="truncate font-semibold">{p.repoName}</span>
         <span className="text-text-tertiary truncate font-mono text-2xs">
           ({p.loading && p.branch === null ? '?' : p.branch ?? 'HEAD'})

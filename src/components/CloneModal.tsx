@@ -507,14 +507,14 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                 <div className="rounded border border-border-subtle bg-bg-secondary/60 px-2.5 py-2 space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0 text-xs">
-                      <Lock size={12} className="text-text-tertiary flex-shrink-0" />
+                      <Lock size={12} className="text-text-tertiary shrink-0" />
                       <span className="font-mono truncate">
                         {sshRes.user || 'git'}@{sshRes.host}{sshRes.port ? `:${sshRes.port}` : ''}
                       </span>
                     </div>
                     {sshRes.profile && (
                       <button
-                        className="btn btn-secondary text-2xs py-0.5 px-2 flex-shrink-0"
+                        className="btn btn-secondary text-2xs py-0.5 px-2 shrink-0"
                         onClick={testSshForClone}
                         disabled={sshTesting}
                       >
@@ -718,7 +718,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                       className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-bg-hover border-b border-border-subtle"
                       onClick={() => selectGithubRepo(r)}
                     >
-                      <Github size={14} className="text-text-tertiary flex-shrink-0" />
+                      <Github size={14} className="text-text-tertiary shrink-0" />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm truncate">{r.full_name}</div>
                         {r.description && (
@@ -827,7 +827,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                             className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-bg-hover border-b border-border-subtle"
                             onClick={() => selectGitlabProject(p)}
                           >
-                            <GitBranch size={14} className="text-text-tertiary flex-shrink-0" />
+                            <GitBranch size={14} className="text-text-tertiary shrink-0" />
                             <div className="flex-1 min-w-0">
                               <div className="text-sm truncate">{p.path_with_namespace}</div>
                               {p.description && (

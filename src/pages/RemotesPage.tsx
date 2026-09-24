@@ -285,13 +285,13 @@ export function RemotesPage() {
                 onContextMenu={(e) => showRemoteMenu(e, r)}
               >
                 <button
-                  className="icon-btn !w-5 !h-5 flex-shrink-0"
+                  className="icon-btn !w-5 !h-5 shrink-0"
                   title={t('remotes.previewTooltip')}
                   onClick={() => togglePreview(r)}
                 >
                   {expanded.has(r.name) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                 </button>
-                <GitBranch size={15} className="text-accent flex-shrink-0" />
+                <GitBranch size={15} className="text-accent shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-text-primary">{r.name}</span>
@@ -312,7 +312,7 @@ export function RemotesPage() {
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
+                <div className="flex items-center gap-1 shrink-0">
                   {busy === r.name ? (
                     <Loader size={14} className="animate-spin text-accent" />
                   ) : (

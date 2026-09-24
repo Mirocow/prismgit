@@ -367,7 +367,7 @@ export function ReviewsPage() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Commit list with review count */}
-        <div className="w-72 border-r border-border-default overflow-y-auto flex-shrink-0">
+        <div className="w-72 border-r border-border-default overflow-y-auto shrink-0">
           <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default">
             {t('pages.reviewedCommits', { count: reviews.length })}
           </div>
@@ -420,7 +420,7 @@ export function ReviewsPage() {
                 >
                   <div className="flex items-start gap-3">
                     <div
-                      className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
+                      className="w-2 h-2 rounded-full mt-1.5 shrink-0"
                       style={{ backgroundColor: SEVERITY_COLORS[comment.severity] }}
                     />
                     <div className="flex-1 min-w-0">
@@ -441,7 +441,7 @@ export function ReviewsPage() {
                         {comment.body}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
                         className="icon-btn !w-6 !h-6"
                         title={comment.resolved ? t('pages.markUnresolved') : t('pages.markResolved')}

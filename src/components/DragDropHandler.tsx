@@ -265,7 +265,7 @@ export function DragDropHandler() {
 
       {/* Processing overlay — kept the same small centered modal. */}
       {processing && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center"
+        <div className="fixed inset-0 z-200 flex items-center justify-center"
           style={{ backgroundColor: 'var(--overlay-bg)' }}
         >
           <div className="flex flex-col items-center gap-3 bg-bg-elevated rounded-xl p-8 shadow-lg border border-border-default">
@@ -282,7 +282,7 @@ export function DragDropHandler() {
 
       {/* Results panel */}
       {results && (
-        <div className="fixed bottom-12 right-4 z-[200] w-96 bg-bg-elevated rounded-lg shadow-lg border border-border-default animate-slide-up overflow-hidden">
+        <div className="fixed bottom-12 right-4 z-200 w-96 bg-bg-elevated rounded-lg shadow-lg border border-border-default animate-slide-up overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-bg-tertiary">
             <span className="text-sm font-semibold text-text-primary">
               {results.filter((r) => r.isRepo).length > 0 ? t('shell.reposAddedTitle') : t('shell.noReposFoundTitle')}
@@ -302,16 +302,16 @@ export function DragDropHandler() {
                 className="flex items-center gap-2 px-4 py-1.5 text-xs"
               >
                 {r.isRepo ? (
-                  <Check size={12} className="text-status-added flex-shrink-0" />
+                  <Check size={12} className="text-status-added shrink-0" />
                 ) : (
-                  <X size={12} className="text-text-tertiary flex-shrink-0" />
+                  <X size={12} className="text-text-tertiary shrink-0" />
                 )}
                 {r.isRepo && r.opened ? (
-                  <FolderGitOpen size={12} className="text-accent flex-shrink-0" />
+                  <FolderGitOpen size={12} className="text-accent shrink-0" />
                 ) : r.isRepo ? (
-                  <FolderGit size={12} className="text-text-tertiary flex-shrink-0" />
+                  <FolderGit size={12} className="text-text-tertiary shrink-0" />
                 ) : (
-                  <FolderGit size={12} className="text-text-tertiary opacity-50 flex-shrink-0" />
+                  <FolderGit size={12} className="text-text-tertiary opacity-50 shrink-0" />
                 )}
                 <span className={cn(
                   'truncate flex-1',
@@ -320,17 +320,17 @@ export function DragDropHandler() {
                   {r.name}
                 </span>
                 {r.opened && (
-                  <span className="text-2xs text-accent font-medium flex-shrink-0">
+                  <span className="text-2xs text-accent font-medium shrink-0">
                     {t('shell.statusOpened')}
                   </span>
                 )}
                 {r.isRepo && !r.opened && (
-                  <span className="text-2xs text-text-tertiary flex-shrink-0">
+                  <span className="text-2xs text-text-tertiary shrink-0">
                     {t('shell.statusAdded')}
                   </span>
                 )}
                 {!r.isRepo && (
-                  <span className="text-2xs text-text-tertiary flex-shrink-0">
+                  <span className="text-2xs text-text-tertiary shrink-0">
                     {t('shell.statusNotRepo')}
                   </span>
                 )}
@@ -381,7 +381,7 @@ function RepoListDropHighlight() {
 
   return (
     <div
-      className="fixed z-[150] pointer-events-none flex items-center justify-center"
+      className="fixed z-150 pointer-events-none flex items-center justify-center"
       style={{
         left: rect.left,
         top: rect.top,

@@ -87,7 +87,7 @@ export function RenameDialog({
       }
     >
       <div className="flex items-center gap-2">
-        <label className="text-xs text-text-tertiary flex-shrink-0 w-11">{t('dialogs.nameLabel')}</label>
+        <label className="text-xs text-text-tertiary shrink-0 w-11">{t('dialogs.nameLabel')}</label>
         <input
           type="text"
           className="flex-1 text-sm font-mono"

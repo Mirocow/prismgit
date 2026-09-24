@@ -106,7 +106,7 @@ export function ResetDialog({
     >
       {advanced && (
         <div className="flex items-center gap-2 mb-3">
-          <label className="text-xs text-text-tertiary flex-shrink-0">{t('branches.resetToLabel')}</label>
+          <label className="text-xs text-text-tertiary shrink-0">{t('branches.resetToLabel')}</label>
           <input
             type="text"
             className="flex-1 text-sm font-mono"
@@ -646,7 +646,7 @@ export function SetDepthDialog({
       }
     >
       <div className="flex items-center gap-2">
-        <label className="text-xs text-text-tertiary flex-shrink-0">{t('remotes.depthLabel')}</label>
+        <label className="text-xs text-text-tertiary shrink-0">{t('remotes.depthLabel')}</label>
         <input
           type="number"
           min={0}
@@ -699,7 +699,7 @@ export function FetchMoreDialog({
       }
     >
       <div className="flex items-center gap-2">
-        <label className="text-xs text-text-tertiary flex-shrink-0">{t('remotes.commitsLabel')}</label>
+        <label className="text-xs text-text-tertiary shrink-0">{t('remotes.commitsLabel')}</label>
         <input
           type="number"
           min={1}

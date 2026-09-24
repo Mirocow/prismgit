@@ -56,7 +56,7 @@ function MergeRowImpl({
       className="flex items-start font-mono text-xs leading-5 px-1"
       style={{ height: ROW_HEIGHT, backgroundColor: bg, borderLeft, borderRight }}
     >
-      <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle tabular-nums">
+      <span className="w-10 shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle tabular-nums">
         {lineNum ?? ''}
       </span>
       <span

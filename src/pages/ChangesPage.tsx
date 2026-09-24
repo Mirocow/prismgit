@@ -2111,7 +2111,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       >
         {/* State icon */}
         <span
-          className="w-4 text-center font-bold flex-shrink-0"
+          className="w-4 text-center font-bold shrink-0"
           style={{ color: getStatusColor(statusCode) }}
         >
           {statusLetter}
@@ -2121,7 +2121,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         {/* 0.3 — EOL-only badge: the file's only change is line endings (CRLF↔LF) */}
         {eolOnlyPaths.has(file.path) && (
           <span
-            className="text-3xs px-1 rounded border border-border-subtle text-text-tertiary flex-shrink-0"
+            className="text-3xs px-1 rounded border border-border-subtle text-text-tertiary shrink-0"
             title={t('changes.eolOnlyTitle')}
           >
             EOL
@@ -2129,7 +2129,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         )}
         {/* Line-change counts (+N -M) — reserved width keeps columns aligned */}
         <span
-          className="text-2xs flex-shrink-0 text-right tabular-nums whitespace-nowrap overflow-hidden"
+          className="text-2xs shrink-0 text-right tabular-nums whitespace-nowrap overflow-hidden"
           style={{ width: 74 }}
           title={t('changes.linesAddedRemoved')}
         >
@@ -2141,15 +2141,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           )}
         </span>
         {/* State text */}
-        <span className="text-text-tertiary flex-shrink-0 italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>{stateLabel}</span>
+        <span className="text-text-tertiary shrink-0 italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>{stateLabel}</span>
         {/* Relative directory — always reserve the cell when the column is
             visible, so rows with an empty relDir (repo-root files) stay
             column-aligned with the header and other rows. */}
         {!compressFilePaths && (
-          <span className="text-text-tertiary flex-shrink-0 truncate whitespace-nowrap" style={{ width: colWidths.dir }} title={relDir}>{relDir}</span>
+          <span className="text-text-tertiary shrink-0 truncate whitespace-nowrap" style={{ width: colWidths.dir }} title={relDir}>{relDir}</span>
         )}
         {/* Actions — fixed width so all rows stay column-aligned */}
-        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0 overflow-hidden" style={{ width: 92 }}>
+        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 shrink-0 overflow-hidden" style={{ width: 92 }}>
           {isStaged ? (
             <button className="icon-btn !w-5 !h-5" title={t('changes.unstage')} onClick={(e) => { e.stopPropagation(); handleUnstageFile(file.path); }}>
               <Minus size={11} />
@@ -2384,7 +2384,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         {/* Directory tree panel (SmartGit-style) — selects the folder scope */}
         {dirTreeVisible && (
           <>
-            <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: treeWidth }}>
+            <div className="flex flex-col overflow-hidden shrink-0" style={{ width: treeWidth }}>
               <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
                 <span className="text-2xs font-semibold uppercase text-text-secondary">{t('sidebar.repositories')}</span>
                 <div className="flex items-center gap-0.5">
@@ -2564,7 +2564,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           </div>
 
           {/* Journal panel (bottom) — shows recent commits like SmartGit */}
-          <div className="flex-shrink-0" style={{ height: journalCollapsed ? 24 : journalHeight }}>
+          <div className="shrink-0" style={{ height: journalCollapsed ? 24 : journalHeight }}>
             {!journalCollapsed && (
               <ResizableSplitter direction="vertical" onResize={(d) => handleJournalResize(-d)} />
             )}
@@ -2641,7 +2641,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                             <span className="flex-1 truncate font-medium text-text-primary">{entry.subject}</span>
                             <CommitHashLink hash={entry.hash} />
                             {grp.entries.length === 1 && (
-                              <span className="text-text-tertiary flex-shrink-0">{grp.label}</span>
+                              <span className="text-text-tertiary shrink-0">{grp.label}</span>
                             )}
                           </div>
                         );
@@ -2656,7 +2656,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           </div>
 
           {/* Commit editor — resizable with markdown preview */}
-          <div className="bg-bg-secondary flex-shrink-0 flex flex-col" style={{ height: commitHeight }}>
+          <div className="bg-bg-secondary shrink-0 flex flex-col" style={{ height: commitHeight }}>
             <ResizableSplitter direction="vertical" onResize={(d) => handleCommitResize(-d)} />
             <div className="flex items-center gap-2 px-2 py-1">
               <label className="flex items-center gap-1 text-2xs text-text-secondary cursor-pointer">
@@ -2753,7 +2753,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 Non-blocking inline banners, dismissible for the session. */}
             {settings?.commitSuggestAddUntracked && untrackedBannerCount > 0 && !dismissedBanners.has('untracked') && (
               <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs">
-                <FilePlus size={10} className="flex-shrink-0 text-accent" />
+                <FilePlus size={10} className="shrink-0 text-accent" />
                 <span className="flex-1 truncate">{t('changes.suggestAddUntracked', { n: untrackedBannerCount })}</span>
                 <button
                   className="btn btn-secondary text-2xs !py-0 !px-1.5"
@@ -2761,14 +2761,14 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 >
                   {t('changes.suggestAddAll')}
                 </button>
-                <button className="icon-btn !w-4 !h-4 flex-shrink-0" title={t('changes.dismissBanner')} onClick={() => setDismissedBanners(prev => new Set(prev).add('untracked'))}>
+                <button className="icon-btn !w-4 !h-4 shrink-0" title={t('changes.dismissBanner')} onClick={() => setDismissedBanners(prev => new Set(prev).add('untracked'))}>
                   <X size={10} />
                 </button>
               </div>
             )}
             {settings?.commitSuggestRemoveMissing !== false && missingBannerPaths.length > 0 && !dismissedBanners.has('missing') && (
               <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs">
-                <Trash size={10} className="flex-shrink-0 text-status-deleted" />
+                <Trash size={10} className="shrink-0 text-status-deleted" />
                 <span className="flex-1 truncate">{t('changes.suggestStageMissing', { n: missingBannerPaths.length })}</span>
                 <button
                   className="btn btn-secondary text-2xs !py-0 !px-1.5"
@@ -2776,7 +2776,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 >
                   {t('changes.suggestStageDeletions')}
                 </button>
-                <button className="icon-btn !w-4 !h-4 flex-shrink-0" title={t('changes.dismissBanner')} onClick={() => setDismissedBanners(prev => new Set(prev).add('missing'))}>
+                <button className="icon-btn !w-4 !h-4 shrink-0" title={t('changes.dismissBanner')} onClick={() => setDismissedBanners(prev => new Set(prev).add('missing'))}>
                   <X size={10} />
                 </button>
               </div>
@@ -2793,9 +2793,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                   onClick={() => { setCommitMsg(aiSuggestion); setAiSuggestion(null); }}
                   title={t('changes.aiSuggestionTitle')}
                 >
-                  <Sparkles size={9} className="flex-shrink-0" />
+                  <Sparkles size={9} className="shrink-0" />
                   <span className="truncate flex-1 font-mono">{aiSuggestion.split('\n')[0]}</span>
-                  <span className="text-3xs text-text-tertiary flex-shrink-0">{t('changes.aiSuggestionClickToUse')}</span>
+                  <span className="text-3xs text-text-tertiary shrink-0">{t('changes.aiSuggestionClickToUse')}</span>
                 </button>
               )}
               {aiSuggesting && !aiSuggestion && !commitMsg.trim() && (

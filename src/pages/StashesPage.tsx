@@ -256,7 +256,7 @@ export function StashesPage() {
                   });
                 }}
               >
-                <code className="text-xs font-mono text-text-tertiary flex-shrink-0">
+                <code className="text-xs font-mono text-text-tertiary shrink-0">
                   stash@{'{' + s.index + '}'}
                 </code>
                 <div className="flex-1 min-w-0">

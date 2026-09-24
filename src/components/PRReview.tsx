@@ -500,7 +500,7 @@ export function PRReview({
         <GitPullRequest
           size={18}
           className={cn(
-            'mt-0.5 flex-shrink-0',
+            'mt-0.5 shrink-0',
             displayPR.merged_at
               ? 'text-status-modified'
               : displayPR.state === 'open' ? 'text-status-added' : 'text-status-deleted'
@@ -553,7 +553,7 @@ export function PRReview({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           {/* Analyze PR with AI — sends the PR diff to the AI Assistant
               for code review. Opens the AI panel with a pre-filled prompt. */}
           <button
@@ -738,7 +738,7 @@ Please review this PR — identify potential issues, suggest improvements, and s
         ) : activeTab === 'commits' ? (
           <div className="flex h-full">
             {/* Commits list (left) */}
-            <div className={`${selectedCommit ? 'w-1/2' : 'w-full'} border-r border-border-subtle overflow-y-auto flex-shrink-0`}>
+            <div className={`${selectedCommit ? 'w-1/2' : 'w-full'} border-r border-border-subtle overflow-y-auto shrink-0`}>
               {commits.length === 0 ? (
                 <div className="p-8 text-center text-text-tertiary text-xs italic">
                   {t('pages.prNoCommits', { defaultValue: 'No commits found.' })}
@@ -757,13 +757,13 @@ Please review this PR — identify potential issues, suggest improvements, and s
                     }}
                     title={t('pages.prClickCommitForDiff', { defaultValue: 'Click to view changes in this commit' })}
                   >
-                    <GitCommit size={12} className="mt-0.5 text-text-tertiary flex-shrink-0" />
+                    <GitCommit size={12} className="mt-0.5 text-text-tertiary shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs text-text-primary whitespace-pre-wrap break-words">
+                      <div className="text-xs text-text-primary whitespace-pre-wrap wrap-break-word">
                         {c.commit.message.split('\n')[0]}
                       </div>
                       {c.commit.message.includes('\n') && (
-                        <div className="text-2xs text-text-tertiary mt-0.5 whitespace-pre-wrap break-words opacity-70">
+                        <div className="text-2xs text-text-tertiary mt-0.5 whitespace-pre-wrap wrap-break-word opacity-70">
                           {c.commit.message.split('\n').slice(1).join('\n').trim()}
                         </div>
                       )}
@@ -811,7 +811,7 @@ Please review this PR — identify potential issues, suggest improvements, and s
                         onClick={() => setSelectedFile(f)}
                       >
                         <span className={cn(
-                          'text-2xs px-1 rounded uppercase font-medium flex-shrink-0',
+                          'text-2xs px-1 rounded uppercase font-medium shrink-0',
                           f.status === 'added' && 'bg-status-added/15 text-status-added',
                           f.status === 'removed' && 'bg-status-deleted/15 text-status-deleted',
                           f.status === 'modified' && 'bg-status-modified/15 text-status-modified',
@@ -820,8 +820,8 @@ Please review this PR — identify potential issues, suggest improvements, and s
                           {f.status.slice(0, 3)}
                         </span>
                         <span className="font-mono truncate flex-1" title={f.filename}>{f.filename}</span>
-                        <span className="text-status-added text-2xs flex-shrink-0">+{f.additions}</span>
-                        <span className="text-status-deleted text-2xs flex-shrink-0">-{f.deletions}</span>
+                        <span className="text-status-added text-2xs shrink-0">+{f.additions}</span>
+                        <span className="text-status-deleted text-2xs shrink-0">-{f.deletions}</span>
                       </button>
                       {selectedFile?.filename === f.filename && f.patch && (
                         <pre className="text-2xs font-mono p-2 overflow-x-auto leading-tight bg-bg-tertiary">
@@ -846,7 +846,7 @@ Please review this PR — identify potential issues, suggest improvements, and s
         ) : activeTab === 'files' ? (
           <div className="flex h-full">
             {/* Files list */}
-            <div className="w-1/3 border-r border-border-subtle overflow-y-auto flex-shrink-0">
+            <div className="w-1/3 border-r border-border-subtle overflow-y-auto shrink-0">
               {/* Commit filter dropdown */}
               <div className="px-3 py-2 border-b border-border-subtle bg-bg-tertiary sticky top-0 z-10">
                 <div className="flex items-center gap-2">
@@ -894,7 +894,7 @@ Please review this PR — identify potential issues, suggest improvements, and s
                 >
                   <span
                     className={cn(
-                      'text-2xs px-1 rounded uppercase font-medium flex-shrink-0',
+                      'text-2xs px-1 rounded uppercase font-medium shrink-0',
                       f.status === 'added' && 'bg-status-added/15 text-status-added',
                       f.status === 'removed' && 'bg-status-deleted/15 text-status-deleted',
                       f.status === 'modified' && 'bg-status-modified/15 text-status-modified',
@@ -904,8 +904,8 @@ Please review this PR — identify potential issues, suggest improvements, and s
                     {f.status.slice(0, 3)}
                   </span>
                   <span className="font-mono truncate flex-1" title={f.filename}>{f.filename}</span>
-                  <span className="text-status-added text-2xs flex-shrink-0">+{f.additions}</span>
-                  <span className="text-status-deleted text-2xs flex-shrink-0">-{f.deletions}</span>
+                  <span className="text-status-added text-2xs shrink-0">+{f.additions}</span>
+                  <span className="text-status-deleted text-2xs shrink-0">-{f.deletions}</span>
                 </button>
               ))}
             </div>

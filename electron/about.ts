@@ -24,7 +24,7 @@ import { SimpleStore } from './services/simpleStore.js';
 // Electron runtime version instead of the app's identity.
 import pkg from '../package.json';
 
-// Baked at build time by vite define (see vite.config.ts → main.vite.define).
+// Baked at build time by vite define (see vite.config.mts → main.vite.define).
 declare const __BUILD_DATE__: string;
 
 let aboutWindow: BrowserWindow | null = null;

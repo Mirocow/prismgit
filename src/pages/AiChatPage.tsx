@@ -305,10 +305,10 @@ export default function AiChatPage() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg-primary">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-bg-elevated flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-bg-elevated shrink-0">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <Sparkles size={16} className="text-accent flex-shrink-0" />
-          <span className="text-sm font-medium flex-shrink-0">{t('aiAssistant.title')}</span>
+          <Sparkles size={16} className="text-accent shrink-0" />
+          <span className="text-sm font-medium shrink-0">{t('aiAssistant.title')}</span>
           {/* Session switcher — clickable badge showing the current session's repo. */}
           <div className="relative ml-2 min-w-0">
             <button
@@ -316,7 +316,7 @@ export default function AiChatPage() {
               onClick={() => setShowSessionMenu(v => !v)}
               title={sessionRepo?.path ?? (sessionRepoPath === null ? t('aiAssistant.noRepoMode') : t('aiAssistant.loading'))}
             >
-              <Folder size={12} className="flex-shrink-0 text-text-tertiary" />
+              <Folder size={12} className="shrink-0 text-text-tertiary" />
               <span className="truncate max-w-40">
                 {sessionRepo
                   ? sessionRepo.name
@@ -376,9 +376,9 @@ export default function AiChatPage() {
                         onClick={() => switchSession(r.path)}
                       >
                         <div className="flex items-center gap-2 min-w-0">
-                          <Folder size={12} className="text-text-tertiary flex-shrink-0" />
+                          <Folder size={12} className="text-text-tertiary shrink-0" />
                           <span className="truncate flex-1">{r.name}</span>
-                          <span className="text-3xs text-text-tertiary flex-shrink-0">{formatAgo(Date.now() - r.lastOpened)}</span>
+                          <span className="text-3xs text-text-tertiary shrink-0">{formatAgo(Date.now() - r.lastOpened)}</span>
                         </div>
                         <div className="text-3xs text-text-tertiary mt-0.5 ml-[20px] truncate">{r.path}</div>
                       </button>
@@ -443,12 +443,12 @@ export default function AiChatPage() {
           </div>
           {/* Message count badge */}
           {messages.length > 0 && (
-            <span className="text-3xs text-text-tertiary px-1.5 py-0.5 rounded bg-bg-secondary border border-border-subtle flex-shrink-0">
+            <span className="text-3xs text-text-tertiary px-1.5 py-0.5 rounded bg-bg-secondary border border-border-subtle shrink-0">
               {messages.length} {messages.length === 1 ? t('aiAssistant.message') : t('aiAssistant.messages')}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           {messages.length > 0 && (
             <>
               {/* Export chat log — same as popup. */}
@@ -555,7 +555,7 @@ export default function AiChatPage() {
 
           {/* Token usage bar — same as popup. */}
           {(tokenUsage.input > 0 || tokenUsage.output > 0) && (
-            <div className="flex items-center gap-4 px-4 py-1 border-t border-border-subtle bg-bg-tertiary text-3xs text-text-tertiary flex-shrink-0">
+            <div className="flex items-center gap-4 px-4 py-1 border-t border-border-subtle bg-bg-tertiary text-3xs text-text-tertiary shrink-0">
               <span title={t('aiAssistant.tokensInput')}>
                 <span className="text-text-secondary font-medium">↓ {tokenUsage.input.toLocaleString()}</span> {t('aiAssistant.tokensIn')}
               </span>
@@ -574,7 +574,7 @@ export default function AiChatPage() {
           )}
 
           {/* Input */}
-          <div className="border-t border-border-default p-3 flex items-end gap-2 flex-shrink-0 bg-bg-elevated">
+          <div className="border-t border-border-default p-3 flex items-end gap-2 shrink-0 bg-bg-elevated">
             <textarea
               className="flex-1 text-sm p-2.5 resize-none bg-bg-primary border border-border-default rounded outline-none focus:border-accent min-h-[44px] max-h-40"
               rows={2}
@@ -588,7 +588,7 @@ export default function AiChatPage() {
             />
             {busy ? (
               <button
-                className="btn btn-danger !px-3 !py-2 flex-shrink-0"
+                className="btn btn-danger !px-3 !py-2 shrink-0"
                 onClick={handleStop}
                 title={t('aiAssistant.stopGeneration')}
                 aria-label={t('aiAssistant.stopGeneration')}
@@ -597,7 +597,7 @@ export default function AiChatPage() {
               </button>
             ) : (
               <button
-                className="btn btn-primary !px-3 !py-2 flex-shrink-0"
+                className="btn btn-primary !px-3 !py-2 shrink-0"
                 onClick={() => void handleSend()}
                 disabled={!input.trim()}
                 title={t('aiAssistant.send')}
@@ -707,14 +707,14 @@ export default function AiChatPage() {
                     title={msg.content}
                   >
                     <div className="flex items-center gap-1.5 mb-1">
-                      {role === 'user' && <User size={9} className="text-accent flex-shrink-0" />}
-                      {role === 'assistant' && <Bot size={9} className="text-accent flex-shrink-0" />}
-                      {role === 'tool' && <Wrench size={9} className="text-text-tertiary flex-shrink-0" />}
+                      {role === 'user' && <User size={9} className="text-accent shrink-0" />}
+                      {role === 'assistant' && <Bot size={9} className="text-accent shrink-0" />}
+                      {role === 'tool' && <Wrench size={9} className="text-text-tertiary shrink-0" />}
                       <span className="text-3xs uppercase tracking-wide text-text-tertiary font-medium">
                         {role === 'tool' ? (msg.toolName ?? 'tool') : role}
                       </span>
                     </div>
-                    <div className="text-text-secondary line-clamp-3 break-words">
+                    <div className="text-text-secondary line-clamp-3 wrap-break-word">
                       {highlightMatch(preview, searchLower)}
                     </div>
                   </div>

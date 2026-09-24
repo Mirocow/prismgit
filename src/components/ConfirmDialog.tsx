@@ -181,10 +181,10 @@ export function ConfirmDialogHost() {
   };
 
   return (
-    // z-[60] — above page modals (z-50), confirmations can be triggered from
+    // z-60 — above page modals (z-50), confirmations can be triggered from
     // inside another dialog (e.g. Settings rows).
     <div
-      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-[60]"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-60"
       onMouseDown={() => cancel()}
     >
       <div
@@ -194,11 +194,11 @@ export function ConfirmDialogHost() {
         aria-modal="true"
       >
         <div className="px-4 pt-4 flex items-start gap-2.5">
-          {req.danger && <AlertTriangle size={16} className="text-status-deleted flex-shrink-0 mt-0.5" />}
+          {req.danger && <AlertTriangle size={16} className="text-status-deleted shrink-0 mt-0.5" />}
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-semibold">{req.title}</h3>
             {req.message && (
-              <div className="text-xs text-text-secondary mt-1.5 whitespace-pre-line leading-relaxed break-words">
+              <div className="text-xs text-text-secondary mt-1.5 whitespace-pre-line leading-relaxed wrap-break-word">
                 {req.message}
               </div>
             )}

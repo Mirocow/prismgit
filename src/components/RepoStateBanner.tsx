@@ -129,7 +129,7 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
       data-testid="repo-state-banner"
       className="flex items-center gap-2 px-3 py-1.5 border-b border-status-conflict/40 bg-status-conflict/10 text-xs"
     >
-      <AlertTriangle size={13} className="text-status-conflict flex-shrink-0" />
+      <AlertTriangle size={13} className="text-status-conflict shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium text-status-conflict" data-testid="repo-state-text">
@@ -139,7 +139,7 @@ export function RepoStateBanner({ status, busy, handlers }: RepoStateBannerProps
         </div>
         <div className="text-2xs text-text-tertiary mt-0.5">{t(FOOTERS[state.key])}</div>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
+      <div className="flex items-center gap-1 shrink-0">
         {/* cherry-picking (incl. empty & conflict): Continue, Abort */}
         {state.key === 'cherry-picking' && cp && (
           <>

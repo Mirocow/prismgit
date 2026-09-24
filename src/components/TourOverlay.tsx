@@ -158,7 +158,7 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100]" role="dialog" aria-modal={true} aria-label={t('tour.ariaLabel')}>
+    <div className="fixed inset-0 z-100" role="dialog" aria-modal={true} aria-label={t('tour.ariaLabel')}>
       {/* Four overlay rectangles forming the "spotlight cut-out". */}
       {targetRect ? (
         <>
@@ -192,7 +192,7 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
         // that never rendered. Now we center a popover with Next/Skip
         // so the user can recover.
         <div
-          className="fixed panel p-4 shadow-2xl w-[360px] z-[101]"
+          className="fixed panel p-4 shadow-2xl w-[360px] z-101"
           style={{
             top: '50%',
             left: '50%',
@@ -235,7 +235,7 @@ export function TourOverlay({ onClose }: { onClose: () => void }) {
 
       {popoverPos && (
         <div
-          className="fixed panel p-4 shadow-2xl w-[360px] z-[101]"
+          className="fixed panel p-4 shadow-2xl w-[360px] z-101"
           style={{ top: popoverPos.top, left: popoverPos.left }}
         >
           <div className="flex items-start justify-between mb-2">

@@ -517,8 +517,8 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-tertiary rounded-t-lg">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <Sparkles size={14} className="text-accent flex-shrink-0" />
-          <span className="text-sm font-medium flex-shrink-0">{t('aiAssistant.title')}</span>
+          <Sparkles size={14} className="text-accent shrink-0" />
+          <span className="text-sm font-medium shrink-0">{t('aiAssistant.title')}</span>
           {/* Session switcher — clickable badge showing the current session's repo. */}
           <div className="relative ml-1 min-w-0">
             <button
@@ -526,7 +526,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
               onClick={() => setShowSessionMenu(v => !v)}
               title={sessionRepo?.path ?? (sessionRepoPath === null ? t('aiAssistant.noRepoMode') : t('aiAssistant.loading'))}
             >
-              <Folder size={10} className="flex-shrink-0 text-text-tertiary" />
+              <Folder size={10} className="shrink-0 text-text-tertiary" />
               <span className="truncate max-w-28">
                 {sessionRepo
                   ? sessionRepo.name
@@ -586,9 +586,9 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                         onClick={() => switchSession(r.path)}
                       >
                         <div className="flex items-center gap-2 min-w-0">
-                          <Folder size={11} className="text-text-tertiary flex-shrink-0" />
+                          <Folder size={11} className="text-text-tertiary shrink-0" />
                           <span className="truncate flex-1">{r.name}</span>
-                          <span className="text-3xs text-text-tertiary flex-shrink-0">{formatAgo(Date.now() - r.lastOpened)}</span>
+                          <span className="text-3xs text-text-tertiary shrink-0">{formatAgo(Date.now() - r.lastOpened)}</span>
                         </div>
                         <div className="text-3xs text-text-tertiary mt-0.5 ml-[18px] truncate">{r.path}</div>
                       </button>
@@ -649,7 +649,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           {/* Favorites toggle — tree of saved parts of the dialogue */}
           <button
             className={cn('icon-btn !w-5 !h-5', showFavorites ? '!text-accent' : 'hover:!text-accent')}
@@ -809,7 +809,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           // Stop button — replaces the Send button while a request is in flight.
           // Aborts the in-flight fetch via the AbortController stored in abortRef.
           <button
-            className="btn btn-danger !px-2 !py-1 flex-shrink-0"
+            className="btn btn-danger !px-2 !py-1 shrink-0"
             onClick={handleStop}
             title={t('aiAssistant.stopGeneration')}
             aria-label={t('aiAssistant.stopGeneration')}
@@ -818,7 +818,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           </button>
         ) : (
           <button
-            className="btn btn-primary !px-2 !py-1 flex-shrink-0"
+            className="btn btn-primary !px-2 !py-1 shrink-0"
             onClick={() => void handleSend()}
             disabled={!input.trim()}
             title={t('aiAssistant.send')}
@@ -867,7 +867,7 @@ export function MessageBubble({ msg, onRegenerate, onSaveFavorite, t }: { msg: C
     return (
       <div className="flex items-start gap-2 justify-end group">
         <div className="flex flex-col items-end gap-0.5">
-          <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap break-words">
+          <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap wrap-break-word">
             {msg.content}
           </div>
           {/* Retry button — ALWAYS visible (not hover-only). Re-sends
@@ -895,7 +895,7 @@ export function MessageBubble({ msg, onRegenerate, onSaveFavorite, t }: { msg: C
             )}
           </div>
         </div>
-        <User size={14} className="flex-shrink-0 mt-0.5 text-text-tertiary" />
+        <User size={14} className="shrink-0 mt-0.5 text-text-tertiary" />
       </div>
     );
   }
@@ -925,8 +925,8 @@ export function MessageBubble({ msg, onRegenerate, onSaveFavorite, t }: { msg: C
   // assistant final answer — render with lightweight markdown + copy + retry.
   return (
     <div className="flex items-start gap-2 group">
-      <Bot size={14} className="flex-shrink-0 mt-0.5 text-accent" />
-      <div className="bg-bg-secondary rounded px-3 py-1.5 text-xs max-w-[85%] whitespace-pre-wrap break-words">
+      <Bot size={14} className="shrink-0 mt-0.5 text-accent" />
+      <div className="bg-bg-secondary rounded px-3 py-1.5 text-xs max-w-[85%] whitespace-pre-wrap wrap-break-word">
         <MarkdownLite text={msg.content} />
         {/* Action buttons — Retry (regenerate) + Copy + Save to favorites. Always visible. */}
         <div className="mt-1 flex justify-end gap-2">
@@ -1017,13 +1017,13 @@ export function ToolResultBubble({ msg, t }: { msg: ChatMessage; t?: (key: strin
           <span className="text-text-tertiary truncate flex-1 ml-1 opacity-70">{firstLine}</span>
         )}
         {/* Line count badge — tells the user how much is hidden. */}
-        <span className="text-3xs text-text-tertiary flex-shrink-0 ml-auto px-1 rounded bg-bg-secondary">
+        <span className="text-3xs text-text-tertiary shrink-0 ml-auto px-1 rounded bg-bg-secondary">
           {lineCount} {lineCount === 1 ? tFn('aiAssistant.line') : tFn('aiAssistant.lines')}
         </span>
         {/* Copy button — always visible, stops propagation so it doesn't toggle. */}
         <span
           onClick={handleCopy}
-          className="icon-btn !w-4 !h-4 hover:text-accent flex-shrink-0 cursor-pointer"
+          className="icon-btn !w-4 !h-4 hover:text-accent shrink-0 cursor-pointer"
           title={tFn('aiAssistant.copyResult')}
         >
           {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
@@ -1031,7 +1031,7 @@ export function ToolResultBubble({ msg, t }: { msg: ChatMessage; t?: (key: strin
       </button>
       {/* Content — only rendered when expanded. */}
       {expanded && (
-        <div className="px-2.5 pb-2 text-text-secondary max-h-60 overflow-y-auto whitespace-pre-wrap break-words border-t border-border-subtle">
+        <div className="px-2.5 pb-2 text-text-secondary max-h-60 overflow-y-auto whitespace-pre-wrap wrap-break-word border-t border-border-subtle">
           {msg.content}
         </div>
       )}

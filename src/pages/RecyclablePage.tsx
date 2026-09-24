@@ -270,7 +270,7 @@ export function RecyclablePage() {
 
       {/* Info banner — explain what "recyclable" means + retention */}
       <div className="px-3 py-1.5 border-b border-border-subtle bg-bg-tertiary flex items-center gap-2">
-        <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+        <AlertCircle size={12} className="text-status-warning shrink-0" />
         <span className="text-2xs text-text-secondary">
           {t('pages.recyclableBanner')}
         </span>

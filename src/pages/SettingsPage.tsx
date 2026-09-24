@@ -328,7 +328,7 @@ export function SettingsPage() {
     <div className="flex flex-col flex-1 overflow-hidden bg-bg-primary">
       <div className="flex-1 flex overflow-hidden">
         {/* Vertical sidebar — tabs on the left, grouped by meaning */}
-        <nav className="w-52 flex-shrink-0 border-r border-border-default bg-bg-secondary overflow-y-auto py-3 px-2">
+        <nav className="w-52 shrink-0 border-r border-border-default bg-bg-secondary overflow-y-auto py-3 px-2">
           <button
             className={cn(
               'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
@@ -742,7 +742,7 @@ export function SettingsPage() {
                     {t('settings.remoteCheckIntervalHint')}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   <input
                     type="number"
                     min={0}
@@ -782,7 +782,7 @@ export function SettingsPage() {
                       {t('settings.historyRefreshIntervalHint', { defaultValue: 'How often to re-run `git log` on the History page. 0 = disabled.' })}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     <input
                       type="number"
                       min={0}
@@ -809,7 +809,7 @@ export function SettingsPage() {
                     {t('settings.changesJournalCountHint', { defaultValue: 'How many commits the recent-commits list on the Changes page fetches (git log -N). Lower = faster and fewer bytes parsed.' })}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   <input
                     type="number"
                     min={5}
@@ -829,7 +829,7 @@ export function SettingsPage() {
                     {t('settings.changesJournalIntervalHint', { defaultValue: 'Minimum seconds between journal reloads. Higher = fewer git log calls (file-watcher ticks + commits + stage ops all coalesce). 0 = reload on every event (not recommended).' })}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   <input
                     type="number"
                     min={0}
@@ -865,7 +865,7 @@ export function SettingsPage() {
                       {t('settings.autoPushIntervalHint', { defaultValue: 'How often to push outgoing commits. Min 60s.' })}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     <input
                       type="number"
                       min={60}
@@ -1389,7 +1389,7 @@ export function SettingsPage() {
                     .filter((e) => !configFilter || e.key.toLowerCase().includes(configFilter.toLowerCase()))
                     .map((entry, i) => (
                       <div key={`${entry.key}-${i}`} className="group flex items-center gap-2 px-3 py-1.5 border-b border-border-subtle last:border-b-0 text-xs">
-                        <code className="font-mono text-text-secondary flex-shrink-0 w-56 truncate" title={entry.key}>
+                        <code className="font-mono text-text-secondary shrink-0 w-56 truncate" title={entry.key}>
                           {entry.key}
                         </code>
                         {editingKey === `${entry.key}-${i}` ? (
@@ -1503,7 +1503,7 @@ export function SettingsPage() {
                   className="group flex items-center gap-3 px-3 py-2 hover:bg-bg-hover rounded-md transition-colors cursor-pointer"
                   onClick={() => openRepository(r.path)}
                 >
-                  <div className="w-7 h-7 rounded-md bg-bg-tertiary border border-border-default flex items-center justify-center flex-shrink-0">
+                  <div className="w-7 h-7 rounded-md bg-bg-tertiary border border-border-default flex items-center justify-center shrink-0">
                     <Folder size={13} className="text-text-tertiary" />
                   </div>
                   <div className="flex-1 min-w-0">

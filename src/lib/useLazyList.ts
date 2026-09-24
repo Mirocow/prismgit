@@ -27,7 +27,7 @@ interface LazyListResult {
   /** Offset to apply to the rendered container (so item N appears at the right Y). */
   offsetY: number;
   /** Ref to attach to the scroll container. */
-  scrollRef: React.RefObject<HTMLDivElement>;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
   /** Call when an item's actual height is measured (for dynamic-height lists). */
   measureItem: (index: number, height: number) => void;
   /** Scroll to a specific item index. */

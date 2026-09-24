@@ -68,7 +68,7 @@ export function seedUserData(
       maxHistoryLoad: 500,
       pullStrategy: 'merge',
       // E2E FIX (root cause #1): without tourCompleted the first-run tour
-      // overlay renders as a fixed inset-0 z-[100] layer that intercepts
+      // overlay renders as a fixed inset-0 z-100 layer that intercepts
       // EVERY click — which is why half the suite used to time out on its
       // first locator.click(). Marking the tour done keeps the overlay
       // from ever mounting.

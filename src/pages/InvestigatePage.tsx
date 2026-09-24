@@ -296,7 +296,7 @@ export function InvestigatePage() {
       {/* ===== Unified search bar ===== */}
       <div className="flex flex-col gap-2 p-3 border-b border-border-default bg-bg-tertiary">
         <div className="flex items-center gap-2">
-          <Search size={14} className="text-text-tertiary flex-shrink-0" />
+          <Search size={14} className="text-text-tertiary shrink-0" />
           <input
             type="text"
             className="flex-1 text-sm"
@@ -315,7 +315,7 @@ export function InvestigatePage() {
           />
           {query && (
             <button
-              className="icon-btn !w-6 !h-6 flex-shrink-0"
+              className="icon-btn !w-6 !h-6 shrink-0"
               title={t('common.clear', { defaultValue: 'Clear' })}
               onClick={() => setQuery('')}
             >
@@ -323,7 +323,7 @@ export function InvestigatePage() {
             </button>
           )}
           <button
-            className="icon-btn !w-7 !h-7 flex-shrink-0"
+            className="icon-btn !w-7 !h-7 shrink-0"
             title={showAdvanced
               ? t('pages.searchHideAdvanced', { defaultValue: 'Hide search options' })
               : t('pages.searchShowAdvanced', { defaultValue: 'Show search options (ignore case, whole words, path filter, etc.)' })}
@@ -484,7 +484,7 @@ export function InvestigatePage() {
                     title={t('pages.invClickOpenHistory')}
                     onClick={() => openCommitInHistory(entry.hash)}
                   >
-                    <GitCommit size={14} className="text-text-tertiary mt-0.5 flex-shrink-0" />
+                    <GitCommit size={14} className="text-text-tertiary mt-0.5 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-text-primary truncate">
                         {highlight(entry.subject, trimmedQuery, ignoreCase).map((seg, j) =>
@@ -501,16 +501,16 @@ export function InvestigatePage() {
                         <RefBadges refs={entry.refs} size={7} hash={entry.hash} className="flex-wrap" />
                       </div>
                     </div>
-                    <code className="text-xs font-mono text-text-tertiary flex-shrink-0">{shortHash(entry.hash)}</code>
+                    <code className="text-xs font-mono text-text-tertiary shrink-0">{shortHash(entry.hash)}</code>
                     <button
-                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                       title={t('pages.openInBrowser')}
                       onClick={(e) => { e.stopPropagation(); handleOpenCommitInBrowser(entry); }}
                     >
                       <ExternalLink size={11} />
                     </button>
                     <button
-                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                       title={t('common.copyHash', { defaultValue: 'Copy commit hash' })}
                       onClick={(e) => { e.stopPropagation(); copyToClipboard(entry.hash); }}
                     >
@@ -538,7 +538,7 @@ export function InvestigatePage() {
                       title={t('pages.invFileRowHint', { path: f })}
                       onClick={() => openFileHistory(f)}
                     >
-                      <FileText size={12} className="text-text-tertiary flex-shrink-0" />
+                      <FileText size={12} className="text-text-tertiary shrink-0" />
                       <span className="font-mono truncate flex-1 min-w-0">
                         {f.slice(0, f.length - base.length)}
                         <span className="text-text-primary font-medium">
@@ -550,28 +550,28 @@ export function InvestigatePage() {
                         </span>
                       </span>
                       <button
-                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.openInChanges')}
                         onClick={(e) => { e.stopPropagation(); openFileInChanges(f); }}
                       >
                         <FolderOpen size={11} />
                       </button>
                       <button
-                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.openInDiff', { defaultValue: 'Open in Diff tool' })}
                         onClick={(e) => { e.stopPropagation(); openFileInDiff(f); }}
                       >
                         <FileText size={11} />
                       </button>
                       <button
-                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.openInBlame', { defaultValue: 'Open in Blame tool' })}
                         onClick={(e) => { e.stopPropagation(); openInBlame(f); }}
                       >
                         <GitBranch size={11} />
                       </button>
                       <button
-                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.fileHistory')}
                         onClick={(e) => { e.stopPropagation(); openFileHistory(f); }}
                       >
@@ -595,11 +595,11 @@ export function InvestigatePage() {
                 {contentGroups.map(([file, matches]) => (
                   <div key={file}>
                     <div className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-secondary border-b border-border-subtle">
-                      <FileText size={11} className="text-text-tertiary flex-shrink-0" />
+                      <FileText size={11} className="text-text-tertiary shrink-0" />
                       <code className="font-mono text-xs text-text-primary truncate flex-1 min-w-0">{file}</code>
-                      <span className="text-2xs text-text-tertiary flex-shrink-0">{matches.length}</span>
+                      <span className="text-2xs text-text-tertiary shrink-0">{matches.length}</span>
                       <button
-                        className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0"
+                        className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.fileHistory')}
                         onClick={() => openFileHistory(file)}
                       >
@@ -614,7 +614,7 @@ export function InvestigatePage() {
                         onClick={() => openFileInChanges(m.file)}
                       >
                         <button
-                          className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 flex-shrink-0 mt-0.5"
+                          className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
                           title={t('pages.copyRef')}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -623,7 +623,7 @@ export function InvestigatePage() {
                         >
                           <Copy size={10} />
                         </button>
-                        <code className="font-mono text-text-tertiary flex-shrink-0 w-10 text-right">{m.line}</code>
+                        <code className="font-mono text-text-tertiary shrink-0 w-10 text-right">{m.line}</code>
                         <pre className="font-mono whitespace-pre-wrap break-all text-text-primary flex-1 min-w-0">
                           {highlight(m.text, trimmedQuery, ignoreCase).map((seg, j) =>
                             seg.hit

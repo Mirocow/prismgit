@@ -71,7 +71,7 @@ function KindBadge({ kind }: { kind: string }) {
       ? 'bg-status-modified/15 text-status-modified'
       : 'bg-accent/15 text-accent';
   return (
-    <span className={cn('px-1.5 py-0.5 rounded text-3xs font-bold uppercase tracking-wider flex-shrink-0', cls)}>
+    <span className={cn('px-1.5 py-0.5 rounded text-3xs font-bold uppercase tracking-wider shrink-0', cls)}>
       {kindBadge(kind)}
     </span>
   );
@@ -270,10 +270,10 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
                     onClick={() => applyTemplate(tpl.id)}
                     title={tpl.description}
                   >
-                    {tpl.protocol === 'ollama' ? <Cpu size={12} className="flex-shrink-0" /> : <Zap size={12} className="flex-shrink-0" />}
+                    {tpl.protocol === 'ollama' ? <Cpu size={12} className="shrink-0" /> : <Zap size={12} className="shrink-0" />}
                     <span className="truncate">{tpl.label}</span>
                     {tpl.freeTier && templateId !== tpl.id && (
-                      <span className="ml-auto text-3xs px-1 rounded bg-status-added/15 text-status-added flex-shrink-0">FREE</span>
+                      <span className="ml-auto text-3xs px-1 rounded bg-status-added/15 text-status-added shrink-0">FREE</span>
                     )}
                   </button>
                 ))}
@@ -352,7 +352,7 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
                 onChange={(e) => setModel(e.target.value)}
               />
               <button
-                className="btn btn-secondary text-xs flex items-center gap-1 flex-shrink-0"
+                className="btn btn-secondary text-xs flex items-center gap-1 shrink-0"
                 onClick={() => void fetchModels()}
                 disabled={fetching}
                 title={isOllama
@@ -375,7 +375,7 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
                 )}
                 {!fetching && fetchResult && !fetchResult.ok && (
                   <div className="px-3 py-2 text-2xs text-status-error flex items-start gap-1.5">
-                    <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
+                    <AlertCircle size={12} className="shrink-0 mt-0.5" />
                     <span className="break-all">{fetchResult.error}</span>
                   </div>
                 )}
@@ -387,7 +387,7 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
                 {!fetching && fetchResult?.ok && models.length > 0 && (
                   <>
                     {/* Search field — filters models by name (case-insensitive) */}
-                    <div className="relative px-2 py-1.5 border-b border-border-subtle flex-shrink-0">
+                    <div className="relative px-2 py-1.5 border-b border-border-subtle shrink-0">
                       <Search size={11} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
                       <input
                         type="text"
@@ -411,9 +411,9 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
                           onClick={() => { setModel(m.id); setModelsOpen(false); setModelSearch(''); }}
                         >
                           <span className="truncate flex-1 font-mono">{m.id}</span>
-                          {m.parameterSize && <span className="text-3xs text-text-tertiary flex-shrink-0">{m.parameterSize}</span>}
-                          {m.quantization && <span className="text-3xs text-text-tertiary flex-shrink-0">{m.quantization}</span>}
-                          {m.size && <span className="text-3xs text-text-tertiary flex-shrink-0">{formatSize(m.size)}</span>}
+                          {m.parameterSize && <span className="text-3xs text-text-tertiary shrink-0">{m.parameterSize}</span>}
+                          {m.quantization && <span className="text-3xs text-text-tertiary shrink-0">{m.quantization}</span>}
+                          {m.size && <span className="text-3xs text-text-tertiary shrink-0">{formatSize(m.size)}</span>}
                         </button>
                       ))}
                       {models.filter(m => !modelSearch.trim() || m.id.toLowerCase().includes(modelSearch.toLowerCase())).length === 0 && (
@@ -606,15 +606,15 @@ export function AiProvidersGrid() {
             >
               {/* Card header */}
               <div className="flex items-center gap-2 px-3 pt-3">
-                {entry.kind === 'ollama' ? <Cpu size={14} className="text-status-added flex-shrink-0" /> : <Zap size={14} className="text-accent flex-shrink-0" />}
+                {entry.kind === 'ollama' ? <Cpu size={14} className="text-status-added shrink-0" /> : <Zap size={14} className="text-accent shrink-0" />}
                 <span className="text-sm font-medium truncate flex-1" title={entry.name}>{entry.name}</span>
                 {entryActive && (
-                  <span className="px-1.5 py-0.5 rounded bg-accent text-white text-3xs font-bold uppercase flex-shrink-0">
+                  <span className="px-1.5 py-0.5 rounded bg-accent text-white text-3xs font-bold uppercase shrink-0">
                     {t('settings.aiGridActive') || 'Active'}
                   </span>
                 )}
                 {!entry.enabled && (
-                  <span className="px-1.5 py-0.5 rounded bg-bg-tertiary text-text-tertiary text-3xs uppercase flex-shrink-0">
+                  <span className="px-1.5 py-0.5 rounded bg-bg-tertiary text-text-tertiary text-3xs uppercase shrink-0">
                     {t('settings.aiGridOff') || 'Off'}
                   </span>
                 )}
@@ -644,7 +644,7 @@ export function AiProvidersGrid() {
                 <div className="px-3 pt-1.5">
                   {test.ok ? (
                     <div className="text-2xs text-status-added flex items-center gap-1">
-                      <CheckCircle size={11} className="flex-shrink-0" />
+                      <CheckCircle size={11} className="shrink-0" />
                       {t('settings.aiGridTestOk') || 'Connected'} · {test.latencyMs} ms · {test.modelCount} {t('settings.aiGridModelsWord') || 'models'}
                     </div>
                   ) : (
@@ -653,9 +653,9 @@ export function AiProvidersGrid() {
                         className="flex items-center gap-1 text-left w-full"
                         onClick={() => setTests(prev => ({ ...prev, [entry.id]: { ...test, expanded: !test.expanded } }))}
                       >
-                        <AlertCircle size={11} className="flex-shrink-0" />
+                        <AlertCircle size={11} className="shrink-0" />
                         <span className="truncate flex-1">{t('settings.aiGridTestFail') || 'Connection failed'}</span>
-                        <ChevronDown size={10} className={cn('transition-transform flex-shrink-0', test.expanded && 'rotate-180')} />
+                        <ChevronDown size={10} className={cn('transition-transform shrink-0', test.expanded && 'rotate-180')} />
                       </button>
                       {test.expanded && test.error && (
                         <div className="mt-1 p-1.5 rounded bg-bg-tertiary break-all font-mono text-3xs text-text-secondary">

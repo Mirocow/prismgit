@@ -68,10 +68,10 @@ export function HelpBanner() {
       className="flex items-start gap-2 px-3 py-2 bg-accent-muted border-b border-accent/20 text-xs text-text-secondary animate-fade-in"
       role="note"
     >
-      <BookOpen size={14} className="text-accent flex-shrink-0 mt-0.5" />
+      <BookOpen size={14} className="text-accent shrink-0 mt-0.5" />
       <span className="flex-1 leading-relaxed">{description}</span>
       <button
-        className="icon-btn !w-5 !h-5 flex-shrink-0"
+        className="icon-btn !w-5 !h-5 shrink-0"
         onClick={handleDismiss}
         title={t('shell.dismissBanner')}
       >

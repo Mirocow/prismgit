@@ -480,7 +480,7 @@ function TagRow({
         });
       }}
     >
-      <TagIcon size={14} className="text-status-modified flex-shrink-0" />
+      <TagIcon size={14} className="text-status-modified shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           {renamingTag === t2.name ? (
@@ -513,7 +513,7 @@ function TagRow({
           <CommitHashLink hash={t2.hash} />
         </div>
       </div>
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
         <button
           className="icon-btn !w-6 !h-6 hover:!text-accent"
           title={t('tags.checkoutTag', { name: t2.name })}

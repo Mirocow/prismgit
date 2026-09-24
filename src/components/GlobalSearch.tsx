@@ -80,12 +80,12 @@ function matchScore(text: string, q: string): number {
 // ── Icon picker per kind ─────────────────────────────────────────────────────
 function KindIcon({ kind }: { kind: ResultKind }) {
   switch (kind) {
-    case 'repo': return <FolderGit size={14} className="flex-shrink-0 opacity-80 text-accent" />;
-    case 'commit': return <GitCommit size={14} className="flex-shrink-0 opacity-80 text-status-renamed" />;
-    case 'branch': return <GitBranch size={14} className="flex-shrink-0 opacity-80 text-accent-purple" />;
-    case 'tag': return <Tag size={14} className="flex-shrink-0 opacity-80 text-status-modified" />;
-    case 'file': return <FileText size={14} className="flex-shrink-0 opacity-80 text-text-secondary" />;
-    case 'stash': return <GitPullRequest size={14} className="flex-shrink-0 opacity-80 text-status-untracked" />;
+    case 'repo': return <FolderGit size={14} className="shrink-0 opacity-80 text-accent" />;
+    case 'commit': return <GitCommit size={14} className="shrink-0 opacity-80 text-status-renamed" />;
+    case 'branch': return <GitBranch size={14} className="shrink-0 opacity-80 text-accent-purple" />;
+    case 'tag': return <Tag size={14} className="shrink-0 opacity-80 text-status-modified" />;
+    case 'file': return <FileText size={14} className="shrink-0 opacity-80 text-text-secondary" />;
+    case 'stash': return <GitPullRequest size={14} className="shrink-0 opacity-80 text-status-untracked" />;
   }
 }
 
@@ -430,7 +430,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-start justify-center pt-[8vh] z-[70] animate-fade-in"
+      className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-start justify-center pt-[8vh] z-70 animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -441,7 +441,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
       >
         {/* ─── Search input ─── */}
         <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border-default">
-          <Search size={15} className="text-text-tertiary flex-shrink-0" />
+          <Search size={15} className="text-text-tertiary shrink-0" />
           <input
             ref={inputRef}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-text-tertiary"
@@ -520,12 +520,12 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
                         )}
                       </div>
                       {r.tertiary && (
-                        <span className="text-2xs text-text-tertiary flex-shrink-0 px-1.5 py-0.5 rounded bg-bg-tertiary">
+                        <span className="text-2xs text-text-tertiary shrink-0 px-1.5 py-0.5 rounded bg-bg-tertiary">
                           {r.tertiary}
                         </span>
                       )}
                       {row.idx === active && (
-                        <ChevronRight size={12} className="flex-shrink-0 text-text-tertiary" />
+                        <ChevronRight size={12} className="shrink-0 text-text-tertiary" />
                       )}
                     </button>
                   );

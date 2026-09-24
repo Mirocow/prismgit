@@ -202,7 +202,7 @@ export function OllamaModelPicker({
                   )}
                 >
                   {/* Selected / warming indicator */}
-                  <span className="w-4 flex-shrink-0 flex items-center justify-center">
+                  <span className="w-4 shrink-0 flex items-center justify-center">
                     {isWarming ? (
                       <Loader size={11} className="animate-spin text-accent" />
                     ) : isSelected ? (
@@ -265,7 +265,7 @@ export function OllamaModelPicker({
       {/* Error message */}
       {error && (
         <div className="mt-2 flex items-start gap-1.5 text-2xs text-status-error">
-          <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
+          <AlertCircle size={11} className="mt-0.5 shrink-0" />
           <span>{error}</span>
         </div>
       )}

@@ -508,16 +508,16 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                     showLineContextMenu(e, lineNo);
                   }}
                 >
-                  <span className="w-12 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
+                  <span className="w-12 shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
                     {line.oldLineNumber ?? ''}
                   </span>
-                  <span className="w-12 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
+                  <span className="w-12 shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
                     {line.newLineNumber ?? ''}
                   </span>
                   {highlightMode === 'text' && (
                     <span
                       className={cn(
-                        'w-6 flex-shrink-0 text-center select-none font-bold',
+                        'w-6 shrink-0 text-center select-none font-bold',
                         isAdd ? 'text-status-added' : isDel ? 'text-status-deleted' : 'text-text-tertiary'
                       )}
                     >
@@ -574,7 +574,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                   if (line.type === 'add') {
                     return (
                       <div key={li} className="flex hover:bg-bg-hover font-mono text-xs" style={{ lineHeight: '20px', minHeight: '20px' }}>
-                        <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
+                        <span className="w-10 shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
                         {/* Empty placeholder for 'add' line in the OLD pane —
                             background tint (not text color) for both modes. */}
                         <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit', background: 'var(--diff-added-line)' }}> </pre>
@@ -595,7 +595,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                       style={{ lineHeight: '20px', minHeight: '20px' }}
                       onClick={() => isDel && toggleLineSelection(hi, li)}
                     >
-                      <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
+                      <span className="w-10 shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
                       <pre className={cn('flex-1 pl-2 whitespace-pre-wrap m-0', textColor)} style={{ fontFamily: 'inherit' }}>
                         {highlightMode === 'background' && lang
                           ? highlightLine(line.content || ' ', lang)
@@ -611,7 +611,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                   if (line.type === 'del') {
                     return (
                       <div key={li} className="flex hover:bg-bg-hover font-mono text-xs" style={{ lineHeight: '20px', minHeight: '20px' }}>
-                        <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.newLineNumber ?? ''}</span>
+                        <span className="w-10 shrink-0 text-right pr-2 text-text-tertiary select-none">{line.newLineNumber ?? ''}</span>
                         {/* Empty placeholder for 'del' line in the NEW pane —
                             background tint (not text color) for both modes. */}
                         <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit', background: 'var(--diff-removed-line)' }}> </pre>
@@ -632,7 +632,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                       style={{ lineHeight: '20px', minHeight: '20px' }}
                       onClick={() => isAdd && toggleLineSelection(hi, li)}
                     >
-                      <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none group-hover:bg-bg-hover">{line.newLineNumber ?? ''}</span>
+                      <span className="w-10 shrink-0 text-right pr-2 text-text-tertiary select-none group-hover:bg-bg-hover">{line.newLineNumber ?? ''}</span>
                       <pre className={cn('flex-1 pl-2 whitespace-pre-wrap m-0', textColor)} style={{ fontFamily: 'inherit' }}>
                         {highlightMode === 'background' && lang
                           ? highlightLine(line.content || ' ', lang)
@@ -695,7 +695,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg-primary">
       {/* Diff header */}
-      <div className="px-3 py-2 border-b border-border-default text-xs bg-bg-secondary flex items-center justify-between flex-shrink-0 gap-2">
+      <div className="px-3 py-2 border-b border-border-default text-xs bg-bg-secondary flex items-center justify-between shrink-0 gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {diff.newFile && <span className="badge badge-added">{t('diff.badgeNew')}</span>}
           {diff.deletedFile && <span className="badge badge-deleted">{t('diff.badgeDeleted')}</span>}
@@ -703,7 +703,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
           {diff.modeChange && <span className="badge badge-modified">{t('diff.badgeMode')}</span>}
           <span className="font-mono truncate text-text-primary">{diff.newPath}</span>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <span className="text-status-added font-medium">+{addedLines}</span>
           <span className="text-status-deleted font-medium">-{removedLines}</span>
           {diff.hunks.length > 1 && (

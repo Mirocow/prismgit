@@ -114,7 +114,7 @@ export function AiFavoritesPanel({ onInsertToInput, onJumpToNote, className }: A
     <div className={cn('flex flex-col min-h-0', className)}>
       {/* Header */}
       <div className="px-3 py-2 border-b border-border-default flex items-center gap-2 bg-bg-elevated">
-        <Star size={12} className="text-accent flex-shrink-0" />
+        <Star size={12} className="text-accent shrink-0" />
         <span className="text-xs font-medium text-text-secondary">{t('aiFav.title')}</span>
         <span className="text-3xs text-text-tertiary ml-auto">
           {noteCount > 0 ? `${noteCount} ${t('aiFav.notes')}` : ''}
@@ -235,11 +235,11 @@ function FolderRow({ node: folder, depth, ctx }: { node: AiFavoriteFolder; depth
         }}
       >
         {folder.expanded
-          ? <ChevronDown size={10} className="text-text-tertiary flex-shrink-0" />
-          : <ChevronRight size={10} className="text-text-tertiary flex-shrink-0" />}
+          ? <ChevronDown size={10} className="text-text-tertiary shrink-0" />
+          : <ChevronRight size={10} className="text-text-tertiary shrink-0" />}
         {folder.expanded
-          ? <FolderOpen size={12} className="text-accent flex-shrink-0" />
-          : <Folder size={12} className="text-accent flex-shrink-0" />}
+          ? <FolderOpen size={12} className="text-accent shrink-0" />
+          : <Folder size={12} className="text-accent shrink-0" />}
         {renaming ? (
           <InlineRename
             initial={folder.name}
@@ -252,7 +252,7 @@ function FolderRow({ node: folder, depth, ctx }: { node: AiFavoriteFolder; depth
           <span className="truncate flex-1" title={folder.name}>{folder.name}</span>
         )}
         <button
-          className="icon-btn !w-5 !h-5 opacity-70 group-hover:opacity-100 flex-shrink-0"
+          className="icon-btn !w-5 !h-5 opacity-70 group-hover:opacity-100 shrink-0"
           onClick={(e) => {
             e.stopPropagation();
             openMenu();
@@ -336,8 +336,8 @@ function NoteRow({ node: note, depth, ctx }: { node: AiFavoriteNote; depth: numb
       }}
     >
       {note.role === 'user'
-        ? <User size={11} className="text-text-tertiary flex-shrink-0" />
-        : <Bot size={11} className="text-accent flex-shrink-0" />}
+        ? <User size={11} className="text-text-tertiary shrink-0" />
+        : <Bot size={11} className="text-accent shrink-0" />}
       {renaming ? (
         <InlineRename
           initial={note.name}
@@ -350,7 +350,7 @@ function NoteRow({ node: note, depth, ctx }: { node: AiFavoriteNote; depth: numb
         <span className="truncate flex-1">{note.name}</span>
       )}
       <button
-        className="icon-btn !w-5 !h-5 opacity-70 group-hover:opacity-100 flex-shrink-0"
+        className="icon-btn !w-5 !h-5 opacity-70 group-hover:opacity-100 shrink-0"
         onClick={(e) => {
           e.stopPropagation();
           openMenu();

@@ -92,7 +92,7 @@ export function ProviderChip({ className }: { className?: string }) {
         }
       >
         <span
-          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+          className="w-1.5 h-1.5 rounded-full shrink-0"
           style={{ backgroundColor: chipColor }}
         />
         <span className="truncate max-w-20">{chipLabel}</span>
@@ -142,7 +142,7 @@ export function ProviderChip({ className }: { className?: string }) {
                 title={p.label}
               >
                 <span
-                  className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
                   style={{ backgroundColor: p.color }}
                 />
                 <span className="flex-1">{p.label}</span>

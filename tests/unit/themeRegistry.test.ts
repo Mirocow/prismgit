@@ -28,11 +28,13 @@ const indexHtml = readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 
 function extractBlocks(source: string): Record<string, Record<string, string>> {
   const blocks: Record<string, Record<string, string>> = {};
-  const re = /((?:\.dark)|(?:\[data-theme="[^"]+"\])|(?::root))\s*\{([^}]*)\}/g;
+  // Tailwind v4's codemod rewrites [data-theme="x"] selectors with single
+  // quotes — accept both quote styles.
+  const re = /((?:\.dark)|(?:\[data-theme=["'][^"']+["']\])|(?::root))\s*\{([^}]*)\}/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(source))) {
     const sel = m[1];
-    const name = sel === ':root' ? 'root' : sel.startsWith('[data-theme="') ? sel.slice(13, -2) : sel.replace('.', '');
+    const name = sel === ':root' ? 'root' : sel.startsWith('[data-theme=') ? sel.slice(13, -2) : sel.replace('.', '');
     // The file legitimately has TWO :root and TWO .dark blocks (tokens +
     // font/utility overrides later in the file) — merge them like the CSS
     // cascade does instead of overwriting (later declarations win per token).

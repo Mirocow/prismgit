@@ -2041,7 +2041,7 @@ export function HistoryPage() {
                   style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 4 }}
                   onClick={() => { setSelectedIdx(-1); window.location.hash = '#/changes'; }}
                 >
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--status-deleted)' }} />
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: 'var(--status-deleted)' }} />
                   <span className="text-xs font-medium">Working Tree ({status?.files.length || 0} changed)</span>
                 </div>
               )}
@@ -2071,7 +2071,7 @@ export function HistoryPage() {
                     onClick={() => { setSelectedIdx(realIdx); selectCommit(entry.hash); }}
                     onContextMenu={(e) => showCommitContextMenu(e, entry, realIdx)}
                   >
-                    {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
+                    {isHEAD && <span className="text-2xs text-text-primary shrink-0" style={{ width: 8 }}>▶</span>}
 
                     {/**  Sync indicator */}
                     {isFirstOverall && status?.current && status?.tracking && (
@@ -2117,7 +2117,7 @@ export function HistoryPage() {
                       </div>
                     )}
 
-                    {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
+                    {!isHEAD && <span style={{ width: 8 }} className="shrink-0" />}
 
                     {/* Decorations: tags first, then HEAD/branches/remotes — parsed
                         from BOTH short and --decorate=full shapes (see refBadge). */}
@@ -2129,7 +2129,7 @@ export function HistoryPage() {
                         In VS Code style: a dashed "↓ incoming" label with the remote
                         branch name. */}
                     {incomingHashes.has(entry.hash) && (
-                      <span className="flex-shrink-0 text-2xs px-1.5 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium flex items-center gap-0.5"
+                      <span className="shrink-0 text-2xs px-1.5 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium flex items-center gap-0.5"
                         title="Incoming — this commit exists on a remote but has not been pulled into a local branch yet. Use Pull to bring it into your local branch.">
                         ↓
                         {entry.refs.some(r => r.includes('refs/remotes/') || r.includes('/')) && (
@@ -2143,7 +2143,7 @@ export function HistoryPage() {
                     {/* GitHub Actions CI badge (SmartGit "My History" CI integrations) */}
                     {ciStatus[entry.hash]?.conclusion && (
                       <span
-                        className="flex-shrink-0 text-2xs"
+                        className="shrink-0 text-2xs"
                         title={`CI: ${ciStatus[entry.hash].conclusion} (${ciStatus[entry.hash].totalChecks} checks)`}
                       >
                         {ciStatus[entry.hash].conclusion === 'success' && <span className="text-green-500">●</span>}
@@ -2178,7 +2178,7 @@ export function HistoryPage() {
                       hash={entry.hash}
                       plain
                       display={entry.hashAbbrev || shortHash(entry.hash)}
-                      className="text-text-tertiary/60 flex-shrink-0 truncate"
+                      className="text-text-tertiary/60 shrink-0 truncate"
                     />
 
                     {/* Author avatar — Gravatar image if the author's email
@@ -2186,7 +2186,7 @@ export function HistoryPage() {
                         otherwise the colored-initial fallback badge.
                         QW-6 / Task (gravatar). */}
                     <Avatar name={entry.author.name} email={entry.author.email} size={16} />
-                    <span className="text-2xs text-text-tertiary flex-shrink-0" style={{ width: 70, textAlign: 'right' }}>
+                    <span className="text-2xs text-text-tertiary shrink-0" style={{ width: 70, textAlign: 'right' }}>
                       {formatTime(entry.author.date)}
                     </span>
                   </div>
@@ -2216,11 +2216,11 @@ export function HistoryPage() {
 
         {/* Detail panel */}
         <ResizableSplitter direction="horizontal" onResize={(d) => handleDetailResize(-d)} />
-        <div className="bg-bg-secondary overflow-y-auto flex-shrink-0" style={{ width: detailWidth }}>
+        <div className="bg-bg-secondary overflow-y-auto shrink-0" style={{ width: detailWidth }}>
           {selected ? (
             <div className="p-3">
               <div className="flex items-start gap-2 mb-2">
-                <Avatar name={selected.author.name} email={selected.author.email} size={20} className="mt-0.5 flex-shrink-0" />
+                <Avatar name={selected.author.name} email={selected.author.email} size={20} className="mt-0.5 shrink-0" />
                 <div className="text-sm font-medium text-text-primary flex-1 min-w-0">
                   {bugtraq
                     ? linkifyCommitMessage(selected.subject, bugtraq).map((seg, i) =>
@@ -2272,7 +2272,7 @@ export function HistoryPage() {
                 </button>
               </div>
               <div className="flex items-center gap-2 mb-3">
-                <span className="flex-shrink-0 rounded author-badge text-center"
+                <span className="shrink-0 rounded author-badge text-center"
                   style={{ backgroundColor: getAuthorColor(selected.author.name).bg, width: 28, height: 18, fontSize: 9, lineHeight: '18px' }}>
                   {getInitials(selected.author.name)}
                 </span>
@@ -2322,11 +2322,11 @@ export function HistoryPage() {
                           title={c.hash === selected.hash ? 'This merge commit' : 'Jump to commit'}
                         >
                           {c.hash === selected.hash
-                            ? <GitMerge size={10} className="text-text-tertiary flex-shrink-0" />
-                            : <CornerDownRight size={10} className="text-text-tertiary flex-shrink-0" />}
-                          <span className="font-mono flex-shrink-0">{c.hashAbbrev || shortHash(c.hash)}</span>
+                            ? <GitMerge size={10} className="text-text-tertiary shrink-0" />
+                            : <CornerDownRight size={10} className="text-text-tertiary shrink-0" />}
+                          <span className="font-mono shrink-0">{c.hashAbbrev || shortHash(c.hash)}</span>
                           <span className="truncate flex-1 min-w-0">{c.subject}</span>
-                          <span className="text-text-tertiary flex-shrink-0">{c.author.name}</span>
+                          <span className="text-text-tertiary shrink-0">{c.author.name}</span>
                         </div>
                       ))}
                     </div>
@@ -2491,7 +2491,7 @@ export function HistoryPage() {
                           <span className={cn('flex-1 truncate font-mono text-text-secondary group-hover:text-text-primary',
                             isHighlighted && 'text-accent font-medium')}>{f.path}</span>
                           {!f.binary && (f.additions > 0 || f.deletions > 0) && (
-                            <span className="text-2xs flex-shrink-0">
+                            <span className="text-2xs shrink-0">
                               <span className="text-status-added">+{f.additions}</span>
                               <span className="text-status-deleted ml-1">-{f.deletions}</span>
                             </span>
@@ -2623,9 +2623,9 @@ export function HistoryPage() {
                         setSplitOffSelected(next);
                       }}
                     />
-                    <span className="badge badge-renamed w-6 text-center flex-shrink-0">{f.status}</span>
+                    <span className="badge badge-renamed w-6 text-center shrink-0">{f.status}</span>
                     <span className="font-mono truncate">{f.path}</span>
-                    <span className="ml-auto flex-shrink-0 text-text-tertiary">
+                    <span className="ml-auto shrink-0 text-text-tertiary">
                       +{f.additions} −{f.deletions}
                     </span>
                   </label>

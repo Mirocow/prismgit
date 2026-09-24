@@ -74,17 +74,17 @@ function renderNode(
         onContextMenu={(e) => onFileContextMenu(e, f)}
         title={f.path}
       >
-        <span className="font-mono font-bold w-3 text-center flex-shrink-0"
+        <span className="font-mono font-bold w-3 text-center shrink-0"
           style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
           {f.status}
         </span>
-        <FileText size={10} className="text-text-tertiary flex-shrink-0" />
+        <FileText size={10} className="text-text-tertiary shrink-0" />
         <span className={cn('flex-1 truncate font-mono text-text-secondary group-hover:text-text-primary',
           isHighlighted && 'text-accent font-medium')}>
           {node.name}
         </span>
         {!f.binary && (f.additions > 0 || f.deletions > 0) && (
-          <span className="text-2xs flex-shrink-0">
+          <span className="text-2xs shrink-0">
             <span className="text-status-added">+{f.additions}</span>
             <span className="text-status-deleted ml-1">-{f.deletions}</span>
           </span>
@@ -109,8 +109,8 @@ function renderNode(
         onClick={() => onToggleDir(node.path)}
         title={node.path}
       >
-        {isOpen ? <ChevronDown size={10} className="text-text-tertiary flex-shrink-0" /> : <ChevronRight size={10} className="text-text-tertiary flex-shrink-0" />}
-        {isOpen ? <FolderOpen size={11} className="text-text-tertiary flex-shrink-0" /> : <Folder size={11} className="text-text-tertiary flex-shrink-0" />}
+        {isOpen ? <ChevronDown size={10} className="text-text-tertiary shrink-0" /> : <ChevronRight size={10} className="text-text-tertiary shrink-0" />}
+        {isOpen ? <FolderOpen size={11} className="text-text-tertiary shrink-0" /> : <Folder size={11} className="text-text-tertiary shrink-0" />}
         <span className="flex-1 truncate text-text-secondary">{node.name}</span>
       </div>
       {isOpen && childNodes.map(child =>

@@ -443,10 +443,10 @@ export function DiffPage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header with comparison controls */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border-default bg-bg-tertiary flex-wrap">
-        <span className="text-xs font-semibold flex-shrink-0">{t('nav.diff')}</span>
+        <span className="text-xs font-semibold shrink-0">{t('nav.diff')}</span>
 
         {/* File path input */}
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           <FileText size={11} className="text-text-tertiary" />
           <input
             type="text"
@@ -459,7 +459,7 @@ export function DiffPage() {
         </div>
 
         {/* Base ref selector */}
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           <span className="text-2xs text-text-tertiary">{t('diff.baseLabel')}</span>
           <select
             value={baseRef}
@@ -492,7 +492,7 @@ export function DiffPage() {
         </div>
 
         {/* Arrow */}
-        <span className="text-text-tertiary flex-shrink-0">→</span>
+        <span className="text-text-tertiary shrink-0">→</span>
 
         {/* Compare mode selector */}
         <div className="flex items-center gap-0">
@@ -571,7 +571,7 @@ export function DiffPage() {
         {changedFiles.length > 0 && (
           <>
             <div
-              className="flex-shrink-0 border-r border-border-default overflow-y-auto bg-bg-secondary"
+              className="shrink-0 border-r border-border-default overflow-y-auto bg-bg-secondary"
               style={{ width: fileListWidth }}
             >
               <div className="px-2 py-1.5 text-2xs font-bold uppercase tracking-wider text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary">
@@ -620,7 +620,7 @@ export function DiffPage() {
                   }}
                   title={t('diff.fileRowTooltip')}
                 >
-                  <span className="font-mono font-bold w-3 text-center flex-shrink-0"
+                  <span className="font-mono font-bold w-3 text-center shrink-0"
                     style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
                     {f.status}
                   </span>

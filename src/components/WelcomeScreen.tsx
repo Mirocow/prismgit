@@ -182,7 +182,7 @@ export function WelcomeScreen({
                       i > 0 ? 'border-t border-border-subtle' : ''
                     }`}
                   >
-                    <div className="w-9 h-9 rounded-lg bg-bg-tertiary border border-border-default flex items-center justify-center flex-shrink-0 group-hover:border-accent group-hover:bg-accent-muted transition-colors">
+                    <div className="w-9 h-9 rounded-lg bg-bg-tertiary border border-border-default flex items-center justify-center shrink-0 group-hover:border-accent group-hover:bg-accent-muted transition-colors">
                       <Folder size={16} className="text-accent" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -191,10 +191,10 @@ export function WelcomeScreen({
                           {repo.name}
                         </span>
                         {meta?.favorite && (
-                          <Star size={11} className="text-status-modified fill-current flex-shrink-0" />
+                          <Star size={11} className="text-status-modified fill-current shrink-0" />
                         )}
                         {meta?.tags && meta.tags.length > 0 && (
-                          <span className="flex gap-1 flex-shrink-0">
+                          <span className="flex gap-1 shrink-0">
                             {meta.tags.slice(0, 3).map(t => (
                               <span key={t} className="text-2xs text-text-tertiary px-1.5 py-0.5 rounded-full bg-bg-tertiary">
                                 {t}
@@ -213,7 +213,7 @@ export function WelcomeScreen({
                     )}
                     <ChevronRight
                       size={14}
-                      className="text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      className="text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                     />
                   </button>
                 );
