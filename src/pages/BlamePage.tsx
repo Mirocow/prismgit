@@ -27,7 +27,7 @@ export function BlamePage() {
   const [loading, setLoading] = useState(false);
   const globalFilePath = useSelectionStore((s) => s.selectedFilePath);
 
-  const handleBlameRef = useRef<(path?: string, refOverride?: string) => void>();
+  const handleBlameRef = useRef<((path?: string, refOverride?: string) => void) | null>(null);
   handleBlameRef.current = (overridePath?: string, refOverride?: string) => {
     const path = overridePath || filePath;
     const effectiveRef = refOverride || ref;
@@ -169,7 +169,7 @@ export function BlamePage() {
                 style={{ backgroundColor: colorMap.get(line.hash) || 'transparent' }}
                 onContextMenu={(e) => showLineContextMenu(e, line.finalLineNumber)}
               >
-                <div className="w-36 flex-shrink-0 px-2 py-1 border-r border-border-subtle text-text-tertiary truncate">
+                <div className="w-36 shrink-0 px-2 py-1 border-r border-border-subtle text-text-tertiary truncate">
                   <div className="flex items-center gap-1">
                     <GitCommit size={9} />
                     <button
@@ -182,7 +182,7 @@ export function BlamePage() {
                   </div>
                   <div className="text-2xs mt-0.5 truncate">{line.author || t('pages.authorUnknown')}</div>
                 </div>
-                <div className="w-12 flex-shrink-0 px-2 py-1 text-right text-text-tertiary border-r border-border-subtle">
+                <div className="w-12 shrink-0 px-2 py-1 text-right text-text-tertiary border-r border-border-subtle">
                   {line.finalLineNumber}
                 </div>
                 <pre
@@ -193,14 +193,14 @@ export function BlamePage() {
                 </pre>
                 {/* Hover buttons: open at line in VS Code · jump to commit in History */}
                 <button
-                  className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0 m-1 transition-opacity"
+                  className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0 m-1 transition-opacity"
                   title={t('vscode.openAtLine', { line: line.finalLineNumber })}
                   onClick={() => openInVsCodeAtLine(line.finalLineNumber)}
                 >
                   <FileText size={10} />
                 </button>
                 <button
-                  className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 flex-shrink-0 m-1 transition-opacity"
+                  className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0 m-1 transition-opacity"
                   title={t('pages.blameViewCommitShort')}
                   onClick={() => handleCommitClick(line.hash)}
                 >

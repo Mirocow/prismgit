@@ -484,9 +484,9 @@ export function SecuritySettings() {
               )}
             >
               {status.backend === 'keychain' ? (
-                <CheckCircle size={14} className="text-status-added flex-shrink-0" />
+                <CheckCircle size={14} className="text-status-added shrink-0" />
               ) : (
-                <AlertCircle size={14} className="text-status-warning flex-shrink-0" />
+                <AlertCircle size={14} className="text-status-warning shrink-0" />
               )}
               <span className="font-medium">{backendLabel}</span>
               <span className="text-text-tertiary">
@@ -589,7 +589,7 @@ export function SecuritySettings() {
                     return (
                       <div key={`${entry.ns}\u001f${entry.key}`} className="rounded-md border border-border-default bg-bg-secondary/40 px-3 py-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <KeyRound size={12} className="text-accent flex-shrink-0" />
+                          <KeyRound size={12} className="text-accent shrink-0" />
                           <span className="text-xs font-medium font-mono truncate max-w-[45%]" title={secretLabel(entry, profileNames)}>
                             {secretLabel(entry, profileNames)}
                           </span>
@@ -803,7 +803,7 @@ export function SecuritySettings() {
                 return (
                   <div key={p.id} className="rounded-md border border-border-default bg-bg-secondary/40 px-3 py-2 space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <PlugConnected size={12} className="text-accent flex-shrink-0" />
+                      <PlugConnected size={12} className="text-accent shrink-0" />
                       <span className="text-xs font-medium font-mono">
                         {p.label ? `${p.label} · ` : ''}{p.user}@{p.host}{p.port !== 22 ? `:${p.port}` : ''}
                       </span>
@@ -915,7 +915,7 @@ export function SecuritySettings() {
                     data-testid="ssh-import-path"
                   />
                   <button
-                    className="btn btn-secondary !py-1 !px-2.5 !text-xs flex items-center gap-1.5 flex-shrink-0"
+                    className="btn btn-secondary !py-1 !px-2.5 !text-xs flex items-center gap-1.5 shrink-0"
                     title={t('security.ssh.importBrowse')}
                     onClick={handleBrowseKeyFile}
                   >
@@ -976,7 +976,7 @@ export function SecuritySettings() {
                 return (
                   <div key={k.id} className="rounded-md border border-border-default bg-bg-secondary/40 p-3 space-y-2">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <KeyRound size={12} className="text-accent flex-shrink-0" />
+                      <KeyRound size={12} className="text-accent shrink-0" />
                       <span className="text-xs font-medium">{k.label}</span>
                       <span className="badge badge-renamed uppercase">{k.type}</span>
                       {k.hasPassphrase && <span className="badge badge-modified">{t('security.ssh.passphraseProtected')}</span>}

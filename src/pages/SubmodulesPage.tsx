@@ -174,7 +174,7 @@ export function SubmodulesPage() {
               key={s.name}
               className="group flex items-center gap-3 px-3 py-3 border-b border-border-subtle hover:bg-bg-hover"
             >
-              <Package size={16} className="text-accent flex-shrink-0" />
+              <Package size={16} className="text-accent shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-text-primary">{s.name}</span>

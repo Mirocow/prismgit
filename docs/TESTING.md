@@ -90,7 +90,7 @@ physically cannot land without passing the whole gate.
 
 ## Coverage
 
-Coverage is configured in `vitest.config.ts` with thresholds:
+Coverage is configured in `vitest.config.mts` with thresholds:
 
 | Metric | Threshold |
 |--------|-----------|

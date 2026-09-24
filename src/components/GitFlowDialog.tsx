@@ -305,7 +305,7 @@ export function GitFlowDialog({
           {/* Info for release/hotfix */}
           {(flow === 'release' || flow === 'hotfix') && action === 'finish' && (
             <div className="flex items-start gap-2 p-2 bg-accent-muted rounded text-xs">
-              <AlertCircle size={12} className="text-accent flex-shrink-0 mt-0.5" />
+              <AlertCircle size={12} className="text-accent shrink-0 mt-0.5" />
               <div className="text-text-secondary">
                 {t('pages.flowThisWill')}
                 <ul className="mt-1 space-y-0.5">

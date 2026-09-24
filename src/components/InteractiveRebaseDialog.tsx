@@ -369,7 +369,7 @@ export function InteractiveRebaseDialog({
                 )}
               >
                 {/* Drag handle — visual cue that rows are draggable */}
-                <div className="text-text-tertiary text-xs flex-shrink-0 mt-1 select-none" title={t('iRebase.dragHandleTitle')}>
+                <div className="text-text-tertiary text-xs shrink-0 mt-1 select-none" title={t('iRebase.dragHandleTitle')}>
                   ⋮⋮
                 </div>
 
@@ -390,7 +390,7 @@ export function InteractiveRebaseDialog({
                 {/* Hash — click selects the commit globally (Toolbar chip,
                     History, Diff, Notes all follow) */}
                 <code
-                  className="text-xs mono text-text-tertiary hover:text-accent cursor-pointer flex-shrink-0 mt-0.5 w-16"
+                  className="text-xs mono text-text-tertiary hover:text-accent cursor-pointer shrink-0 mt-0.5 w-16"
                   title={t('iRebase.selectCommitHint')}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -421,7 +421,7 @@ export function InteractiveRebaseDialog({
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-0.5 flex-shrink-0">
+                <div className="flex items-center gap-0.5 shrink-0">
                   {editingMessage === idx ? (
                     <>
                       <button

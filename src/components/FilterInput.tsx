@@ -116,7 +116,7 @@ export function FilterInput({
         <button
           type="button"
           className={cn(
-            'text-2xs px-1.5 py-0.5 border rounded font-mono flex-shrink-0',
+            'text-2xs px-1.5 py-0.5 border rounded font-mono shrink-0',
             isRegex
               ? 'border-accent bg-accent-muted text-accent'
               : 'border-border-default bg-bg-tertiary text-text-secondary hover:text-text-primary',

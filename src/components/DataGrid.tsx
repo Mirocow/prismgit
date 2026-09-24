@@ -255,7 +255,7 @@ export function DataGrid<R>({
             >
               <span className="truncate">{col.header}</span>
               {isSortable && (
-                <span className="ml-1 flex-shrink-0 opacity-60">
+                <span className="ml-1 shrink-0 opacity-60">
                   {!isSorted ? <ChevronsUpDown size={10} />
                     : sort?.direction === 'asc' ? <ChevronUp size={10} />
                     : <ChevronDown size={10} />}

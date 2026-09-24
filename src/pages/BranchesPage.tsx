@@ -1499,7 +1499,7 @@ export function BranchesPage() {
             also trigger single-select and clear the multi-set). */}
         <input
           type="checkbox"
-          className="flex-shrink-0 cursor-pointer"
+          className="shrink-0 cursor-pointer"
           checked={isMultiSelected}
           onClick={(e) => e.stopPropagation()}
           onChange={() => toggleBranch(b.name)}
@@ -1510,7 +1510,7 @@ export function BranchesPage() {
             can always see at a glance which branch they are on. */}
         <span
           className={cn(
-            'flex-shrink-0 flex items-center justify-center font-bold rounded-sm',
+            'shrink-0 flex items-center justify-center font-bold rounded-sm',
             b.current
               ? 'w-5 h-5 bg-accent text-text-inverse text-xs'
               : 'w-5 h-5 text-text-tertiary/30 text-xs'
@@ -1519,7 +1519,7 @@ export function BranchesPage() {
         >
           {b.current ? '>' : ''}
         </span>
-        <GitBranch size={12} className={cn('flex-shrink-0', b.current ? 'text-accent' : 'text-text-tertiary')} />
+        <GitBranch size={12} className={cn('shrink-0', b.current ? 'text-accent' : 'text-text-tertiary')} />
         {/* Task 6 — visual fork/socket indicator for the local↔remote
             tracking relationship. Plug inserted into the socket when the
             branch has an upstream; hovering shows the upstream ref name. */}
@@ -1559,7 +1559,7 @@ export function BranchesPage() {
             {b.current && repoState && (
               <span
                 data-testid="repo-state-badge"
-                className="text-2xs px-1 py-0.5 rounded bg-status-conflict/15 text-status-conflict border border-status-conflict/40 flex items-center gap-0.5 font-medium flex-shrink-0"
+                className="text-2xs px-1 py-0.5 rounded bg-status-conflict/15 text-status-conflict border border-status-conflict/40 flex items-center gap-0.5 font-medium shrink-0"
                 title={`${repoState.bannerText} Not yet committed, detached from remote. Pull and Checkout would lead to loss of commits. Finish it on the Changes page.`}
               >
                 ⚠ {repoState.badge}
@@ -1613,7 +1613,7 @@ export function BranchesPage() {
         </div>
         {/* Last commit info */}
         {b.lastCommit && (
-          <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 flex-shrink-0">
+          <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 shrink-0">
             <code className="font-mono">{shortHash(b.lastCommit.hash)}</code>
             <span className="hidden lg:inline truncate" style={{ maxWidth: 150 }}>{b.lastCommit.message}</span>
             <span>· {fmtDate(b.lastCommit.date)}</span>
@@ -1622,7 +1622,7 @@ export function BranchesPage() {
         {/* Hover actions — always faintly visible, brighten on hover.
             Checkout is the primary action (leftmost, accent color) — it is
             NEVER auto-fired by clicking the row itself. */}
-        <div className="flex items-center gap-0.5 opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0">
+        <div className="flex items-center gap-0.5 opacity-30 group-hover:opacity-100 transition-opacity shrink-0">
           {!b.remote && (
             <>
               {!b.current && (
@@ -1879,12 +1879,12 @@ export function BranchesPage() {
           key={`${groupKey}-single-branch-hint`}
           className="flex items-center gap-2 px-3 py-1.5 border-b border-border-subtle bg-status-warning/10"
         >
-          <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+          <AlertCircle size={12} className="text-status-warning shrink-0" />
           <span className="flex-1 min-w-0 text-2xs text-text-secondary">
             {t('branches.singleBranchClone', { name: remoteName })}
           </span>
           <button
-            className="flex-shrink-0 text-2xs font-medium text-accent hover:underline disabled:opacity-50"
+            className="shrink-0 text-2xs font-medium text-accent hover:underline disabled:opacity-50"
             disabled={remoteBusy === remoteName}
             onClick={(e) => { e.stopPropagation(); handleFetchAllBranches(remoteName); }}
           >
@@ -1896,7 +1896,7 @@ export function BranchesPage() {
           key={`${groupKey}-empty-hint`}
           className="flex items-center gap-2 px-3 py-1.5 text-2xs text-text-tertiary border-b border-border-subtle"
         >
-          <span className="w-3 flex-shrink-0" />
+          <span className="w-3 shrink-0" />
           {t('branches.noBranchesFetched')}
           <CloudDownload size={10} /> {t('remotes.fetch')}
         </div>
@@ -1959,8 +1959,8 @@ export function BranchesPage() {
       }}
       onContextMenu={(e) => showTagContextMenu(e, tag)}
     >
-      <span className="w-3 flex-shrink-0" />
-      <TagIcon size={12} className="text-text-tertiary flex-shrink-0" />
+      <span className="w-3 shrink-0" />
+      <TagIcon size={12} className="text-text-tertiary shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium text-text-primary">{tag.name}</span>
@@ -1971,7 +1971,7 @@ export function BranchesPage() {
           )}
         </div>
       </div>
-      <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 flex-shrink-0">
+      <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 shrink-0">
         <code className="font-mono">{tag.hashAbbrev}</code>
         {tag.date && <span>· {fmtDate(tag.date)}</span>}
       </div>
@@ -1992,13 +1992,13 @@ export function BranchesPage() {
         onContextMenu={(e) => showStashContextMenu(e, s)}
         title={t('stashes.branchesRowTooltip')}
       >
-        <span className="w-3 flex-shrink-0" />
-        <Package size={12} className="text-text-tertiary flex-shrink-0" />
+        <span className="w-3 shrink-0" />
+        <Package size={12} className="text-text-tertiary shrink-0" />
         <div className="flex-1 min-w-0 truncate">
           {dateLabel && <span className="text-text-secondary">{dateLabel}: </span>}
           <span className="text-text-primary">{s.message}</span>
         </div>
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
           <button className="icon-btn !w-5 !h-5" title={t('stashes.applyTooltip')}
             onClick={(e) => { e.stopPropagation(); handleApplyStash(s); }}>
             <Check size={11} />
@@ -2095,7 +2095,7 @@ export function BranchesPage() {
           Covers ALL five states (incl. bisect) via repoState. */}
       {repoState && (
         <div className="px-3 py-1.5 border-b border-status-warning/40 bg-status-warning/10 flex items-center gap-2">
-          <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+          <AlertCircle size={12} className="text-status-warning shrink-0" />
           <span className="text-2xs text-status-warning font-medium">
             {repoState.bannerText}
           </span>
@@ -2111,7 +2111,7 @@ export function BranchesPage() {
           when HEAD moves. Surface this prominently. */}
       {status?.detached && !repoState && (
         <div className="px-3 py-1.5 border-b border-status-warning/40 bg-status-warning/10 flex items-center gap-2">
-          <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+          <AlertCircle size={12} className="text-status-warning shrink-0" />
           <span className="text-2xs text-status-warning font-medium">
             HEAD is detached.
           </span>
@@ -2188,7 +2188,7 @@ export function BranchesPage() {
                     onKeyDown={(e) => e.key === 'Enter' && handleCreate()} />
                   <button
                     type="button"
-                    className="btn btn-secondary text-2xs !py-1 !px-2 flex-shrink-0"
+                    className="btn btn-secondary text-2xs !py-1 !px-2 shrink-0"
                     onClick={handleAISuggestBranches}
                     disabled={aiSuggesting}
                     title={t('branches.aiSuggestTooltip')}
@@ -2440,7 +2440,7 @@ export function BranchesPage() {
                         compareFiles.map((f, i) => (
                           <div key={`${f.path}-${i}`} className="flex items-center gap-2 px-3 py-1 text-xs border-b border-border-subtle last:border-b-0">
                             <span className={cn(
-                              'badge w-8 text-center flex-shrink-0',
+                              'badge w-8 text-center shrink-0',
                               f.status.startsWith('A') ? 'badge-added' : f.status.startsWith('D') ? 'badge-deleted' : 'badge-modified'
                             )}>{f.status}</span>
                             <span className="font-mono truncate">{f.path}</span>

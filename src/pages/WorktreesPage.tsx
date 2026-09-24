@@ -266,7 +266,7 @@ export function WorktreesPage() {
                     key={wt.path}
                     className="group flex items-center gap-3 px-3 py-3 border-b border-border-subtle hover:bg-bg-hover"
                   >
-                    <FolderTree size={16} className="text-accent flex-shrink-0" />
+                    <FolderTree size={16} className="text-accent shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate">{wt.path}</div>
                       <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5 flex-wrap">

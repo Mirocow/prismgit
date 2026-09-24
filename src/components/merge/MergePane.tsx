@@ -49,7 +49,7 @@ function MergePaneImpl({
     : undefined;
   return (
     <div className="flex-1 flex flex-col border-r border-border-default last:border-r-0 min-w-0 overflow-hidden">
-      <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between flex-shrink-0 h-8">
+      <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between shrink-0 h-8">
         <span className={cn('truncate', headerColor)} style={headerStyle}>
           {title}
           <span className="ml-2 text-2xs text-text-tertiary normal-case font-normal">

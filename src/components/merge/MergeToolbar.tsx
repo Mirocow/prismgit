@@ -115,7 +115,7 @@ export function MergeToolbar({
 
   // Common button class — compact secondary buttons.
   const btnCls = 'btn btn-secondary h-7 px-2 text-xs whitespace-nowrap inline-flex items-center gap-1.5';
-  const iconBtnCls = 'icon-btn h-7 w-7 flex-shrink-0';
+  const iconBtnCls = 'icon-btn h-7 w-7 shrink-0';
 
   // Run a "More" menu action and close the menu.
   const runMoreAction = useCallback((action: () => void) => {
@@ -126,13 +126,13 @@ export function MergeToolbar({
   return (
     <>
       {/* ============ Top toolbar — h-10 (40px) ============ */}
-      <div className="flex items-center gap-2 px-3 h-10 bg-bg-secondary border-b border-border-default flex-shrink-0">
+      <div className="flex items-center gap-2 px-3 h-10 bg-bg-secondary border-b border-border-default shrink-0">
         {/* ─── Group 1: File info ─── */}
         <AlertCircle
           size={16}
-          className={`flex-shrink-0 ${hasConflicts ? 'text-status-conflict' : 'text-text-tertiary'}`}
+          className={`shrink-0 ${hasConflicts ? 'text-status-conflict' : 'text-text-tertiary'}`}
         />
-        <span className="text-xs font-semibold whitespace-nowrap flex-shrink-0">
+        <span className="text-xs font-semibold whitespace-nowrap shrink-0">
           {t('changes.conflictSolverTitle')}
         </span>
         <code className="text-2xs font-mono text-text-tertiary truncate max-w-[200px]" title={filePath}>
@@ -140,10 +140,10 @@ export function MergeToolbar({
         </code>
 
         {/* Vertical divider */}
-        <div className="w-px h-5 bg-border-default flex-shrink-0" />
+        <div className="w-px h-5 bg-border-default shrink-0" />
 
         {/* ─── Group 2: Conflict navigation ─── */}
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           <button
             className={iconBtnCls}
             title={t('conflict.prevConflictTitle')}
@@ -179,10 +179,10 @@ export function MergeToolbar({
         </div>
 
         {/* Vertical divider */}
-        <div className="w-px h-5 bg-border-default flex-shrink-0" />
+        <div className="w-px h-5 bg-border-default shrink-0" />
 
         {/* ─── Group 3: Edit actions ─── */}
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           <button
             className={iconBtnCls}
             title="Undo last resolution (⌘Z)"
@@ -215,7 +215,7 @@ export function MergeToolbar({
 
         {/* ─── Group 4: External tools (collapses to "More ⋯" on narrow viewports) ─── */}
         {narrow ? (
-          <div className="relative flex-shrink-0" ref={moreMenuRef}>
+          <div className="relative shrink-0" ref={moreMenuRef}>
             <button
               className={iconBtnCls}
               title="More actions"
@@ -257,7 +257,7 @@ export function MergeToolbar({
             )}
           </div>
         ) : (
-          <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               className={btnCls}
               onClick={onOpenExternal}
@@ -286,11 +286,11 @@ export function MergeToolbar({
         )}
 
         {/* Vertical divider before Save */}
-        <div className="w-px h-5 bg-border-default flex-shrink-0 mx-1" />
+        <div className="w-px h-5 bg-border-default shrink-0 mx-1" />
 
         {/* ─── Group 5: Save & Stage (always visible, primary) ─── */}
         <button
-          className="btn btn-primary h-7 px-3 text-xs whitespace-nowrap inline-flex items-center gap-1.5 flex-shrink-0"
+          className="btn btn-primary h-7 px-3 text-xs whitespace-nowrap inline-flex items-center gap-1.5 shrink-0"
           onClick={onSave}
           disabled={saving}
           title={t('conflict.saveStageTitle')}
@@ -313,7 +313,7 @@ export function MergeToolbar({
       </div>
 
       {/* ============ Bottom status bar — h-6 (24px) ============ */}
-      <div className="flex items-center justify-between px-3 h-6 bg-bg-secondary border-t border-border-default text-2xs text-text-tertiary flex-shrink-0">
+      <div className="flex items-center justify-between px-3 h-6 bg-bg-secondary border-t border-border-default text-2xs text-text-tertiary shrink-0">
         <span className="flex items-center gap-1.5 whitespace-nowrap">
           {dirty ? (
             <span className="w-1.5 h-1.5 rounded-full bg-status-modified" aria-label="Dirty" />

@@ -23,11 +23,12 @@ export default defineConfig({
                 },
                 build: {
                   outDir: 'dist-electron',
+                  // chokidar@5 is ESM-only and simple-git is bundled into the
+                  // main-process bundle by rolldown — only Electron + node
+                  // builtins stay external (auto-handled).
                   rollupOptions: {
                     external: [
                       'electron',
-                      'simple-git',
-                      'chokidar',
                       'https',
                       'http',
                       'url',
@@ -55,7 +56,7 @@ export default defineConfig({
   root: '.',
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'),
+      '@': resolve(import.meta.dirname, './src'),
     },
   },
   build: {
@@ -73,7 +74,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 700,
     rollupOptions: {
       input: {
-        index: resolve(__dirname, 'index.html'),
+        index: resolve(import.meta.dirname, 'index.html'),
       },
       output: {
         // Split stable vendor code into separate chunks so app code changes
@@ -100,13 +101,14 @@ export default defineConfig({
       },
     },
   },
-  // esbuild config — keep production builds small by stripping `debugger`
-  // statements. We do NOT drop console.* because the Command Log integration
-  // (electron/services/commandLog.ts) wraps child_process.spawn — it does
-  // not call console.* directly, but unrelated app code may legitimately
-  // use console.error/warn for runtime diagnostics.
-  esbuild: {
-    drop: process.env.NODE_ENV === 'production' ? ['debugger'] : [],
+  // oxc config (vite 8 replaced esbuild with oxc) — keep production builds
+  // small by stripping `debugger` statements. We do NOT drop console.*
+  // because the Command Log integration (electron/services/commandLog.ts)
+  // wraps child_process.spawn — it does not call console.* directly, but
+  // unrelated app code may legitimately use console.error/warn for runtime
+  // diagnostics.
+  oxc: {
+    dropDebugger: process.env.NODE_ENV === 'production',
   },
   server: {
     port: 5173,

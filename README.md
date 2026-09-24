@@ -181,7 +181,7 @@ The Output panel (Command Log) captures:
 ├── Dockerfile                # Multi-platform Docker build
 ├── docker-compose.yml        # 4 build services
 ├── Makefile                  # All-in-one task runner
-└── vitest.config.ts          # Test configuration
+└── vitest.config.mts         # Test configuration
 ```
 
 ## Keyboard Shortcuts

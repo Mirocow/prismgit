@@ -243,7 +243,7 @@ export function GitFlowPage() {
              branch off a non-existent develop fails with an opaque error. */
           <div className="m-4 p-5 rounded-lg border-2 border-dashed border-accent/40 bg-accent-muted/20">
             <div className="flex items-start gap-3">
-              <AlertCircle size={20} className="text-accent flex-shrink-0 mt-0.5" />
+              <AlertCircle size={20} className="text-accent shrink-0 mt-0.5" />
               <div className="flex-1">
                 <div className="text-sm font-medium text-text-primary mb-1">
                   {t('pages.gitflowNeedsInit', { defaultValue: 'Git-Flow is not initialized in this repository' })}

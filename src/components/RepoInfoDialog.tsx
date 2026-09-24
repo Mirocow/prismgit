@@ -329,7 +329,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
             {/* Per-repo SSH key override (when any managed keys exist) */}
             {sshKeys.length > 0 && (
               <div className="flex items-center gap-2 mb-2">
-                <KeyRound size={12} className="text-text-tertiary flex-shrink-0" />
+                <KeyRound size={12} className="text-text-tertiary shrink-0" />
                 <span className="text-2xs text-text-tertiary whitespace-nowrap">SSH</span>
                 <select
                   className="flex-1 bg-bg-primary border border-border-default rounded-md px-2 py-1 text-2xs focus:outline-none focus:border-accent"
@@ -365,7 +365,7 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
                   return (
                     <div key={r.name} className="rounded-md border border-border-default bg-bg-secondary/40 p-2.5 space-y-2">
                       <div className="flex items-center gap-2">
-                        <GitBranch size={12} className="text-accent flex-shrink-0" />
+                        <GitBranch size={12} className="text-accent shrink-0" />
                         <span className="text-xs font-medium">{r.name}</span>
                         {r.name === 'origin' && <span className="badge badge-renamed">DEFAULT</span>}
                         {stored && <span className="badge badge-added">AUTH</span>}

@@ -180,7 +180,7 @@ export function JournalPage() {
                 });
               }}
             >
-              <code className="text-2xs font-mono text-text-tertiary flex-shrink-0 mt-0.5 w-20">
+              <code className="text-2xs font-mono text-text-tertiary shrink-0 mt-0.5 w-20">
                 {entry.selector}
               </code>
               <div className="flex-1 min-w-0">

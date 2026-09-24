@@ -89,7 +89,7 @@ export const Avatar = memo(function Avatar({
         alt={name}
         width={size}
         height={size}
-        className={`rounded-full flex-shrink-0 ${className}`}
+        className={`rounded-full shrink-0 ${className}`}
         style={{ width: size, height: size }}
         loading="lazy"
       />
@@ -99,7 +99,7 @@ export const Avatar = memo(function Avatar({
   // Initials fallback — colored badge with 1-2 letter initials.
   return (
     <span
-      className={`inline-flex items-center justify-center rounded-full flex-shrink-0 font-semibold ${className}`}
+      className={`inline-flex items-center justify-center rounded-full shrink-0 font-semibold ${className}`}
       style={{
         width: size,
         height: size,

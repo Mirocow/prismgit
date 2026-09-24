@@ -206,7 +206,7 @@ export function ErrorReportDialog({ error, onClose, onReload }: ErrorReportDialo
 
   return (
     <div
-      className="fixed inset-0 bg-black/70 flex items-center justify-center z-[10000] animate-fade-in p-4"
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-10000 animate-fade-in p-4"
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="error-dialog-title"
@@ -217,7 +217,7 @@ export function ErrorReportDialog({ error, onClose, onReload }: ErrorReportDialo
       >
         {/* Header */}
         <div className="flex items-start gap-3 px-4 py-3 border-b border-border-default bg-status-deleted/10">
-          <AlertTriangle size={18} className="text-status-deleted flex-shrink-0 mt-0.5" />
+          <AlertTriangle size={18} className="text-status-deleted shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <div id="error-dialog-title" className="text-base font-medium text-text-primary">
               {kindLabel}
@@ -227,7 +227,7 @@ export function ErrorReportDialog({ error, onClose, onReload }: ErrorReportDialo
             </div>
           </div>
           <button
-            className="icon-btn !w-7 !h-7 flex-shrink-0"
+            className="icon-btn !w-7 !h-7 shrink-0"
             title={t('common.close', { defaultValue: 'Close' })}
             onClick={handleDismiss}
           >

@@ -61,7 +61,7 @@ interface MergeResultEditorProps {
   initialContent: string;
   lang: SupportedLang;
   onChange?: (text: string) => void;
-  textareaRef?: React.RefObject<HTMLTextAreaElement>;
+  textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
 
 /** Line classification (state machine) within the Result editor. */
@@ -204,7 +204,7 @@ export function MergeResultEditor({
       style={{ minHeight: 0 }}
     >
       {/* Header */}
-      <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between flex-shrink-0 h-8">
+      <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between shrink-0 h-8">
         <span className="text-text-primary truncate">Working Tree (Result)</span>
       </div>
       {/* Editor area — relative container with pre + textarea overlay */}

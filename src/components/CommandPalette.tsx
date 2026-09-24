@@ -261,7 +261,7 @@ export function CommandPalette({ open, onClose, triggers }: {
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-start justify-center pt-[12vh] z-[70] animate-fade-in"
+      className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-start justify-center pt-[12vh] z-70 animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -271,7 +271,7 @@ export function CommandPalette({ open, onClose, triggers }: {
         aria-label={t('shell.commandPalette')}
       >
         <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border-default">
-          <Search size={15} className="text-text-tertiary flex-shrink-0" />
+          <Search size={15} className="text-text-tertiary shrink-0" />
           <input
             ref={inputRef}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-text-tertiary"
@@ -314,10 +314,10 @@ export function CommandPalette({ open, onClose, triggers }: {
                     onMouseEnter={() => setActive(row.idx)}
                     onClick={() => execute(cmd)}
                   >
-                    {Icon && <Icon size={14} className="flex-shrink-0 opacity-80" />}
+                    {Icon && <Icon size={14} className="shrink-0 opacity-80" />}
                     <span className="flex-1 truncate">{cmd.label}</span>
                     {cmd.hint && (
-                      <kbd className="text-2xs text-text-tertiary border border-border-subtle rounded px-1.5 py-0.5 flex-shrink-0">
+                      <kbd className="text-2xs text-text-tertiary border border-border-subtle rounded px-1.5 py-0.5 shrink-0">
                         {cmd.hint}
                       </kbd>
                     )}

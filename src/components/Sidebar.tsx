@@ -61,7 +61,7 @@ function RemoteBadges({ check }: { check: RemoteCheckSummary | undefined }) {
     <>
       {check.incoming > 0 && (
         <span
-          className="text-2xs font-semibold text-status-added flex-shrink-0 tabular-nums"
+          className="text-2xs font-semibold text-status-added shrink-0 tabular-nums"
           title={t('shell.incomingTooltip', { count: check.incoming, remotes: remoteNames })}
         >
           ↓{check.incoming}
@@ -69,7 +69,7 @@ function RemoteBadges({ check }: { check: RemoteCheckSummary | undefined }) {
       )}
       {check.outgoing > 0 && (
         <span
-          className="text-2xs font-semibold text-status-modified flex-shrink-0 tabular-nums"
+          className="text-2xs font-semibold text-status-modified shrink-0 tabular-nums"
           title={t('shell.outgoingTooltip', { count: check.outgoing, remotes: remoteNames })}
         >
           ↑{check.outgoing}
@@ -77,12 +77,12 @@ function RemoteBadges({ check }: { check: RemoteCheckSummary | undefined }) {
       )}
       {check.dirty > 0 && (
         <span
-          className="w-1.5 h-1.5 rounded-full bg-status-modified flex-shrink-0"
+          className="w-1.5 h-1.5 rounded-full bg-status-modified shrink-0"
           title={t('shell.dirtyTooltip', { count: check.dirty })}
         />
       )}
       {check.error && (
-        <span className="flex-shrink-0" title={t('shell.remoteCheckProblem', { error: check.error })}>
+        <span className="shrink-0" title={t('shell.remoteCheckProblem', { error: check.error })}>
           <AlertCircle size={10} className="text-status-deleted" />
         </span>
       )}
@@ -584,7 +584,7 @@ export function Sidebar() {
         data-testid={`repo-item-${repo.name}`}
       >
         <div className="flex items-center gap-2 min-w-0">
-          {isActive ? <FolderGitOpen size={13} className="text-accent flex-shrink-0" /> : <FolderGit size={13} className="text-text-tertiary flex-shrink-0" />}
+          {isActive ? <FolderGitOpen size={13} className="text-accent shrink-0" /> : <FolderGit size={13} className="text-text-tertiary shrink-0" />}
           <span
             className={cn(
               'flex-1 truncate',
@@ -602,7 +602,7 @@ export function Sidebar() {
             <a
               href="#/changes"
               onClick={(e) => e.stopPropagation()}
-              className="flex-shrink-0 w-1.5 h-1.5"
+              className="shrink-0 w-1.5 h-1.5"
               title={t('banner.stateTooltip').replace('{label}',
                 status?.isMerging ? t('banner.mergingLabel').toLowerCase()
                 : status?.isRebasing ? t('banner.rebasingLabel').toLowerCase()
@@ -613,7 +613,7 @@ export function Sidebar() {
           )}
           {showBisectBadge && !showInProgressBadge && (
             <span
-              className="flex-shrink-0 text-2xs text-status-info font-semibold"
+              className="shrink-0 text-2xs text-status-info font-semibold"
               title={t('banner.bisectInProgressTooltip')}
             >
               bisect
@@ -621,7 +621,7 @@ export function Sidebar() {
           )}
           {showDetachedBadge && !showInProgressBadge && (
             <span
-              className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning inline-block"
+              className="shrink-0 w-1.5 h-1.5 rounded-full bg-status-warning inline-block"
               title={t('banner.detachedHeadTooltip')}
             />
           )}
@@ -646,7 +646,7 @@ export function Sidebar() {
             />
           </button>
           {meta?.tags && meta.tags.length > 0 && (
-            <span className="text-2xs text-text-tertiary flex-shrink-0 px-1.5 py-0.5 rounded-full bg-bg-tertiary">
+            <span className="text-2xs text-text-tertiary shrink-0 px-1.5 py-0.5 rounded-full bg-bg-tertiary">
               {meta.tags.length}
             </span>
           )}
@@ -691,17 +691,17 @@ export function Sidebar() {
           data-testid={`repo-group-${node.group.name}`}
         >
           <button
-            className="icon-btn !w-4 !h-4 !p-0 flex-shrink-0"
+            className="icon-btn !w-4 !h-4 !p-0 shrink-0"
             title={isExpanded ? t('shell.collapse') : t('shell.expand')}
             onClick={(e) => { e.stopPropagation(); void toggleGroupExpanded(node.group.id, !isExpanded); }}
           >
             {isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           </button>
           {isExpanded
-            ? <FolderOpen size={12} className="text-accent flex-shrink-0" />
-            : <Folder size={12} className="text-text-tertiary flex-shrink-0" />}
+            ? <FolderOpen size={12} className="text-accent shrink-0" />
+            : <Folder size={12} className="text-text-tertiary shrink-0" />}
           <span className="flex-1 truncate font-medium">{node.group.name}</span>
-          <span className="text-2xs text-text-tertiary flex-shrink-0 tabular-nums">{node.repoCount}</span>
+          <span className="text-2xs text-text-tertiary shrink-0 tabular-nums">{node.repoCount}</span>
           <button
             className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 transition-opacity"
             title={t('shell.newSubgroup')}
@@ -720,7 +720,7 @@ export function Sidebar() {
   return (
     <>
     <aside
-      className="sidebar-root flex flex-col bg-bg-secondary flex-shrink-0 no-drag"
+      className="sidebar-root flex flex-col bg-bg-secondary shrink-0 no-drag"
       style={{ width: sidebarWidth }}
     >
       {/* Repository switcher */}
@@ -755,7 +755,7 @@ export function Sidebar() {
           <div className="flex items-center gap-0.5">
             {currentRepo && (
               <button
-                className="icon-btn no-drag flex-shrink-0 hover:!text-status-deleted !w-7 !h-7"
+                className="icon-btn no-drag shrink-0 hover:!text-status-deleted !w-7 !h-7"
                 title={t('shell.closeRepoTooltip')}
                 onClick={async (e) => {
                   e.preventDefault(); e.stopPropagation();
@@ -773,7 +773,7 @@ export function Sidebar() {
               </button>
             )}
             <button
-              className="icon-btn no-drag flex-shrink-0 !w-7 !h-7"
+              className="icon-btn no-drag shrink-0 !w-7 !h-7"
               title={checkingRemotes ? t('shell.checkingRemotes') : t('shell.checkAllRemotesFull')}
               onClick={(e) => {
                 e.preventDefault();

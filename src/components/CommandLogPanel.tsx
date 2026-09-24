@@ -226,11 +226,11 @@ export function isUserCommand(args: string[]): boolean {
 function CommandStatusDot({ entry }: { entry: CommandLogEntry }) {
   const failed = entry.exitCode !== 0;
   return failed ? (
-    <span className="flex-shrink-0 w-3 h-3 rounded-full bg-status-deleted/25 flex items-center justify-center">
+    <span className="shrink-0 w-3 h-3 rounded-full bg-status-deleted/25 flex items-center justify-center">
       <X size={8} className="text-status-deleted" />
     </span>
   ) : (
-    <span className="flex-shrink-0 w-3 h-3 rounded-full bg-status-added/20 flex items-center justify-center">
+    <span className="shrink-0 w-3 h-3 rounded-full bg-status-added/20 flex items-center justify-center">
       <Check size={8} className="text-status-added" />
     </span>
   );
@@ -258,17 +258,17 @@ const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEn
         onClick={() => setExpanded(!expanded)}
         title={cmdline}
       >
-        <span className="w-3 flex-shrink-0 text-text-tertiary">
+        <span className="w-3 shrink-0 text-text-tertiary">
           {hasDetails ? (
             expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />
           ) : null}
         </span>
         <CommandStatusDot entry={entry} />
-        <span className="text-2xs text-text-tertiary font-mono flex-shrink-0">
+        <span className="text-2xs text-text-tertiary font-mono shrink-0">
           [{formatTime(entry.timestamp)}]
         </span>
         {!isUser && (
-          <span className="text-2xs px-1 rounded bg-bg-tertiary text-text-tertiary flex-shrink-0">
+          <span className="text-2xs px-1 rounded bg-bg-tertiary text-text-tertiary shrink-0">
             {t('pages.sysBadge')}
           </span>
         )}
@@ -281,9 +281,9 @@ const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEn
           {cmdline}
         </span>
         {entry.exitCode !== 0 && entry.exitCode !== null && (
-          <span className="text-2xs text-status-deleted flex-shrink-0">exit {entry.exitCode}</span>
+          <span className="text-2xs text-status-deleted shrink-0">exit {entry.exitCode}</span>
         )}
-        <span className="text-2xs text-text-tertiary ml-auto flex-shrink-0">
+        <span className="text-2xs text-text-tertiary ml-auto shrink-0">
           {formatDuration(entry.durationMs)}
         </span>
       </button>
@@ -421,11 +421,11 @@ export function CommandLogPanel({
   };
 
   return (
-    <div className="flex flex-col bg-bg-secondary border-t border-border-default flex-shrink-0"
+    <div className="flex flex-col bg-bg-secondary border-t border-border-default shrink-0"
       style={{ height: '100%' }}
     >
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-bg-tertiary border-b border-border-default flex-shrink-0">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-bg-tertiary border-b border-border-default shrink-0">
         <div className="flex items-center gap-1">
           <button
             className="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider transition-colors bg-bg-hover text-text-primary"
