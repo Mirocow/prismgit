@@ -196,6 +196,7 @@ export const ru: Record<string, string> = {
   'settings.appDescription': 'Глобальные настройки приложения (внешний вид, интеграции, AI, CI/CD)',
   'settings.projectDescription': 'Настройки репозитория (Git, remote, стратегия pull, конфигурация)',
   'settings.appearance': 'Внешний вид',
+  'settings.userInterface': 'Пользовательский интерфейс',
   'settings.theme': 'Тема',
   'settings.language': 'Язык',
   'settings.contrast': 'Контрастность UI',

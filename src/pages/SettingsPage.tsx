@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AiProvidersGrid } from '../components/AiProvidersGrid';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { ExternalLink, Folder, GitBranch, Github, Loader, Lock, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
+import { ExternalLink, Folder, GitBranch, Github, Loader, Lock, LogOut, Moon, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
 import { SecuritySettings } from '../components/settings/SecuritySettings';
 import { api, type GitConfigEntry } from '../lib/api';
 import { restoreAllConfirmations } from '../lib/confirmations';
@@ -81,7 +81,7 @@ export function SettingsPage() {
   // - Security: SSH keys + credentials
   // - Integrations: GitHub + GitLab + VS Code
   // - Project: per-repo settings (only when a repo is open)
-  const [activeTab, setActiveTab] = useState<'appearance' | 'git' | 'ai' | 'security' | 'integrations' | 'project'>('appearance');
+  const [activeTab, setActiveTab] = useState<'appearance' | 'git' | 'ai' | 'security' | 'integrations' | 'repositories' | 'user-interface' | 'project'>('appearance');
   const showApp = activeTab === 'appearance';
   const showGit = activeTab === 'git';
   const showProject = activeTab === 'project' && !!currentRepo;
@@ -90,6 +90,8 @@ export function SettingsPage() {
   const showSecurity = activeTab === 'security';
   const showAdvanced = activeTab === 'git';
   const showIntegrations = activeTab === 'integrations';
+  const showRepositories = activeTab === 'repositories';
+  const showUserInterface = activeTab === 'user-interface';
 
   // === Git Config section state ===
   const [configScope, setConfigScope] = useState<'local' | 'global' | 'system'>('local');
@@ -339,6 +341,28 @@ export function SettingsPage() {
             onClick={() => setActiveTab('appearance')}
           >
             {t('settings.appearance', { defaultValue: 'Appearance' })}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
+              showUserInterface
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('user-interface')}
+          >
+            {t('settings.userInterface', { defaultValue: 'User interface' })}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
+              showRepositories
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('repositories')}
+          >
+            {t('settings.repositories', { defaultValue: 'Repositories' })}
           </button>
           <button
             className={cn(
@@ -1478,7 +1502,7 @@ export function SettingsPage() {
             Was: showProject (only visible with a repo open) — that made it
             impossible to open/remove repos from Settings when the user
             had just launched the app with no repo. */}
-        {showApp && (
+        {showRepositories && (
         <section className="panel mb-4">
           <div className="panel-header">
             <span>{t('settings.knownRepositories', { count: repos.length })}</span>
@@ -1534,7 +1558,7 @@ export function SettingsPage() {
         )}
 
         {/* SmartGit Manual: Preferences → Commands */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.commands')}</div>
           <div className="p-5 space-y-3 text-sm">
@@ -1710,7 +1734,7 @@ export function SettingsPage() {
         )}
 
         {/* SmartGit Manual: External Tools system */}
-        {showApp && (
+        {showIntegrations && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.externalTools')}</div>
           <div className="p-5 text-sm space-y-3">
@@ -1750,7 +1774,7 @@ export function SettingsPage() {
         )}
 
         {/* SmartGit Manual: Low-Level Properties editor */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.lowLevelProps')}</div>
           <div className="p-5 text-sm space-y-3">
@@ -2007,7 +2031,7 @@ smartgit.refresh.inspectEol=true
         )}
 
         {/* SmartGit Manual: Force Push Policies */}
-        {showApp && (
+        {showGit && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.forcePushPolicy')}</div>
           <div className="p-5 space-y-3 text-sm">
@@ -2058,7 +2082,7 @@ smartgit.refresh.inspectEol=true
         )}
 
         {/* Output / Command Log Settings */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.outputPanel')}</div>
           <div className="p-5 space-y-3 text-sm">
@@ -2336,7 +2360,7 @@ smartgit.refresh.inspectEol=true
         )}
 
         {/* Settings redesign — UI Density (Compact / Comfortable) */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.densityTitle')}</div>
           <div className="p-5 space-y-3">
@@ -2362,7 +2386,7 @@ smartgit.refresh.inspectEol=true
         )}
 
         {/* Settings redesign — Date Format (Relative / Absolute / Both) */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.dateFormatTitle')}</div>
           <div className="p-5 space-y-3">
@@ -2388,7 +2412,7 @@ smartgit.refresh.inspectEol=true
         )}
 
         {/* Settings redesign — Zoom (stepper control) */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.zoomTitle')}</div>
           <div className="p-5 space-y-3">
@@ -2420,7 +2444,7 @@ smartgit.refresh.inspectEol=true
 
         {/* Task 18 — VSCode-style footer display settings. Each checkbox
             toggles a StatusBar footer section. */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.footerSectionTitle')}</div>
           <div className="p-5 space-y-3">
