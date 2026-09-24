@@ -1,6 +1,7 @@
 import { ipcMain, shell } from 'electron';
 import * as path from 'path';
 import * as gitService from '../services/git.js';
+import { isBenignRawError } from '../../src/lib/rawGitErrors';
 
 /**
  * Wrap an async git handler so simple-git errors NEVER propagate as
@@ -187,29 +188,31 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:detectWorkingTreeRenames', (_e, p: string, deleted: string[], untracked: string[]) =>
     wrap(gitService.detectWorkingTreeRenames)(p, deleted, untracked)
   );
-  // git:raw — suppress noisy "path does not exist" errors that flood the
-  // main-process console. ConflictMergeView intentionally probes stages
-  // :1/:2/:3 that may not exist (e.g. when a file is no longer conflicted).
-  // The renderer already handles rejections via .catch(() => '') — but
-  // Electron's ipcMain.handle logs every thrown error to stderr.
-  // Returning '' for known-benign errors avoids the console spam while
-  // still propagating real errors (network failures, bad git invocations).
+  // git:raw — suppress noisy EXPECTED failures that flood the main-process
+  // console. Two classes (see src/lib/rawGitErrors.ts for the rationale):
+  //   1. "not there" probes — ConflictMergeView intentionally probes merge
+  //      stages :1/:2/:3 that may not exist; pathspecs of files deleted
+  //      since the last status; submodule entries without a .gitmodules
+  //      mapping. The renderer already handles rejections via
+  //      .catch(() => '') — returning '' keeps that contract.
+  //   2. STALE RANGE races — `git rev-list main..origin/main` /
+  //      `git diff A..B` die with
+  //        fatal: ambiguous argument 'main..origin/main': unknown revision…
+  //      when a range side was deleted between the UI's ref-list read and
+  //      this call (upstream [gone], branch deleted in another tool while
+  //      the app was open). An unresolvable range side is an EMPTY result
+  //      for every caller (incoming set / compare diff) — re-throwing only
+  //      produced the "Error occurred in handler for 'git:raw'" console
+  //      spam the user reported. Single-ref ambiguity (a real typo in a
+  //      user-initiated command) still propagates.
+  // Real errors — network failures, bad git invocations — still re-throw so
+  // the renderer can surface them.
   ipcMain.handle('git:raw', async (_e, p: string, a: string[]) => {
     try {
       return await wrap(gitService.raw)(p, a);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Benign errors that shouldn't flood the console:
-      //   - "path '...' does not exist (neither on disk nor in the index)"
-      //   - "pathspec '...' did not match any file(s) known to git"
-      //   - "no submodule mapping found in .gitmodules for path '...'"
-      // These happen when probing for stage versions (:1/:2/:3) that may
-      // not exist, or when `git submodule status` is run on a repo whose
-      // index has a directory recorded as a submodule (mode 160000) but
-      // `.gitmodules` no longer references it. Returning an empty string
-      // matches what the renderer's .catch(() => '') would have produced
-      // and keeps the dev console quiet.
-      if (/does not exist|did not match any file|not in the index|no submodule mapping found|but not at stage/i.test(msg)) {
+      if (isBenignRawError(msg)) {
         return '';
       }
       // Real error — re-throw so the renderer can handle it.
