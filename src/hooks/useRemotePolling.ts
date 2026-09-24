@@ -73,13 +73,22 @@ export function useRemotePolling(): void {
 
   // PERF-2 — subscribe to gitStore's lastRefresh so that whenever a git
   // mutation completes (commit/push/fetch/etc. all call refreshStatus),
-  // we bump the polling into boost mode. This re-renders the hook with
-  // the new lastRefresh, but the effect below is keyed on the same
-  // deps so it doesn't re-subscribe.
-  const lastRefresh = useGitStore((s) => s.lastRefresh);
+  // we bump the polling into boost mode.
+  // RENDER-PERF: this used to be `useGitStore((s) => s.lastRefresh)` — a
+  // hook-level subscription inside a hook mounted in the ROOT App component.
+  // Since lastRefresh changed on every status refresh (~5s under watcher
+  // churn), that single line re-rendered the ENTIRE App tree (Routes, active
+  // page, Sidebar, Toolbar) on every tick. The bump doesn't need React state
+  // at all — the store's subscribe() listener fires imperatively with zero
+  // re-renders. Same semantics: lastRefresh > 0 → bump.
   useEffect(() => {
-    if (lastRefresh > 0) bumpPolling('git-mutation');
-  }, [lastRefresh]);
+    const unsub = useGitStore.subscribe((s, prev) => {
+      if (s.lastRefresh !== prev.lastRefresh && s.lastRefresh > 0) {
+        bumpPolling('git-mutation');
+      }
+    });
+    return unsub;
+  }, []);
 
   // StrictMode double-invocation guard: in dev React runs mount → cleanup →
   // mount on the same component, which fired the initial checkNow() TWICE

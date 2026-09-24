@@ -196,6 +196,7 @@ export const zh: Record<string, string> = {
   'settings.appDescription': '全局应用偏好 (外观、集成、AI、CI/CD)',
   'settings.projectDescription': '仓库配置 (Git、远程、拉取策略、配置)',
   'settings.appearance': '外观',
+  'settings.userInterface': '用户界面',
   'settings.theme': '主题',
   'settings.language': '语言',
   'settings.contrast': 'UI 对比度',

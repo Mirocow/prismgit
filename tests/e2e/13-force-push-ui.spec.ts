@@ -200,8 +200,20 @@ test.describe('Force push (--force) everywhere', () => {
       await navigateTo(page, 'Settings');
       await page.waitForTimeout(1000);
 
-      // The Force Push Policy panel (Appearance tab is the default) exposes
-      // the flag select right below the policy select.
+      // The Force Push Policy panel lives on the GIT tab (the settings
+      // reorg moved it off the default Appearance tab). Switch there
+      // first — the tab button lives in the settings page's vertical
+      // <nav> (NOT the Git toolbar's "Git" button — scope the locator
+      // to the nav so the toolbar button can't intercept the click).
+      const gitTab = page
+        .locator('nav >> xpath=child::button[contains(normalize-space(.), "Git")]')
+        .first();
+      await expect(gitTab).toBeVisible({ timeout: 8000 });
+      await gitTab.click();
+      await page.waitForTimeout(300);
+
+      // The Force Push Policy panel exposes the flag select right
+      // below the policy select.
       const flagSelect = page
         .locator('xpath=//label[contains(normalize-space(.), "Force push flag")]/following-sibling::select')
         .first();

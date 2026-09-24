@@ -121,7 +121,14 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // state change (e.g. clone progress, fetch metadata) re-rendered the
   // entire 1969-line page. Now only `status` changes trigger re-render.
   const status = useGitStore((s) => s.status);
-  const lastRefresh = useGitStore((s) => s.lastRefresh);
+  // RENDER-PERF: `lastRefresh` is NOT subscribed here anymore. The numstat
+  // reload below needs to fire when the status refresh completes, but a
+  // hook subscription re-rendered this entire page (2.9k lines, thousands
+  // of file rows) on EVERY refresh tick (~5s under watcher churn) even
+  // when the status content was identical. The store's subscribe()
+  // listener now triggers the reload imperatively — zero re-renders.
+  // (status is still subscribed: the file list itself legitimately
+  // re-renders when the content changes.)
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const stageFiles = useGitStore((s) => s.stageFiles);
   const stageAll = useGitStore((s) => s.stageAll);
@@ -610,13 +617,26 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileDisplayFlags, repo.path]);
 
+  // RENDER-PERF: numstat reload on status refresh — via the store's
+  // subscribe() listener instead of a lastRefresh subscription + effect.
+  // Same trigger semantics (fires whenever a refresh commits a NEW status
+  // — the gitStore's content-equality gate already skips no-op refreshes,
+  // so numstat is not re-spawned when nothing changed), but without
+  // re-rendering this page on every tick. loadNumstat is a useCallback
+  // keyed on repo.path; keep it in a ref so the listener is subscribed once.
+  const loadNumstatRef = useRef(loadNumstat);
+  loadNumstatRef.current = loadNumstat;
   useEffect(() => {
-    // Only reload numstat on status refresh — the other loaders
-    // (dirTree, tracked+indexFlags, ignored, submoduleChanges)
-    // don't depend on the working-tree diff and would be redundant.
-    loadNumstat();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastRefresh]);
+    const unsub = useGitStore.subscribe((s, prev) => {
+      if (s.lastRefresh !== prev.lastRefresh) {
+        // Only reload numstat on status refresh — the other loaders
+        // (dirTree, tracked+indexFlags, ignored, submoduleChanges)
+        // don't depend on the working-tree diff and would be redundant.
+        loadNumstatRef.current();
+      }
+    });
+    return unsub;
+  }, []);
 
   // Reset folder scope and tree expansion when switching repositories
   useEffect(() => {

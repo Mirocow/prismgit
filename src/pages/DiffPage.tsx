@@ -210,25 +210,27 @@ export function DiffPage() {
   // because the watcher had just fired. Now we only invalidate if the
   // status's file list actually changed (different set of files or different
   // file states), not just because the timer fired.
-  const lastRefresh = useGitStore((s) => s.lastRefresh);
-  const gitStatus = useGitStore((s) => s.status);
-  const prevFilesKeyRef = useRef<string>('');
-  useEffect(() => {
-    if (!gitStatus) return;
-    // Build a compact signature of the current file states: for each file,
-    // its path + index flag + working_dir flag. If this signature changed,
-    // the working tree really changed → invalidate diff cache. If it's
-    // the same, the lastRefresh was just a timer tick — keep the cache.
-    const filesKey = (gitStatus.files || [])
+  //
+  // RENDER-PERF: the two subscriptions (`s.lastRefresh`, `s.status` objects)
+  // re-rendered this entire page — DiffViewer included — on every refresh
+  // tick (~5s), even when the file signature was unchanged. The selector
+  // below computes the signature STRING inside the store subscription:
+  // a string has stable identity, so the component only re-renders (and the
+  // effect below only fires) when the file list REALLY changed. The
+  // prevFilesKeyRef bookkeeping is no longer needed — React's dependency
+  // comparison does exactly the same job.
+  const filesSignature = useGitStore((s) =>
+    (s.status?.files || [])
       .map((f: { path: string; index: string; working_dir: string }) => `${f.path}:${f.index}${f.working_dir}`)
       .sort()
-      .join('|');
-    if (prevFilesKeyRef.current !== filesKey) {
-      prevFilesKeyRef.current = filesKey;
-      invalidateDiffCache();
-    }
-    void lastRefresh; // keep the dependency so the effect runs on refresh
-  }, [lastRefresh, gitStatus]);
+      .join('|'));
+  useEffect(() => {
+    // Signature '' = no status yet (or clean tree with no files) — nothing
+    // to invalidate. A non-empty signature that CHANGED means the working
+    // tree really changed → cached diffs are stale.
+    if (filesSignature) invalidateDiffCache();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filesSignature]);
 
   const computeDiff = useCallback(async () => {
     if (!repo) return;

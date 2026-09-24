@@ -139,7 +139,14 @@ export default function App() {
   }, [customThemeOverrides]);
   const loadAuth = useAuthStore((s) => s.loadAuthState);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const status = useGitStore((s) => s.status);
+  // RENDER-PERF: do NOT subscribe to `s.status` here. The App component is
+  // the ROOT of the render tree — subscribing it to the status object meant
+  // every status refresh (~5s under watcher churn) re-rendered the ENTIRE
+  // app: Routes, the active page (History graph / Diff viewer / Changes
+  // list), Sidebar, Toolbar — even though nothing in App's own render used
+  // `status` (all three read sites go through useGitStore.getState().status
+  // inside callbacks/effects). This dead subscription was the single largest
+  // source of the "UI is sluggish" report: removed.
   const toast = useToastActions();
   const windowStyle = useWindowStyleStore((s) => s.style);
   const setWindowStyle = useWindowStyleStore((s) => s.setStyle);

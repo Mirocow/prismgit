@@ -196,6 +196,7 @@ export const en: Record<string, string> = {
   'settings.appDescription': 'Global application preferences (appearance, integrations, AI, CI/CD)',
   'settings.projectDescription': 'Per-repository configuration (Git, remotes, pull strategy, config)',
   'settings.appearance': 'Appearance',
+  'settings.userInterface': 'User interface',
   'settings.theme': 'Theme',
   'settings.language': 'Language',
   'settings.contrast': 'UI Contrast',

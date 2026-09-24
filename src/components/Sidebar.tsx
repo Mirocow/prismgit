@@ -516,10 +516,28 @@ export function Sidebar() {
   // warning dot on the active repo row. Per-repo status for inactive repos
   // would require additional backend plumbing (RemoteCheckSummary doesn't
   // carry isMerging etc.) — left for a follow-up.
-  const status = useGitStore((s) => s.status);
-  const currentInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
-  const currentBisecting = !!status?.isBisecting;
-  const currentDetached = !!status?.detached;
+  // RENDER-PERF: three BOOLEAN selectors instead of subscribing to the whole
+  // status object. The Sidebar (repo tree, groups, drag&drop handlers,
+  // context menus) is a large component that sits ABOVE the active page —
+  // a status-object subscription re-rendered it on every refresh tick
+  // (~5s under watcher churn). Booleans only change identity when the
+  // sequencer / detach state actually flips.
+  const currentInProgress = useGitStore((s) =>
+    !!(s.status?.isMerging || s.status?.isRebasing || s.status?.isCherryPicking || s.status?.isReverting));
+  const currentBisecting = useGitStore((s) => !!s.status?.isBisecting);
+  const currentDetached = useGitStore((s) => !!s.status?.detached);
+  // Which sequencer state exactly — stable string key for the badge tooltip.
+  const currentInProgressKind = useGitStore((s) => {
+    const st = s.status;
+    if (st?.isMerging) return 'merging';
+    if (st?.isRebasing) return 'rebasing';
+    if (st?.isCherryPicking) return 'cherry-picking';
+    if (st?.isReverting) return 'reverting';
+    return '';
+  });
+  // Sidebar header shows the current branch name (SmartGit parity) — string
+  // selector so the header only re-renders when the branch actually changes.
+  const currentBranch = useGitStore((s) => s.status?.current ?? null);
 
   // ============= Tree rendering =============
 
@@ -604,9 +622,9 @@ export function Sidebar() {
               onClick={(e) => e.stopPropagation()}
               className="shrink-0 w-1.5 h-1.5"
               title={t('banner.stateTooltip').replace('{label}',
-                status?.isMerging ? t('banner.mergingLabel').toLowerCase()
-                : status?.isRebasing ? t('banner.rebasingLabel').toLowerCase()
-                : status?.isCherryPicking ? t('banner.cherryPickingLabel').toLowerCase()
+                currentInProgressKind === 'merging' ? t('banner.mergingLabel').toLowerCase()
+                : currentInProgressKind === 'rebasing' ? t('banner.rebasingLabel').toLowerCase()
+                : currentInProgressKind === 'cherry-picking' ? t('banner.cherryPickingLabel').toLowerCase()
                 : t('banner.revertingStatusBarLabel').toLowerCase()
               )}
             />
@@ -733,13 +751,13 @@ export function Sidebar() {
             {showRepoList ? <FolderGitOpen size={15} className="text-accent" /> : <FolderGit size={15} className="text-text-secondary" />}
             <span className="truncate">{currentRepo ? currentRepo.name : t('sidebar.repositories')}</span>
             {/* Current branch name next to repo name — SmartGit shows it in the sidebar header */}
-            {currentRepo && status?.current && !status?.detached && (
+            {currentRepo && currentBranch && !currentDetached && (
               <span className="text-2xs text-text-tertiary font-mono truncate">
                 <GitBranch size={10} className="inline -mt-0.5 mr-0.5" />
-                {status.current}
+                {currentBranch}
               </span>
             )}
-            {currentRepo && status?.detached && (
+            {currentRepo && currentDetached && (
               <span className="text-2xs text-status-modified font-mono truncate">
                 (detached)
               </span>

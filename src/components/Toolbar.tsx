@@ -4,7 +4,7 @@ import { api, type BranchInfo, type RemoteInfo } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { pickDefaultPullBranch, pickDefaultPushBranch } from '../lib/pullPushDefaults';
 import { describePushResult } from '../lib/pushResult';
-import { getRepoInProgressState, isRepoBusy } from '../lib/repoState';
+import { getRepoInProgressState } from '../lib/repoState';
 import { getThemeMeta } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
@@ -82,7 +82,10 @@ interface ToolbarProps {
 export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase, onRepoInfo, onShowShortcuts, onShowClone, onShowInit, onToggleCommandLog, onToggleAiAssistant }: ToolbarProps = {}) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const currentMetadata = useRepositoryStore((s) => s.currentMetadata);
-  const status = useGitStore((s) => s.status);
+  // RENDER-PERF: no `s.status` subscription here — the main Toolbar renders
+  // NO status-derived UI (the center badges area is empty; git status chips
+  // live in GitToolbar below and in StatusBar). The dead subscription
+  // re-rendered this 1.2k-line component on every status refresh (~5s).
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const push = useGitStore((s) => s.push);
   const pull = useGitStore((s) => s.pull);
@@ -979,7 +982,18 @@ function PullDropdown({ disabled, pullBlocked }: { disabled: boolean; /** Reason
 export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () => void; onInteractiveRebase?: () => void } = {}) {
   const { t } = useI18n();
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
-  const status = useGitStore((s) => s.status);
+  // RENDER-PERF: GitToolbar previously subscribed to the whole `s.status`
+  // object and re-rendered on every status refresh (~5s of watcher churn),
+  // even though it only renders (a) which sequencer state is active and
+  // (b) the conflict count + first conflicted file. Selectors below return
+  // STABLE identities:
+  //  - getRepoInProgressState() returns a CONSTANT object from the STATES
+  //    table (same reference for the same state key) → the component only
+  //    re-renders when the state actually CHANGES.
+  //  - conflictCount / firstConflictFile are primitives.
+  const repoState = useGitStore((s) => getRepoInProgressState(s.status));
+  const conflictCount = useGitStore((s) => s.status?.conflicted?.length ?? 0);
+  const firstConflictFile = useGitStore((s) => s.status?.conflicted?.[0]);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const push = useGitStore((s) => s.push);
   const pull = useGitStore((s) => s.pull);
@@ -997,16 +1011,15 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   // In-progress sequencer states block Push/Discard — they would conflict
   // with the in-progress merge/rebase/cherry-pick/revert. Fetch/Fetch All are
   // still allowed (read-only on the working tree). Bisect does NOT block.
-  const isInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
+  const isInProgress = !!repoState && repoState.key !== 'bisecting';
 
   // SmartGit: while a sequencer state (merge / rebase / cherry-pick / revert /
   // bisect) is active, Pull is NOT allowed — only Fetch / Fetch All remain
   // available (they never touch the working tree or HEAD).
-  const repoState = getRepoInProgressState(status);
   const pullBlocked = repoState
     ? `${repoState.pullReason} — ${repoState.blockedHint}`
     : undefined;
-  const isBusy = isRepoBusy(status);
+  const isBusy = !!repoState;
 
   const handlePush = async () => {
     if (!currentRepo) return;
@@ -1078,14 +1091,16 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
   if (!currentRepo) return null;
 
   // Show conflict resolution button when conflicts exist
-  const hasConflicts = status?.conflicted && status.conflicted.length > 0;
+  // (RENDER-PERF: derived from the primitive selectors above — conflictCount
+  // and firstConflictFile — instead of the whole status object.)
+  const hasConflicts = conflictCount > 0;
   const handleResolveConflicts = () => {
-    if (status?.conflicted && status.conflicted.length > 0) {
+    if (firstConflictFile) {
       // Navigate to Changes and trigger conflict solver on first conflicted file
       navigate('/changes');
       // Set a global event that ChangesPage picks up
       window.dispatchEvent(new CustomEvent('smartgit:resolve-conflict', {
-        detail: { file: status.conflicted[0] }
+        detail: { file: firstConflictFile }
       }));
     }
   };
@@ -1098,10 +1113,10 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           <button
             className="flex items-center gap-1.5 px-3 h-8 rounded-md transition-colors no-drag text-xs bg-status-conflict/15 text-status-conflict border border-status-conflict/40 hover:bg-status-conflict/25 font-medium animate-pulse"
             onClick={handleResolveConflicts}
-            title={t('shell.conflictsTooltip', { count: status?.conflicted?.length || 0 })}
+            title={t('shell.conflictsTooltip', { count: conflictCount })}
           >
             <AlertCircle size={14} />
-            <span>{t('shell.resolveConflicts', { count: status?.conflicted?.length || 0 })}</span>
+            <span>{t('shell.resolveConflicts', { count: conflictCount })}</span>
           </button>
           <Divider />
         </>

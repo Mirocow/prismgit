@@ -14,6 +14,98 @@ import { useSettingsStore } from './settingsStore';
 // `git status` call for B entirely, leaving the UI on a stale snapshot.
 const refreshInFlight = new Map<string, Promise<void>>();
 
+/**
+ * RENDER-PERF: content-equality comparator for StatusResult.
+ *
+ * Every `refreshStatus` used to `set({ status: <new object> })` unconditionally,
+ * so the object identity changed on EVERY refresh — and since `status` is a new
+ * reference even when the content is byte-identical, every component subscribed
+ * to `s.status` / `s.lastRefresh` re-rendered on every watcher tick (~5s under
+ * IDE auto-save / build activity). On a machine where the Changes page holds
+ * thousands of file rows, that constant full-page re-render was the "UI is
+ * sluggish" report: React reconciliation + memo recomputation every few seconds
+ * while the user is trying to click things.
+ *
+ * This comparator walks the fields the UI actually renders (branch, tracking,
+ * HEAD hash, ahead/behind, sequencer states, per-file status codes, counts)
+ * and reports true when nothing visible changed — in which case refreshStatus
+ * keeps the OLD status object (preserving its identity) and does NOT bump
+ * lastRefresh, so not a single subscriber re-renders.
+ *
+ * O(files) — one pass over the file list; no serialization, no allocation.
+ */
+function statusContentEquals(a: StatusResult, b: StatusResult): boolean {
+  if (a === b) return true;
+  // Scalar fields first — cheapest and most likely to differ.
+  if (
+    a.current !== b.current ||
+    a.tracking !== b.tracking ||
+    a.head !== b.head ||
+    a.ahead !== b.ahead ||
+    a.behind !== b.behind ||
+    a.detached !== b.detached ||
+    a.isClean !== b.isClean ||
+    a.isMerging !== b.isMerging ||
+    a.isRebasing !== b.isRebasing ||
+    a.isCherryPicking !== b.isCherryPicking ||
+    a.isReverting !== b.isReverting ||
+    a.isBisecting !== b.isBisecting
+  ) {
+    return false;
+  }
+  // Sequencer detail objects (small, optional).
+  if (
+    JSON.stringify(a.cherryPick ?? null) !== JSON.stringify(b.cherryPick ?? null) ||
+    JSON.stringify(a.revert ?? null) !== JSON.stringify(b.revert ?? null) ||
+    JSON.stringify(a.merge ?? null) !== JSON.stringify(b.merge ?? null) ||
+    JSON.stringify(a.rebase ?? null) !== JSON.stringify(b.rebase ?? null) ||
+    JSON.stringify(a.bisect ?? null) !== JSON.stringify(b.bisect ?? null)
+  ) {
+    return false;
+  }
+  // Path arrays.
+  const strEq = (x: string[], y: string[]) =>
+    x.length === y.length && x.every((v, i) => v === y[i]);
+  if (
+    !strEq(a.not_added, b.not_added) ||
+    !strEq(a.conflicted, b.conflicted) ||
+    !strEq(a.created, b.created) ||
+    !strEq(a.deleted, b.deleted) ||
+    !strEq(a.modified, b.modified)
+  ) {
+    return false;
+  }
+  // Renamed pairs.
+  const renA = a.renamed ?? [];
+  const renB = b.renamed ?? [];
+  if (
+    renA.length !== renB.length ||
+    renA.some((r, i) => r.from !== renB[i].from || r.to !== renB[i].to)
+  ) {
+    return false;
+  }
+  // Staged entries ({path,index,working_dir}).
+  const stA = a.staged ?? [];
+  const stB = b.staged ?? [];
+  if (
+    stA.length !== stB.length ||
+    stA.some((f, i) => f.path !== stB[i].path || f.index !== stB[i].index || f.working_dir !== stB[i].working_dir)
+  ) {
+    return false;
+  }
+  // The full file list — the field every page derives its rows from.
+  const fA = a.files ?? [];
+  const fB = b.files ?? [];
+  if (fA.length !== fB.length) return false;
+  for (let i = 0; i < fA.length; i++) {
+    const x = fA[i];
+    const y = fB[i];
+    if (x.path !== y.path || x.index !== y.index || x.working_dir !== y.working_dir) return false;
+    if ((x.old_path ?? null) !== (y.old_path ?? null)) return false;
+  }
+  return true;
+}
+
 interface GitState {
   status: StatusResult | null;
   loading: boolean;
@@ -114,7 +206,26 @@ export const useGitStore = create<GitState>((set, get) => ({
         // user has switched to repo B in the meantime, dropping the result
         // is correct — refreshStatus(B) is running its own status() call.
         if (useRepositoryStore.getState().currentRepo?.path === repoPath) {
-          set({ status, loading: false, lastRefresh: Date.now() });
+          // RENDER-PERF: content-equality gate. The watcher fires refreshes
+          // on every .git/index touch (IDE auto-save, builds, git itself)
+          // — but most of those refreshes produce a status that is
+          // IDENTICAL to the current one. Committing a new object identity
+          // anyway re-rendered every status subscriber in the tree
+          // (App → Toolbar → Sidebar → active page) every ~5s: the
+          // "interface is sluggish" report. When the content is equal we
+          // keep the previous `status` object AND the previous lastRefresh
+          // timestamp — zero store notifications, zero re-renders, and the
+          // numstat reload keyed on lastRefresh is skipped too (the file
+          // states didn't change, so numstat is still valid).
+          const prev = get().status;
+          if (prev && statusContentEquals(prev, status)) {
+            // Only settle the loading flag — no component subscribes to it
+            // in a way that re-renders (verified), so this is a no-op for
+            // the render tree.
+            if (get().loading) set({ loading: false });
+          } else {
+            set({ status, loading: false, lastRefresh: Date.now() });
+          }
         }
       } catch (e) {
         if (useRepositoryStore.getState().currentRepo?.path === repoPath) {
