@@ -462,6 +462,10 @@ export function registerGitIpc(): void {
   // kept (it's covered by integration tests).
   // EOL-only change detection
   ipcMain.handle('git:isEolOnlyChange', (_e, p: string, f: string) => wrap(gitService.isEolOnlyChange)(p, f));
+  // PERF (v3.1): batch variant — ONE chunked `git diff --ignore-cr-at-eol
+  // --name-only -z` instead of N per-file spawns (see services/git.ts
+  // filesWithRealChanges for the full rationale).
+  ipcMain.handle('git:filesWithRealChanges', (_e, p: string, f: string[]) => wrap(gitService.filesWithRealChanges)(p, f));
   // Push to Gerrit
   ipcMain.handle('git:pushToGerrit', (_e, p: string, b?: string, r?: string, o?: { draft?: boolean; reviewers?: string[]; topic?: string }) =>
     wrap(gitService.pushToGerrit)(p, b, r, o)

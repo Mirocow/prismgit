@@ -641,6 +641,12 @@ export interface GitApi {
 
   /** EOL-only change detection. */
   isEolOnlyChange: (repoPath: string, file: string) => Promise<boolean>;
+  /**
+   * BATCH EOL-only detection (perf): returns the subset of `files` whose
+   * changes are more than line-ending noise — one chunked
+   * `git diff --ignore-cr-at-eol --name-only` instead of N per-file diffs.
+   */
+  filesWithRealChanges: (repoPath: string, files: string[]) => Promise<string[]>;
 
   /** Push to Gerrit — refs/for/<branch>. */
   pushToGerrit: (repoPath: string, branch?: string, remote?: string, options?: { draft?: boolean; reviewers?: string[]; topic?: string }) => Promise<string>;

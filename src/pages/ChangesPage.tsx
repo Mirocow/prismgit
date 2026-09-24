@@ -12,6 +12,7 @@ import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../com
 import { CommitHashLink } from '../components/StatusBar';
 import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, generateCommitMessageStream, type LLMProvider } from '../lib/aiCommitMessages';
 import { buildProviderFromSettings } from '../lib/aiUtils';
+import { LS_FILES_V_ARGS, parseLsFilesV } from '../lib/changesIndexScan';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
 import { findCommentLines, resolveCommentChar, stripCommitComments } from '../lib/commitMessage';
 import { formatTime } from '../lib/authorBadges';
@@ -450,15 +451,24 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     }
   }, [repo.path, fileDisplayFlags]);
 
-  const loadTrackedCount = useCallback(async () => {
+  // PERF (v3.1): `ls-files` + `ls-files -v` MERGED into ONE index walk — the
+  // `-v` output is the plain listing with a one-char tag prefix, so a single
+  // call yields the tracked count, the unchanged-files list, AND the
+  // assume-unchanged / skip-worktree flags (see lib/changesIndexScan.ts).
+  // On a 50k-file repo this halves the repo-open index-scan cost.
+  const loadTrackedAndIndexFlags = useCallback(async () => {
     try {
-      const out = await api.git.raw(repo.path, ['ls-files']);
-      const list = out ? out.split('\n').filter(Boolean) : [];
-      setTrackedTotal(list.length);
-      setTrackedFilesList(list);
+      const out = await api.git.raw(repo.path, [...LS_FILES_V_ARGS]);
+      const scan = parseLsFilesV(out);
+      setTrackedTotal(scan.trackedTotal);
+      setTrackedFilesList(scan.trackedFiles);
+      setAssumeUnchangedFiles(scan.assumeUnchanged);
+      setSkippedFiles(scan.skipped);
     } catch {
       setTrackedTotal(0);
       setTrackedFilesList([]);
+      setAssumeUnchangedFiles([]);
+      setSkippedFiles([]);
     }
   }, [repo.path]);
 
@@ -478,38 +488,19 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     }
   }, [repo.path]);
 
-  /** Load assume-unchanged + skip-worktree files via `git ls-files -v`.
-   *  Lines starting with lowercase letter (h,k,l,m,n) = assume-unchanged.
-   *  Lines starting with 'S' = skip-worktree. */
-  const loadIndexFlags = useCallback(async () => {
-    try {
-      const out = await api.git.raw(repo.path, ['ls-files', '-v']);
-      const assumeUnchanged: string[] = [];
-      const skipped: string[] = [];
-      for (const line of out.split('\n').filter(Boolean)) {
-        const tag = line[0];
-        const path = line.slice(1).trim();
-        if (!path) continue;
-        // Lowercase tags = assume-unchanged (h, k, l, m, n)
-        if (tag === 'h' || tag === 'k' || tag === 'l' || tag === 'm' || tag === 'n') {
-          assumeUnchanged.push(path);
-        }
-        // 'S' = skip-worktree
-        if (tag === 'S') {
-          skipped.push(path);
-        }
-      }
-      setAssumeUnchangedFiles(assumeUnchanged);
-      setSkippedFiles(skipped);
-    } catch {
-      setAssumeUnchangedFiles([]);
-      setSkippedFiles([]);
-    }
-  }, [repo.path]);
-
-  /** Load submodule changes via `git submodule summary`. */
+  /** Load submodule changes via `git submodule summary`.
+   *  PERF (v3.1): gated on `.gitmodules` existence — `git submodule summary`
+   *  spawns a git process that scans the worktree even on the ~99% of repos
+   *  with no submodules, where its output is ALWAYS empty. The fs:exists
+   *  round-trip is subprocess-free. (Index has mode-160000 entries but no
+   *  .gitmodules → summary errors → catch → [] — same result as skipping.) */
   const loadSubmoduleChanges = useCallback(async () => {
     try {
+      const hasGitmodules = await api.fs.exists(`${repo.path}/.gitmodules`);
+      if (!hasGitmodules) {
+        setSubmoduleChanges([]);
+        return;
+      }
       const out = await api.git.raw(repo.path, ['submodule', 'summary']);
       // Format: '* <hash> <name> <commits>
       //          <commit lines>
@@ -559,26 +550,50 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     }
   }, [repo.path]);
 
-  // R9 FIX: split the 6-subprocess effect into two effects:
-  // 1. Repo switch — run ALL 6 loaders (dirTree, trackedCount, ignored,
-  //    indexFlags, submoduleChanges, numstat). Only fires when repo.path
-  //    changes (not on every status refresh).
+  // R9 FIX: split the repo-open effect from the status-refresh effect:
+  // 1. Repo switch — run the loaders that are ALWAYS needed. Only fires
+  //    when repo.path changes (not on every status refresh).
   // 2. Status refresh — run ONLY numstat (the one that depends on
   //    staged/unstaged diff output). Fires on every lastRefresh, but
-  //    only spawns ONE git subprocess instead of SIX.
+  //    only spawns TWO git subprocesses (one Promise.all pair) instead
+  //    of the whole loader set.
+  //
+  // PERF (v3.1) repo-open spawn budget (default display flags):
+  //   OLD: ls-files + ls-files -v + status --porcelain --ignored +
+  //        submodule summary + numstat×2 = 6 git subprocesses.
+  //   NEW: ls-files -v (merged scan) + numstat×2 = 3 git subprocesses —
+  //   - `status --porcelain --ignored` is the SECOND full status walk of
+  //     the same tree (and the most expensive one: it descends into
+  //     ignored directories like node_modules) — now LAZY: only runs when
+  //     the 'ignored' display flag is ON (see effect below).
+  //   - `submodule summary` is fs-gated on .gitmodules existing.
+  //   - `ls-files` + `ls-files -v` merged into one walk.
   useEffect(() => {
     loadDirTree();
-    loadTrackedCount();
-    loadIgnored();
-    loadIndexFlags();
-    loadSubmoduleChanges();
+    loadTrackedAndIndexFlags();
     loadNumstat();
+    if (fileDisplayFlags.has('ignored')) loadIgnored();
+    loadSubmoduleChanges();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo.path]);
 
+  // PERF (v3.1): lazy-load the ignored-files scan when the user turns the
+  // 'ignored' display flag ON (or a repo is opened with it already on).
+  // Guarded per-repo so toggling OTHER flags while 'ignored' stays on does
+  // not re-run the expensive scan — same freshness as the old always-loaded
+  // behavior (loaded once per repo open), just deferred to first need.
+  const ignoredLoadedFor = useRef<string | null>(null);
   useEffect(() => {
-    // Only reload numstat on status refresh — the other 5 loaders
-    // (dirTree, trackedCount, ignored, indexFlags, submoduleChanges)
+    if (!fileDisplayFlags.has('ignored')) return;
+    if (ignoredLoadedFor.current === repo.path) return;
+    ignoredLoadedFor.current = repo.path;
+    loadIgnored();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileDisplayFlags, repo.path]);
+
+  useEffect(() => {
+    // Only reload numstat on status refresh — the other loaders
+    // (dirTree, tracked+indexFlags, ignored, submoduleChanges)
     // don't depend on the working-tree diff and would be redundant.
     loadNumstat();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1559,18 +1574,21 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     }
     let cancelled = false;
     (async () => {
-      const found = new Set<string>();
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < changed.length) {
-          const p = changed[cursor++];
-          try {
-            if (await api.git.isEolOnlyChange(repo.path, p)) found.add(p);
-          } catch { /* per-file failure is fine */ }
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(4, changed.length) }, worker));
-      if (!cancelled) setEolOnlyPaths(found);
+      // PERF (v3.1): ONE batched IPC (chunked `git diff --ignore-cr-at-eol
+      // --name-only` in the main process) replaces the old worker pool that
+      // spawned up to 100 PER-FILE `git diff` subprocesses on EVERY status
+      // refresh — with 50 modified files that was 50 spawns per ~5s watcher
+      // tick, permanently saturating the git process queue.
+      try {
+        const realSet = new Set(
+          await api.git.filesWithRealChanges(repo.path, changed)
+        );
+        if (cancelled) return;
+        // EOL-only = modified files that did NOT show up as real changes.
+        setEolOnlyPaths(new Set(changed.filter(p => !realSet.has(p))));
+      } catch {
+        if (!cancelled) setEolOnlyPaths(new Set());
+      }
     })();
     return () => { cancelled = true; };
   }, [repo?.path, status, settings?.distinguishEolChanges]);

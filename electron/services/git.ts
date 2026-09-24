@@ -7285,6 +7285,79 @@ export async function isEolOnlyChange(repoPath: string, file: string): Promise<b
   }
 }
 
+/**
+ * BATCH EOL-only detection — PERF (v3.1).
+ *
+ * The Changes page's EOL-detection effect used to call isEolOnlyChange()
+ * PER FILE: up to 100 `git diff --ignore-cr-at-eol -- <file>` subprocesses
+ * on EVERY status refresh (watcher ticks every ~5s → a repo with 50 modified
+ * files spawned 50 processes per tick, permanently saturating the simple-git
+ * queue and competing with the user's own actions).
+ *
+ * One batched `git diff --ignore-cr-at-eol --numstat -z -- <files…>` yields
+ * the same answer: verified against real git, `--numstat` RESPECTS
+ * `--ignore-cr-at-eol` (EOL-only files are omitted from the listing
+ * entirely), unlike `--name-only` which lists every raw content difference
+ * regardless of the flag. Files that appear in the numstat listing = real
+ * changes; files that do NOT = EOL-only. One subprocess per chunk.
+ *
+ * The file list is chunked (≤40 files or ≤8k characters per invocation) so
+ * the argv can never approach the Windows CreateProcess 32k limit; chunks
+ * run in parallel via the getGit queue.
+ *
+ * Returns the files (among `files`) that have REAL (non-EOL) changes. A
+ * failed chunk's files are conservatively reported as real changes —
+ * matching the old per-file catch path, where an error meant
+ * isEolOnlyChange() === false ("real change").
+ */
+export async function filesWithRealChanges(repoPath: string, files: string[]): Promise<string[]> {
+  if (files.length === 0) return [];
+  const git = getGit(repoPath);
+  // Chunk: max 40 files AND max 8000 characters of joined paths per call.
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let chars = 0;
+  for (const f of files) {
+    const cost = f.length + 4; // path + arg separator + quoting headroom
+    if (current.length > 0 && (current.length >= 40 || chars + cost > 8000)) {
+      chunks.push(current);
+      current = [];
+      chars = 0;
+    }
+    current.push(f);
+    chars += cost;
+  }
+  if (current.length > 0) chunks.push(current);
+
+  const results = await Promise.allSettled(
+    chunks.map((chunk) =>
+      git.raw(['diff', '--ignore-cr-at-eol', '--numstat', '-z', '--', ...chunk])
+    )
+  );
+
+  const real = new Set<string>();
+  const failed = new Set<string>();
+  chunks.forEach((chunk, i) => {
+    const r = results[i];
+    if (r.status !== 'fulfilled') {
+      // A chunk failed — treat only ITS files as real changes (the old
+      // per-file path swallowed exactly this class of error per file).
+      for (const f of chunk) failed.add(f);
+      return;
+    }
+    // -z numstat entries: `added\tdel\tpath\0` — paths are NOT quoted in
+    // -z mode, so they match status.files paths byte-for-byte. Binary
+    // entries are `-\t-\tpath` — still a real change (listed).
+    for (const entry of r.value.split('\0')) {
+      if (!entry) continue;
+      const secondTab = entry.indexOf('\t', entry.indexOf('\t') + 1);
+      const p = secondTab >= 0 ? entry.slice(secondTab + 1) : entry;
+      if (p) real.add(p);
+    }
+  });
+  return files.filter((f) => real.has(f) || failed.has(f));
+}
+
 /** Push to Gerrit — refs/for/<branch> instead of HEAD */
 export async function pushToGerrit(
   repoPath: string,

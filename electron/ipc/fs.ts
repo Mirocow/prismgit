@@ -20,6 +20,19 @@ export function registerFsIpc(): void {
   ipcMain.handle('fs:pathBasename', (_e, p: string) => path.basename(p));
   ipcMain.handle('fs:pathDirname', (_e, p: string) => path.dirname(p));
 
+  // Synchronous existence check — one IPC round-trip, ZERO git subprocesses.
+  // PERF (v3.1): used by the renderer to gate expensive scans that are
+  // pointless without their config file (e.g. `git submodule summary` on
+  // repos without .gitmodules — ~99% of repos — always outputs nothing,
+  // but still spawns a git process that scans the worktree).
+  ipcMain.handle('fs:exists', (_e, p: string) => {
+    try {
+      return fs.existsSync(p);
+    } catch {
+      return false;
+    }
+  });
+
   // Open a terminal emulator in the given directory (SmartGit "Open in Terminal")
   ipcMain.handle('fs:openTerminal', async (_e, dirPath: string) => {
     try {

@@ -319,6 +319,7 @@ const api = {
     noteRemove: (repoPath: string, commit: string, ref?: string) => ipcRenderer.invoke('git:noteRemove', repoPath, commit, ref),
     // NOTE: forceCompare IPC was removed (dead renderer-side code).
     isEolOnlyChange: (repoPath: string, file: string) => ipcRenderer.invoke('git:isEolOnlyChange', repoPath, file),
+    filesWithRealChanges: (repoPath: string, files: string[]) => ipcRenderer.invoke('git:filesWithRealChanges', repoPath, files),
     pushToGerrit: (repoPath: string, branch?: string, remote?: string, options?: { draft?: boolean; reviewers?: string[]; topic?: string }) =>
       ipcRenderer.invoke('git:pushToGerrit', repoPath, branch, remote, options),
     clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean }) =>
@@ -451,6 +452,7 @@ const api = {
     writeFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
     pathBasename: (filePath: string) => ipcRenderer.invoke('fs:pathBasename', filePath),
     pathDirname: (filePath: string) => ipcRenderer.invoke('fs:pathDirname', filePath),
+    exists: (filePath: string) => ipcRenderer.invoke('fs:exists', filePath),
     openTerminal: (dirPath: string) => ipcRenderer.invoke('fs:openTerminal', dirPath),
   } as FsApi,
 
