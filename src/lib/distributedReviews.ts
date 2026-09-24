@@ -154,8 +154,15 @@ export async function pushReviews(
   remote = 'origin'
 ): Promise<'pushed' | 'nothing-to-push'> {
   // Check if the local notes ref exists. If not, there's nothing to push.
+  // QUIET-FLAG PITFALL: `rev-parse --verify -q` on a MISSING ref makes git
+  // exit 1 with NO stderr, which simple-git resolves as an EMPTY SUCCESS
+  // ("" instead of a throw) — so a try/catch never detects the missing ref
+  // and the code fell through to `git push`, surfacing the raw
+  // "src refspec does not match any" error instead of 'nothing-to-push'.
+  // Existence = the resolved output is a non-empty SHA.
   try {
-    await api.git.raw(repoPath, ['rev-parse', '--verify', '-q', NOTES_REF]);
+    const out = await api.git.raw(repoPath, ['rev-parse', '--verify', '-q', NOTES_REF]);
+    if (!out || !out.trim()) return 'nothing-to-push';
   } catch {
     // Local ref doesn't exist — no reviews have been added yet.
     return 'nothing-to-push';

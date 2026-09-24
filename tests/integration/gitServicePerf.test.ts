@@ -89,6 +89,11 @@ beforeAll(async () => {
   fs.writeFileSync(path.join(WITH_UPSTREAM, 'local.txt'), 'local' + NL);
   sh('git add local.txt', WITH_UPSTREAM);
   sh('git commit -q -m local-only', WITH_UPSTREAM);
+  // Extra local branches for the log() multi-branch budget test below
+  // (created WITHOUT checkout so `main` stays the current branch).
+  sh('git branch feat/a', WITH_UPSTREAM);
+  sh('git branch feat/b', WITH_UPSTREAM);
+  sh('git branch feat/c', WITH_UPSTREAM);
 
   // Warm the per-repo caches (gitDirCache, poll/remotes caches, coalescing
   // state) so the measurements below count steady-state behavior.
@@ -239,4 +244,63 @@ describe('pollRemoteSummary() — parallel step batch (v3)', () => {
     // but still count as four spawns — the budget is 5 total.
     expect(m.subprocesses).toBe(5);
   }, 20_000);
+});
+
+describe('log() — batched branch validation (v3.1: N rev-parse → 1 for-each-ref)', () => {
+  it('head+upstream pair: exactly 2 subprocesses (was 3: 2 rev-parse + log)', async () => {
+    let entries: gitService.LogEntry[] = [];
+    const m = await measure(WITH_UPSTREAM, async () => {
+      entries = await gitService.log(WITH_UPSTREAM, { branches: ['main', 'origin/main'] });
+    });
+    // 1× for-each-ref (validates BOTH refs — TTL-cached meta read shared
+    // with the renderer's incoming-commits validation) + 1× git log.
+    expect(m.subprocesses).toBe(2);
+    expect(entries.length).toBeGreaterThan(0);
+  });
+
+  it('5 selected branches: still 2 subprocesses (was 6: 5 rev-parse + log)', async () => {
+    let entries: gitService.LogEntry[] = [];
+    const m = await measure(WITH_UPSTREAM, async () => {
+      entries = await gitService.log(WITH_UPSTREAM, {
+        branches: ['main', 'feat/a', 'feat/b', 'feat/c', 'origin/main'],
+      });
+    });
+    // The one for-each-ref lists EVERY ref in the repo — validation cost is
+    // O(1) subprocesses no matter how many branches the user selected.
+    expect(m.subprocesses).toBe(2);
+    expect(entries.length).toBeGreaterThan(0);
+  });
+
+  it('non-ref spec (SHA) still works via the rev-parse fallback', async () => {
+    const sha = execSync('git rev-parse HEAD', { cwd: WITH_UPSTREAM, encoding: 'utf-8' }).trim();
+    let entries: gitService.LogEntry[] = [];
+    const m = await measure(WITH_UPSTREAM, async () => {
+      entries = await gitService.log(WITH_UPSTREAM, { branches: ['main', sha] });
+    });
+    // 1× for-each-ref + 1× rev-parse --verify (the SHA is not a ref name)
+    // + 1× git log.
+    expect(m.subprocesses).toBe(3);
+    expect(entries.length).toBeGreaterThan(0);
+  });
+
+  it('invalid refs are skipped, not fatal', async () => {
+    const entries = await gitService.log(WITH_UPSTREAM, {
+      branches: ['main', 'deleted-branch', 'origin/pruned'],
+    });
+    // Both invalid refs silently dropped — log ran with the valid one.
+    expect(entries.length).toBeGreaterThan(0);
+    // And with ONLY invalid refs: empty result, no throw.
+    const none = await gitService.log(WITH_UPSTREAM, { branches: ['nope', 'also-nope'] });
+    expect(none).toEqual([]);
+  });
+
+  it('HEAD is accepted without a probe (cheap path for detached fallback)', async () => {
+    let entries: gitService.LogEntry[] = [];
+    const m = await measure(WITH_UPSTREAM, async () => {
+      entries = await gitService.log(WITH_UPSTREAM, { branches: ['HEAD'] });
+    });
+    // 1× for-each-ref (HEAD not found in the set but special-cased) + log.
+    expect(m.subprocesses).toBe(2);
+    expect(entries.length).toBeGreaterThan(0);
+  });
 });

@@ -707,9 +707,27 @@ export function DiffPage() {
 // (a known git quirk), but `git show <hash> --format=` returns the full
 // diff (all files as "new file" against the empty tree).
 //
-// The check is done at call time (not earlier) because the commit may
-// have been gc'd between the initial load and the diff request.
+// PERF (v3.1): the parent probe (`rev-list --parents -n 1`) is IMMUTABLE for
+// a given (repo, hash) — a commit's parents never change. It used to run on
+// EVERY computeDiff (twice: file list + selected file) and on every
+// per-file cache miss in compare mode, adding a serial spawn round-trip
+// each time. Now memoized per (repo, baseRef, compareRef) for the session.
+const diffArgsMemo = new Map<string, string[]>();
 async function buildDiffArgs(
+  repoPath: string,
+  baseRef: string,
+  compareRef: string,
+): Promise<string[]> {
+  const memoKey = `${repoPath}\u0000${baseRef}\u0000${compareRef}`;
+  const cached = diffArgsMemo.get(memoKey);
+  if (cached) return cached;
+  const args = await buildDiffArgsUncached(repoPath, baseRef, compareRef);
+  if (diffArgsMemo.size > 128) diffArgsMemo.clear(); // trivial LRU-by-reset
+  diffArgsMemo.set(memoKey, args);
+  return args;
+}
+
+async function buildDiffArgsUncached(
   repoPath: string,
   baseRef: string,
   compareRef: string,

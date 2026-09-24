@@ -30,6 +30,24 @@ export type IncomingScope =
   | { mode: 'head+upstream'; currentBranch?: string | null; upstream?: string | null }
   | { mode: 'global' };
 
+/** Runner shape of `api.git.raw` — injected so tests can stub it. */
+export type RawRunner = (repoPath: string, args: string[]) => Promise<string>;
+
+/**
+ * ONE `git for-each-ref --format=%(refname)` call that lists every ref in
+ * the repo (heads, remotes, tags) — used to validate refs BEFORE running a
+ * `rev-list A..B` that would die with
+ *   "fatal: ambiguous argument 'v2..origin/v2': unknown revision…"
+ * when the upstream ref is `[gone]` (deleted on the remote) or was never
+ * fetched.
+ *
+ * The argv is deliberately IDENTICAL to the one used by the main-process
+ * `log()` branch validation, so both callers hit the SAME 1s-TTL meta-cache
+ * entry in the read-coalescing layer — effectively one subprocess serves
+ * the whole History-page load (log validation + incoming check).
+ */
+const REF_LIST_ARGS = ['for-each-ref', '--format=%(refname)'];
+
 /**
  * Build the `git rev-list` argv that yields the incoming commit set for the
  * given scope. Returns the args for `api.git.raw(repoPath, args)`.
@@ -58,4 +76,69 @@ export function parseRevList(raw: string): Set<string> {
     if (h) out.add(h);
   }
   return out;
+}
+
+/** Parse `for-each-ref --format=%(refname)` output into a Set of full refnames. */
+export function parseRefNames(raw: string): Set<string> {
+  const out = new Set<string>();
+  for (const line of raw.split('\n')) {
+    const r = line.trim();
+    if (r) out.add(r);
+  }
+  return out;
+}
+
+/**
+ * Does `ref` (given in the short form used across the app: `main`,
+ * `origin/main`, `v1.0`, or a full `refs/…` name) resolve to a ref in
+ * `refNames` — the set of ALL refs from `for-each-ref --format=%(refname)`?
+ */
+export function refExists(ref: string, refNames: Set<string>): boolean {
+  return (
+    refNames.has(ref) ||
+    refNames.has(`refs/heads/${ref}`) ||
+    refNames.has(`refs/remotes/${ref}`) ||
+    refNames.has(`refs/tags/${ref}`)
+  );
+}
+
+/**
+ * Compute the incoming-commit hash set for the History graph.
+ *
+ * Wraps `incomingRevListArgs` with REF VALIDATION: in head+upstream mode the
+ * two refs of `<current>..<upstream>` are checked against the repo's actual
+ * ref list first. When either side does not exist (the classic case: the
+ * branch config still points at an upstream whose remote ref was deleted →
+ * git status reports `tracking: 'origin/v2'` while `refs/remotes/origin/v2`
+ * is gone), the result is an EMPTY set — there is nothing to pull from a
+ * deleted branch — instead of a fatal rev-list error.
+ *
+ * The validation costs ONE `for-each-ref` subprocess, which is TTL-cached in
+ * the main process (meta read) and shared with `log()`'s branch validation
+ * when both run on the same History load.
+ */
+export async function fetchIncomingHashes(
+  repoPath: string,
+  scope: IncomingScope,
+  raw: RawRunner,
+): Promise<Set<string>> {
+  const args = incomingRevListArgs(scope);
+  if (
+    scope.mode === 'head+upstream' &&
+    args.length === 2 &&
+    args[1].includes('..')
+  ) {
+    const [left, right] = args[1].split('..');
+    try {
+      const refNames = parseRefNames(await raw(repoPath, REF_LIST_ARGS));
+      if (!refExists(left, refNames) || !refExists(right, refNames)) {
+        // Upstream (or local branch) gone → nothing incoming for this view.
+        return new Set();
+      }
+    } catch {
+      // for-each-ref itself failed — fall through and let rev-list decide;
+      // the renderer's catch handler treats that as empty as well.
+    }
+  }
+  return parseRevList(await raw(repoPath, args));
 }

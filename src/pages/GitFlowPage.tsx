@@ -6,9 +6,10 @@ import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { GitFlowDialog } from '../components/GitFlowDialog';
 import {
-  listFlowBranches,
-  detectGitFlowConfig,
-  detectGitFlowStatus,
+  readGitFlowConfigMap,
+  gitFlowConfigFromMap,
+  gitFlowStatusFrom,
+  flowListsFrom,
   initGitFlow,
   checkoutFlowBranch,
   flowPrefix,
@@ -45,13 +46,21 @@ export function GitFlowPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [st, cfg] = await Promise.all([
-        detectGitFlowStatus(repo.path),
-        detectGitFlowConfig(repo.path),
+      // PERF (v3.1): the old flow fired ~13 SEQUENTIAL git spawns per page
+      // load — detectGitFlowStatus (2 duplicate + 9 sequential
+      // `git config --get`), then detectGitFlowConfig (9 more), then
+      // listFlowBranches (config again + branches). The config map and
+      // the branch list are independent reads, so ONE config spawn and
+      // ONE branches() call (2 for-each-ref, TTL-cached) now serve the
+      // entire page: status, config, and all flow lists derive purely.
+      const [map, branchList] = await Promise.all([
+        readGitFlowConfigMap(repo.path),
+        api.git.branches(repo.path).catch(() => [] as import('../lib/api').BranchInfo[]),
       ]);
+      const cfg = gitFlowConfigFromMap(map);
       setConfig(cfg);
-      setStatus(st);
-      const lists = await listFlowBranches(repo.path, cfg);
+      setStatus(gitFlowStatusFrom(map, branchList));
+      const lists = flowListsFrom(cfg, branchList);
       setFeatures(lists.features);
       setReleases(lists.releases);
       setHotfixes(lists.hotfixes);

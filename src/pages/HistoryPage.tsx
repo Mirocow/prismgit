@@ -34,7 +34,7 @@ import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 import { linkifyCommitMessage } from '../lib/bugtraq';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { filterSymbolicHeads } from '../lib/branchFilter';
-import { incomingRevListArgs, parseRevList } from '../lib/incomingCommits';
+import { fetchIncomingHashes } from '../lib/incomingCommits';
 import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
 import { useI18n } from '../lib/i18n';
@@ -331,12 +331,27 @@ export function HistoryPage() {
           // view this is `<current>..<upstream>`. The global
           // `--remotes --not --branches` variant is contaminated when ANY
           // other local branch (backup/feature) contains the remote
-          // commits — which made incoming commits render as plain local
+          // commits — which made incoming commits render as plain local$
           // history after `git reset --hard` (user-reported).
-          const remoteOnly = await api.git.raw(repo.path, incomingRevListArgs(incomingScope));
+          //
+          // fetchIncomingHashes VALIDATES the refs first (one TTL-cached
+          // `for-each-ref`, shared with log()'s validation): when the
+          // upstream ref is gone (branch deleted on the remote — git status
+          // still reports `tracking: 'origin/v2'`), the old code spawned a
+          // `git rev-list v2..origin/v2` that died with
+          // "fatal: ambiguous argument 'v2..origin/v2'" and logged
+          // "Error occurred in handler for 'git:raw'" in the main process
+          // on EVERY History load. Now the set is simply empty (nothing to
+          // pull from a deleted remote branch) and no failing subprocess
+          // is spawned at all.
+          const hashes = await fetchIncomingHashes(
+            repo.path,
+            incomingScope,
+            (p, args) => api.git.raw(p, args),
+          );
           // Commits reachable from the remote side but not from the local
           // branch = commits that exist on the remote but haven't been pulled yet
-          setIncomingHashes(parseRevList(remoteOnly));
+          setIncomingHashes(hashes);
         } catch {
           setIncomingHashes(new Set());
         }

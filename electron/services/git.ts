@@ -2398,6 +2398,78 @@ export function fetchAllBranches(repoPath: string, remote = 'origin'): Promise<v
   });
 }
 
+/**
+ * Validate candidate `git log` refs against the repo's actual ref list.
+ *
+ * ONE `git for-each-ref --format=%(refname)` ('meta' read — 1s TTL cached +
+ * in-flight coalesced; argv shared with the renderer's incoming-commits
+ * validation) resolves plain branch names ('main'), remote names
+ * ('origin/main'), tags ('v1.0') and full refnames. Specs that are NOT
+ * ref names (commit SHAs, 'HEAD', 'HEAD~2', ranges) fall back to
+ * `git rev-parse --verify -q` probes, preserving the exact behaviour of the
+ * old per-branch loop for those cases.
+ *
+ * Returns the refs that are safe to pass to `git log`, in input order.
+ * Invalid refs are silently skipped (expected when a branch was deleted or
+ * a remote ref was pruned).
+ */
+async function validateLogRefs(git: SimpleGit, branches: string[]): Promise<string[]> {
+  let refNames: Set<string> | null = null;
+  try {
+    // NOTE: argv must stay IDENTICAL to src/lib/incomingCommits.ts
+    // REF_LIST_ARGS so both share the coalescing-layer cache entry.
+    const out = await git.raw(['for-each-ref', '--format=%(refname)']);
+    refNames = new Set(out.split('\n').map((l) => l.trim()).filter(Boolean));
+  } catch {
+    // for-each-ref failed (corrupt repo?) — every ref goes through the
+    // rev-parse fallback below, which is the old sequential behaviour.
+  }
+  const valid: string[] = [];
+  const unresolved: string[] = [];
+  for (const b of branches) {
+    if (b === 'HEAD') {
+      // Always resolvable in a repo with commits; keep the cheap answer.
+      valid.push(b);
+      continue;
+    }
+    if (
+      refNames &&
+      (refNames.has(b) ||
+        refNames.has(`refs/heads/${b}`) ||
+        refNames.has(`refs/remotes/${b}`) ||
+        refNames.has(`refs/tags/${b}`))
+    ) {
+      valid.push(b);
+      continue;
+    }
+    // Not a known ref name — could be a SHA / rev expression (or a ref that
+    // genuinely does not exist). Probe with rev-parse.
+    unresolved.push(b);
+  }
+  for (const b of unresolved) {
+    // QUIET-FLAG PITFALL: `git rev-parse --verify -q <bad>` produces NO
+    // stderr, and simple-git treats an empty-stdout+empty-stderr failure as
+    // an EMPTY SUCCESS (resolves "") rather than a throw. So the "try/catch
+    // drop invalid refs" logic NEVER fired — invalid refs were treated as
+    // valid, passed to `git log`, and the whole log died with
+    // "fatal: ambiguous argument" → EMPTY history (user-visible: selecting
+    // a stale branch in History blanked the graph). VALIDITY = the resolved
+    // output is a non-empty SHA. (Verified: `-q <valid>` resolves the SHA.)
+    try {
+      const out = await git.raw(['rev-parse', '--verify', '-q', b]);
+      if (typeof out === 'string' && out.trim()) {
+        valid.push(b);
+      }
+      // Empty output (or a non-quiet throw, caught here) = the ref does not
+      // exist — skip it. Expected when a branch was deleted or a remote
+      // ref was pruned.
+    } catch {
+      /* invalid ref spec — skip */
+    }
+  }
+  return valid;
+}
+
 export async function log(
   repoPath: string,
   options: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean } = {}
@@ -2443,18 +2515,21 @@ export async function log(
     // exist (e.g. a deleted branch, or a remote-tracking ref that was pruned),
     // `git log` exits 128 with "fatal: ambiguous argument". This spammed
     // the command log with errors on every History page load.
-    // We use `git rev-parse --verify -q <ref>` to check each ref; invalid
-    // refs are silently skipped (not included in the git log args).
-    const validBranches: string[] = [];
-    for (const b of branches) {
-      try {
-        await git.raw(['rev-parse', '--verify', '-q', b]);
-        validBranches.push(b);
-      } catch {
-        // Ref doesn't exist — skip it. Don't log the error (it's expected
-        // when a branch was deleted or a remote ref was pruned).
-      }
-    }
+    //
+    // PERF (v3.1): the old validation ran ONE `git rev-parse --verify -q`
+    // PER BRANCH, SEQUENTIALLY — with the head+upstream view that is 2
+    // spawns, with a Ctrl+multi-branch selection it is N spawns (10+ on
+    // the live repo), each a full spawn+exec round-trip. We now fetch the
+    // repo's ENTIRE ref list with ONE
+    //   git for-each-ref --format=%(refname)
+    // — a 'meta' read in the coalescing layer (1s TTL + in-flight sharing),
+    // and the argv is IDENTICAL to the renderer's incoming-commits
+    // validation (src/lib/incomingCommits.ts REF_LIST_ARGS), so a History
+    // page load serves BOTH from the same cached subprocess.
+    // Entries that are NOT plain ref names (SHAs, HEAD~2, …) fall back to
+    // individual `rev-parse --verify -q` probes — behaviour identical to
+    // the old code for those exotic specs.
+    const validBranches = await validateLogRefs(git, branches);
     if (validBranches.length === 0) {
       // No valid refs — return empty instead of running git log with no refs
       // (which would show HEAD, confusing the user).
