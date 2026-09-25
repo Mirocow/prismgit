@@ -20,7 +20,7 @@ import { windowBackgroundForTheme } from './services/themeDark.js';
 import { migrateLegacyGithubToken, flushGithubStore } from './services/github.js';
 import { migrateLegacyGitLabToken, flushGitlabStore } from './services/gitlab.js';
 import { flushSecrets } from './services/secrets.js';
-import { disposeGitPollWorkerAsync } from './services/gitPollProcess.js';
+import { disposeGitPollWorkerAsync, hardKillGitPollWorkerNow } from './services/gitPollProcess.js';
 import { buildAppMenu } from './menu.js';
 import { setMenuLocale, normalizeMenuLocale } from './i18n-menu.js';
 import { resolveResourceIcon } from './appIcons.js';
@@ -255,8 +255,19 @@ function createWindow(): BrowserWindow {
   let closeDeadlineTimer: NodeJS.Timeout | null = null;
 
   win.on('close', () => {
+    // Arm the ABSOLUTE quit bound FIRST — nothing below may leave it unarmed.
+    // darwin: closing the window does NOT quit the app (it lives in the dock) —
+    // the watchdog is only for real quits (before-quit covers menu/Cmd+Q).
+    if (process.platform !== 'darwin') armQuitWatchdog('window close');
     qlog('main window close');
-    saveWindowState();
+    try {
+      saveWindowState();
+    } catch {
+      // Belt: saveWindowState is internally guarded, but a throw here would
+      // historically have disarmed the close deadline below (the timer is
+      // armed later in this handler) → unbounded renderer handshake.
+      qlog('saveWindowState threw on close — ignored');
+    }
     if (closeDeadlineTimer == null) {
       closeDeadlineTimer = setTimeout(() => {
         closeDeadlineTimer = null;
@@ -505,6 +516,7 @@ app.on('window-all-closed', () => {
   qlog('window-all-closed');
   stopAllWatchers();
   if (process.platform !== 'darwin') {
+    armQuitWatchdog('window-all-closed');
     qlog('window-all-closed → app.quit()');
     app.quit();
   }
@@ -525,7 +537,54 @@ process.on('beforeExit', (code) => { qlog(`process beforeExit code=${code} (even
 
 let quitDisposalComplete = false;
 
+// ── Quit watchdog (v3.7) ───────────────────────────────────────────────────
+// The user's «при закрытии приложения намертво зависает» could not be
+// reproduced on any in-house fixture (prod/dev × repo open × hung fetch ×
+// 24k files — every measured quit: 50–100 ms), which means their machine
+// stalls somewhere our guards don't reach: an OS-level window-teardown stall,
+// a store flush on a slow/AV-scanned disk, an exotic driver, or an older
+// build. A bounded chain is only as strong as its weakest future regression,
+// so the quit is now ABSOLUTELY bounded: the moment ANY quit/close is
+// requested, a one-shot watchdog arms; if the whole graceful chain (renderer
+// handshake ≤800 ms + worker disposal ≤530 ms + synchronous flushes) hasn't
+// finished by QUIT_WATCHDOG_MS, it hard-kills the git worker and its
+// reported children, best-effort-flushes the stores, and calls app.exit(0)
+// — which bypasses EVERY remaining lifecycle handler and tears the process
+// down immediately. Normal quits finish in ~100 ms and never see it fire.
+const QUIT_WATCHDOG_MS = 3_000;
+let quitWatchdogArmed = false;
+function armQuitWatchdog(reason: string): void {
+  if (quitWatchdogArmed) return;
+  quitWatchdogArmed = true;
+  qlog(`quit watchdog armed (${reason}) — hard exit in ≤${QUIT_WATCHDOG_MS} ms whatever happens`);
+  const timer = setTimeout(() => {
+    qlog('quit watchdog FIRED — the bounded quit chain failed somewhere; forcing app.exit(0)');
+    try { hardKillGitPollWorkerNow(); } catch { /* already gone */ }
+    try { stopAllWatchers(); } catch { /* ignore */ }
+    try { flushCommandLogBatch(); } catch { /* ignore */ }
+    try { flushSecrets(); } catch { /* ignore */ }
+    try { flushSettings(); } catch { /* ignore */ }
+    try { flushGithubStore(); } catch { /* ignore */ }
+    try { flushGitlabStore(); } catch { /* ignore */ }
+    try { windowStateStore.flush(); } catch { /* ignore */ }
+    app.exit(0);
+  }, QUIT_WATCHDOG_MS);
+  // Never keep the process alive on its own — only the quit flow does that.
+  timer.unref?.();
+}
+
 app.on('before-quit', (event) => {
+  armQuitWatchdog('before-quit');
+
+  // TEST HOOK (scripts/verify-quit-watchdog.mjs): park the quit FOREVER —
+  // never re-quit, never flush. Reproduces a fully wedged quit chain; the
+  // watchdog is the only way out. Must NEVER be set in production.
+  if (process.env.PRISMGIT_QUIT_SIMULATE_WEDGE) {
+    event.preventDefault();
+    qlog('before-quit → SIMULATED WEDGE (test hook): quit parked forever, watchdog must fire');
+    return;
+  }
+
   // First pass: PARK the quit until the git worker is verifiably dead.
   // The old fire-and-forget dispose raced Electron's teardown: 'quit'
   // completed ~50 ms later, the utilityProcess died WITHOUT running its

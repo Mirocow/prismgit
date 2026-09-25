@@ -6,7 +6,7 @@ import { runStatsJob } from './gitStatsCore.js';
 import type { StatsJobRequest } from './gitStatsCore.js';
 import { runRawJob } from './gitRawCore.js';
 import type { RawJobRequest } from './gitRawCore.js';
-import { installChildTracker, killAllChildren, __trackedChildPidsForLog } from './childTracker.js';
+import { installChildTracker, killAllChildren, setChildrenListener, __trackedChildPidsForLog } from './childTracker.js';
 import { WORKTREE_IGNORED } from './watcherIgnore.js';
 import chokidar, { type FSWatcher } from 'chokidar';
 
@@ -46,6 +46,9 @@ import chokidar, { type FSWatcher } from 'chokidar';
  *                    { kind: 'watch-stop',  repoPath: string }
  *                    { kind: 'shutdown' }            (dispose: kill git children)
  *   worker → main  : { kind: 'ready' }                       (once, at startup)
+ *                    { kind: 'children', pids: number[] }    (live child set,
+ *                    coalesced — main kills the groups if this worker is
+ *                    hard-killed before its own shutdown ran)
  *                    { kind: 'poll-result',   id, result: PollJobResult }
  *                    { kind: 'poll-error',    id, message: string }
  *                    { kind: 'status-result', id, result: StatusJobResult }
@@ -234,6 +237,17 @@ function handleWatchStop(repoPath: string): void {
 // machine sluggish" report). Must be installed before any job arrives; jobs
 // only start after the 'ready' handshake below.
 installChildTracker();
+
+// Report the live child pid set to main (coalesced per event-loop turn by
+// the tracker). Main keeps the LAST reported set: if this worker is
+// hard-killed before its own shutdown handler runs (wedged event loop at
+// quit — the 500 ms dispose backstop), main SIGKILLs those process groups
+// itself so nothing orphans. Dead-pid kills are harmless no-ops (ESRCH).
+if (port) {
+  setChildrenListener((pids) => {
+    try { port.postMessage({ kind: 'children', pids }); } catch { /* main gone — quitting */ }
+  });
+}
 
 const WORKER_LOG = !!process.env.PRISMGIT_QUIT_LOG;
 if (WORKER_LOG) console.log(`[worker pid=${process.pid}] alive — child tracker installed`);

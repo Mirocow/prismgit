@@ -8,11 +8,12 @@
  * kills every live child exactly once, and errors from dying children are
  * swallowed.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createRequire } from 'node:module';
 import {
   installChildTracker,
   killAllChildren,
+  setChildrenListener,
   __trackedChildrenForTests,
   __resetChildTrackerForTests,
 } from '../../electron/services/childTracker';
@@ -66,5 +67,61 @@ describe('installChildTracker', () => {
     // The 'close' bookkeeping already dropped it.
     expect(__trackedChildrenForTests()).toBe(0);
     expect(killAllChildren()).toBe(0);
+  });
+});
+
+describe('setChildrenListener (worker → main pid reports)', () => {
+  it('reports the live pid set after a spawn and after an exit (coalesced per loop turn)', async () => {
+    installChildTracker();
+    const reports: number[][] = [];
+    setChildrenListener((pids) => reports.push(pids));
+
+    const child = cp.spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], {
+      stdio: 'ignore',
+    });
+    expect(child.pid).toBeTruthy();
+    // setImmediate coalescing: the report lands on the NEXT loop turn.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await vi.waitFor(() => expect(reports.length).toBeGreaterThan(0));
+    expect(reports[reports.length - 1]).toEqual([child.pid]);
+
+    // Child exits → the set update is reported too (empty set).
+    child.kill('SIGKILL');
+    await new Promise<void>((resolve) => child.once('close', () => resolve()));
+    await vi.waitFor(() => expect(reports[reports.length - 1]).toEqual([]));
+    killAllChildren();
+  });
+
+  it('coalesces a burst of spawns into few reports, not one per spawn', async () => {
+    installChildTracker();
+    const reports: number[][] = [];
+    setChildrenListener((pids) => reports.push(pids));
+
+    const children = Array.from({ length: 8 }, () =>
+      cp.spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' }));
+    // All 8 spawns happen within one macrotask chain — setImmediate should
+    // coalesce them into 1-2 reports (≤ 3 is a generous bound).
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await vi.waitFor(() => expect(reports.length).toBeGreaterThan(0));
+    expect(reports.length).toBeLessThanOrEqual(3);
+    expect(reports[reports.length - 1]).toEqual(
+      expect.arrayContaining(children.map((c) => c.pid)),
+    );
+    killAllChildren();
+  });
+
+  it('null clears the listener — spawning stays silent', async () => {
+    installChildTracker();
+    let calls = 0;
+    setChildrenListener(() => { calls++; });
+    setChildrenListener(null);
+    const child = cp.spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], {
+      stdio: 'ignore',
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    expect(calls).toBe(0);
+    killAllChildren();
+    expect(child.pid).toBeTruthy();
   });
 });

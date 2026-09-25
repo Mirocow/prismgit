@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { execFileSync } from 'node:child_process';
 import { runPollJob } from './gitPollCore.js';
 import type { PollJobRequest, PollJobResult } from './gitPollCore.js';
 import { runStatusJob } from './gitStatusCore.js';
@@ -120,6 +121,13 @@ export type WorkdirWatchListener = (event: WorkdirWatchEvent) => void;
 const workdirWatchListeners = new Map<string, WorkdirWatchListener>();
 const watchOutbox: WatchCommand[] = [];
 
+/** Live pids of the worker's git children, as LAST reported by the worker
+ *  ('children' messages, coalesced by the tracker). Deliberately NOT cleared
+ *  on worker 'exit': if the worker died before running its shutdown sweep,
+ *  those pids are exactly the potential orphans killKnownGitChildren() must
+ *  reach. Exited pids cost nothing (kill → ESRCH, swallowed). */
+let knownWorkerChildPids = new Set<number>();
+
 let workerState: WorkerState | null = null;
 
 /**
@@ -224,7 +232,7 @@ async function ensureWorker(): Promise<WorkerState> {
   proc.on('message', (message: unknown) => {
     if (workerState !== state || state.dead) return;
     const msg = message as
-      | { kind?: unknown; id?: unknown; result?: unknown; message?: unknown; repoPath?: unknown }
+      | { kind?: unknown; id?: unknown; result?: unknown; message?: unknown; repoPath?: unknown; pids?: unknown }
       | null
       | undefined;
     if (!msg || typeof msg.kind !== 'string') return;
@@ -267,6 +275,14 @@ async function ensureWorker(): Promise<WorkerState> {
     if (msg.kind === 'watch-error' && typeof msg.repoPath === 'string') {
       workdirWatchListeners.get(msg.repoPath)?.('error');
       workdirWatchListeners.delete(msg.repoPath);
+      return;
+    }
+    if (msg.kind === 'children' && Array.isArray(msg.pids)) {
+      // Replace, never merge — the worker reports the FULL live set, and a
+      // stale pid in the union would only ever produce a swallowed ESRCH.
+      knownWorkerChildPids = new Set(
+        (msg.pids as unknown[]).filter((p): p is number => typeof p === 'number' && p > 0),
+      );
       return;
     }
 
@@ -497,6 +513,66 @@ export async function runRawJobExternal(request: RawJobRequest): Promise<string>
   }
 }
 
+/** SIGKILL the process GROUPS of the worker's last-reported git children.
+ *  Used when the worker is hard-killed before its own shutdown sweep ran
+ *  (dispose backstop / quit watchdog): the children spawn detached = own
+ *  group leaders, so kill(-pid) reaches the git-remote-http/curl helper
+ *  chains too. Dead pids are harmless (ESRCH, swallowed). Returns the count
+ *  of pids a kill was issued for. Clears the set — one-shot semantics. */
+export function killKnownGitChildren(): number {
+  let issued = 0;
+  for (const pid of knownWorkerChildPids) {
+    try {
+      if (process.platform === 'win32') {
+        try {
+          execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+        } catch {
+          /* already gone — race between report and sweep */
+        }
+      } else {
+        try {
+          process.kill(-pid, 'SIGKILL');
+        } catch {
+          // Group already gone — the direct child may still linger.
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch { /* already gone */ }
+        }
+      }
+      issued++;
+    } catch {
+      /* bookkeeping races must never block the sweep */
+    }
+  }
+  knownWorkerChildPids.clear();
+  return issued;
+}
+
+/** Synchronous last-resort hard kill for the quit watchdog: worker dead
+ *  NOW, its reported children dead NOW — nothing here can block or throw
+ *  outward. Safe to call when no worker ever existed (no-op). */
+export function hardKillGitPollWorkerNow(): void {
+  quitDisposalStarted = true;
+  const state = workerState;
+  if (state) {
+    state.dead = true;
+    if (state.readyTimer !== null) {
+      clearTimeout(state.readyTimer);
+      state.readyTimer = null;
+    }
+    try {
+      state.proc.kill();
+    } catch {
+      /* already gone */
+    }
+  }
+  try {
+    killKnownGitChildren();
+  } catch {
+    /* never block the watchdog */
+  }
+}
+
 /** App-quit hook: kill the worker process (main.ts calls this from
  *  'before-quit' alongside the other flush/stop handlers).
  *
@@ -581,6 +657,14 @@ export async function disposeGitPollWorkerAsync(deadlineMs: number = WORKER_SHUT
       } catch {
         /* already exited via the graceful path */
       }
+      // The worker was killed BEFORE its shutdown handler could run (wedged
+      // event loop) — its git children are now potential orphans. Main knows
+      // the last-reported pids: sweep the process groups from here.
+      try {
+        killKnownGitChildren();
+      } catch {
+        /* never block the quit on the sweep */
+      }
       // SIGKILL delivery is near-instant but 'exit' needs one loop turn —
       // give it a beat, but never block the quit on it.
       setTimeout(settle, 30);
@@ -616,4 +700,5 @@ export function __resetGitPollProcessForTests(): void {
   lastForkFailure = 0;
   nextId = 1;
   quitDisposalStarted = false;
+  knownWorkerChildPids.clear();
 }

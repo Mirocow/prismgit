@@ -39,6 +39,42 @@ const liveChildren = new Set<childProcess.ChildProcess>();
 let installed = false;
 let origSpawn: typeof childProcess.spawn | null = null;
 
+// ── Live-pids listener (quit-orphan safety, v3.7) ──────────────────────────
+// The worker reports its live child pids to the main process (which cannot
+// see them otherwise — the children are grandchildren from main's point of
+// view). If the worker is hard-killed BEFORE its own shutdown handler kills
+// the children (wedged worker at quit), main uses the LAST reported set to
+// SIGKILL the process groups itself. Without this, a wedged worker's
+// in-flight `git fetch` chains orphan to init and keep the network/AV busy
+// after the app is gone.
+type ChildrenListener = (pids: number[]) => void;
+let childrenListener: ChildrenListener | null = null;
+let notifyQueued = false;
+
+/** Coalesce add/remove bursts into ONE listener callback per event-loop turn
+ *  (a repo-open burst spawns a dozen children in a few ms — the protocol
+ *  must not carry a message per spawn). */
+function scheduleChildrenNotify(): void {
+  if (notifyQueued || !childrenListener) return;
+  notifyQueued = true;
+  setImmediate(() => {
+    notifyQueued = false;
+    try {
+      childrenListener?.([...liveChildren].map((c) => c.pid ?? 0).filter((p) => p > 0));
+    } catch {
+      /* listener must never break tracking */
+    }
+  });
+}
+
+/** Register (or clear, with null) the live-pids listener. The FIRST
+ *  registration immediately reports the current set so a listener attached
+ *  after jobs already ran still sees existing children. */
+export function setChildrenListener(listener: ChildrenListener | null): void {
+  childrenListener = listener;
+  scheduleChildrenNotify();
+}
+
 /**
  * Wrap child_process.spawn so every child of THIS process is tracked until
  * it exits. Idempotent. MUST run before any git work — the worker installs
@@ -90,9 +126,10 @@ export function installChildTracker(): void {
     const child = spawnFn.call(this, command, args as string[], mergedOpts);
     try {
       liveChildren.add(child);
-      const drop = () => liveChildren.delete(child);
+      const drop = () => { liveChildren.delete(child); scheduleChildrenNotify(); };
       child.once('close', drop);
       child.once('error', drop);
+      scheduleChildrenNotify();
       if (process.env.PRISMGIT_QUIT_LOG && child.pid != null) {
         console.log(`[worker pid=${process.pid}] spawn pid=${child.pid} group=${mergedOpts.detached ? 'yes' : 'no'}: ${command} ${(args as string[]).slice(0, 3).join(' ')}`);
       }
@@ -172,4 +209,6 @@ export function __resetChildTrackerForTests(): void {
   installed = false;
   origSpawn = null;
   liveChildren.clear();
+  childrenListener = null;
+  notifyQueued = false;
 }

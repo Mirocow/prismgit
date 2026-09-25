@@ -117,6 +117,8 @@ import {
   runStatsJobExternal,
   disposeGitPollWorker,
   disposeGitPollWorkerAsync,
+  hardKillGitPollWorkerNow,
+  killKnownGitChildren,
   __resetGitPollProcessForTests,
 } from '../../electron/services/gitPollProcess';
 import { runPollJob } from '../../electron/services/gitPollCore.js';
@@ -538,5 +540,85 @@ describe('gitPollProcess — sidebar stats jobs on the SAME worker', () => {
       result: { branchCount: 3, commitCount: 9, provider: 'unknown' },
     });
     await expect(statsPromise).resolves.toMatchObject({ commitCount: 9 });
+  });
+});
+
+describe('gitPollProcess — worker child-pid reports + quit hard-kill', () => {
+  it("a 'children' message replaces the known set; killKnownGitChildren sweeps the process groups ONCE", async () => {
+    const promise = runPollJobExternal({ ...REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+    // Worker reports its live git children; garbage entries are filtered.
+    proc.emit('message', { kind: 'children', pids: [111, 222, 0, -5, 'x'] });
+    // A LATER report replaces (never merges) — pid 111 exited, 444 spawned.
+    proc.emit('message', { kind: 'children', pids: [222, 444] });
+
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      const issued = killKnownGitChildren();
+      expect(issued).toBe(2);
+      expect(killSpy).toHaveBeenCalledWith(-222, 'SIGKILL');
+      expect(killSpy).toHaveBeenCalledWith(-444, 'SIGKILL');
+      expect(killSpy).not.toHaveBeenCalledWith(-111, 'SIGKILL'); // stale pid dropped
+      // One-shot semantics: the second sweep is a no-op.
+      killSpy.mockClear();
+      expect(killKnownGitChildren()).toBe(0);
+      expect(killSpy).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+    }
+
+    proc.emit('message', {
+      kind: 'poll-result',
+      id: (proc.posted[0] as { id: number }).id,
+      result: { fetched: true, error: null, branch: 'b', incoming: 0, outgoing: 0, dirty: 0 },
+    });
+    await promise;
+  });
+
+  it('hardKillGitPollWorkerNow kills the worker AND its reported children synchronously', async () => {
+    const promise = runPollJobExternal({ ...REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+    proc.emit('message', { kind: 'children', pids: [333] });
+
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      hardKillGitPollWorkerNow();
+      expect(proc.killed).toBe(true);
+      expect(killSpy).toHaveBeenCalledWith(-333, 'SIGKILL');
+    } finally {
+      killSpy.mockRestore();
+    }
+    // The in-flight job rejects (worker stopped) — no in-process re-run at quit.
+    await expect(promise).rejects.toThrow(/stopped|quitting/i);
+    expect(runPollJob).not.toHaveBeenCalled();
+  });
+
+  it('hardKillGitPollWorkerNow is a safe no-op when no worker was ever forked', () => {
+    expect(() => hardKillGitPollWorkerNow()).not.toThrow();
+  });
+
+  it('disposeGitPollWorkerAsync backstop hard-kills a WEDGED worker and sweeps its reported children', async () => {
+    const promise = runStatsJobExternal({ repoPath: '/repos/beta' });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+    proc.emit('message', { kind: 'children', pids: [777] });
+
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      // Tiny deadline: the fake worker NEVER exits on its own — only the
+      // backstop can end this disposal (the real "wedged worker" case).
+      await disposeGitPollWorkerAsync(20);
+      expect(proc.killed).toBe(true);
+      expect(killSpy).toHaveBeenCalledWith(-777, 'SIGKILL');
+    } finally {
+      killSpy.mockRestore();
+    }
+    await expect(promise).rejects.toThrow(/stopped|quitting/i);
+    expect(runStatsJob).not.toHaveBeenCalled();
   });
 });
