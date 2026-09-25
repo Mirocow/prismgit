@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { api, type StatusResult, type PushResult } from '../lib/api';
 import { t as i18nT } from '../lib/i18n';
 import { resolveDefaultRemote } from '../lib/remotes';
+import { bumpPolling } from '../lib/pollingBoost';
 import { useOperationLogStore } from './operationLogStore';
 import { useRepositoryStore } from './repositoryStore';
 import { useToastStore } from './toastStore';
@@ -264,6 +265,11 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const hash = await api.git.commit(repoPath, message, amend);
       await get().refreshStatus(repoPath);
+      // Boost the sidebar remote-poll for 2 min so the ↓/↑/dirty badges pick
+      // up the new commit quickly. v3.2: mutations bump the boost EXPLICITLY
+      // — the old blanket lastRefresh-subscribe bumped on every background
+      // refresh too and made the 30s boost interval permanent (fetch storm).
+      bumpPolling('commit');
       log.finishOp(opId, `Commit ${hash.substring(0, 7)}`);
       return hash;
     } catch (e) {
@@ -291,8 +297,14 @@ export const useGitStore = create<GitState>((set, get) => ({
       // Refresh repository metadata (lastCommit, branchCount, etc.) in the sidebar
       api.settings.refreshRepoStats(repoPath).then(() => {
         useRepositoryStore.getState().loadMetadata();
-        useRepositoryStore.getState().checkRemotes?.([repoPath]);
+        // v3.2: clear THIS repo's 60s poll cache first — without it the
+        // checkRemotes call below returned the cached pre-push summary and
+        // the ↓/↑ badges stayed stale for up to a minute after the push.
+        api.git.clearPollCache(repoPath).then(() => {
+          useRepositoryStore.getState().checkRemotes?.([repoPath]);
+        }).catch(() => {});
       }).catch(() => {});
+      bumpPolling('push');
       log.finishOp(opId, result?.summary ?? 'Pushed successfully');
       return result;
     } catch (e) {
@@ -319,8 +331,12 @@ export const useGitStore = create<GitState>((set, get) => ({
       // Refresh repository metadata in the sidebar
       api.settings.refreshRepoStats(repoPath).then(() => {
         useRepositoryStore.getState().loadMetadata();
-        useRepositoryStore.getState().checkRemotes?.([repoPath]);
+        // v3.2: clear the 60s poll cache first — see the push action.
+        api.git.clearPollCache(repoPath).then(() => {
+          useRepositoryStore.getState().checkRemotes?.([repoPath]);
+        }).catch(() => {});
       }).catch(() => {});
+      bumpPolling('pull');
       log.finishOp(opId, 'Pulled successfully');
       // 0.2 — surface the auto-stash cycle (autoStashOnCommonCommands setting)
       if (res?.autoStashed) {
@@ -352,8 +368,12 @@ export const useGitStore = create<GitState>((set, get) => ({
       // Refresh repository metadata in the sidebar
       api.settings.refreshRepoStats(repoPath).then(() => {
         useRepositoryStore.getState().loadMetadata();
-        useRepositoryStore.getState().checkRemotes?.([repoPath]);
+        // v3.2: clear the 60s poll cache first — see the push action.
+        api.git.clearPollCache(repoPath).then(() => {
+          useRepositoryStore.getState().checkRemotes?.([repoPath]);
+        }).catch(() => {});
       }).catch(() => {});
+      bumpPolling('fetch');
       log.finishOp(opId, 'Fetched successfully');
     } catch (e) {
       log.failOp(opId, String(e));

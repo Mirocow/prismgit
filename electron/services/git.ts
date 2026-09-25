@@ -3189,8 +3189,20 @@ export async function aheadBehind(
   }
 }
 
-/** Never-resolving safety timeout for the network fetch of a remote check. */
+/** Inactivity timeout for the network fetch of a remote check. simple-git's
+ * timeoutPlugin KILLS the child process after this many ms WITHOUT output on
+ * stdout/stderr (every chunk resets the timer, so a slow-but-active download
+ * is never killed — only a truly hung one: unreachable host, stalled TLS,
+ * dead VPN). This replaces the old Promise.race which rejected the caller
+ * but left the git subprocess RUNNING — repeated polls against a slow
+ * remote accumulated zombie fetches (the "switching repos gets slower and
+ * slower" report: every poll cycle spawned a fresh fetch while the previous
+ * ones were still alive). */
 const REMOTE_FETCH_TIMEOUT_MS = 60_000;
+/** Back-off for poll results that carry a network error: don't re-fetch a
+ * failing remote every cycle (60s) — that is a spawn storm while the network
+ * is down. Successful results keep the 60s TTL. */
+const POLL_ERROR_TTL_MS = 5 * 60_000;
 
 function emptyRemoteCheckSummary(repoPath: string): RemoteCheckSummary {
   return {
@@ -3239,6 +3251,8 @@ function getBackgroundFetchRemotes(repoPath: string): string[] {
 // is called. This was the #2 source of git command spam: the sidebar
 // polled ALL repos every 30s (boost) / 120s (baseline), and EACH repo
 // ran 6-7 git commands. With 10 repos = 60-70 commands per poll cycle.
+// FAILED fetches get POLL_ERROR_TTL_MS instead — an unreachable remote
+// must not be retried every minute.
 const POLL_CACHE_TTL_MS = 60_000; // 1 minute — results are cached for 60s
 const pollCache = new Map<string, { summary: RemoteCheckSummary; expiresAt: number }>();
 // In-flight promises: prevents the race where two pollRemoteSummary calls
@@ -3269,8 +3283,6 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
       return summary;
     }
 
-    const git = getGit(repoPath);
-
   // 1. Remotes
   try {
     const remotes = (await getCachedRemotes(repoPath, true)) as Array<{ name: string; refs: { fetch: string } }>;
@@ -3297,22 +3309,31 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
       // for every remote of this repository.
       const ssh = await networkSshEnv(repoPath, checked[0]);
       const fetchGit = withMergedGitEnv(
-        simpleGit({ baseDir: repoPath, binary: 'git', ...GIT_SSH_UNSAFE_OPTIONS }),
+        simpleGit({
+          baseDir: repoPath,
+          binary: 'git',
+          ...GIT_SSH_UNSAFE_OPTIONS,
+          // Kills the child process after REMOTE_FETCH_TIMEOUT_MS without
+          // output — see the REMOTE_FETCH_TIMEOUT_MS doc block above. The
+          // old Promise.race only rejected the CALLER; the fetch subprocess
+          // kept running and accumulated across poll cycles.
+          timeout: { block: REMOTE_FETCH_TIMEOUT_MS },
+        }),
         { ...ssh.env, GIT_TERMINAL_PROMPT: '0' }
       );
       const perRemote = async (name: string): Promise<void> => {
         const authArgs = await remoteNetworkArgs(repoPath, name);
-        await Promise.race([
-          fetchGit.raw([...authArgs, 'fetch', '--prune', '--quiet', name]),
-          new Promise<never>((_, reject) => {
-            const timer = setTimeout(
-              () => reject(new Error(`fetch timed out after ${REMOTE_FETCH_TIMEOUT_MS / 1000}s`)),
-              REMOTE_FETCH_TIMEOUT_MS
-            );
-            // Don't keep the process alive just for this timer.
-            (timer as { unref?: () => void }).unref?.();
-          }),
-        ]);
+        try {
+          await fetchGit.raw([...authArgs, 'fetch', '--prune', '--quiet', name]);
+        } catch (e) {
+          // simple-git's timeoutPlugin rejects with 'block timeout reached'.
+          // Surface a message consistent with the old race-based timeout.
+          const msg = e instanceof Error ? e.message : String(e);
+          if (/timeout/i.test(msg)) {
+            throw new Error(`fetch timed out after ${REMOTE_FETCH_TIMEOUT_MS / 1000}s (process killed)`);
+          }
+          throw e;
+        }
       };
       try {
         const results = await Promise.allSettled(checked.map(perRemote));
@@ -3334,23 +3355,43 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
     }
   }
 
+    // PERF (v3.2, remote-check): the poll's local commands run on a
+    // DEDICATED short-lived instance, NOT on the shared getGit(repoPath).
+    // The shared instance is the same queue the repo-open / status-refresh
+    // burst runs on (maxConcurrentProcesses=4) — a poll landing mid-switch
+    // put its two `rev-list --count` walks (expensive on big repos) and its
+    // `status --porcelain` in FRONT of the foreground status the user was
+    // actively waiting for, adding seconds to every repo switch while the
+    // background check was running. A private queue can never starve the
+    // foreground one (the poll is TTL-gated, so at most one set per repo
+    // per minute anyway).
+    const pollGit = withMergedGitEnv(
+      simpleGit({
+        baseDir: repoPath,
+        binary: 'git',
+        maxConcurrentProcesses: 4,
+        trimmed: false,
+        ...GIT_UNSAFE_OPTIONS,
+      })
+    );
+
   // 3+4+5. PERF (v3): these four reads (symbolic-ref, two rev-list counts,
   //    status --porcelain) are completely INDEPENDENT but used to run
   //    sequentially — 4 round-trips of subprocess spawn+exec per repo per
   //    poll. On a sidebar with 10 repos that's 40 serialized spawns per
   //    poll cycle. They now run in one Promise.all: wall time drops from
-  //    sum(...) to max(...) (the getGit queue allows 4 concurrent).
+  //    sum(...) to max(...).
   const [branchName, incomingRaw, outgoingRaw, dirtyRaw] = await Promise.all([
-    git.raw(['symbolic-ref', '--short', '-q', 'HEAD'])
+    pollGit.raw(['symbolic-ref', '--short', '-q', 'HEAD'])
       .then((out) => out.trim())
       .catch(() => ''),
-    countRevList(git, ['rev-list', '--count', '--remotes', '--not', '--branches'])
+    countRevList(pollGit, ['rev-list', '--count', '--remotes', '--not', '--branches'])
       .then((n) => n)
       .catch(() => 0),
-    countRevList(git, ['rev-list', '--count', '--branches', '--not', '--remotes'])
+    countRevList(pollGit, ['rev-list', '--count', '--branches', '--not', '--remotes'])
       .then((n) => n)
       .catch(() => 0),
-    git.raw(['status', '--porcelain', '--ignore-submodules=all'])
+    pollGit.raw(['status', '--porcelain', '--ignore-submodules=all'])
       .then((status) => status.split('\n').filter((line) => line.trim().length > 0).length)
       .catch(() => 0),
   ]);
@@ -3360,9 +3401,13 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
   summary.dirty = dirtyRaw;
 
   summary.checkedAt = Date.now();
-  // Cache the result so the next poll within POLL_CACHE_TTL_MS returns
-  // instantly without spawning any git subprocesses.
-  pollCache.set(repoPath, { summary, expiresAt: Date.now() + POLL_CACHE_TTL_MS });
+  // Cache the result so the next poll within the TTL returns instantly
+  // without spawning any git subprocesses. Network errors back off for
+  // POLL_ERROR_TTL_MS — re-fetching a dead remote every 60s was a spawn
+  // storm whenever the network/VPN went down (and the fetch subprocesses
+  // used to linger even longer than that).
+  const ttl = summary.error ? POLL_ERROR_TTL_MS : POLL_CACHE_TTL_MS;
+  pollCache.set(repoPath, { summary, expiresAt: Date.now() + ttl });
   return summary;
   })(); // end of promise IIFE
 
@@ -3376,6 +3421,15 @@ export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSu
     // cache (just set) or start a fresh computation.
     pollInFlight.delete(repoPath);
   }
+}
+
+/**
+ * Test/observability hook: the pollCache entry of one repo (summary +
+ * expiresAt), so tests can assert the TTL policy — 60s for successful
+ * results, POLL_ERROR_TTL_MS (5 min) back-off for network errors.
+ */
+export function __pollCacheEntryForTests(repoPath: string): { summary: RemoteCheckSummary; expiresAt: number } | undefined {
+  return pollCache.get(repoPath);
 }
 
 /**

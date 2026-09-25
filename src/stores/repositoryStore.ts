@@ -406,11 +406,20 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   checkRemotes: async (paths) => {
     const targets = paths ?? get().repos.map((r) => r.path);
     if (targets.length === 0) return;
+    // v3.2: poll the CURRENT repo first. pollRemoteSummaries works through a
+    // 3-worker pool in input order, so with many sidebar repos a slow remote
+    // up front kept the freshly-opened repo's ↓/↑ badge waiting behind the
+    // whole list — part of the "switching repos takes longer and longer"
+    // report (the in-flight cycle also coalesced away the new request).
+    const current = get().currentRepo?.path;
+    const ordered = current && targets.includes(current)
+      ? [current, ...targets.filter((p) => p !== current)]
+      : targets;
     // Only one background check at a time — a second click is coalesced.
     if (get().checkingRemotes) return;
     set({ checkingRemotes: true });
     try {
-      const summaries = await api.git.pollRemoteSummaries(targets);
+      const summaries = await api.git.pollRemoteSummaries(ordered);
       // Merge into existing map so unchecked repos keep their last result.
       const remoteChecks = { ...get().remoteChecks, ...summaries };
       set({ remoteChecks });

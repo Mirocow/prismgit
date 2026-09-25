@@ -196,7 +196,8 @@ export function BranchesPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Live refresh: background fetches (useBackgroundFetch) update
+  // Live refresh: background fetches (the sidebar remote poll fetches the
+  // remotes opted in via "Perform background Poll or Fetch") update
   // refs/remotes while the user sits on this page — without this, newly
   // fetched remote branches only appear after navigating away/back or
   // pressing Refresh. Debounced 3s; silent (no spinner, no error toast) so

@@ -227,12 +227,18 @@ describe('diffCommit() — preflights dropped (v3)', () => {
   });
 });
 
-describe('pollRemoteSummary() — parallel step batch (v3)', () => {
-  it('computes branch/incoming/outgoing/dirty in 5 subprocesses (4 concurrent)', async () => {
-    // Poll NORMAL (no remotes configured → network fetch skipped) and
-    // measure the spawn DELTA: this is the first poll for this repo so
-    // the 60s pollCache does not short-circuit.
+describe('pollRemoteSummary() — parallel step batch (v3.2: decoupled from the shared queue)', () => {
+  it('local poll commands do NOT occupy the shared getGit queue (repo-open burst stays free)', async () => {
+    // Poll NORMAL (no remotes configured → network fetch skipped).
     //   getRemotes(1) + symbolic-ref + 2× rev-list + status (4 concurrent)
+    //
+    // v3.2: the four local reads run on a DEDICATED short-lived instance, so
+    // the shared-queue coalescing stats only observe the getRemotes spawn.
+    // Before v3.2 the delta was 5 — the poll's two rev-list walks and its
+    // status sat in the SAME 4-slot queue the repo-open / status-refresh
+    // burst depends on, delaying every repo switch while a poll ran.
+    // The full 5-spawn budget (4 local + getRemotes) is pinned at the mock
+    // level in tests/unit/pollFetchKill.test.ts (it sees every instance).
     let summary: Awaited<ReturnType<typeof gitService.pollRemoteSummary>> | null = null;
     const m = await measure(NORMAL, async () => {
       summary = await gitService.pollRemoteSummary(NORMAL);
@@ -240,9 +246,8 @@ describe('pollRemoteSummary() — parallel step batch (v3)', () => {
     expect(summary!.branch).toBe('main');
     expect(summary!.dirty).toBe(0);
     expect(summary!.hasRemote).toBe(false);
-    // The four post-remotes steps run CONCURRENTLY (wall = max, not sum)
-    // but still count as four spawns — the budget is 5 total.
-    expect(m.subprocesses).toBe(5);
+    // Only getRemotes goes through the shared queue now.
+    expect(m.subprocesses).toBe(1);
   }, 20_000);
 });
 

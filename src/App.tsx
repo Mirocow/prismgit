@@ -14,7 +14,6 @@ import { ToastContainer } from './components/ToastContainer';
 import { GitToolbar, Toolbar } from './components/Toolbar';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { useWindowStyleStore } from './components/WindowStyleSwitcher';
-import { useBackgroundFetch } from './hooks/useBackgroundFetch';
 import { useChunkPreload } from './hooks/useChunkPreload';
 import { useAutoPush } from './hooks/useAutoPush';
 import { useRemotePolling } from './hooks/useRemotePolling';
@@ -364,9 +363,13 @@ export default function App() {
   const [showRepoSettings, setShowRepoSettings] = useState(false);
   const [gitFlowType, setGitFlowType] = useState<'feature' | 'release' | 'hotfix' | undefined>(undefined);
 
-  // SmartGit-style background "Poll or Fetch" for remotes marked in Configure remote properties
-  useBackgroundFetch();
-  // Periodic remote check for the repository list (fetch --all + ↓/↑ badges)
+  // v3.2: the old useBackgroundFetch() hook was removed — it duplicated the
+  // sidebar remote poll (same "Perform background Poll or Fetch" remotes,
+  // current repo included in pollRemoteSummaries' target list) AND its
+  // post-fetch refreshStatus re-armed the polling boost, feeding the
+  // fetch storm (see lib/pollingBoost.ts). The refs watcher refreshes the
+  // status after real fetches on its own.
+  // Periodic remote check for the repository list (fetch + ↓/↑ badges)
   useRemotePolling();
   // Periodic auto-push to origin for the active repository (Settings → Git →
   // "Periodically push to origin"). Disabled by default — opt-in only.

@@ -461,5 +461,26 @@ describe('repositoryStore', () => {
       await useRepositoryStore.getState().checkRemotes();
       expect(api.git.pollRemoteSummaries).not.toHaveBeenCalled();
     });
+
+    it('polls the CURRENT repo first so its badges update before slow remotes', async () => {
+      // v3.2: pollRemoteSummaries walks targets in input order through a
+      // 3-worker pool; without this reordering a slow remote at the head of
+      // the sidebar kept the freshly-opened repo's ↓/↑ badge waiting behind
+      // the whole list.
+      vi.mocked(api.git.pollRemoteSummaries).mockResolvedValue({});
+      useRepositoryStore.setState({
+        repos: [
+          { path: '/a', name: 'a', lastOpened: 1 },
+          { path: '/b', name: 'b', lastOpened: 2 },
+          { path: '/c', name: 'c', lastOpened: 3 },
+        ],
+        currentRepo: { path: '/c', name: 'c', lastOpened: 3 },
+        checkingRemotes: false,
+      });
+
+      await useRepositoryStore.getState().checkRemotes();
+
+      expect(api.git.pollRemoteSummaries).toHaveBeenCalledWith(['/c', '/a', '/b']);
+    });
   });
 });

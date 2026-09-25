@@ -1,41 +1,23 @@
 import { useEffect, useRef } from 'react';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useGitStore } from '../stores/gitStore';
+import { isPollingBoosted } from '../lib/pollingBoost';
+
+// Re-exported for existing importers (useAutoPush) and for tests.
+export { bumpPolling, BOOST_DURATION_MS } from '../lib/pollingBoost';
 
 /** Default cadence for the repository-list remote check (SmartGit ~5min; we poll faster). */
 export const DEFAULT_REMOTE_CHECK_INTERVAL_SEC = 120;
 /** Lower bound so a typo in settings can't hammer every remote every second. */
 export const MIN_REMOTE_CHECK_INTERVAL_SEC = 30;
-/**
- * PERF-2 — how long the polling stays in "boost" mode after a git
- * mutation (commit/push/fetch/stage). During boost the interval is
- * BOOST_INTERVAL_MS instead of the baseline.
- */
-export const BOOST_DURATION_MS = 120_000; // 2 min
+/** Boost interval — used while a boost window is active (see lib/pollingBoost). */
 export const BOOST_INTERVAL_MS = 30_000;   // 30s during boost (was 15s — too aggressive on LFS repos)
-/**
- * PERF-2 — pause-polling timestamp. While pauseUntil > Date.now(), the
- * scheduler skips ticks. Set when the window blurs (no point fetching
- * if the user isn't looking), cleared on focus + immediate checkNow.
- */
 let pauseUntil = 0;
 export function pauseRemotePolling(untilMs = Date.now() + 5 * 60_000): void {
   pauseUntil = Math.max(pauseUntil, untilMs);
 }
 export function resumeRemotePolling(): void {
   pauseUntil = 0;
-}
-
-/**
- * PERF-2 — bump the polling into boost mode for BOOST_DURATION_MS.
- * Called by gitStore actions after commit/push/fetch/stage/etc so the
- * sidebar counter refreshes faster in the moments the user is most
- * likely to be watching it.
- */
-let boostUntil = 0;
-export function bumpPolling(_reason: string): void {
-  boostUntil = Math.max(boostUntil, Date.now() + BOOST_DURATION_MS);
 }
 
 /**
@@ -52,10 +34,10 @@ export function bumpPolling(_reason: string): void {
  *   without re-subscribing.
  * - Interval 0 (or negative) disables the periodic check; "Check now" in the
  *   sidebar still works.
- * - PERF-2: adaptive cadence. After a git mutation (commit/push/fetch/stage)
- *   the gitStore calls bumpPolling() which sets a 2-min boost window where
- *   the timer fires every 15s instead of the baseline 120s. Also pauses
- *   while the window is blurred (so background fetches don't drain battery).
+ * - PERF-2: adaptive cadence. After a REAL git mutation (commit/push/pull/
+ *   fetch — the gitStore actions call bumpPolling()) the timer fires every
+ *   30s for 2 min instead of the baseline 120s. Also pauses while the window
+ *   is blurred (so background fetches don't drain battery).
  * - Silent by design: network failures land in each summary's `error` field,
  *   never as toasts.
  */
@@ -71,24 +53,12 @@ export function useRemotePolling(): void {
   const repoListKeyRef = useRef(repoListKey);
   repoListKeyRef.current = repoListKey;
 
-  // PERF-2 — subscribe to gitStore's lastRefresh so that whenever a git
-  // mutation completes (commit/push/fetch/etc. all call refreshStatus),
-  // we bump the polling into boost mode.
-  // RENDER-PERF: this used to be `useGitStore((s) => s.lastRefresh)` — a
-  // hook-level subscription inside a hook mounted in the ROOT App component.
-  // Since lastRefresh changed on every status refresh (~5s under watcher
-  // churn), that single line re-rendered the ENTIRE App tree (Routes, active
-  // page, Sidebar, Toolbar) on every tick. The bump doesn't need React state
-  // at all — the store's subscribe() listener fires imperatively with zero
-  // re-renders. Same semantics: lastRefresh > 0 → bump.
-  useEffect(() => {
-    const unsub = useGitStore.subscribe((s, prev) => {
-      if (s.lastRefresh !== prev.lastRefresh && s.lastRefresh > 0) {
-        bumpPolling('git-mutation');
-      }
-    });
-    return unsub;
-  }, []);
+  // NOTE (v3.2): there is NO gitStore.lastRefresh subscription here anymore.
+  // It bumped the boost on EVERY status refresh — including the refreshes the
+  // poll's own background fetch caused via the .git/refs watcher — which made
+  // the 30s boost interval permanent and fed a self-sustaining fetch storm
+  // (see lib/pollingBoost.ts). Real mutations now bump the boost directly
+  // from the gitStore actions (commit/push/pull/fetch) and useAutoPush.
 
   // StrictMode double-invocation guard: in dev React runs mount → cleanup →
   // mount on the same component, which fired the initial checkNow() TWICE
@@ -119,7 +89,7 @@ export function useRemotePolling(): void {
     const getIntervalMs = (): number | null => {
       const baseline = getBaselineMs();
       if (baseline === null) return null;
-      if (Date.now() < boostUntil) return Math.max(MIN_REMOTE_CHECK_INTERVAL_SEC * 1000, BOOST_INTERVAL_MS);
+      if (isPollingBoosted()) return Math.max(MIN_REMOTE_CHECK_INTERVAL_SEC * 1000, BOOST_INTERVAL_MS);
       return baseline;
     };
 
