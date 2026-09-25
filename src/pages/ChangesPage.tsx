@@ -19,6 +19,7 @@ import { formatTime } from '../lib/authorBadges';
 import { Avatar } from '../components/Avatar';
 import { buildFileMenu, getIndexFlagsAsync, invalidateIndexFlagsCache, runFileAction, type IndexFlags } from '../lib/fileContextMenu';
 import { useI18n } from '../lib/i18n';
+import { computeStateColumnWidth, measureTextWidth, UI_FONT_STACK } from '../lib/measure';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { describePushResult } from '../lib/pushResult';
 import { RefBadges } from '../lib/refBadge';
@@ -168,6 +169,22 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const toggleDirTreeVisible = useSelectionStore((s) => s.toggleDirTreeVisible);
   const colWidths = useSelectionStore((s) => s.colWidths);
   const setColWidth = useSelectionStore((s) => s.setColWidth);
+
+  // ── Locale-aware state column width ─────────────────────────────────────
+  // RU/DE status labels are 2-4x longer than the EN ones the 70px default
+  // was sized for ("Unstaged" -> "Рабочее дерево"). The column clamps to the
+  // longest localized label so text is never cut; users can still make it
+  // WIDER by dragging the header resizer (Math.max keeps the larger value).
+  const stateColWidth = computeStateColumnWidth(
+    colWidths.state,
+    [
+      t('changes.statusUntracked'), t('changes.conflicted'), t('changes.statusModified'),
+      t('changes.stateAdded'), t('changes.statusDeleted'), t('changes.statusRenamed'),
+      t('changes.stateCopied'), t('changes.stateUnchanged'), t('changes.stateIgnored'),
+      t('changes.stateAssumeUnchanged'), t('changes.stateSkipped'), t('changes.stateSubmodule'),
+    ],
+    (s) => measureTextWidth(s, `italic 12px ${UI_FONT_STACK}`),
+  );
 
   // Sync 'subdirectories' flag with file scope:
   //   subdirectories ON  → show files from current dir AND all subdirectories
@@ -1979,11 +1996,11 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       deleted: 'changes.statusDeleted',
       renamed: 'changes.statusRenamed',
       copied: 'changes.stateCopied',
-      unmodified: 'Unchanged',
-      ignored: 'Ignored',
-      assumeUnchanged: 'Assume-Unch',
-      skipped: 'Skipped',
-      submodule: 'Submodule',
+      unmodified: 'changes.stateUnchanged',
+      ignored: 'changes.stateIgnored',
+      assumeUnchanged: 'changes.stateAssumeUnchanged',
+      skipped: 'changes.stateSkipped',
+      submodule: 'changes.stateSubmodule',
     };
     const stateLabel = t(stateKeys[statusCode] ?? 'changes.statusModified');
     // Untracked directories come from porcelain as 'dir/' — show the folder
@@ -2183,7 +2200,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           )}
         </span>
         {/* State text */}
-        <span className="text-text-tertiary shrink-0 italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>{stateLabel}</span>
+        <span className="text-text-tertiary shrink-0 italic truncate whitespace-nowrap" style={{ width: stateColWidth }} title={stateLabel}>{stateLabel}</span>
         {/* Relative directory — always reserve the cell when the column is
             visible, so rows with an empty relDir (repo-root files) stay
             column-aligned with the header and other rows. */}
@@ -2506,7 +2523,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <span className="w-4"></span>
               <SortableHeader label={t('changes.colName')} sortKey="name" sort={fileSort} onSort={handleSort} width={colWidths.name} onResizeStart={(e) => startColResize(e, 'name')} />
               <span style={{ width: 74 }} title={t('changes.addedRemovedLines')}></span>
-              <SortableHeader label={t('changes.colState')} sortKey="state" sort={fileSort} onSort={handleSort} width={colWidths.state} onResizeStart={(e) => startColResize(e, 'state')} />
+              <SortableHeader label={t('changes.colState')} sortKey="state" sort={fileSort} onSort={handleSort} width={stateColWidth} onResizeStart={(e) => startColResize(e, 'state')} />
               {!compressFilePaths && (
                 <SortableHeader label={t('changes.colRelDir')} sortKey="dir" sort={fileSort} onSort={handleSort} width={colWidths.dir} onResizeStart={(e) => startColResize(e, 'dir')} />
               )}
@@ -2905,7 +2922,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 ))
               )}
             </div>
-            <div className="flex justify-end gap-2 px-4 py-3">
+            <div className="flex flex-wrap justify-end gap-2 px-4 py-3">
               <button className="btn btn-secondary" onClick={() => setShowCleanDialog(false)}>
                 {t('common.cancel')}
               </button>

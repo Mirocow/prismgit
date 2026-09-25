@@ -445,7 +445,7 @@ export function RemotesPage() {
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>{t('common.cancel')}</button>
               <button className="btn btn-primary" onClick={handleAdd} disabled={busy === 'add'}>
                 {busy === 'add' ? <Loader size={13} className="animate-spin" /> : <Plus size={13} />}
@@ -547,7 +547,7 @@ export function RemotesPage() {
                 {t('remotes.backgroundHint')}
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setEditRemote(null)}>{t('common.cancel')}</button>
               <button className="btn btn-primary" onClick={handleSaveUrls} disabled={busy === editRemote.name}>
                 {busy === editRemote.name ? <Loader size={13} className="animate-spin" /> : <Check size={13} />}

@@ -117,12 +117,25 @@ export const useI18nStore = create<I18nState>((set) => ({
       settings?.set?.('appLanguage', locale);
     } catch { /* ignore */ }
     ensureLocale(locale);
+    syncDocumentLang(locale);
     set({ locale });
   },
 }));
 
 // Load the dictionary for the initial (saved/detected) locale if non-English.
 ensureLocale(useI18nStore.getState().locale);
+
+// Keep <html lang> in sync with the active locale. Chromium uses it for
+// hyphenation dictionaries (globals.css: html[lang='ru'|'de'] { hyphens: auto }),
+// locale-aware font fallback (Cyrillic/CJK glyph selection), and screen readers.
+function syncDocumentLang(locale: Locale): void {
+  try {
+    if (typeof document !== 'undefined' && document.documentElement.lang !== locale) {
+      document.documentElement.lang = locale;
+    }
+  } catch { /* not a DOM context (unit tests) — ignore */ }
+}
+syncDocumentLang(useI18nStore.getState().locale);
 
 // --- Hook (for React components) ---
 

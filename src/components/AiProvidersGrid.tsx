@@ -444,7 +444,7 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-3 border-t border-border-subtle sticky bottom-0 bg-bg-elevated">
+        <div className="flex flex-wrap justify-end gap-2 px-5 py-3 border-t border-border-subtle sticky bottom-0 bg-bg-elevated">
           <button className="btn btn-secondary text-xs" onClick={onClose}>
             {t('common.cancel') || 'Cancel'}
           </button>

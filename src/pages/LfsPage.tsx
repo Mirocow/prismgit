@@ -335,7 +335,7 @@ export function LfsPage() {
             <div className="text-2xs text-text-tertiary mb-4">
               {t('pages.lfsTrackHint')}
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <button className="btn btn-secondary" onClick={() => setShowTrack(false)}>{t('common.cancel')}</button>
               <button className="btn btn-primary" onClick={handleTrack} disabled={busy === 'track'}>
                 {busy === 'track' ? <Loader size={13} className="spin" /> : <Check size={13} />}

@@ -173,7 +173,7 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
           )}
         </div>
 
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
+        <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border-default">
           <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button className="btn btn-primary" onClick={handleApply} disabled={busy}>
             {busy ? <Loader size={13} className="spin" /> : <Check size={13} />}

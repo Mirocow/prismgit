@@ -1901,6 +1901,24 @@
       'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace !important;
   }
 
+  /* === i18n typography ===
+   * RU/DE text is 2-4x longer than EN. With <html lang> synced (see
+   * src/lib/i18n.ts) Chromium's hyphenation dictionaries produce clean
+   * line breaks instead of ragged edges or overflow. Mono/code content
+   * (SHAs, paths, code) must NEVER hyphenate. */
+  html[lang='ru'],
+  html[lang='de'] {
+    hyphens: auto;
+  }
+
+  .mono,
+  code,
+  pre,
+  kbd,
+  .font-mono {
+    hyphens: none;
+  }
+
   button {
     font-family: inherit;
     font-size: inherit;
@@ -1979,6 +1997,12 @@
       border-color 0.15s ease,
       box-shadow 0.15s ease;
     white-space: nowrap;
+    /* i18n safety: RU/DE labels are 2-4x longer than EN ("Use" ->
+       "Используйте"). In constrained rows the button now ellipsizes
+       instead of blowing out the layout; unconstrained rows grow. */
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     -webkit-app-region: no-drag;
     letter-spacing: -0.005em;
   }

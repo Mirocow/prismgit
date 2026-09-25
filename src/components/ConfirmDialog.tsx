@@ -233,7 +233,7 @@ export function ConfirmDialogHost() {
             </label>
           </div>
         )}
-        <div className="flex justify-end gap-2 px-4 py-3">
+        <div className="flex flex-wrap justify-end gap-2 px-4 py-3">
           {!req.hideCancel && (
             <button
               className="btn btn-secondary text-xs"

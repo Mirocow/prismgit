@@ -46,7 +46,7 @@ function DialogShell({ title, subtitle, children, buttons, onClose, width = 440 
         <h3 className="text-base font-medium">{title}</h3>
         {subtitle && <p className="text-xs text-text-tertiary mt-1 mb-3 whitespace-pre-line">{subtitle}</p>}
         <div className={subtitle ? '' : 'mt-3'}>{children}</div>
-        <div className="flex justify-end gap-2 mt-4">{buttons}</div>
+        <div className="flex flex-wrap justify-end gap-2 mt-4">{buttons}</div>
       </div>
     </div>
   );

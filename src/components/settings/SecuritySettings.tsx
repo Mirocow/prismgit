@@ -560,7 +560,7 @@ export function SecuritySettings() {
                   onChange={(e) => setAddValue(e.target.value)}
                 />
               </div>
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <button className="btn btn-secondary !py-1 !px-2.5 !text-xs" onClick={() => setShowAdd(false)}>{t('common.cancel')}</button>
                 <button className="btn btn-primary !py-1 !px-2.5 !text-xs flex items-center gap-1.5" disabled={addBusy} onClick={handleAddSecret}>
                   {addBusy ? <Loader size={12} className="animate-spin" /> : <Save size={12} />}
@@ -890,7 +890,7 @@ export function SecuritySettings() {
                 value={genPassphrase}
                 onChange={(e) => setGenPassphrase(e.target.value)}
               />
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <button className="btn btn-secondary !py-1 !px-2.5 !text-xs" onClick={() => setShowGenerate(false)}>{t('common.cancel')}</button>
                 <button className="btn btn-primary !py-1 !px-2.5 !text-xs flex items-center gap-1.5" disabled={genBusy} onClick={handleGenerate}>
                   {genBusy ? <Loader size={12} className="animate-spin" /> : <KeyRound size={12} />}
@@ -954,7 +954,7 @@ export function SecuritySettings() {
                 value={importPassphrase}
                 onChange={(e) => setImportPassphrase(e.target.value)}
               />
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <button className="btn btn-secondary !py-1 !px-2.5 !text-xs" onClick={() => setShowImport(false)}>{t('common.cancel')}</button>
                 <button className="btn btn-primary !py-1 !px-2.5 !text-xs flex items-center gap-1.5" disabled={importBusy} onClick={handleImport}>
                   {importBusy ? <Loader size={12} className="animate-spin" /> : <Upload size={12} />}

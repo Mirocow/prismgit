@@ -241,7 +241,7 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
             <span className="text-text-tertiary">— {preview.author}</span>
           </div>
         )}
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+        <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border">
           <button className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover" onClick={onClose}>{t('common.cancel')}</button>
           <button
             className="px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded hover:opacity-90 disabled:opacity-40 flex items-center gap-1"

@@ -2286,7 +2286,7 @@ export function BranchesPage() {
                 {t('branches.checkoutAfterCreate')}
               </label>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowNewDialog(false)}>{t('common.cancel')}</button>
               <button className="btn btn-primary" onClick={handleCreate}>
                 <Check size={13} /> {t('common.create')}
@@ -2409,7 +2409,7 @@ export function BranchesPage() {
                 {t('stashes.includeUntracked')}
               </label>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowStashDialog(false)}>{t('common.cancel')}</button>
               <button className="btn btn-primary" onClick={handleStashChanges}>
                 <Download size={13} /> {t('toolbar.stash')}

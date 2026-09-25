@@ -527,7 +527,7 @@ function GitFlowSettingsDialog({
             {t('pages.gitflowCfgHint', { defaultValue: 'Changes are written to local git config (gitflow.* keys). Renaming an already-used prefix will not move existing branches.' })}
           </div>
         </div>
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
+        <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border-default">
           <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
             {saving ? <Loader size={13} className="spin" /> : <Check size={13} />}

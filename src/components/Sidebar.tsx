@@ -960,7 +960,7 @@ export function Sidebar() {
                     aria-label={item.label}
                   >
                     <Icon size={15} />
-                    <span>{item.label}</span>
+                    <span className="min-w-0 truncate" title={item.label}>{item.label}</span>
                     {showBadge ? (
                       <>
                         {stagedCount > 0 && (
@@ -1079,7 +1079,7 @@ export function Sidebar() {
                     aria-label={item.label}
                   >
                     <Icon size={15} />
-                    <span>{item.label}</span>
+                    <span className="min-w-0 truncate" title={item.label}>{item.label}</span>
                     {showBadge ? (
                       <>
                         {stagedCount > 0 && (

@@ -370,7 +370,7 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
           )}
         </div>
 
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+        <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border">
           {/* Config file paths — matches SmartGit's bottom panel showing
               where the settings are stored. */}
           {/* <div className="flex-1 text-2xs text-text-tertiary font-mono flex flex-col justify-center gap-0.5">

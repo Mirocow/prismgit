@@ -1693,8 +1693,8 @@ export function HistoryPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default bg-bg-tertiary" style={{ height: 32 }}>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold">Graph</span>
-          <span className="text-2xs text-text-tertiary">{filtered.length} commits</span>
+          <span className="text-xs font-semibold">{t('history.headerGraph')}</span>
+          <span className="text-2xs text-text-tertiary">{t('history.headerCommits', { n: filtered.length })}</span>
           {/* Incoming count badge — shows how many remote-only commits are visible */}
           {(() => {
             const visibleIncoming = filtered.filter(e => incomingHashes.has(e.hash)).length;
@@ -1702,13 +1702,13 @@ export function HistoryPage() {
             return (
               <span className="text-2xs px-1.5 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium flex items-center gap-0.5"
                 title={t('history.ttIncoming', { n: visibleIncoming })}>
-                ↓ {visibleIncoming} incoming
+                {t('history.headerIncoming', { n: visibleIncoming })}
               </span>
             );
           })()}
           {(authorFilter || dateFrom || dateTo || pathFilter || useRegex) && (
             <span className="text-2xs text-accent flex items-center gap-1" title={t('history.ttActiveFilters')}>
-              <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />filtered
+              <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />{t('history.headerFiltered')}
             </span>
           )}
           {selectedBranches.size > 0 && (
@@ -2596,7 +2596,7 @@ export function HistoryPage() {
                 <span>{t('history.tagAnnotatedLabel')}</span>
               </label>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowTagDialog(false)}>{t('action.button.cancel')}</button>
               <button className="btn btn-primary" onClick={handleSaveTag} disabled={!tagName.trim()}>
                 <TagIcon size={13} /> {editingTagName ? t('history.tagSaveButton') : t('history.tagCreateButton')}
@@ -2628,7 +2628,7 @@ export function HistoryPage() {
                 <span>{t('history.branchCheckoutAfter')}</span>
               </label>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowBranchDialog(false)}>{t('action.button.cancel')}</button>
               <button className="btn btn-primary" onClick={handleSaveBranch} disabled={!branchName.trim()}>
                 <GitBranch size={13} /> Create Branch
@@ -2696,7 +2696,7 @@ export function HistoryPage() {
                 value={splitOffMessage}
                 onChange={(e) => setSplitOffMessage(e.target.value)}
               />
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <button className="btn btn-secondary text-xs" onClick={() => setShowSplitOff(false)}>{t('action.button.cancel')}</button>
                 <button
                   className="btn btn-primary text-xs"

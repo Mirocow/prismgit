@@ -865,7 +865,7 @@ export function MessageBubble({ msg, onRegenerate, onSaveFavorite, t }: { msg: C
 
   if (msg.role === 'user') {
     return (
-      <div className="flex items-start gap-2 justify-end group">
+      <div className="flex flex-wrap items-start gap-2 justify-end group">
         <div className="flex flex-col items-end gap-0.5">
           <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap wrap-break-word">
             {msg.content}
@@ -929,7 +929,7 @@ export function MessageBubble({ msg, onRegenerate, onSaveFavorite, t }: { msg: C
       <div className="bg-bg-secondary rounded px-3 py-1.5 text-xs max-w-[85%] whitespace-pre-wrap wrap-break-word">
         <MarkdownLite text={msg.content} />
         {/* Action buttons — Retry (regenerate) + Copy + Save to favorites. Always visible. */}
-        <div className="mt-1 flex justify-end gap-2">
+        <div className="mt-1 flex flex-wrap justify-end gap-2">
           {onRegenerate && (
             <button
               onClick={onRegenerate}

@@ -852,7 +852,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
           )}
         </div>
 
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
+        <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border-default">
           <button className="btn btn-secondary" onClick={onClose}>
             {t('common.cancel')}
           </button>

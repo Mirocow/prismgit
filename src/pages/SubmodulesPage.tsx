@@ -325,7 +325,7 @@ export function SubmodulesPage() {
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>
                 {t('common.cancel')}
               </button>
