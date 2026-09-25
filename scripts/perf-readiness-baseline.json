@@ -1,0 +1,31 @@
+{
+  "totals": {
+    "write": 42,
+    "read": 91
+  },
+  "syncFs": {
+    "write": {
+      "electron/services/avatarCache.ts": 2,
+      "electron/services/git.ts": 23,
+      "electron/services/simpleStore.ts": 3,
+      "electron/services/ssh.ts": 9,
+      "electron/services/vscode.ts": 5
+    },
+    "read": {
+      "electron/about.ts": 1,
+      "electron/ipc/fs.ts": 1,
+      "electron/services/aiMemory.ts": 2,
+      "electron/services/avatarCache.ts": 3,
+      "electron/services/git.ts": 47,
+      "electron/services/gitPollCore.ts": 1,
+      "electron/services/gitStatsCore.ts": 1,
+      "electron/services/gitStatusCore.ts": 14,
+      "electron/services/simpleStore.ts": 3,
+      "electron/services/ssh.ts": 13,
+      "electron/services/storage.ts": 1,
+      "electron/services/vscode.ts": 2,
+      "electron/services/watcher.ts": 2
+    }
+  },
+  "note": "ratchet baseline — only ever LOWER these numbers by hand; never raise"
+}

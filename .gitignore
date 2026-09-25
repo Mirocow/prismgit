@@ -64,3 +64,7 @@ src-tauri/gen/
 # Generated perf-profiling artifacts (repo-switch freeze triage)
 scripts/repo-switch-results.json
 scripts/perf-results.json
+# Perf-suite run artifacts (baseline IS tracked — the ratchet):
+scripts/perf-cdp-results.json
+scripts/perf-readiness-report.json
+scripts/perf-repos-manifest.json
