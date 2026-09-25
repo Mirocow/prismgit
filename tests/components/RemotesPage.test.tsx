@@ -46,6 +46,16 @@ function lastShownItems(): Array<Record<string, unknown>> {
   return calls[calls.length - 1][0] as Array<Record<string, unknown>>;
 }
 
+// v3.4: menus are GROUPED into submenus — flatten for presence assertions.
+function flatShownItems(items: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const i of items) {
+    out.push(i);
+    if (Array.isArray(i.submenu)) out.push(...flatShownItems(i.submenu as Array<Record<string, unknown>>));
+  }
+  return out;
+}
+
 describe('RemotesPage — right-click context menu on a remote row', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -69,24 +79,26 @@ describe('RemotesPage — right-click context menu on a remote row', () => {
 
     await waitFor(() => expect(mockShow).toHaveBeenCalledTimes(1));
     const items = lastShownItems();
+    // v3.4: top level = fetch + preview + two GROUPS + removal.
     const labels = items.map((i) => i.label ?? '---');
-
     expect(labels).toEqual([
       "Fetch 'origin' (with prune)",
       'Preview remote refs (ls-remote)',
-      'Copy fetch URL',
       '---',
-      'Browse branches',
-      "Edit 'origin'...",
-      "Rename 'origin'...",
-      '---',
-      'Perform background Poll or Fetch',
-      'Repository Settings...',
+      'Copy',
+      'Manage Remote',
       '---',
       "Remove remote 'origin'...",
     ]);
+    // Every flat action is still reachable through the submenus.
+    const flatLabels = flatShownItems(items).map((i) => i.label);
+    expect(flatLabels).toContain('Copy fetch URL');
+    expect(flatLabels).toContain('Browse branches');
+    expect(flatLabels).toContain("Edit 'origin'...");
+    expect(flatLabels).toContain("Rename 'origin'...");
+    expect(flatLabels).toContain('Repository Settings...');
     // Checkbox item for the background poll toggle
-    const checkbox = items.find((i) => i.clickId === 'toggle-background');
+    const checkbox = flatShownItems(items).find((i) => i.clickId === 'toggle-background');
     expect(checkbox).toMatchObject({ type: 'checkbox', checked: false });
   });
 
@@ -116,7 +128,8 @@ describe('RemotesPage — right-click context menu on a remote row', () => {
 
     await waitFor(() => expect(mockShow).toHaveBeenCalledTimes(1));
     const items = lastShownItems();
-    const labels = items.map((i) => i.label ?? '---');
+    // v3.4: URL copies live inside the “Copy” submenu — flatten first.
+    const labels = flatShownItems(items).map((i) => i.label ?? '---');
     expect(labels).toContain('Copy push URL');
     expect(labels.indexOf('Copy push URL')).toBeGreaterThan(labels.indexOf('Copy fetch URL'));
   });

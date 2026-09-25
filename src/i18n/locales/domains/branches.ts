@@ -243,6 +243,18 @@ export const en: Record<string, string> = {
   'branches.aheadHint': '{n} commit(s) ahead of upstream — Push to publish them.',
   'branches.synced': 'synced',
   'branches.syncedHint': 'Up to date with upstream',
+
+  // ── v3.4 localization completion ──
+  'branches.deleteConfirmTitle': 'Delete branch \'{name}\'',
+  'branches.deleteConfirmMessage': 'This removes the branch pointer. Commits reachable from other branches or HEAD are not affected.',
+  'branches.deleteRemoteConfirmTitle': 'Delete remote branch \'{name}\'',
+  'branches.deleteRemoteConfirmMessage': 'The branch is deleted on the remote. Commits stay in your local repository.',
+  'branches.deleteTagTitle': 'Delete tag \'{name}\'',
+  'branches.deleteTagMessage': 'This permanently removes the tag reference. The tagged commit is not affected.',
+  'branches.pushTagTitle': 'Push tag \'{name}\'',
+  'branches.pushTagMessage': 'Push the tag to its remote?',
+  'branches.pushBlockedHint': 'Blocked while a merge/rebase/cherry-pick is in progress',
+  'branches.upstreamGroup': 'Upstream',
 };
 
 export const ru: Record<string, string> = {
@@ -482,6 +494,18 @@ export const ru: Record<string, string> = {
   'branches.aheadHint': '{n} коммит(ов) впереди upstream — Push для публикации.',
   'branches.synced': 'синхр.',
   'branches.syncedHint': 'Синхронизирована с upstream',
+
+  // ── v3.4 localization completion ──
+  'branches.deleteConfirmTitle': 'Удалить ветку \'{name}\'',
+  'branches.deleteConfirmMessage': 'Указатель ветки будет удалён. Коммиты, достижимые из других веток или HEAD, не затрагиваются.',
+  'branches.deleteRemoteConfirmTitle': 'Удалить удалённую ветку \'{name}\'',
+  'branches.deleteRemoteConfirmMessage': 'Ветка будет удалена на remote. Коммиты останутся в локальном репозитории.',
+  'branches.deleteTagTitle': 'Удалить тег \'{name}\'',
+  'branches.deleteTagMessage': 'Ссылка на тег будет удалена навсегда. Помеченный коммит не затрагивается.',
+  'branches.pushTagTitle': 'Отправить тег \'{name}\'',
+  'branches.pushTagMessage': 'Отправить тег на remote?',
+  'branches.pushBlockedHint': 'Недоступно, пока идёт merge/rebase/cherry-pick',
+  'branches.upstreamGroup': 'Upstream (отслеживание)',
 };
 
 export const zh: Record<string, string> = {
@@ -721,6 +745,18 @@ export const zh: Record<string, string> = {
   'branches.aheadHint': '领先 upstream {n} 个提交 — Push 以发布。',
   'branches.synced': '已同步',
   'branches.syncedHint': '与 upstream 同步',
+
+  // ── v3.4 localization completion ──
+  'branches.deleteConfirmTitle': '删除分支 \'{name}\'',
+  'branches.deleteConfirmMessage': '这将移除分支指针。可从其他分支或 HEAD 访问的提交不受影响。',
+  'branches.deleteRemoteConfirmTitle': '删除远程分支 \'{name}\'',
+  'branches.deleteRemoteConfirmMessage': '该分支将在远程删除。提交仍保留在本地仓库中。',
+  'branches.deleteTagTitle': '删除标签 \'{name}\'',
+  'branches.deleteTagMessage': '这将永久移除标签引用。被标记的提交不受影响。',
+  'branches.pushTagTitle': '推送标签 \'{name}\'',
+  'branches.pushTagMessage': '将该标签推送到远程？',
+  'branches.pushBlockedHint': '已有 merge/rebase/cherry-pick 进行中，暂被阻止',
+  'branches.upstreamGroup': '上游分支',
 };
 
 export const de: Record<string, string> = {
@@ -960,4 +996,16 @@ export const de: Record<string, string> = {
   'branches.aheadHint': '{n} Commit(s) vor Upstream — Push zum Veröffentlichen.',
   'branches.synced': 'synchr.',
   'branches.syncedHint': 'Mit Upstream synchronisiert',
+
+  // ── v3.4 localization completion ──
+  'branches.deleteConfirmTitle': 'Branch \'{name}\' löschen',
+  'branches.deleteConfirmMessage': 'Der Branch-Zeiger wird entfernt. Commits, die von anderen Branches oder HEAD erreichbar sind, bleiben unberührt.',
+  'branches.deleteRemoteConfirmTitle': 'Remote-Branch \'{name}\' löschen',
+  'branches.deleteRemoteConfirmMessage': 'Der Branch wird im Remote gelöscht. Commits bleiben im lokalen Repository.',
+  'branches.deleteTagTitle': 'Tag \'{name}\' löschen',
+  'branches.deleteTagMessage': 'Die Tag-Referenz wird dauerhaft entfernt. Der getaggte Commit bleibt unberührt.',
+  'branches.pushTagTitle': 'Tag \'{name}\' pushen',
+  'branches.pushTagMessage': 'Den Tag zum Remote pushen?',
+  'branches.pushBlockedHint': 'Blockiert, solange ein Merge/Rebase/Cherry-pick läuft',
+  'branches.upstreamGroup': 'Upstream',
 };

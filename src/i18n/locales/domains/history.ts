@@ -256,6 +256,32 @@ export const en: Record<string, string> = {
   'history.blockedBy.abortNow': 'Abort {state} now',
   'history.blockedBy.goToChanges': 'Go to Changes',
   'history.blockedBy.aborted': '{state} aborted',
+
+  // ── v3.4 localization completion ──
+  'history.filterPlaceholder': 'Filter commits...',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'history.syncNoUpstreamHint': 'No upstream — push -u to set tracking',
+  'history.syncNoUpstream': 'No upstream',
+  'history.syncUpstreamGone': 'Upstream gone',
+  'history.syncInSync': 'In sync with {ref}',
+  'history.syncInSyncShort': 'In sync',
+  'history.syncOutOfSync': 'Out of sync',
+  'history.ttActiveFilters': 'Active filters',
+  'history.ttClearFileFilter': 'Clear file filter',
+  'history.ttShowMyCommits': 'Show only my commits',
+  'history.ttShowMerges': 'Show only merge commits',
+  'history.ttToggleGraph': 'Toggle graph',
+  'history.ttRefresh': 'Refresh',
+  'history.ttSelectCommit': 'Select a commit',
+  'history.ttAllBranches': 'All branches',
+  'history.ttParents': 'Parents',
+  'history.ttIncoming': '{n} incoming commit(s) — exist on remote but not yet pulled',
+  'history.branchNameLabel': 'Branch name',
+  'history.branchCheckoutAfter': 'Checkout after creation',
+  'history.branchStartsAt': 'Branch will start from this commit.',
+  'history.splitOffTitle': 'Split Off Files Into New Commit',
+  'history.splitOffMessageLabel': 'Message for the new commit',
 };
 
 export const ru: Record<string, string> = {
@@ -507,6 +533,32 @@ export const ru: Record<string, string> = {
   'history.blockedBy.abortNow': 'Прервать {state} сейчас',
   'history.blockedBy.goToChanges': 'Перейти к Изменениям',
   'history.blockedBy.aborted': '{state} прерван',
+
+  // ── v3.4 localization completion ──
+  'history.filterPlaceholder': 'Фильтр коммитов...',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'history.syncNoUpstreamHint': 'Нет upstream — выполните push -u, чтобы связать',
+  'history.syncNoUpstream': 'Нет upstream',
+  'history.syncUpstreamGone': 'Upstream удалён',
+  'history.syncInSync': 'Синхронизировано с {ref}',
+  'history.syncInSyncShort': 'Синхронизировано',
+  'history.syncOutOfSync': 'Не синхронизировано',
+  'history.ttActiveFilters': 'Активные фильтры',
+  'history.ttClearFileFilter': 'Сбросить фильтр файлов',
+  'history.ttShowMyCommits': 'Только мои коммиты',
+  'history.ttShowMerges': 'Только merge-коммиты',
+  'history.ttToggleGraph': 'Вкл/выкл граф',
+  'history.ttRefresh': 'Обновить',
+  'history.ttSelectCommit': 'Выберите коммит',
+  'history.ttAllBranches': 'Все ветки',
+  'history.ttParents': 'Родители',
+  'history.ttIncoming': '{n} входящих коммитов — есть на remote, но ещё не загружены',
+  'history.branchNameLabel': 'Имя ветки',
+  'history.branchCheckoutAfter': 'Переключиться после создания',
+  'history.branchStartsAt': 'Ветка начнётся с этого коммита.',
+  'history.splitOffTitle': 'Вынести файлы в отдельный коммит',
+  'history.splitOffMessageLabel': 'Сообщение для нового коммита',
 };
 
 export const zh: Record<string, string> = {
@@ -758,6 +810,32 @@ export const zh: Record<string, string> = {
   'history.blockedBy.abortNow': '立即中止 {state}',
   'history.blockedBy.goToChanges': '前往更改',
   'history.blockedBy.aborted': '{state} 已中止',
+
+  // ── v3.4 localization completion ──
+  'history.filterPlaceholder': '筛选提交…',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'history.syncNoUpstreamHint': '无上游分支——执行 push -u 设置跟踪',
+  'history.syncNoUpstream': '无上游分支',
+  'history.syncUpstreamGone': '上游分支已删除',
+  'history.syncInSync': '与 {ref} 同步',
+  'history.syncInSyncShort': '已同步',
+  'history.syncOutOfSync': '未同步',
+  'history.ttActiveFilters': '生效的筛选',
+  'history.ttClearFileFilter': '清除文件筛选',
+  'history.ttShowMyCommits': '只显示我的提交',
+  'history.ttShowMerges': '只显示合并提交',
+  'history.ttToggleGraph': '切换图形',
+  'history.ttRefresh': '刷新',
+  'history.ttSelectCommit': '选择一个提交',
+  'history.ttAllBranches': '所有分支',
+  'history.ttParents': '父提交',
+  'history.ttIncoming': '{n} 个传入提交——存在于远程但尚未拉取',
+  'history.branchNameLabel': '分支名称',
+  'history.branchCheckoutAfter': '创建后检出',
+  'history.branchStartsAt': '分支将从此提交开始。',
+  'history.splitOffTitle': '将文件拆分为新提交',
+  'history.splitOffMessageLabel': '新提交的提交信息',
 };
 
 export const de: Record<string, string> = {
@@ -1009,4 +1087,30 @@ export const de: Record<string, string> = {
   'history.blockedBy.abortNow': '{state} jetzt abbrechen',
   'history.blockedBy.goToChanges': 'Zu Änderungen',
   'history.blockedBy.aborted': '{state} abgebrochen',
+
+  // ── v3.4 localization completion ──
+  'history.filterPlaceholder': 'Commits filtern...',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'history.syncNoUpstreamHint': 'Kein Upstream — mit push -u das Tracking setzen',
+  'history.syncNoUpstream': 'Kein Upstream',
+  'history.syncUpstreamGone': 'Upstream entfernt',
+  'history.syncInSync': 'Synchron mit {ref}',
+  'history.syncInSyncShort': 'Synchron',
+  'history.syncOutOfSync': 'Nicht synchron',
+  'history.ttActiveFilters': 'Aktive Filter',
+  'history.ttClearFileFilter': 'Dateifilter löschen',
+  'history.ttShowMyCommits': 'Nur meine Commits zeigen',
+  'history.ttShowMerges': 'Nur Merge-Commits zeigen',
+  'history.ttToggleGraph': 'Graph ein-/ausschalten',
+  'history.ttRefresh': 'Aktualisieren',
+  'history.ttSelectCommit': 'Commit auswählen',
+  'history.ttAllBranches': 'Alle Branches',
+  'history.ttParents': 'Parents',
+  'history.ttIncoming': '{n} eingehende Commits — liegen am Remote, wurden aber noch nicht gepullt',
+  'history.branchNameLabel': 'Branch-Name',
+  'history.branchCheckoutAfter': 'Nach dem Erstellen auschecken',
+  'history.branchStartsAt': 'Der Branch beginnt bei diesem Commit.',
+  'history.splitOffTitle': 'Dateien in einen neuen Commit abspalten',
+  'history.splitOffMessageLabel': 'Nachricht für den neuen Commit',
 };

@@ -77,7 +77,29 @@ const baseCtx = (over: Partial<FileMenuCtx> = {}): FileMenuCtx => ({
   ...over,
 });
 
-const labels = (items: { label?: string }[]) => items.map((i) => i.label ?? '---');
+// v3.4 menus are GROUPED into submenus (Open / View / Working Tree / Delete /
+// Copy). Tests that assert presence of an item must see through the submenu
+// nesting — flattenLabels returns top-level AND nested labels in order.
+type TestMenuItem = { label?: string; submenu?: TestMenuItem[]; clickId?: string; type?: string; checked?: boolean };
+const flattenLabels = (items: TestMenuItem[]): string[] => {
+  const out: string[] = [];
+  for (const i of items) {
+    out.push(i.label ?? '---');
+    if (i.submenu) out.push(...flattenLabels(i.submenu));
+  }
+  return out;
+};
+/** All items (top-level and nested) as a flat array — for clickId lookups. */
+const flattenMenu = (items: TestMenuItem[]): TestMenuItem[] => {
+  const out: TestMenuItem[] = [];
+  for (const i of items) {
+    out.push(i);
+    if (i.submenu) out.push(...flattenMenu(i.submenu));
+  }
+  return out;
+};
+
+const labels = (items: TestMenuItem[]) => flattenLabels(items);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -115,8 +137,9 @@ describe('buildFileMenu — changes mode', () => {
 
   it('reflects live index flags in the checkbox items', () => {
     const items = buildFileMenu(baseCtx({ indexFlags: { assumeUnchanged: true, skipWorktree: true, tracked: true } }));
-    const au = items.find((i) => i.clickId === 'toggle-assume-unchanged');
-    const sw = items.find((i) => i.clickId === 'toggle-skip-worktree');
+    // v3.4: the checkboxes live inside the "Working Tree" submenu.
+    const au = flattenMenu(items).find((i) => i.clickId === 'toggle-assume-unchanged');
+    const sw = flattenMenu(items).find((i) => i.clickId === 'toggle-skip-worktree');
     expect(au?.type).toBe('checkbox');
     expect(au?.checked).toBe(true);
     expect(sw?.checked).toBe(true);

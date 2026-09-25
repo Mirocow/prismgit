@@ -185,7 +185,7 @@ export function MergeToolbar({
         <div className="flex items-center gap-1 shrink-0">
           <button
             className={iconBtnCls}
-            title="Undo last resolution (⌘Z)"
+            title={t('conflict.undoLastResolution')}
             onClick={onUndo}
             disabled={!canUndo}
           >
@@ -198,11 +198,11 @@ export function MergeToolbar({
             disabled={saving}
           >
             <RotateCcw size={12} />
-            <span className="hidden sm:inline">Reset all</span>
+            <span className="hidden sm:inline">{t('conflict.resetAll')}</span>
           </button>
           <button
             className={`${btnCls} ${showBase ? 'bg-accent text-text-inverse hover:bg-accent' : ''}`}
-            title="Show / hide the base (common ancestor) pane"
+            title={t('conflict.toggleBasePane')}
             onClick={onToggleBase}
           >
             {showBase ? <EyeOff size={12} /> : <Eye size={12} />}
@@ -218,9 +218,9 @@ export function MergeToolbar({
           <div className="relative shrink-0" ref={moreMenuRef}>
             <button
               className={iconBtnCls}
-              title="More actions"
+              title={t('conflict.moreActions')}
               onClick={() => setMoreMenuOpen((o) => !o)}
-              aria-label="More actions"
+              aria-label={t('conflict.moreActions')}
             >
               <MoreHorizontal size={14} />
             </button>
@@ -306,7 +306,7 @@ export function MergeToolbar({
           {dirty && !saving && (
             <span
               className="w-1.5 h-1.5 rounded-full bg-status-modified inline-block"
-              aria-label="Unsaved changes"
+              aria-label={t('conflict.unsavedChanges')}
             />
           )}
         </button>

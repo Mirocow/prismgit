@@ -351,14 +351,20 @@ export function CommandLogPanel({
 
   const entries = useCommandLogStore((s) => s.entries);
   const load = useCommandLogStore((s) => s.load);
-  const append = useCommandLogStore((s) => s.append);
+  const appendBatch = useCommandLogStore((s) => s.appendBatch);
   const clearCommands = useCommandLogStore((s) => s.clear);
 
   useEffect(() => {
     load();
-    const unsubscribe = api.commandLog.onEntry(append);
+    // PERF (v3.4): batch feed — ONE store set() per 100 ms main-process
+    // batch instead of one per entry (see commandLogStore.appendBatch).
+    // Falls back to the per-entry API when the batch channel is missing
+    // (older main process in tests).
+    const unsubscribe = api.commandLog.onBatch
+      ? api.commandLog.onBatch(appendBatch)
+      : api.commandLog.onEntry(useCommandLogStore.getState().append);
     return unsubscribe;
-  }, [load, append]);
+  }, [load, appendBatch]);
 
   const failedCount = useMemo(
     () => entries.filter((e) => e.exitCode !== 0).length,

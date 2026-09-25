@@ -84,7 +84,7 @@ function ConflictRegionBarImpl({
       <button
         className="btn btn-secondary text-2xs !py-0.5 !px-2"
         onClick={() => onResolve(conflictIdx, 'manual')}
-        title="Clear block and edit manually"
+        title={t('conflict.clearBlockAndEdit')}
       >
         Manual
       </button>

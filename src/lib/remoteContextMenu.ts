@@ -26,6 +26,9 @@ export function buildRemoteContextMenu(
   state: RemoteMenuState
 ): ContextMenuItem[] {
   const hasSeparatePushUrl = Boolean(remote.refs.push) && remote.refs.push !== remote.refs.fetch;
+  // MENU STRUCTURE (v3.4): grouped by domain — fetch/preview stay top-level
+  // (most-used), clipboard under “Копировать ▸”, remote management under
+  // “Управление remote ▸”, removal at the bottom.
   return [
     { label: i18nT('ctx.remote.fetchWithPrune').replace('{name}', remote.name), clickId: 'fetch', enabled: !state.busy },
     {
@@ -34,22 +37,32 @@ export function buildRemoteContextMenu(
         : i18nT('ctx.remote.previewRemoteRefs'),
       clickId: 'preview',
     },
-    { label: i18nT('ctx.remote.copyFetchUrl'), clickId: 'copy-fetch' },
-    ...(hasSeparatePushUrl
-      ? [{ label: i18nT('ctx.remote.copyPushUrl'), clickId: 'copy-push' } as ContextMenuItem]
-      : []),
-    { type: 'separator' },
-    { label: i18nT('ctx.remote.browseBranches'), clickId: 'branches' },
-    { label: i18nT('ctx.remote.edit').replace('{name}', remote.name), clickId: 'edit' },
-    { label: i18nT('ctx.remote.rename').replace('{name}', remote.name), clickId: 'rename' },
     { type: 'separator' },
     {
-      label: i18nT('ctx.remote.backgroundPollOrFetch'),
-      type: 'checkbox',
-      checked: state.backgroundFetch,
-      clickId: 'toggle-background',
+      label: i18nT('ctx.group.copy'),
+      submenu: [
+        { label: i18nT('ctx.remote.copyFetchUrl'), clickId: 'copy-fetch' },
+        ...(hasSeparatePushUrl
+          ? [{ label: i18nT('ctx.remote.copyPushUrl'), clickId: 'copy-push' } as ContextMenuItem]
+          : []),
+      ],
     },
-    { label: i18nT('ctx.remote.repositorySettings'), clickId: 'repo-settings' },
+    {
+      label: i18nT('ctx.group.remote.manage'),
+      submenu: [
+        { label: i18nT('ctx.remote.browseBranches'), clickId: 'branches' },
+        { label: i18nT('ctx.remote.edit').replace('{name}', remote.name), clickId: 'edit' },
+        { label: i18nT('ctx.remote.rename').replace('{name}', remote.name), clickId: 'rename' },
+        { type: 'separator' },
+        {
+          label: i18nT('ctx.remote.backgroundPollOrFetch'),
+          type: 'checkbox',
+          checked: state.backgroundFetch,
+          clickId: 'toggle-background',
+        },
+        { label: i18nT('ctx.remote.repositorySettings'), clickId: 'repo-settings' },
+      ],
+    },
     { type: 'separator' },
     { label: i18nT('ctx.remote.removeRemote').replace('{name}', remote.name), clickId: 'remove' },
   ];

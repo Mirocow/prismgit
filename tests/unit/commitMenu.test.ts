@@ -48,6 +48,17 @@ import { useSelectionStore } from '../../src/stores/selectionStore';
 
 const HASH = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0';
 
+// v3.4: menus are GROUPED into submenus (Copy / View / Manage Branches /
+// Manage Tags) — composition tests must see through the nesting.
+const flatIds = (items: { clickId?: string; submenu?: unknown[] }[]): string[] => {
+  const out: string[] = [];
+  for (const i of items) {
+    if (i.clickId) out.push(i.clickId);
+    if (i.submenu) out.push(...flatIds(i.submenu as { clickId?: string; submenu?: unknown[] }[]));
+  }
+  return out;
+};
+
 const hashCtx = (over: Partial<HashMenuCtx> = {}): HashMenuCtx => ({
   hash: HASH,
   subject: 'feat: add tags',
@@ -72,21 +83,29 @@ beforeEach(() => {
 
 describe('buildHashMenu — composition', () => {
   it('always offers hash copies + View in History', () => {
-    const items = buildHashMenu({ hash: HASH });
-    const ids = items.map((i) => i.clickId);
+    const ids = flatIds(buildHashMenu({ hash: HASH }));
     expect(ids).toContain('copy-short');
     expect(ids).toContain('copy-full');
     expect(ids).toContain('view-history');
   });
 
   it('adds Copy Message only when a subject is given', () => {
-    expect(buildHashMenu({ hash: HASH }).map((i) => i.clickId)).not.toContain('copy-msg');
-    expect(buildHashMenu(hashCtx()).map((i) => i.clickId)).toContain('copy-msg');
+    expect(flatIds(buildHashMenu({ hash: HASH }))).not.toContain('copy-msg');
+    expect(flatIds(buildHashMenu(hashCtx()))).toContain('copy-msg');
   });
 
   it('adds Open in Browser only when a repoPath is given', () => {
-    expect(buildHashMenu({ hash: HASH }).map((i) => i.clickId)).not.toContain('browser');
-    expect(buildHashMenu(hashCtx()).map((i) => i.clickId)).toContain('browser');
+    expect(flatIds(buildHashMenu({ hash: HASH }))).not.toContain('browser');
+    expect(flatIds(buildHashMenu(hashCtx()))).toContain('browser');
+  });
+
+  it('groups the items by domain (v3.4): Copy and View submenus', () => {
+    const items = buildHashMenu(hashCtx());
+    const labels = items.map((i) => i.label);
+    // Group headers replace the old flat list — clipboard and navigation
+    // live in their own submenus now.
+    expect(labels).toContain('Copy');
+    expect(labels).toContain('View && Compare');
   });
 });
 
@@ -143,7 +162,7 @@ describe('runHashMenuAction — real operations', () => {
 
 describe('buildRefMenu — composition by ref kind', () => {
   it('tag: Copy Name/Full Ref + Delete Tag + View Commit', () => {
-    const ids = buildRefMenu(refCtx()).map((i) => i.clickId);
+    const ids = flatIds(buildRefMenu(refCtx()));
     expect(ids).toContain('copy-name');
     expect(ids).toContain('copy-full-ref');
     expect(ids).toContain('delete-tag');
@@ -152,13 +171,13 @@ describe('buildRefMenu — composition by ref kind', () => {
   });
 
   it('branch: Checkout + Delete Branch (requires repoPath)', () => {
-    const ids = buildRefMenu(refCtx({ parsed: parseDecoratedRef('refs/heads/feature') })).map((i) => i.clickId);
+    const ids = flatIds(buildRefMenu(refCtx({ parsed: parseDecoratedRef('refs/heads/feature') })));
     expect(ids).toContain('checkout-branch');
     expect(ids).toContain('delete-branch');
   });
 
   it('branch without repoPath: no destructive items', () => {
-    const ids = buildRefMenu(refCtx({ parsed: parseDecoratedRef('refs/heads/feature'), repoPath: undefined })).map((i) => i.clickId);
+    const ids = flatIds(buildRefMenu(refCtx({ parsed: parseDecoratedRef('refs/heads/feature'), repoPath: undefined })));
     expect(ids).not.toContain('checkout-branch');
     expect(ids).not.toContain('delete-branch');
   });

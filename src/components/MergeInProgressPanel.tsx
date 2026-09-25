@@ -111,7 +111,7 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
                       for trivial conflicts. */}
                   <button
                     className="text-2xs px-1 rounded border border-status-added/30 bg-status-added/10 text-status-added hover:bg-status-added/20 transition-colors"
-                    title="Take ours (git checkout --ours)"
+                    title={t('conflict.mergePanelTakeOurs')}
                     onClick={async (e) => {
                       e.stopPropagation();
                       try {
@@ -127,7 +127,7 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
                   </button>
                   <button
                     className="text-2xs px-1 rounded border border-status-modified/30 bg-status-modified/10 text-status-modified hover:bg-status-modified/20 transition-colors"
-                    title="Take theirs (git checkout --theirs)"
+                    title={t('conflict.mergePanelTakeTheirs')}
                     onClick={async (e) => {
                       e.stopPropagation();
                       try {

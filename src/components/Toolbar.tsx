@@ -1136,7 +1136,7 @@ export function GitToolbar({ onGitFlow, onInteractiveRebase }: { onGitFlow?: () 
           case 'stage':
             return (
               <div key={key} className="flex items-center">
-                <LabeledButton icon={Plus} label={t('action.button.stage')} iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title="Stage all changes" />
+                <LabeledButton icon={Plus} label={t('action.button.stage')} iconColor={COLOR_GREEN} onClick={() => currentRepo && useGitStore.getState().stageAll(currentRepo.path)} disabled={disabled} title={t('toolbar.stageAllTooltip')} />
                 <LabeledButton icon={Minus} label={t('action.button.unstage')} iconColor={COLOR_ORANGE} onClick={() => {
                   if (!currentRepo) return;
                   useOperationLogStore.getState().logOperation(

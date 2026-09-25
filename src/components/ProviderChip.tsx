@@ -23,6 +23,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useProviderStore, suggestProviderFromUrl, type RepoProvider } from '../stores/providerStore';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 const PROVIDERS: { id: 'github' | 'gitlab'; label: string; color: string }[] = [
   { id: 'github', label: 'GitHub', color: 'var(--accent-purple, #6f42c1)' },
@@ -30,6 +31,7 @@ const PROVIDERS: { id: 'github' | 'gitlab'; label: string; color: string }[] = [
 ];
 
 export function ProviderChip({ className }: { className?: string }) {
+  const { t } = useI18n();
   const provider = useProviderStore((s) => s.provider);
   const owner = useProviderStore((s) => s.owner);
   const repo = useProviderStore((s) => s.repo);
@@ -118,10 +120,10 @@ export function ProviderChip({ className }: { className?: string }) {
                 provider === 'unknown' && !manualOverride && 'bg-accent-muted text-accent',
               )}
               onClick={handleAutoDetect}
-              title="Re-scan the remote URL and pick the provider automatically"
+              title={t('settings.providerAutoDetectHint')}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" />
-              <span className="flex-1">Auto-detect from remote URL</span>
+              <span className="flex-1">{t('settings.providerAutoDetect')}</span>
               {provider === 'unknown' && !manualOverride && (
                 <span className="text-3xs text-accent">•</span>
               )}

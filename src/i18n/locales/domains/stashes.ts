@@ -91,6 +91,9 @@ export const en: Record<string, string> = {
   'stashes.renameTooltip': 'Rename Stash',
   'stashes.dropRowTooltip': 'Drop Stash',
   'stashes.branchesRowTooltip': 'Click: show content in Log · Right-click: stash menu',
+
+  // ── v3.4 localization completion ──
+  'stashes.restoreGroup': 'Restore',
 };
 
 export const ru: Record<string, string> = {
@@ -178,6 +181,9 @@ export const ru: Record<string, string> = {
   'stashes.renameTooltip': 'Переименовать Stash',
   'stashes.dropRowTooltip': 'Удалить Stash',
   'stashes.branchesRowTooltip': 'Клик: показать содержимое в журнале · Правый клик: меню stash',
+
+  // ── v3.4 localization completion ──
+  'stashes.restoreGroup': 'Восстановить',
 };
 
 export const zh: Record<string, string> = {
@@ -265,6 +271,9 @@ export const zh: Record<string, string> = {
   'stashes.renameTooltip': '重命名贮藏',
   'stashes.dropRowTooltip': '删除贮藏',
   'stashes.branchesRowTooltip': '点击：在日志中显示内容 · 右键：贮藏菜单',
+
+  // ── v3.4 localization completion ──
+  'stashes.restoreGroup': '恢复',
 };
 
 export const de: Record<string, string> = {
@@ -352,4 +361,7 @@ export const de: Record<string, string> = {
   'stashes.renameTooltip': 'Stash umbenennen',
   'stashes.dropRowTooltip': 'Stash löschen',
   'stashes.branchesRowTooltip': 'Klick: Inhalt im Log anzeigen · Rechtsklick: Stash-Menü',
+
+  // ── v3.4 localization completion ──
+  'stashes.restoreGroup': 'Wiederherstellen',
 };

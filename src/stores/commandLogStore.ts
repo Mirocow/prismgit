@@ -48,6 +48,13 @@ interface CommandLogState {
   load: () => Promise<void>;
   /** Append a live entry coming from the command-log:entry broadcast. */
   append: (entry: CommandLogEntry) => void;
+  /** Append a whole 100 ms main-process batch in ONE set() — one array
+   *  copy, one re-render, one errorPulse evaluation. Prefer over per-entry
+   *  append(): during a "Check all repositories" burst the per-entry path
+   *  fires N back-to-back set()s, each copying the 500-entry array — enough
+   *  back-to-back JS work to freeze the renderer's main thread for the
+   *  duration of the burst. */
+  appendBatch: (entries: CommandLogEntry[]) => void;
   /** Forget all entries (main process + this mirror). */
   clear: () => Promise<void>;
   /** QW-5 — mark that the user just manually closed the panel. */
@@ -78,6 +85,26 @@ export const useCommandLogStore = create<CommandLogState>((set) => ({
       return {
         entries: next,
         errorPulse: entry.exitCode !== 0 ? state.errorPulse + 1 : state.errorPulse,
+      };
+    });
+  },
+
+  appendBatch: (batch) => {
+    if (!Array.isArray(batch) || batch.length === 0) return;
+    set((state) => {
+      // Batch arrives oldest→newest from main; the mirror is newest-first —
+      // reverse once, then ONE prepend of the whole block.
+      const block = batch.slice().reverse();
+      const next = [...block, ...state.entries];
+      if (next.length > MAX_ENTRIES) next.length = MAX_ENTRIES;
+      // errorPulse semantics identical to append(): a transition to "an
+      // error just happened" — bumped ONCE per batch if any entry failed
+      // (App.tsx's auto-open already coalesces rapid pulses; per-entry
+      // bumping just burned renders).
+      const anyFailed = batch.some((e) => e.exitCode !== 0);
+      return {
+        entries: next,
+        errorPulse: anyFailed ? state.errorPulse + 1 : state.errorPulse,
       };
     });
   },

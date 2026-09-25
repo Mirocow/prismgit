@@ -91,7 +91,7 @@ const AiChatPage = lazy(() => import('./pages/AiChatPage'));
 function PageLoader() {
   return (
     <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
-      <div className="animate-fade-in">Loading...</div>
+      <div className="animate-fade-in">{i18nT('common.loadingEllipsis')}</div>
     </div>
   );
 }

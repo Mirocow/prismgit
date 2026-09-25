@@ -1,5 +1,6 @@
 import { CheckCircle, AlertCircle, Info, X, AlertTriangle } from './icons';
 import { useToastStore } from '../stores/toastStore';
+import { t as i18nT } from '../lib/i18n';
 import { cn } from '../lib/utils';
 
 const ICONS = {
@@ -78,7 +79,7 @@ export function ToastContainer() {
         <button
           className="icon-btn shrink-0"
           onClick={() => dismiss(toast.id)}
-          aria-label="Dismiss notification"
+          aria-label={i18nT('common.dismissNotification')}
         >
           <X size={14} />
         </button>

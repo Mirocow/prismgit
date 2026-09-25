@@ -810,15 +810,26 @@ export function BranchesPage() {
   const showTagContextMenu = (e: React.MouseEvent, tag: TagInfo) => {
     e.preventDefault();
     e.stopPropagation();
+    // MENU STRUCTURE (v3.4): grouped by domain — tag deletion under
+    // “Управление тегами ▸”, clipboard under “Копировать ▸”, push/log top-level.
     showContextMenu([
       { label: t('branches.pushTo'), accelerator: 'CmdOrCtrl+Up', clickId: 'push-tag' },
       { type: 'separator' },
+      {
+        label: t('ctx.group.tags'),
+        submenu: [
+          { label: t('branches.deleteMenu'), clickId: 'tag-delete' },
+        ],
+      },
+      {
+        label: t('ctx.group.copy'),
+        submenu: [
+          { label: t('tags.copyName'), accelerator: 'CmdOrCtrl+C', clickId: 'tag-copy' },
+          { label: t('tags.copyHash'), clickId: 'tag-copy-hash' },
+        ],
+      },
+      { type: 'separator' },
       { label: t('branches.showInLog'), accelerator: 'CmdOrCtrl+L', clickId: 'tag-log' },
-      { type: 'separator' },
-      { label: t('tags.copyName'), accelerator: 'CmdOrCtrl+C', clickId: 'tag-copy' },
-      { label: t('tags.copyHash'), clickId: 'tag-copy-hash' },
-      { type: 'separator' },
-      { label: t('branches.deleteMenu'), clickId: 'tag-delete' },
     ], (action) => {
       if (action === 'push-tag') handlePushTag(tag);
       else if (action === 'tag-log') {
@@ -998,16 +1009,23 @@ export function BranchesPage() {
   const showStashContextMenu = (e: React.MouseEvent, s: StashEntry) => {
     e.preventDefault();
     e.stopPropagation();
+    // MENU STRUCTURE (v3.4): grouped by domain — apply/pop (most-used) stay
+    // top-level, stash management (rename/drop) in one group, clipboard in
+    // “Копировать ▸”.
     showContextMenu([
       { label: t('stashes.applyMenu'), accelerator: 'Shift+CmdOrCtrl+S', clickId: 'stash-apply' },
       { label: t('stashes.popMenu'), clickId: 'stash-pop' },
       { type: 'separator' },
-      { label: t('stashes.showInLog'), accelerator: 'CmdOrCtrl+L', clickId: 'stash-log' },
-      { type: 'separator' },
-      { label: t('stashes.renameMenu'), accelerator: 'F2', clickId: 'stash-rename' },
-      { label: t('stashes.dropMenu'), clickId: 'stash-drop' },
-      { type: 'separator' },
-      { label: t('stashes.copyMessage'), clickId: 'stash-copy' },
+      { label: t('ctx.group.delete'), submenu: [
+        { label: t('stashes.renameMenu'), accelerator: 'F2', clickId: 'stash-rename' },
+        { label: t('stashes.dropMenu'), clickId: 'stash-drop' },
+      ] },
+      { label: t('ctx.group.view'), submenu: [
+        { label: t('stashes.showInLog'), accelerator: 'CmdOrCtrl+L', clickId: 'stash-log' },
+      ] },
+      { label: t('ctx.group.copy'), submenu: [
+        { label: t('stashes.copyMessage'), clickId: 'stash-copy' },
+      ] },
     ], (action) => {
       if (action === 'stash-apply') handleApplyStash(s);
       else if (action === 'stash-pop') {
@@ -1127,77 +1145,111 @@ export function BranchesPage() {
     const items: ContextMenuItem[] = [];
 
     if (b.remote) {
-      // === REMOTE BRANCH CONTEXT MENU (matches Fork: Check Out / Merge / Rebase /
-      //     Push (disabled) / Push To / Log / Reset / Reset Advanced / Delete / Copy) ===
+      // === REMOTE BRANCH CONTEXT MENU — v3.4: logically GROUPED by domain
+      //     (branch management / push / reset / view / copy) instead of a
+      //     flat 12-item list. Checkout stays top-level (most-used). ===
       items.push({ label: t('branches.checkoutMenu'), accelerator: 'CmdOrCtrl+G', clickId: 'checkout-remote', enabled: !isInProgress });
       items.push({ type: 'separator' });
-      items.push({ label: t('branches.merge'), clickId: 'merge' });
-      items.push({ label: t('branches.rebase'), accelerator: 'CmdOrCtrl+D', clickId: 'rebase' });
-      items.push({ type: 'separator' });
-      // Push is meaningless for a remote-only branch — shown disabled like Fork does.
-      items.push({ label: t('branches.push'), accelerator: 'CmdOrCtrl+Up', enabled: false, clickId: '_noop' });
-      items.push({ label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to-remote', enabled: !isInProgress });
-      items.push({ type: 'separator' });
-      items.push({ label: t('branches.log'), accelerator: 'CmdOrCtrl+L', clickId: 'log' });
-      items.push({ type: 'separator' });
-      items.push({ label: t('branches.resetMenu'), accelerator: 'CmdOrCtrl+R', clickId: 'reset-remote' });
-      items.push({ label: t('branches.resetAdvancedMenu'), accelerator: 'Shift+CmdOrCtrl+R', clickId: 'reset-advanced-remote' });
-      items.push({ type: 'separator' });
-      items.push({ label: t('branches.deleteMenu'), clickId: 'delete-remote' });
-      items.push({ type: 'separator' });
+      items.push({
+        label: t('ctx.group.branches'),
+        submenu: [
+          { label: t('branches.merge'), clickId: 'merge' },
+          { label: t('branches.rebase'), accelerator: 'CmdOrCtrl+D', clickId: 'rebase' },
+          { type: 'separator' },
+          { label: t('branches.deleteMenu'), clickId: 'delete-remote' },
+        ],
+      });
+      items.push({
+        label: t('toolbar.push'),
+        submenu: [
+          // Push is meaningless for a remote-only branch — shown disabled like Fork does.
+          { label: t('branches.push'), accelerator: 'CmdOrCtrl+Up', enabled: false, clickId: '_noop' },
+          { label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to-remote', enabled: !isInProgress },
+        ],
+      });
+      items.push({
+        label: t('ctx.group.reset'),
+        submenu: [
+          { label: t('branches.resetMenu'), accelerator: 'CmdOrCtrl+R', clickId: 'reset-remote' },
+          { label: t('branches.resetAdvancedMenu'), accelerator: 'Shift+CmdOrCtrl+R', clickId: 'reset-advanced-remote' },
+        ],
+      });
+      items.push({
+        label: t('ctx.group.view'),
+        submenu: [
+          { label: t('branches.log'), accelerator: 'CmdOrCtrl+L', clickId: 'log' },
+          { label: t('branches.openInBrowser'), clickId: 'browser' },
+        ],
+      });
       items.push({ label: t('common.copy'), accelerator: 'CmdOrCtrl+C', clickId: 'copy' });
-      items.push({ label: t('branches.openInBrowser'), clickId: 'browser' });
     } else {
-      // === LOCAL BRANCH CONTEXT MENU (matches Fork) ===
-
-      // Group 1: Checkout / Merge / Rebase
+      // === LOCAL BRANCH CONTEXT MENU — v3.4: logically GROUPED by domain.
+      //     Checkout stays top-level (most-used); merge/rebase/rename/delete
+      //     under “Управление ветками ▸”, the 4 push variants under
+      //     “Push ▸”, resets under “Сбросить ▸”, tracking in its own group. ===
       if (!b.current) {
         items.push({ label: t('branches.checkoutMenu'), accelerator: 'CmdOrCtrl+G', clickId: 'checkout', enabled: !isInProgress });
         items.push({ type: 'separator' });
-        items.push({ label: t('branches.merge'), clickId: 'merge' });
-        items.push({ label: t('branches.rebase'), accelerator: 'CmdOrCtrl+D', clickId: 'rebase' });
-        items.push({ label: t('branches.ffMerge'), clickId: 'ff-merge' });
-        items.push({ type: 'separator' });
       }
 
-      // Group 2: Push
-      items.push({ label: t('branches.push'), accelerator: 'CmdOrCtrl+Up', clickId: 'push', enabled: !isInProgress });
-      items.push({ label: t('branches.forcePushMenu'), clickId: 'force-push', enabled: !isInProgress });
-      items.push({ label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to', enabled: !isInProgress });
-      // SmartGit Manual: Push to Gerrit — refs/for/<branch>
-      items.push({ label: t('branches.pushToGerrit'), clickId: 'push-gerrit' });
-      items.push({ type: 'separator' });
+      // Branch management: integrate / rename / delete
+      const manageItems: ContextMenuItem[] = [
+        { label: t('branches.merge'), clickId: 'merge' },
+        { label: t('branches.rebase'), accelerator: 'CmdOrCtrl+D', clickId: 'rebase' },
+        { label: t('branches.ffMerge'), clickId: 'ff-merge' },
+        { type: 'separator' },
+        { label: t('branches.renameMenu'), accelerator: 'F2', clickId: 'rename' },
+      ];
+      if (!b.current) {
+        manageItems.push({ label: t('branches.deleteMenu'), clickId: 'delete' });
+      }
+      items.push({ label: t('ctx.group.branches'), submenu: manageItems });
+
+      // Push: all four variants in one place
+      items.push({
+        label: t('toolbar.push'),
+        submenu: [
+          { label: t('branches.push'), accelerator: 'CmdOrCtrl+Up', clickId: 'push', enabled: !isInProgress },
+          { label: t('branches.forcePushMenu'), clickId: 'force-push', enabled: !isInProgress },
+          { label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to', enabled: !isInProgress },
+          // SmartGit Manual: Push to Gerrit — refs/for/<branch>
+          { label: t('branches.pushToGerrit'), clickId: 'push-gerrit' },
+        ],
+      });
 
       // Task 14 — Worktree actions (moved from the deleted Worktrees page).
       items.push({ label: t('branches.createWorktree'), clickId: 'create-worktree', enabled: !isInProgress });
+
+      // Reset
+      items.push({
+        label: t('ctx.group.reset'),
+        submenu: [
+          { label: t('branches.resetMenu'), accelerator: 'CmdOrCtrl+R', clickId: 'reset' },
+          { label: t('branches.resetAdvancedMenu'), accelerator: 'Shift+CmdOrCtrl+R', clickId: 'reset-advanced' },
+        ],
+      });
+
       items.push({ type: 'separator' });
 
-      // Group 3: Log / Reset
-      items.push({ label: t('branches.log'), accelerator: 'CmdOrCtrl+L', clickId: 'log' });
-      items.push({ type: 'separator' });
-      items.push({ label: t('branches.resetMenu'), accelerator: 'CmdOrCtrl+R', clickId: 'reset' });
-      items.push({ label: t('branches.resetAdvancedMenu'), accelerator: 'Shift+CmdOrCtrl+R', clickId: 'reset-advanced' });
-      items.push({ type: 'separator' });
-
-      // Group 4: Rename / Delete
-      items.push({ label: t('branches.renameMenu'), accelerator: 'F2', clickId: 'rename' });
-      if (!b.current) {
-        items.push({ label: t('branches.deleteMenu'), clickId: 'delete' });
-      }
-      items.push({ type: 'separator' });
-
-      // Group 5: Tracking
+      // Tracking
+      const trackingItems: ContextMenuItem[] = [];
       if (b.tracking) {
-        items.push({ label: t('branches.trackingLabel', { name: b.tracking }), clickId: '_noop', enabled: false });
-        items.push({ label: t('branches.setTracked'), clickId: 'set-tracking' });
-        items.push({ label: t('branches.stopTrackingMenu'), clickId: 'stop-tracking' });
+        trackingItems.push({ label: t('branches.trackingLabel', { name: b.tracking }), clickId: '_noop', enabled: false });
+        trackingItems.push({ label: t('branches.setTracked'), clickId: 'set-tracking' });
+        trackingItems.push({ label: t('branches.stopTrackingMenu'), clickId: 'stop-tracking' });
       } else {
-        items.push({ label: t('branches.setTracked'), clickId: 'set-tracking' });
-        items.push({ label: t('branches.stopTrackingMenu'), enabled: false, clickId: '_noop' });
+        trackingItems.push({ label: t('branches.setTracked'), clickId: 'set-tracking' });
+        trackingItems.push({ label: t('branches.stopTrackingMenu'), enabled: false, clickId: '_noop' });
       }
-      items.push({ type: 'separator' });
+      items.push({ label: t('ctx.group.view'), submenu: [
+        { label: t('branches.log'), accelerator: 'CmdOrCtrl+L', clickId: 'log' },
+      ] });
+      items.push({
+        label: t('branches.upstreamGroup', { defaultValue: 'Upstream' }),
+        submenu: trackingItems,
+      });
 
-      // Group 6: Copy
+      // Copy
       items.push({ label: t('common.copy'), accelerator: 'CmdOrCtrl+C', clickId: 'copy' });
     }
 
@@ -1724,24 +1776,29 @@ export function BranchesPage() {
   const showRemoteContextMenu = (e: React.MouseEvent, remoteName: string) => {
     e.preventDefault();
     e.stopPropagation();
+    // MENU STRUCTURE (v3.4): grouped by domain — sync actions stay top-level
+    // (most-used), URL copy under “Копировать ▸”, remote management under
+    // “Управление remote ▸” (rename/delete/depth/properties/configure).
     showContextMenu([
       { label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'remote-push-to' },
       { label: t('branches.pullMenu'), accelerator: 'CmdOrCtrl+Down', clickId: 'remote-pull' },
-      { type: 'separator' },
       { label: t('remotes.fetch'), accelerator: 'Shift+CmdOrCtrl+Down', clickId: 'fetch' },
       { label: t('branches.fetchMoreMenu'), clickId: 'fetch-more' },
       { type: 'separator' },
-      { label: t('branches.renameMenu'), accelerator: 'F2', clickId: 'rename-remote' },
-      { label: t('branches.deleteMenu'), clickId: 'remove-remote' },
-      { type: 'separator' },
-      { label: t('branches.copyUrl'), clickId: 'copy-url' },
-      { type: 'separator' },
-      { label: t('branches.setDepthMenu'), clickId: 'set-depth' },
-      { label: t('branches.propertiesMenu'), clickId: 'properties' },
-      { type: 'separator' },
-      { label: t('branches.configureRemote'), clickId: 'configure' },
-      { label: t('branches.addNewRemote'), clickId: 'add-remote' },
-      { label: t('branches.manageRemotes'), clickId: 'manage' },
+      { label: t('ctx.group.copy'), submenu: [
+        { label: t('branches.copyUrl'), clickId: 'copy-url' },
+      ] },
+      { label: t('ctx.group.remote.manage'), submenu: [
+        { label: t('branches.renameMenu'), accelerator: 'F2', clickId: 'rename-remote' },
+        { label: t('branches.deleteMenu'), clickId: 'remove-remote' },
+        { type: 'separator' },
+        { label: t('branches.setDepthMenu'), clickId: 'set-depth' },
+        { label: t('branches.propertiesMenu'), clickId: 'properties' },
+        { type: 'separator' },
+        { label: t('branches.configureRemote'), clickId: 'configure' },
+        { label: t('branches.addNewRemote'), clickId: 'add-remote' },
+        { label: t('branches.manageRemotes'), clickId: 'manage' },
+      ] },
     ], (action) => {
       if (action === 'remote-push-to') {
         // Push the CURRENT branch to this remote (Fork behavior) — via the

@@ -156,15 +156,21 @@ export function JournalPage() {
               onClick={() => useSelectionStore.getState().selectCommit(entry.hash)}
               onContextMenu={(e) => {
                 e.preventDefault();
+                // MENU STRUCTURE (v3.4): grouped by domain — navigation
+                // top-level, clipboard under “Копировать ▸”, git operations
+                // (cherry-pick/reset) in one group.
                 showContextMenu([
                   { label: t('pages.menuViewCommitInHistory'), clickId: 'view-commit' },
                   { type: 'separator' },
-                  { label: t('history.copyShortHash'), clickId: 'copy-short' },
-                  { label: t('history.copyFullHash'), clickId: 'copy-full' },
-                  { label: t('pages.menuCopyMessage'), clickId: 'copy-msg' },
-                  { type: 'separator' },
-                  { label: t('pages.menuCherryPick'), clickId: 'cherry-pick' },
-                  { label: t('pages.menuResetHard'), clickId: 'reset-hard' },
+                  { label: t('ctx.group.copy'), submenu: [
+                    { label: t('history.copyShortHash'), clickId: 'copy-short' },
+                    { label: t('history.copyFullHash'), clickId: 'copy-full' },
+                    { label: t('pages.menuCopyMessage'), clickId: 'copy-msg' },
+                  ] },
+                  { label: t('ctx.group.editCommit'), submenu: [
+                    { label: t('pages.menuCherryPick'), clickId: 'cherry-pick' },
+                    { label: t('pages.menuResetHard'), clickId: 'reset-hard' },
+                  ] },
                 ], (action) => {
                   switch (action) {
                     case 'view-commit':

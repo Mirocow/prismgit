@@ -244,13 +244,21 @@ export function AnnotatePage() {
                           e.stopPropagation();
                           setSelectedIdx(realIdx);
                           selectCommit(entry.hash);
+                          // MENU STRUCTURE (v3.4): grouped by domain —
+                          // navigation top-level, tag creation under
+                          // “Управление тегами ▸”, clipboard under
+                          // “Копировать ▸”.
                           const items: ContextMenuItem[] = [
                             { label: t('pages.menuViewInHistory'), clickId: 'view-history' },
-                            { label: t('history.createTag'), clickId: 'create-tag' },
                             { type: 'separator' },
-                            { label: t('history.copyShortHash'), clickId: 'copy-short' },
-                            { label: t('history.copyFullHash'), clickId: 'copy-full' },
-                            { label: t('history.copyMessage'), clickId: 'copy-msg' },
+                            { label: t('ctx.group.tags'), submenu: [
+                              { label: t('history.createTag'), clickId: 'create-tag' },
+                            ] },
+                            { label: t('ctx.group.copy'), submenu: [
+                              { label: t('history.copyShortHash'), clickId: 'copy-short' },
+                              { label: t('history.copyFullHash'), clickId: 'copy-full' },
+                              { label: t('history.copyMessage'), clickId: 'copy-msg' },
+                            ] },
                           ];
                           showContextMenu(items, (action) => {
                             if (action === 'view-history') {
@@ -274,7 +282,7 @@ export function AnnotatePage() {
                         }}
                         title={t('pages.clickSelectHint')}
                       >
-                        {isHEAD && <span className="text-2xs text-accent font-bold shrink-0" style={{ width: 8 }} title="Current branch (HEAD)">{'>'}</span>}
+                        {isHEAD && <span className="text-2xs text-accent font-bold shrink-0" style={{ width: 8 }} title={t('pages.currentBranchHead')}>{'>'}</span>}
                         {!isHEAD && <span style={{ width: 8 }} className="shrink-0" />}
                         {fileCount !== undefined && fileCount > 0 && (
                           <span className="text-2xs px-1 py-0 rounded bg-accent-muted text-accent shrink-0" style={{ minWidth: 20, textAlign: 'center' }}>
@@ -368,12 +376,17 @@ export function AnnotatePage() {
                         onContextMenu={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
+                          // MENU STRUCTURE (v3.4): grouped — navigation in
+                          // “Просмотр ▸”, clipboard in “Копировать ▸”.
                           const items: ContextMenuItem[] = [
-                            { label: t('pages.menuViewFileHistory'), clickId: 'file-history' },
-                            { label: t('pages.menuBlameThisFile'), clickId: 'blame' },
-                            { type: 'separator' },
-                            { label: t('pages.menuCopyPath'), clickId: 'copy-path' },
-                            { label: t('pages.menuCopyFullPath'), clickId: 'copy-full-path' },
+                            { label: t('ctx.group.view'), submenu: [
+                              { label: t('pages.menuViewFileHistory'), clickId: 'file-history' },
+                              { label: t('pages.menuBlameThisFile'), clickId: 'blame' },
+                            ] },
+                            { label: t('ctx.group.copy'), submenu: [
+                              { label: t('pages.menuCopyPath'), clickId: 'copy-path' },
+                              { label: t('pages.menuCopyFullPath'), clickId: 'copy-full-path' },
+                            ] },
                           ];
                           showContextMenu(items, (action) => {
                             if (action === 'file-history') {

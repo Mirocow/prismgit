@@ -163,6 +163,10 @@ export function bulkSuffix(ctx: Pick<FileMenuCtx, 'path' | 'paths'>): string {
 
 /** Build the menu items for a file (pure — no side effects). */
 export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
+  // MENU STRUCTURE (v3.4): items are LOGICALLY GROUPED by domain —
+  // “Открыть ▸”, “Просмотр ▸”, “Рабочее дерево ▸”, “Игнорировать ▸”,
+  // “Копировать ▸” — instead of a flat 20+ item list. The most frequent
+  // action (Open) stays top-level.
   const items: ContextMenuItem[] = [];
   // In changes mode the working-tree state is authoritative: an untracked
   // file is never in the index, so 'Remove...' becomes 'Delete File...'.
@@ -174,89 +178,102 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
 
   // --- Open (opens EVERY selected file, like a file manager) ----------------
   items.push({ label: `${i18nT('ctx.file.open')}${bulk}`, clickId: 'open' });
-  items.push({ label: i18nT('vscode.openInVscode'), clickId: 'open-vscode' });
-  items.push({ label: `${i18nT('ctx.file.revealInFileManager')}${bulk}`, clickId: 'reveal' });
+  items.push({
+    label: i18nT('ctx.group.open'),
+    submenu: [
+      { label: i18nT('vscode.openInVscode'), clickId: 'open-vscode' },
+      { label: `${i18nT('ctx.file.revealInFileManager')}${bulk}`, clickId: 'reveal' },
+    ],
+  });
   items.push({ type: 'separator' });
 
-  // --- Inspect ------------------------------------------------------------
+  // --- Inspect → “Просмотр и сравнение” --------------------------------------
+  const viewItems: ContextMenuItem[] = [];
   if (ctx.mode === 'changes' && ctx.onShowChanges) {
-    items.push({ label: i18nT('ctx.file.showChanges'), clickId: 'show-changes' });
+    viewItems.push({ label: i18nT('ctx.file.showChanges'), clickId: 'show-changes' });
   }
   if ((ctx.mode === 'history' || ctx.mode === 'changes') && ctx.onOpenDiff) {
-    items.push({ label: i18nT('ctx.file.openInDiffTool'), clickId: 'open-diff' });
+    viewItems.push({ label: i18nT('ctx.file.openInDiffTool'), clickId: 'open-diff' });
   }
   if (ctx.mode === 'changes') {
-    items.push({ label: i18nT('vscode.openDiffInVscode'), clickId: 'open-vscode-diff' });
+    viewItems.push({ label: i18nT('vscode.openDiffInVscode'), clickId: 'open-vscode-diff' });
   }
   if (ctx.mode === 'history' && ctx.commitSha) {
-    items.push({ label: i18nT('vscode.openCommitFileDiff'), clickId: 'open-vscode-commit-diff' });
-    items.push({ label: i18nT('vscode.openFileVersion'), clickId: 'open-vscode-version' });
+    viewItems.push({ label: i18nT('vscode.openCommitFileDiff'), clickId: 'open-vscode-commit-diff' });
+    viewItems.push({ label: i18nT('vscode.openFileVersion'), clickId: 'open-vscode-version' });
   }
-  items.push({ label: i18nT('ctx.file.fileHistory'), clickId: 'file-history' });
-  items.push({ label: i18nT('ctx.file.blameThisFile'), clickId: 'blame' });
-  items.push({ type: 'separator' });
+  viewItems.push({ label: i18nT('ctx.file.fileHistory'), clickId: 'file-history' });
+  viewItems.push({ label: i18nT('ctx.file.blameThisFile'), clickId: 'blame' });
+  if (viewItems.length > 0) {
+    items.push({ label: i18nT('ctx.group.view'), submenu: viewItems });
+    items.push({ type: 'separator' });
+  }
 
-  // --- Working-tree operations (Changes mode only) -------------------------
+  // --- Working-tree operations (Changes mode only) → “Рабочее дерево” -------
   if (ctx.mode === 'changes') {
+    const worktreeItems: ContextMenuItem[] = [];
     if (ctx.isStaged) {
-      items.push({ label: `${i18nT('ctx.file.unstage')}${bulk}`, clickId: 'unstage' });
+      worktreeItems.push({ label: `${i18nT('ctx.file.unstage')}${bulk}`, clickId: 'unstage' });
     } else {
-      items.push({ label: `${i18nT('ctx.file.stage')}${bulk}`, clickId: 'stage' });
+      worktreeItems.push({ label: `${i18nT('ctx.file.stage')}${bulk}`, clickId: 'stage' });
     }
-    items.push({ label: i18nT('ctx.file.commit'), clickId: 'commit' });
+    worktreeItems.push({ label: i18nT('ctx.file.commit'), clickId: 'commit' });
     if (!untracked) {
-      items.push({ label: `${i18nT('ctx.file.stashSelection')}${bulk}`, clickId: 'stash-file' });
-      items.push({ type: 'separator' });
-      items.push({
+      worktreeItems.push({ label: `${i18nT('ctx.file.stashSelection')}${bulk}`, clickId: 'stash-file' });
+      worktreeItems.push({ type: 'separator' });
+      worktreeItems.push({
         label: ctx.isStaged ? `${i18nT('ctx.file.discardStagedChanges')}${bulk}` : `${i18nT('ctx.file.discardChanges')}${bulk}`,
         clickId: 'discard',
       });
-      items.push({ label: `${i18nT('ctx.file.restoreFromRef')}${bulk}`, clickId: 'restore-from-ref' });
+      worktreeItems.push({ label: `${i18nT('ctx.file.restoreFromRef')}${bulk}`, clickId: 'restore-from-ref' });
     } else {
       // Untracked files — "Discard" means deleting the file (git clean).
       // Show it as "Discard (Delete)" so the user understands what happens.
-      items.push({ type: 'separator' });
-      items.push({
+      worktreeItems.push({ type: 'separator' });
+      worktreeItems.push({
         label: `${i18nT('ctx.file.discardDelete')}${bulk}`,
         clickId: 'discard-untracked',
       });
     }
-    items.push({ type: 'separator' });
-
     // --- Index flags (tracked files only, live checkbox state) ------------
     if (ctx.indexFlags) {
-      items.push({
+      worktreeItems.push({ type: 'separator' });
+      worktreeItems.push({
         label: i18nT('ctx.file.toggleAssumeUnchanged'),
         type: 'checkbox',
         checked: ctx.indexFlags.assumeUnchanged,
         clickId: 'toggle-assume-unchanged',
       });
-      items.push({
+      worktreeItems.push({
         label: i18nT('ctx.file.toggleSkipWorktree'),
         type: 'checkbox',
         checked: ctx.indexFlags.skipWorktree,
         clickId: 'toggle-skip-worktree',
       });
-      items.push({ type: 'separator' });
     }
+    items.push({ label: i18nT('ctx.group.worktree'), submenu: worktreeItems });
 
-    // --- File operations --------------------------------------------------
+    // --- File operations → “Игнорировать” / “Удаление” --------------------
+    const fileOpItems: ContextMenuItem[] = [];
     if (untracked) {
-      items.push({ label: `${i18nT('ctx.file.addToGitignore')}${bulk}`, clickId: 'ignore' });
-      items.push({ label: i18nT('ctx.file.editGitignore'), clickId: 'edit-ignore-local' });
-      items.push({ label: i18nT('ctx.file.editGlobalIgnore'), clickId: 'edit-ignore-global' });
+      fileOpItems.push({ label: `${i18nT('ctx.file.addToGitignore')}${bulk}`, clickId: 'ignore' });
+      fileOpItems.push({ label: i18nT('ctx.file.editGitignore'), clickId: 'edit-ignore-local' });
+      fileOpItems.push({ label: i18nT('ctx.file.editGlobalIgnore'), clickId: 'edit-ignore-global' });
+      fileOpItems.push({ type: 'separator' });
     }
-    items.push({ label: i18nT('ctx.file.moveOrRename'), clickId: 'move-rename' });
-    items.push({
+    fileOpItems.push({ label: i18nT('ctx.file.moveOrRename'), clickId: 'move-rename' });
+    fileOpItems.push({
       label: `${tracked ? i18nT('ctx.file.remove') : i18nT('ctx.file.deleteFile')}${bulk}`,
       clickId: 'delete-file',
     });
+    items.push({ label: i18nT('ctx.group.delete'), submenu: fileOpItems });
+
     if (ctx.isConflicted) {
       items.push({ type: 'separator' });
       items.push({ label: i18nT('ctx.file.resolveConflict'), clickId: 'resolve-conflict' });
       // SmartGit-style "Resolve" submenu: Take Ours / Take Theirs
       items.push({
-        label: i18nT('ctx.file.resolve'),
+        label: i18nT('ctx.group.resolve'),
         clickId: '_submenu_resolve',
         submenu: [
           { label: i18nT('ctx.file.takeOurs'), clickId: 'resolve-take-ours', title: 'git checkout --ours -- <file> + git add' },
@@ -270,10 +287,15 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
     items.push({ type: 'separator' });
   }
 
-  // --- Clipboard ------------------------------------------------------------
-  items.push({ label: i18nT('ctx.file.copyName'), clickId: 'copy-name' });
-  items.push({ label: i18nT('ctx.file.copyRelativePath'), clickId: 'copy-rel-path' });
-  items.push({ label: i18nT('ctx.file.copyFullPath'), clickId: 'copy-full-path' });
+  // --- Clipboard → “Копировать” ----------------------------------------------
+  items.push({
+    label: i18nT('ctx.group.copy'),
+    submenu: [
+      { label: i18nT('ctx.file.copyName'), clickId: 'copy-name' },
+      { label: i18nT('ctx.file.copyRelativePath'), clickId: 'copy-rel-path' },
+      { label: i18nT('ctx.file.copyFullPath'), clickId: 'copy-full-path' },
+    ],
+  });
 
   // --- Directory scoping (Changes mode) --------------------------------------
   if (ctx.mode === 'changes' && ctx.onSelectDirectory) {

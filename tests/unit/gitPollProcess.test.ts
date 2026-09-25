@@ -66,6 +66,26 @@ vi.mock('../../electron/services/gitStatusCore.js', () => {
   return { runStatusJob, resolveHeadSha: vi.fn(), detectRepoStateFromGitDir: vi.fn(() => ({})) };
 });
 
+vi.mock('../../electron/services/gitStatsCore.js', () => {
+  const runStatsJob = vi.fn(
+    async (req: { repoPath: string }) =>
+      ({
+        isRepo: true,
+        lastCommitHash: `hash-${req.repoPath}`,
+        lastCommitDate: '2026-01-01T00:00:00.000Z',
+        lastCommitMessage: 'direct stats commit',
+        branchCount: 2,
+        commitCount: 42,
+        remoteUrl: 'https://gitlab.com/team/repo.git',
+        provider: 'gitlab',
+        owner: 'team',
+        repo: 'repo',
+        webUrl: 'https://gitlab.com/team/repo',
+      }) as const
+  );
+  return { runStatsJob };
+});
+
 vi.mock('electron', async () => {
   const { EventEmitter: EE } = await import('node:events');
 
@@ -94,11 +114,13 @@ vi.mock('electron', async () => {
 import {
   runPollJobExternal,
   runStatusJobExternal,
+  runStatsJobExternal,
   disposeGitPollWorker,
   __resetGitPollProcessForTests,
 } from '../../electron/services/gitPollProcess';
 import { runPollJob } from '../../electron/services/gitPollCore.js';
 import { runStatusJob } from '../../electron/services/gitStatusCore.js';
+import { runStatsJob } from '../../electron/services/gitStatsCore.js';
 
 const electronModule = (await import('electron')) as unknown as {
   utilityProcess: { fork: ReturnType<typeof vi.fn> };
@@ -126,6 +148,7 @@ beforeEach(() => {
   (process as { type?: string }).type = 'browser';
   vi.mocked(runPollJob).mockClear();
   vi.mocked(runStatusJob).mockClear();
+  vi.mocked(runStatsJob).mockClear();
   electronModule.utilityProcess.fork.mockClear();
   electronModule.__processes.length = 0;
 });
@@ -292,7 +315,12 @@ describe('gitPollProcess — separate-process status fetch', () => {
     const proc = lastProcess();
     proc.emit('message', { kind: 'ready' });
     disposeGitPollWorker();
-    expect(proc.killed).toBe(true);
+    // v3.4: dispose is GRACEFUL first — the worker gets a 'shutdown' message
+    // (so it can kill its git children) and the hard kill lands after the
+    // 500 ms grace window (real timers — waitFor polls until it fires).
+    expect(proc.posted).toContainEqual({ kind: 'shutdown' });
+    expect(proc.killed).toBe(false);
+    await vi.waitFor(() => expect(proc.killed).toBe(true));
     // The pending job survives via the in-process fallback.
     await expect(promise).resolves.toMatchObject({ branch: 'direct-branch' });
   });
@@ -395,5 +423,85 @@ describe('gitPollProcess — watcher status jobs on the SAME worker', () => {
     const jobId = (proc.posted[0] as { id: number }).id;
     proc.emit('message', { kind: 'status-result', id: jobId, result: null });
     await expect(promise).resolves.toMatchObject({ current: 'direct-status-branch' });
+  });
+});
+
+describe('gitPollProcess — sidebar stats jobs on the SAME worker', () => {
+  const STATS_REQUEST = { repoPath: '/repos/beta' } as const;
+
+  it('runs the stats job IN-PROCESS outside the Electron main process (vitest fallback)', async () => {
+    (process as { type?: string }).type = undefined;
+    const result = await runStatsJobExternal({ ...STATS_REQUEST });
+    expect(result.commitCount).toBe(42);
+    expect(result.provider).toBe('gitlab');
+    expect(runStatsJob).toHaveBeenCalledWith({ ...STATS_REQUEST });
+    expect(electronModule.utilityProcess.fork).not.toHaveBeenCalled();
+  });
+
+  it('dispatches a stats job with kind:"stats" and resolves on stats-result', async () => {
+    const promise = runStatsJobExternal({ ...STATS_REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+
+    // The request went out tagged as a STATS job.
+    const sent = proc.posted[0] as { kind: string; id: number; request: unknown };
+    expect(sent.kind).toBe('stats');
+    expect(sent.request).toEqual({ ...STATS_REQUEST });
+
+    proc.emit('message', {
+      kind: 'stats-result',
+      id: sent.id,
+      result: {
+        lastCommitMessage: 'worker stats commit',
+        branchCount: 7,
+        commitCount: 100,
+        provider: 'github',
+      },
+    });
+    await expect(promise).resolves.toMatchObject({
+      lastCommitMessage: 'worker stats commit',
+      branchCount: 7,
+      commitCount: 100,
+      provider: 'github',
+    });
+    expect(runStatsJob).not.toHaveBeenCalled(); // no in-process fallback needed
+  });
+
+  it('a stats-error from the worker falls back to the in-process run', async () => {
+    const promise = runStatsJobExternal({ ...STATS_REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+    const jobId = (proc.posted[0] as { id: number }).id;
+    proc.emit('message', { kind: 'stats-error', id: jobId, message: 'stats exploded' });
+    // runStatsJobExternal swallows the worker failure → in-process result.
+    await expect(promise).resolves.toMatchObject({ commitCount: 42 });
+    expect(runStatsJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares ONE worker between poll, status AND stats jobs (no extra fork)', async () => {
+    const pollPromise = runPollJobExternal({ ...REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+    proc.emit('message', {
+      kind: 'poll-result',
+      id: (proc.posted[0] as { id: number }).id,
+      result: { fetched: true, error: null, branch: 'b', incoming: 0, outgoing: 0, dirty: 0 },
+    });
+    await pollPromise;
+
+    const statsPromise = runStatsJobExternal({ ...STATS_REQUEST });
+    await vi.waitFor(() => expect(proc.posted.length).toBe(2));
+    expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1); // SAME process
+    const second = proc.posted[1] as { kind: string; id: number };
+    expect(second.kind).toBe('stats');
+    proc.emit('message', {
+      kind: 'stats-result',
+      id: second.id,
+      result: { branchCount: 3, commitCount: 9, provider: 'unknown' },
+    });
+    await expect(statsPromise).resolves.toMatchObject({ commitCount: 9 });
   });
 });

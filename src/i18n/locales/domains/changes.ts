@@ -381,6 +381,11 @@ export const en: Record<string, string> = {
   'changes.abortMergeDialogMessage': 'The repository returns to its state before the merge started. All staged merge changes are discarded.',
   'changes.gitCommitNoEditHint': 'git commit --no-edit',
   'changes.gitMergeAbortHint': 'git merge --abort',
+
+  // ── v3.4 localization completion ──
+  'changes.expandAllFolders': 'Expand all folders',
+  'changes.collapseAllFolders': 'Collapse all folders',
+  'changes.clearFolderScope': 'Clear folder scope (show all files)',
 };
 
 export const ru: Record<string, string> = {
@@ -754,6 +759,11 @@ export const ru: Record<string, string> = {
   'changes.abortMergeDialogMessage': 'Репозиторий вернётся к состоянию до начала слияния. Все проиндексированные изменения слияния будут потеряны.',
   'changes.gitCommitNoEditHint': 'git commit --no-edit',
   'changes.gitMergeAbortHint': 'git merge --abort',
+
+  // ── v3.4 localization completion ──
+  'changes.expandAllFolders': 'Развернуть все папки',
+  'changes.collapseAllFolders': 'Свернуть все папки',
+  'changes.clearFolderScope': 'Сбросить область папки (показать все файлы)',
 };
 
 export const zh: Record<string, string> = {
@@ -1127,6 +1137,11 @@ export const zh: Record<string, string> = {
   'changes.abortMergeDialogMessage': '仓库将返回到合并开始前的状态。所有已暂存的合并更改将被丢弃。',
   'changes.gitCommitNoEditHint': 'git commit --no-edit',
   'changes.gitMergeAbortHint': 'git merge --abort',
+
+  // ── v3.4 localization completion ──
+  'changes.expandAllFolders': '展开全部文件夹',
+  'changes.collapseAllFolders': '折叠全部文件夹',
+  'changes.clearFolderScope': '清除文件夹范围（显示全部文件）',
 };
 
 export const de: Record<string, string> = {
@@ -1500,4 +1515,9 @@ export const de: Record<string, string> = {
   'changes.abortMergeDialogMessage': 'Das Repository kehrt in den Zustand vor Beginn des Merges zurück. Alle indexierten Merge-Änderungen werden verworfen.',
   'changes.gitCommitNoEditHint': 'git commit --no-edit',
   'changes.gitMergeAbortHint': 'git merge --abort',
+
+  // ── v3.4 localization completion ──
+  'changes.expandAllFolders': 'Alle Ordner ausklappen',
+  'changes.collapseAllFolders': 'Alle Ordner einklappen',
+  'changes.clearFolderScope': 'Ordnerbereich löschen (alle Dateien zeigen)',
 };

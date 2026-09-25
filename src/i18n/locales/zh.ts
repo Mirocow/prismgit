@@ -290,4 +290,19 @@ export const zh: Record<string, string> = {
   'common.copyFailed': '复制失败',
   'common.copyHash': '复制提交哈希',
   'common.copyLineNumber': '复制行号 ({n})',
+
+  // ── v3.4 localization completion ──
+  'common.lines': '行',
+  'common.load': '加载',
+  'common.settings': '设置',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'common.noRows': '暂无数据',
+  'common.dismissNotification': '关闭通知',
+  'common.copyCode': '复制代码',
+  'common.apiKeySaved': 'API 密钥已保存',
+  'common.loadingEllipsis': '加载中…',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'toolbar.stageAllTooltip': '暂存所有更改',
 };

@@ -222,19 +222,28 @@ export function StashesPage() {
                 title={t('stashes.rowTooltip')}
                 onContextMenu={(e) => {
                   e.preventDefault();
+                  // MENU STRUCTURE (v3.4): grouped by domain — view top-level,
+                  // restore variants (apply/pop × keep-index) in one group,
+                  // branch/drop in “Удаление ▸”, clipboard in “Копировать ▸”.
                   showContextMenu([
                     { label: t('stashes.viewMenu'), clickId: 'view' },
                     { type: 'separator' },
-                    { label: t('stashes.applyItem', { index: s.index }), clickId: 'apply' },
-                    { label: t('stashes.applyKeepIndexMenu', { index: s.index }), clickId: 'apply-keep-index' },
-                    { label: t('stashes.popStashAtMenu', { index: s.index }), clickId: 'pop' },
-                    { label: t('stashes.popKeepIndexMenu', { index: s.index }), clickId: 'pop-keep-index' },
-                    { label: t('stashes.branchMenu'), clickId: 'branch' },
-                    { type: 'separator' },
-                    { label: t('stashes.dropStashAtMenu', { index: s.index }), clickId: 'drop' },
-                    { type: 'separator' },
-                    { label: t('stashes.copyMessage'), clickId: 'copy-msg' },
-                    { label: t('stashes.copyHash'), clickId: 'copy-hash' },
+                    { label: t('stashes.restoreGroup', { defaultValue: 'Restore' }), submenu: [
+                      { label: t('stashes.applyItem', { index: s.index }), clickId: 'apply' },
+                      { label: t('stashes.applyKeepIndexMenu', { index: s.index }), clickId: 'apply-keep-index' },
+                      { type: 'separator' },
+                      { label: t('stashes.popStashAtMenu', { index: s.index }), clickId: 'pop' },
+                      { label: t('stashes.popKeepIndexMenu', { index: s.index }), clickId: 'pop-keep-index' },
+                      { type: 'separator' },
+                      { label: t('stashes.branchMenu'), clickId: 'branch' },
+                    ] },
+                    { label: t('ctx.group.delete'), submenu: [
+                      { label: t('stashes.dropStashAtMenu', { index: s.index }), clickId: 'drop' },
+                    ] },
+                    { label: t('ctx.group.copy'), submenu: [
+                      { label: t('stashes.copyMessage'), clickId: 'copy-msg' },
+                      { label: t('stashes.copyHash'), clickId: 'copy-hash' },
+                    ] },
                   ], (action) => {
                     switch (action) {
                       case 'view': handleViewStash(s); break;

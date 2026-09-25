@@ -290,4 +290,19 @@ export const ru: Record<string, string> = {
   'common.copyFailed': 'Не удалось скопировать',
   'common.copyHash': 'Скопировать хэш коммита',
   'common.copyLineNumber': 'Скопировать номер строки ({n})',
+
+  // ── v3.4 localization completion ──
+  'common.lines': 'строк',
+  'common.load': 'Загрузить',
+  'common.settings': 'Настройки',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'common.noRows': 'Нет записей',
+  'common.dismissNotification': 'Закрыть уведомление',
+  'common.copyCode': 'Копировать код',
+  'common.apiKeySaved': 'API-ключ сохранён',
+  'common.loadingEllipsis': 'Загрузка...',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'toolbar.stageAllTooltip': 'Индексировать все изменения',
 };

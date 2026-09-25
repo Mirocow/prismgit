@@ -486,7 +486,7 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
       {/* Optional Base peek pane (collapsible) */}
       {showBase && (
         <div className="border-b border-border-default bg-bg-tertiary px-3 py-1 text-2xs max-h-32 overflow-auto">
-          <div className="text-text-tertiary font-medium mb-1">Base (common ancestor):</div>
+          <div className="text-text-tertiary font-medium mb-1">{t('conflict.basePaneLabel')}</div>
           <pre className="text-2xs font-mono whitespace-pre-wrap text-text-secondary">{baseContent || '(empty)'}</pre>
         </div>
       )}

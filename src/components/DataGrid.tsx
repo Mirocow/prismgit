@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { ChevronUp, ChevronDown, ChevronsUpDown } from './icons';
 import { cn } from '../lib/utils';
+import { t as i18nT } from '../lib/i18n';
 
 /**
  * Resizable + sortable DataGrid.
@@ -275,7 +276,7 @@ export function DataGrid<R>({
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
         {sortedRows.length === 0 ? (
-          emptyState ?? <div className="p-4 text-center text-text-tertiary text-xs">No rows</div>
+          emptyState ?? <div className="p-4 text-center text-text-tertiary text-xs">{i18nT('common.noRows')}</div>
         ) : (
           <>
             {sortedRows.slice(0, visibleCount).map((row, idx) => {

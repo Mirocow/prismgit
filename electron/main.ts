@@ -351,7 +351,11 @@ app.whenReady().then(() => {
     //   - SharedImageManager GPU errors (already disabled via --disable-gpu,
     //     but some Chromium versions still log them)
     //   - Deprecation warnings from Chromium internals
-    const benign = /Autofill\.|SharedImageManager|ProduceMemory|non-existent mailbox|deprecated/i;
+    //   - react-dom's dev-build "Download the React DevTools" banner — it
+    //     prints on EVERY `make dev` session (React dev mode is inherent to
+    //     the Vite dev server); suppressing it keeps the DevTools console
+    //     signal-only. The banner is dev-only noise, never an app problem.
+    const benign = /Autofill\.|SharedImageManager|ProduceMemory|non-existent mailbox|deprecated|Download the React DevTools/i;
     if (benign.test(message)) {
       _event.preventDefault();
     }
@@ -449,12 +453,14 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  // PERF (v3.4): kill the background git worker FIRST — it asks the worker
+  // to kill its in-flight git children (a hard kill of the worker alone
+  // ORPHANS `git fetch` processes that keep the network/AV busy for up to
+  // the OS TCP timeout AFTER the app is gone — the "closing the app leaves
+  // the machine sluggish" report), and it takes ≤500 ms.
+  disposeGitPollWorker();
   saveWindowState();
   stopAllWatchers();
-  // Kill the dedicated git-poll utility process (repository-list remote
-  // check) — its pending jobs reject and the poll callers already handle
-  // that silently.
-  disposeGitPollWorker();
   // Flush any pending command-log batch — otherwise the last 100 ms of
   // git commands would never reach the renderer's Output panel.
   flushCommandLogBatch();

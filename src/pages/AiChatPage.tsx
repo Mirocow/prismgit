@@ -430,7 +430,7 @@ export default function AiChatPage() {
                       <span className="flex-1 truncate">{p.name}</span>
                       <span className="text-3xs text-text-tertiary truncate max-w-24">{p.model || p.url}</span>
                       {p.apiKey && (
-                        <span className="text-3xs text-status-added" title="API key saved">✓</span>
+                        <span className="text-3xs text-status-added" title={t('common.apiKeySaved')}>✓</span>
                       )}
                     </button>
                   ))}

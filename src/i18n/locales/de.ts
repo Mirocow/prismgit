@@ -290,4 +290,19 @@ export const de: Record<string, string> = {
   'common.copyFailed': 'Kopieren fehlgeschlagen',
   'common.copyHash': 'Commit-Hash kopieren',
   'common.copyLineNumber': 'Zeilennummer kopieren ({n})',
+
+  // ── v3.4 localization completion ──
+  'common.lines': 'Zeilen',
+  'common.load': 'Laden',
+  'common.settings': 'Einstellungen',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'common.noRows': 'Keine Zeilen',
+  'common.dismissNotification': 'Benachrichtigung schließen',
+  'common.copyCode': 'Code kopieren',
+  'common.apiKeySaved': 'API-Schlüssel gespeichert',
+  'common.loadingEllipsis': 'Lädt...',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'toolbar.stageAllTooltip': 'Alle Änderungen stagen',
 };

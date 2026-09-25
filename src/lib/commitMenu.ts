@@ -46,15 +46,23 @@ export interface HashMenuCtx {
 }
 
 export function buildHashMenu(ctx: HashMenuCtx): ContextMenuItem[] {
-  const items: ContextMenuItem[] = [
+  // MENU STRUCTURE (v3.4): grouped by domain — everything clipboard under
+  // “Копировать ▸”, navigation under “Просмотр ▸”. This menu appears on
+  // EVERY commit-hash link in the app.
+  const copyItems: ContextMenuItem[] = [
     { label: i18nT('ctx.commit.copyShortHash'), clickId: 'copy-short' },
     { label: i18nT('ctx.commit.copyFullHash'), clickId: 'copy-full' },
   ];
-  if (ctx.subject) items.push({ label: i18nT('ctx.commit.copyCommitMessage'), clickId: 'copy-msg' });
-  items.push({ type: 'separator' });
-  items.push({ label: i18nT('ctx.commit.viewInHistory'), clickId: 'view-history' });
-  if (ctx.repoPath) items.push({ label: i18nT('ctx.commit.openInBrowser'), clickId: 'browser' });
-  return items;
+  if (ctx.subject) copyItems.push({ label: i18nT('ctx.commit.copyCommitMessage'), clickId: 'copy-msg' });
+  const viewItems: ContextMenuItem[] = [
+    { label: i18nT('ctx.commit.viewInHistory'), clickId: 'view-history' },
+  ];
+  if (ctx.repoPath) viewItems.push({ label: i18nT('ctx.commit.openInBrowser'), clickId: 'browser' });
+  return [
+    { label: i18nT('ctx.group.copy'), submenu: copyItems },
+    { type: 'separator' },
+    { label: i18nT('ctx.group.view'), submenu: viewItems },
+  ];
 }
 
 export async function runHashMenuAction(clickId: string, ctx: HashMenuCtx): Promise<boolean> {
@@ -112,18 +120,36 @@ export interface RefMenuCtx {
 
 export function buildRefMenu(ctx: RefMenuCtx): ContextMenuItem[] {
   const { parsed } = ctx;
+  // MENU STRUCTURE (v3.4): grouped by domain — branch actions under
+  // “Управление ветками ▸”, tag deletion under “Управление тегами ▸”,
+  // clipboard under “Копировать ▸”, navigation top-level.
   const items: ContextMenuItem[] = [
-    { label: i18nT('ctx.commit.copyName'), clickId: 'copy-name' },
-    { label: i18nT('ctx.commit.copyFullRef'), clickId: 'copy-full-ref' },
+    {
+      label: i18nT('ctx.group.copy'),
+      submenu: [
+        { label: i18nT('ctx.commit.copyName'), clickId: 'copy-name' },
+        { label: i18nT('ctx.commit.copyFullRef'), clickId: 'copy-full-ref' },
+      ],
+    },
+    { type: 'separator' },
   ];
-  items.push({ type: 'separator' });
   if (parsed.kind === 'branch' && ctx.repoPath) {
-    items.push({ label: i18nT('ctx.commit.checkoutName').replace('{name}', parsed.label), clickId: 'checkout-branch' });
-    items.push({ label: i18nT('ctx.commit.deleteBranchName').replace('{name}', parsed.label), clickId: 'delete-branch' });
+    items.push({
+      label: i18nT('ctx.group.branches'),
+      submenu: [
+        { label: i18nT('ctx.commit.checkoutName').replace('{name}', parsed.label), clickId: 'checkout-branch' },
+        { label: i18nT('ctx.commit.deleteBranchName').replace('{name}', parsed.label), clickId: 'delete-branch' },
+      ],
+    });
     items.push({ type: 'separator' });
   }
   if (parsed.kind === 'tag' && ctx.repoPath) {
-    items.push({ label: i18nT('ctx.commit.deleteTagName').replace('{name}', parsed.label), clickId: 'delete-tag' });
+    items.push({
+      label: i18nT('ctx.group.tags'),
+      submenu: [
+        { label: i18nT('ctx.commit.deleteTagName').replace('{name}', parsed.label), clickId: 'delete-tag' },
+      ],
+    });
     items.push({ type: 'separator' });
   }
   if (ctx.hash) items.push({ label: i18nT('ctx.commit.viewInHistory'), clickId: 'view-commit' });

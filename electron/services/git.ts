@@ -3169,8 +3169,16 @@ export function __pollCacheEntryForTests(repoPath: string): { summary: RemoteChe
  * state instead of the cached result from a prior test. In production
  * callers should NOT call this — the cache is the whole point of the
  * background poll throttling.
+ *
+ * PERF (v3.4) `opts.remotes` (default TRUE for test parity): production
+ * IPC passes `remotes: false` — the manual "Check all repositories" click
+ * must re-poll but dropping the REMOTES cache only re-spawns `git remote -v`
+ * per repo on the MAIN loop for data that cannot have changed by clicking a
+ * button. Remotes have their own 60s TTL and explicit mutation-based
+ * invalidation (addRemote/removeRemote/etc.).
  */
-export function clearPollCache(repoPath?: string): void {
+export function clearPollCache(repoPath?: string, opts?: { remotes?: boolean }): void {
+  const wipeRemotes = opts?.remotes !== false;
   if (repoPath) {
     pollCache.delete(repoPath);
   } else {
@@ -3180,6 +3188,7 @@ export function clearPollCache(repoPath?: string): void {
   // sees — the read coalescing caches must go the same way, or subsequent
   // assertions would observe pre-mutation cached reads.
   invalidateReadCache(repoPath);
+  if (!wipeRemotes) return;
   // remotesCache keys are '<repoPath>|<withRefs>' — drop both variants.
   if (repoPath) {
     remotesCache.delete(repoPath + '|1');

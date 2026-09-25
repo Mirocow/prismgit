@@ -554,14 +554,26 @@ function TagRow({
       title={t('tags.rowTooltip')}
       onContextMenu={(e) => {
         e.preventDefault();
+        // MENU STRUCTURE (v3.4): grouped by domain — the tag's own
+        // management (edit/delete) lives under “Управление тегами”,
+        // clipboard under “Копировать”, navigation stays top-level.
         showContextMenu([
           { label: t('tags.checkoutTag', { name: t2.name }), clickId: 'checkout' },
           { type: 'separator' },
-          { label: t('tags.copyName'), clickId: 'copy-name' },
-          { label: t('tags.copyHash'), clickId: 'copy-hash' },
-          { type: 'separator' },
-          { label: t('tags.editItem', { name: t2.name }), clickId: 'edit' },
-          { label: t('tags.deleteTagItem', { name: t2.name }), clickId: 'delete' },
+          {
+            label: t('ctx.group.tags'),
+            submenu: [
+              { label: t('tags.editItem', { name: t2.name }), clickId: 'edit' },
+              { label: t('tags.deleteTagItem', { name: t2.name }), clickId: 'delete' },
+            ],
+          },
+          {
+            label: t('ctx.group.copy'),
+            submenu: [
+              { label: t('tags.copyName'), clickId: 'copy-name' },
+              { label: t('tags.copyHash'), clickId: 'copy-hash' },
+            ],
+          },
           { type: 'separator' },
           { label: t('tags.viewCommitInHistory'), clickId: 'view-commit' },
         ], (action) => {

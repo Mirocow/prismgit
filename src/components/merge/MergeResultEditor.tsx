@@ -53,6 +53,7 @@
 
 import { useEffect, useRef, useMemo, useCallback } from 'react';
 import { tokenizeLineCached, tokensToHtml, type SupportedLang } from '../../lib/syntaxHighlight';
+import { useI18n } from '../../lib/i18n';
 
 const ROW_HEIGHT = 20;
 const GUTTER_WIDTH = 48; // px — matches w-10 + pr-2 + border = ~48px
@@ -134,6 +135,7 @@ export function MergeResultEditor({
   onChange,
   textareaRef,
 }: MergeResultEditorProps) {
+  const { t } = useI18n();
   const preRef = useRef<HTMLPreElement>(null);
   const innerTextareaRef = useRef<HTMLTextAreaElement>(null);
   // Use the provided textareaRef if any, else the internal one.
@@ -205,7 +207,7 @@ export function MergeResultEditor({
     >
       {/* Header */}
       <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between shrink-0 h-8">
-        <span className="text-text-primary truncate">Working Tree (Result)</span>
+        <span className="text-text-primary truncate">{t('conflict.resultPaneTitle')}</span>
       </div>
       {/* Editor area — relative container with pre + textarea overlay */}
       <div className="flex-1 relative overflow-hidden" style={{ minHeight: 0 }}>

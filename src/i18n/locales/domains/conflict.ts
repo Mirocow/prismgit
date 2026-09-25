@@ -46,6 +46,18 @@ export const en: Record<string, string> = {
   'conflict.editableCenterHint': 'Editable center — direct typing or use toolbar actions above.',
   'conflict.shortcutsHint': 'Shortcuts: F7 next · Shift+F7 prev · Ctrl+1 ours · Ctrl+2 theirs · Ctrl+3 both · Ctrl+Enter save',
   'conflict.reloadingFile': 'Reloading file content…',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'conflict.mergePanelTakeOurs': 'Take ours (git checkout --ours)',
+  'conflict.mergePanelTakeTheirs': 'Take theirs (git checkout --theirs)',
+  'conflict.basePaneLabel': 'Base (common ancestor):',
+  'conflict.resultPaneTitle': 'Working Tree (Result)',
+  'conflict.clearBlockAndEdit': 'Clear block and edit manually',
+  'conflict.undoLastResolution': 'Undo last resolution (⌘Z)',
+  'conflict.resetAll': 'Reset all',
+  'conflict.toggleBasePane': 'Show / hide the base (common ancestor) pane',
+  'conflict.moreActions': 'More actions',
+  'conflict.unsavedChanges': 'Unsaved changes',
 };
 
 export const ru: Record<string, string> = {
@@ -83,6 +95,18 @@ export const ru: Record<string, string> = {
   'conflict.editableCenterHint': 'Редактируемый центр — прямой ввод или используйте действия тулбара выше.',
   'conflict.shortcutsHint': 'Горячие клавиши: F7 следующий · Shift+F7 предыдущий · Ctrl+1 ours · Ctrl+2 theirs · Ctrl+3 оба · Ctrl+Enter сохранить',
   'conflict.reloadingFile': 'Перезагрузка содержимого файла…',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'conflict.mergePanelTakeOurs': 'Взять ours (git checkout --ours)',
+  'conflict.mergePanelTakeTheirs': 'Взять theirs (git checkout --theirs)',
+  'conflict.basePaneLabel': 'База (общий предок):',
+  'conflict.resultPaneTitle': 'Рабочее дерево (результат)',
+  'conflict.clearBlockAndEdit': 'Очистить блок и править вручную',
+  'conflict.undoLastResolution': 'Отменить последнее разрешение (⌘Z)',
+  'conflict.resetAll': 'Сбросить всё',
+  'conflict.toggleBasePane': 'Показать/скрыть панель базы (общий предок)',
+  'conflict.moreActions': 'Ещё действия',
+  'conflict.unsavedChanges': 'Несохранённые изменения',
 };
 
 export const zh: Record<string, string> = {
@@ -120,6 +144,18 @@ export const zh: Record<string, string> = {
   'conflict.editableCenterHint': '可编辑的中间面板 — 直接输入或使用上方工具栏操作。',
   'conflict.shortcutsHint': '快捷键: F7 下一个 · Shift+F7 上一个 · Ctrl+1 ours · Ctrl+2 theirs · Ctrl+3 两者 · Ctrl+Enter 保存',
   'conflict.reloadingFile': '重新加载文件内容…',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'conflict.mergePanelTakeOurs': '采用我们的版本（git checkout --ours）',
+  'conflict.mergePanelTakeTheirs': '采用他们的版本（git checkout --theirs）',
+  'conflict.basePaneLabel': '基准（共同祖先）：',
+  'conflict.resultPaneTitle': '工作区（结果）',
+  'conflict.clearBlockAndEdit': '清除冲突块并手动编辑',
+  'conflict.undoLastResolution': '撤销上一次解决（⌘Z）',
+  'conflict.resetAll': '全部重置',
+  'conflict.toggleBasePane': '显示/隐藏基准（共同祖先）窗格',
+  'conflict.moreActions': '更多操作',
+  'conflict.unsavedChanges': '未保存的更改',
 };
 
 export const de: Record<string, string> = {
@@ -157,4 +193,16 @@ export const de: Record<string, string> = {
   'conflict.editableCenterHint': 'Bearbeitbare Mitte — direkte Eingabe oder Toolbar-Aktionen oben verwenden.',
   'conflict.shortcutsHint': 'Tastenkürzel: F7 weiter · Shift+F7 zurück · Ctrl+1 ours · Ctrl+2 theirs · Ctrl+3 beide · Ctrl+Enter speichern',
   'conflict.reloadingFile': 'Dateiinhalt wird neu geladen…',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'conflict.mergePanelTakeOurs': 'Take ours (git checkout --ours)',
+  'conflict.mergePanelTakeTheirs': 'Take theirs (git checkout --theirs)',
+  'conflict.basePaneLabel': 'Basis (gemeinsamer Vorfahre):',
+  'conflict.resultPaneTitle': 'Arbeitsverzeichnis (Ergebnis)',
+  'conflict.clearBlockAndEdit': 'Block leeren und manuell bearbeiten',
+  'conflict.undoLastResolution': 'Letzte Auflösung rückgängig (⌘Z)',
+  'conflict.resetAll': 'Alles zurücksetzen',
+  'conflict.toggleBasePane': 'Basis-Bereich (gemeinsamer Vorfahre) ein-/ausblenden',
+  'conflict.moreActions': 'Weitere Aktionen',
+  'conflict.unsavedChanges': 'Ungespeicherte Änderungen',
 };

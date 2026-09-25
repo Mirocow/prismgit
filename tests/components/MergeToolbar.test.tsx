@@ -24,6 +24,12 @@ vi.mock('../../src/lib/i18n', () => ({
         'conflict.saveStageTitle': 'Save resolved content and stage the file (Ctrl+Enter)',
         'action.title.openExternalEditor': 'Open in external editor',
         'conflict.vsCodeTitle': 'Open in VS Code',
+        // v3.4 localized tooltips (previously hardcoded English)
+        'conflict.undoLastResolution': 'Undo last resolution (⌘Z)',
+        'conflict.toggleBasePane': 'Show / hide the base (common ancestor) pane',
+        'conflict.moreActions': 'More actions',
+        'conflict.unsavedChanges': 'Unsaved changes',
+        'conflict.resetAll': 'Reset all',
       };
       const base = dict[k] ?? k;
       return p

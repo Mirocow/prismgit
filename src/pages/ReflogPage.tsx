@@ -222,16 +222,23 @@ export function ReflogPage() {
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    // MENU STRUCTURE (v3.4): grouped by domain — navigation
+                    // top-level, clipboard under “Копировать ▸”, destructive
+                    // actions at the bottom.
                     showContextMenu([
                       { label: t('pages.menuViewCommitInHistory'), clickId: 'view-commit' },
                       { type: 'separator' },
-                      { label: t('history.copyShortHash'), clickId: 'copy-short' },
-                      { label: t('history.copyFullHash'), clickId: 'copy-full' },
-                      { label: t('pages.menuCopyMessage'), clickId: 'copy-msg' },
+                      { label: t('ctx.group.copy'), submenu: [
+                        { label: t('history.copyShortHash'), clickId: 'copy-short' },
+                        { label: t('history.copyFullHash'), clickId: 'copy-full' },
+                        { label: t('pages.menuCopyMessage'), clickId: 'copy-msg' },
+                      ] },
                       { type: 'separator' },
                       { label: t('pages.reflogGoToPoint'), clickId: 'go-to-point' },
                       { type: 'separator' },
-                      { label: t('pages.menuDeleteEntry'), clickId: 'delete' },
+                      { label: t('ctx.group.delete'), submenu: [
+                        { label: t('pages.menuDeleteEntry'), clickId: 'delete' },
+                      ] },
                     ], (action) => {
                       switch (action) {
                         case 'view-commit':

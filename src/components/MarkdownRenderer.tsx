@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { tokenizeLine, tokensToHtml, type SupportedLang } from '../lib/syntaxHighlight';
 import { Copy, Check } from './icons';
+import { t as i18nT } from '../lib/i18n';
 
 /**
  * Full-featured Markdown renderer for AI chat messages.
@@ -468,8 +469,8 @@ function CodeBlock({ content, lang }: { content: string; lang: string }) {
       <button
         onClick={handleCopy}
         className="absolute top-1 right-1 icon-btn !w-5 !h-5 hover:text-accent"
-        title="Copy code"
-        aria-label="Copy code"
+        title={i18nT('common.copyCode')}
+        aria-label={i18nT('common.copyCode')}
       >
         {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
       </button>

@@ -416,18 +416,25 @@ export function Sidebar() {
     // FIRST in the menu (at the top), as the user requested. They open the
     // standard Open / Clone modals with the target group preselected so
     // the newly-added repo lands in this group automatically.
+    // MENU STRUCTURE (v3.4): grouped by domain — create/add stays on top,
+    // group management (new subgroup / rename / workspace) under one group,
+    // deletion at the bottom.
     void showContextMenu([
       { label: t('shell.addToGroup'), clickId: 'add-to-group' },
       { label: t('shell.cloneIntoGroup'), clickId: 'clone-into-group' },
       { label: t('shell.createIntoGroup'), clickId: 'create-into-group' },
       { type: 'separator' },
-      { label: t('shell.newSubgroup'), clickId: 'subgroup' },
-      { label: t('common.rename'), clickId: 'rename' },
-      ...(groupRepoPaths.length > 0 ? [
-        { label: t('vscode.openGroupWorkspace', { count: groupRepoPaths.length }), clickId: 'vscode-workspace' },
-      ] : []),
+      { label: t('ctx.group.repo'), submenu: [
+        { label: t('shell.newSubgroup'), clickId: 'subgroup' },
+        { label: t('common.rename'), clickId: 'rename' },
+        ...(groupRepoPaths.length > 0 ? [
+          { label: t('vscode.openGroupWorkspace', { count: groupRepoPaths.length }), clickId: 'vscode-workspace' },
+        ] : []),
+      ] },
       { type: 'separator' },
-      { label: t('shell.deleteGroup'), clickId: 'delete' },
+      { label: t('ctx.group.delete'), submenu: [
+        { label: t('shell.deleteGroup'), clickId: 'delete' },
+      ] },
     ], (clickId) => {
       if (clickId === 'add-to-group') {
         // Open the standard repo picker (which also opens the repo).
@@ -469,19 +476,32 @@ export function Sidebar() {
         ? [{ label: t('shell.removeFromGroup'), clickId: 'ungroup' }]
         : []),
       { type: 'separator' as const },
-      ...moveTargets.map((mt) => ({
-        label: `${'\u00A0'.repeat(mt.depth * 3)}${mt.isRoot ? '· ' : ''}${mt.name}`,
-        clickId: `move:${mt.id ?? 'root'}`,
-      })),
+      // MENU STRUCTURE (v3.4): grouped by domain — the group-move targets
+      // (previously a FLAT indented list that pushed everything else down)
+      // live under “Переместить в группу ▸”, remote check + stats refresh
+      // under “Проверка и обновление ▸”, settings under “Репозиторий ▸”.
+      {
+        label: t('ctx.group.move'),
+        submenu: moveTargets.map((mt) => ({
+          label: `${'\u00A0'.repeat(mt.depth * 3)}${mt.isRoot ? '· ' : ''}${mt.name}`,
+          clickId: `move:${mt.id ?? 'root'}`,
+        })),
+      },
+      {
+        label: t('ctx.group.check'),
+        submenu: [
+          { label: t('shell.checkRemotesNow'), clickId: 'check' },
+          // Per-row stats refresh — recomputes lastCommit / branchCount /
+          // commitCount / provider from git. The user complaint was that the
+          // sidebar showed stale cached stats even after a push/pull, because
+          // the per-row context menu had no "refresh stats" action.
+          { label: t('shell.refreshStatsNow', { defaultValue: 'Refresh stats' }), clickId: 'refresh-stats' },
+        ],
+      },
       { type: 'separator' as const },
-      { label: t('shell.checkRemotesNow'), clickId: 'check' },
-      // Per-row stats refresh — recomputes lastCommit / branchCount /
-      // commitCount / provider from git. The user complaint was that the
-      // sidebar showed stale cached stats even after a push/pull, because
-      // the per-row context menu had no "refresh stats" action.
-      { label: t('shell.refreshStatsNow', { defaultValue: 'Refresh stats' }), clickId: 'refresh-stats' },
-      { type: 'separator' as const },
-      { label: t('shell.repoSettingsMenu'), clickId: 'repo-settings' },
+      { label: t('ctx.group.repo'), submenu: [
+        { label: t('shell.repoSettingsMenu'), clickId: 'repo-settings' },
+      ] },
     ];
     void showContextMenu(items, (clickId) => {
       if (clickId === 'favorite' || clickId === 'unfavorite') {
@@ -852,8 +872,10 @@ export function Sidebar() {
               void showContextMenu([
                 { label: t('sidebar.newGroup'), clickId: 'new-group' },
                 { type: 'separator' },
-                { label: t('sidebar.openRepository'), clickId: 'open-repo' },
-                { label: t('shell.cloneRepositoryMenu'), clickId: 'clone-repo' },
+                { label: t('ctx.group.repo'), submenu: [
+                  { label: t('sidebar.openRepository'), clickId: 'open-repo' },
+                  { label: t('shell.cloneRepositoryMenu'), clickId: 'clone-repo' },
+                ] },
               ], (clickId) => {
                 if (clickId === 'new-group') {
                   void handleCreateGroup(null);

@@ -664,6 +664,22 @@ const api = {
         ipcRenderer.removeListener('command-log:entry', singleListener);
       };
     },
+    onBatch: (cb: (entries: CommandLogEntry[]) => void) => {
+      // PERFORMANCE (v3.4): the batch-aware variant — ONE callback per
+      // 100 ms main-process batch. The store then does a single set()
+      // (one array copy, one re-render, one errorPulse evaluation) per
+      // batch instead of N per-entry set()s. During a "Check all
+      // repositories" burst (4 spawns × N repos logged in main) that is
+      // the difference between a calm panel and a renderer freeze.
+      const batchListener = (_: unknown, batch: CommandLogEntry[]) => {
+        if (Array.isArray(batch)) cb(batch);
+        else if (batch) cb([batch as unknown as CommandLogEntry]);
+      };
+      ipcRenderer.on('command-log:batch', batchListener);
+      return () => {
+        ipcRenderer.removeListener('command-log:batch', batchListener);
+      };
+    },
   },
 
   // Operation log — high-level operation start/finish events emitted by the

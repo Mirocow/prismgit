@@ -1008,6 +1008,10 @@ export const tauriApi = {
       // No live command log in Tauri yet — return a no-op unsubscriber.
       return () => {};
     },
+    onBatch: (_cb: (entries: unknown[]) => void): UnlistenFn => {
+      // No live command log in Tauri yet — no-op unsubscriber (see onEntry).
+      return () => {};
+    },
     onClick: (_cb: (clickId: string) => void): UnlistenFn => {
       return () => {};
     },

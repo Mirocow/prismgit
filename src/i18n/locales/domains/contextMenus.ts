@@ -22,6 +22,26 @@ export const en: Record<string, string> = {
   'ctx.confirm.deleteLabel': 'Delete',
   'ctx.confirm.checkoutLabel': 'Checkout',
 
+  // ── Group headers (menus are grouped by domain: tags / branches /
+  //    working tree / copy / … — every right-click menu follows this
+  //    principle, e.g. “Manage Tags ▸ create / edit / delete”).
+  'ctx.group.tags': 'Manage Tags',
+  'ctx.group.branches': 'Manage Branches',
+  'ctx.group.notes': 'Notes',
+  'ctx.group.reset': 'Reset to This Commit',
+  'ctx.group.copy': 'Copy',
+  'ctx.group.view': 'View && Compare',
+  'ctx.group.editCommit': 'Edit Commit',
+  'ctx.group.worktree': 'Working Tree',
+  'ctx.group.ignore': 'Ignore',
+  'ctx.group.open': 'Open',
+  'ctx.group.repo': 'Repository',
+  'ctx.group.move': 'Move to Group',
+  'ctx.group.check': 'Check && Refresh',
+  'ctx.group.delete': 'Delete',
+  'ctx.group.resolve': 'Resolve',
+  'ctx.group.remote.manage': 'Manage Remote',
+
   // ── File context menu ─────────────────────────────────────────────────
   'ctx.file.open': 'Open',
   'ctx.file.revealInFileManager': 'Reveal in File Manager',
@@ -102,6 +122,26 @@ export const ru: Record<string, string> = {
   'ctx.confirm.copied': 'Скопировано',
   'ctx.confirm.deleteLabel': 'Удалить',
   'ctx.confirm.checkoutLabel': 'Переключиться',
+
+  // ── Заголовки групп (меню сгруппированы по принадлежности: теги /
+  //    ветки / рабочее дерево / копирование / … — этот принцип в КАЖДОМ
+  //    меню, например «Управление тегами ▸ создать / изменить / удалить»).
+  'ctx.group.tags': 'Управление тегами',
+  'ctx.group.branches': 'Управление ветками',
+  'ctx.group.notes': 'Заметки',
+  'ctx.group.reset': 'Сбросить к этому коммиту',
+  'ctx.group.copy': 'Копировать',
+  'ctx.group.view': 'Просмотр и сравнение',
+  'ctx.group.editCommit': 'Изменить коммит',
+  'ctx.group.worktree': 'Рабочее дерево',
+  'ctx.group.ignore': 'Игнорировать',
+  'ctx.group.open': 'Открыть',
+  'ctx.group.repo': 'Репозиторий',
+  'ctx.group.move': 'Переместить в группу',
+  'ctx.group.check': 'Проверка и обновление',
+  'ctx.group.delete': 'Удаление',
+  'ctx.group.resolve': 'Разрешить конфликт',
+  'ctx.group.remote.manage': 'Управление remote',
 
   // ── File context menu ─────────────────────────────────────────────────
   'ctx.file.open': 'Открыть',
@@ -184,6 +224,24 @@ export const zh: Record<string, string> = {
   'ctx.confirm.deleteLabel': '删除',
   'ctx.confirm.checkoutLabel': '检出',
 
+  // ── 分组标题（所有右键菜单按领域分组，如“管理标签 ▸ 创建/编辑/删除”）
+  'ctx.group.tags': '管理标签',
+  'ctx.group.branches': '管理分支',
+  'ctx.group.notes': '备注',
+  'ctx.group.reset': '重置到此提交',
+  'ctx.group.copy': '复制',
+  'ctx.group.view': '查看与对比',
+  'ctx.group.editCommit': '编辑提交',
+  'ctx.group.worktree': '工作区',
+  'ctx.group.ignore': '忽略',
+  'ctx.group.open': '打开',
+  'ctx.group.repo': '仓库',
+  'ctx.group.move': '移动到分组',
+  'ctx.group.check': '检查与刷新',
+  'ctx.group.delete': '删除',
+  'ctx.group.resolve': '解决冲突',
+  'ctx.group.remote.manage': '管理远程',
+
   // ── File context menu ─────────────────────────────────────────────────
   'ctx.file.open': '打开',
   'ctx.file.revealInFileManager': '在文件管理器中显示',
@@ -264,6 +322,25 @@ export const de: Record<string, string> = {
   'ctx.confirm.copied': 'Kopiert',
   'ctx.confirm.deleteLabel': 'Löschen',
   'ctx.confirm.checkoutLabel': 'Auschecken',
+
+  // ── Gruppenköpfe (jedes Kontextmenü ist nach Zuständigkeit gruppiert,
+  //    z. B. „Tags verwalten ▸ erstellen / bearbeiten / löschen“).
+  'ctx.group.tags': 'Tags verwalten',
+  'ctx.group.branches': 'Branches verwalten',
+  'ctx.group.notes': 'Notizen',
+  'ctx.group.reset': 'Auf diesen Commit zurücksetzen',
+  'ctx.group.copy': 'Kopieren',
+  'ctx.group.view': 'Anzeigen && Vergleichen',
+  'ctx.group.editCommit': 'Commit bearbeiten',
+  'ctx.group.worktree': 'Arbeitsverzeichnis',
+  'ctx.group.ignore': 'Ignorieren',
+  'ctx.group.open': 'Öffnen',
+  'ctx.group.repo': 'Repository',
+  'ctx.group.move': 'In Gruppe verschieben',
+  'ctx.group.check': 'Prüfen && Aktualisieren',
+  'ctx.group.delete': 'Löschen',
+  'ctx.group.resolve': 'Konflikt lösen',
+  'ctx.group.remote.manage': 'Remote verwalten',
 
   // ── File context menu ─────────────────────────────────────────────────
   'ctx.file.open': 'Öffnen',

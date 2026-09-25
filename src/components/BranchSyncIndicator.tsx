@@ -29,6 +29,7 @@
  */
 import { PlugConnected, PlugDisconnected } from './icons';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 export interface BranchSyncIndicatorProps {
   /** Set on the CURRENT branch (from git status). */
@@ -59,6 +60,7 @@ export function BranchSyncIndicator({
   size = 12,
   className,
 }: BranchSyncIndicatorProps) {
+  const { t } = useI18n();
   // Remote branches are the upstream side — no "sync" to display.
   if (remote) return null;
 
@@ -73,9 +75,9 @@ export function BranchSyncIndicator({
     return (
       <span
         className={cn('inline-flex items-center text-text-tertiary/40', className)}
-        title="No upstream — push -u to set tracking"
+        title={t('history.syncNoUpstreamHint')}
         role="img"
-        aria-label="No upstream"
+        aria-label={t('history.syncNoUpstream')}
       >
         <PlugDisconnected size={size} />
       </span>
@@ -87,9 +89,9 @@ export function BranchSyncIndicator({
     return (
       <span
         className={cn('inline-flex items-center text-status-warning', className)}
-        title={`⚠ Upstream ${upstreamRef} was deleted on the remote. Push to recreate or set a new tracked branch.`}
+        title={t('pages.upstreamDeletedWarning')}
         role="img"
-        aria-label="Upstream gone"
+        aria-label={t('history.syncUpstreamGone')}
       >
         <PlugDisconnected size={size} />
       </span>
@@ -104,9 +106,9 @@ export function BranchSyncIndicator({
     return (
       <span
         className={cn('inline-flex items-center text-status-added', className)}
-        title={`In sync with ${upstreamRef}`}
+        title={t('history.syncInSync', { ref: upstreamRef })}
         role="img"
-        aria-label="In sync"
+        aria-label={t('history.syncInSyncShort')}
       >
         <PlugConnected size={size} />
       </span>
@@ -130,7 +132,7 @@ export function BranchSyncIndicator({
       className={cn('inline-flex items-center', tone, className)}
       title={title}
       role="img"
-      aria-label="Out of sync"
+      aria-label={t('history.syncOutOfSync')}
     >
       <PlugDisconnected size={size} />
     </span>

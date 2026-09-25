@@ -2,9 +2,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../types/settings-api.js';
-import simpleGit from 'simple-git';
 import { SimpleStore } from './simpleStore.js';
-import { GIT_UNSAFE_OPTIONS, withMergedGitEnv } from './git-env.js';
+import { runStatsJobExternal } from './gitPollProcess.js';
 import {
   splitSettingSecrets,
   rehydrateSettingSecrets,
@@ -354,74 +353,38 @@ export function removeTag(repoPath: string, tag: string): void {
  */
 export async function refreshRepoStats(repoPath: string): Promise<Partial<RepositoryMetadata>> {
   try {
-    // Use GIT_UNSAFE_OPTIONS from git-env.ts (static import — no circular dep).
-    // Without these env overrides, git-lfs smudge filters run on every file.
-    const git = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }));
+    // PERF (v3.4): the four git reads (log -1 / branch list / remotes /
+    // rev-list --count) now run in the DEDICATED background git worker
+    // process (runStatsJobExternal → gitStatsCore), NOT on the main event
+    // loop. This function is fired per repo on every repo open (deferred
+    // stats fan-out) and for EVERY repo by the sidebar's "Check all
+    // repositories" button — 4 spawns × N repos on the main loop was the
+    // "UI goes fully unresponsive after clicking Check all" report, exactly
+    // the pattern the poll/status jobs were already moved out for. The
+    // metadata WRITE stays here in main (settings store). In non-Electron
+    // hosts (vitest) the job runs in-process — same results, same contract.
+    const stats = await runStatsJobExternal({ repoPath });
 
-    // PERF (v3): run all reads in parallel — they are independent.
-    // The old flow ran FIVE subprocesses, two of them redundant:
-    //   - `git.revparse('HEAD')` duplicated the hash that `git log -1`
-    //     already returns (log -1 without a rev IS HEAD) — and on the
-    //     unborn-HEAD repo both calls fail anyway, so it added nothing;
-    //   - branchLocal() + getRemotes() + rev-list --count + log -1 are the
-    //     four genuinely distinct reads.
-    // 5 spawns → 4 per repo, on every repo open / push / pull / fetch.
-    const [logRaw, branchResult, remotes, commitCountStr] = await Promise.all([
-      // PERF: git.raw instead of git.log — avoids simple-git's full LogEntry parsing
-      git.raw(['log', '-1', '--format=%H%x1f%s%x1f%cI']).catch(() => ''),
-      git.branchLocal().catch(() => ({ all: [] as string[] })),
-      git.getRemotes(true).catch(() => []),
-      git.raw(['rev-list', '--count', 'HEAD']).catch(() => '0'),
-    ]);
-
-    // Parse the raw log output: hash\x1fsubject\x1fdate
-    const logParts = logRaw.trim().split('\x1f');
-    const latest = logParts.length >= 3
-      ? { hash: logParts[0], date: logParts[2].trim(), message: logParts[1] }
-      : null;
-    const origin = (remotes as Array<{ name: string; refs: { fetch: string } }>).find(r => r.name === 'origin') ||
-      (remotes as Array<{ name: string; refs: { fetch: string } }>)[0];
-    const url = origin?.refs.fetch;
-    const commitCount = parseInt((commitCountStr || '0').trim(), 10) || 0;
-
-    // Detect provider
-    let provider: RepositoryMetadata['provider'] = 'unknown';
-    let owner: string | undefined;
-    let repo: string | undefined;
-    let webUrl: string | undefined;
-
-    if (url) {
-      const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
-      const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
-      const match = sshMatch || httpsMatch;
-      if (match) {
-        const [, host, ownerName, repoName] = match;
-        webUrl = `https://${host}/${ownerName}/${repoName}`;
-        // Match by host substring so self-hosted instances are detected too:
-        //   github.com, github.company.com  → github
-        //   gitlab.com, gitlab.company.com  → gitlab
-        // We no longer classify bitbucket/gitea/gogs because there is no API
-        // integration for them — they will be 'unknown' and the UI will offer
-        // manual GitHub/GitLab selection.
-        if (host.includes('github')) { provider = 'github'; owner = ownerName; repo = repoName; }
-        else if (host.includes('gitlab')) { provider = 'gitlab'; owner = ownerName; repo = repoName; }
-      }
-    }
+    // NOT-A-REPO guard: keep the pre-worker behavior of returning {} (and
+    // NOT writing) when the directory is not a git repository — the old
+    // simpleGit path threw here. Writing zeros would OVERWRITE good cached
+    // metadata (lastCommit etc.) with empty values whenever the repo vanished
+    // from disk (deleted externally) instead of preserving it. An UNBORN repo
+    // (.git exists, no commits) legitimately reports zeros — isRepo stays
+    // true there, matching the old behavior.
+    if (!stats.isRepo) return {};
 
     const updates: Partial<RepositoryMetadata> = {
-      // `git log -1` (no rev) resolves HEAD itself — the removed redundant
-      // `revparse('HEAD')` returned the exact same hash (and also failed on
-      // unborn HEAD, where log -1 fails too, so latest stays null there).
-      lastCommitHash: latest?.hash,
-      lastCommitDate: latest?.date,
-      lastCommitMessage: latest?.message,
-      branchCount: (branchResult as { all: string[] }).all.length,
-      commitCount,
-      remoteUrl: url,
-      provider,
-      owner,
-      repo,
-      webUrl,
+      lastCommitHash: stats.lastCommitHash,
+      lastCommitDate: stats.lastCommitDate,
+      lastCommitMessage: stats.lastCommitMessage,
+      branchCount: stats.branchCount,
+      commitCount: stats.commitCount,
+      remoteUrl: stats.remoteUrl,
+      provider: stats.provider,
+      owner: stats.owner,
+      repo: stats.repo,
+      webUrl: stats.webUrl,
       // Touch updatedAt so callers can verify the metadata was actually
       // recomputed (used by the Sidebar's "refresh" tooltip + tests).
       updatedAt: Date.now(),
@@ -446,6 +409,9 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
  * blocks). Now a bounded worker pool of 3 keeps concurrency safe (the old
  * comment's concern about saturating the process table) while cutting wall
  * time to ~⌈N/3⌉ rounds.
+ * PERF (v3.4): since refreshRepoStats now dispatches to the background git
+ * worker, this sweep keeps the MAIN loop free — main only awaits per-repo
+ * job results and writes metadata (fast, in-memory + debounced flush).
  */
 const REPO_STATS_CONCURRENCY = 3;
 

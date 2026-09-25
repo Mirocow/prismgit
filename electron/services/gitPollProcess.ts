@@ -3,6 +3,8 @@ import { runPollJob } from './gitPollCore.js';
 import type { PollJobRequest, PollJobResult } from './gitPollCore.js';
 import { runStatusJob } from './gitStatusCore.js';
 import type { StatusJobRequest, StatusJobResult } from './gitStatusCore.js';
+import { runStatsJob } from './gitStatsCore.js';
+import type { StatsJobRequest, StatsJobResult } from './gitStatsCore.js';
 
 /**
  * GIT POLL PROCESS — main-side manager of the DEDICATED utilityProcess that
@@ -12,7 +14,10 @@ import type { StatusJobRequest, StatusJobResult } from './gitStatusCore.js';
  *             background fetch + local counters per repo;
  *  - 'status' the watcher-driven working-tree refresh (gitStatusCore) —
  *             porcelain parse + repo-state reads; the exact computation
- *             the foreground status() runs, just never on the main loop.
+ *             the foreground status() runs, just never on the main loop;
+ *  - 'stats'  the sidebar metadata sweep (gitStatsCore) — the 4 reads per
+ *             repo (log -1 / branches / remotes / commit count) behind the
+ *             "Check all repositories" button and every repo open.
  *
  * Lifecycle & failure policy (applies to BOTH job kinds):
  *  - The worker is forked LAZILY on the first job and reused for all
@@ -49,6 +54,12 @@ const WORKER_JOB_TIMEOUT_MS = 10 * 60_000;
  * slow (tens of seconds) but never minutes — anything beyond this is a
  * wedged worker, not a legit status. */
 const STATUS_JOB_TIMEOUT_MS = 5 * 60_000;
+/** Whole-job safety net for stats jobs: four quick reads; even a huge repo
+ * never takes minutes — beyond this the worker is wedged. */
+const STATS_JOB_TIMEOUT_MS = 5 * 60_000;
+/** Grace window for the worker's 'shutdown' (kill its git children, then
+ * exit) before main hard-kills it. */
+const WORKER_SHUTDOWN_GRACE_MS = 500;
 /** The worker must say 'ready' within this window or the fork is treated as
  *  failed (and the manager cools down before reforking). */
 const WORKER_READY_TIMEOUT_MS = 15_000;
@@ -62,7 +73,7 @@ const CRASH_STORM_WINDOW_MS = 5 * 60_000;
 type ElectronUtilityProcess = import('electron').UtilityProcess;
 
 /** The job kinds this worker process serves. */
-type JobKind = 'poll' | 'status';
+type JobKind = 'poll' | 'status' | 'stats';
 
 interface PendingJob {
   resolve: (result: unknown) => void;
@@ -205,14 +216,14 @@ async function ensureWorker(): Promise<WorkerState> {
     }
 
     if (
-      (msg.kind === 'poll-result' || msg.kind === 'status-result' || msg.kind === 'poll-error' || msg.kind === 'status-error') &&
+      (msg.kind === 'poll-result' || msg.kind === 'status-result' || msg.kind === 'stats-result' || msg.kind === 'poll-error' || msg.kind === 'status-error' || msg.kind === 'stats-error') &&
       typeof msg.id === 'number'
     ) {
       const job = state.pending.get(msg.id);
       if (!job) return; // late answer for an already-timeouted job — ignore
       state.pending.delete(msg.id);
       clearTimeout(job.timer);
-      if ((msg.kind === 'poll-result' || msg.kind === 'status-result') && msg.result && typeof msg.result === 'object') {
+      if ((msg.kind === 'poll-result' || msg.kind === 'status-result' || msg.kind === 'stats-result') && msg.result && typeof msg.result === 'object') {
         job.resolve(msg.result);
       } else {
         job.reject(new Error(typeof msg.message === 'string' && msg.message ? msg.message : 'git background worker job failed'));
@@ -308,10 +319,58 @@ export async function runStatusJobExternal(request: StatusJobRequest): Promise<S
   }
 }
 
+/**
+ * Run one STATS job (gitStatsCore.runStatsJob — the sidebar metadata reads)
+ * — in the same dedicated background worker process when running inside the
+ * Electron main process, in-process otherwise (vitest, plain node). Worker
+ * failure for ANY reason falls back to the in-process run: a stats refresh
+ * is an idempotent read, so re-running it can't corrupt anything.
+ */
+export async function runStatsJobExternal(request: StatsJobRequest): Promise<StatsJobResult> {
+  if (!isElectronMain()) {
+    return runStatsJob(request);
+  }
+  try {
+    return await dispatchToWorker<StatsJobResult>('stats', request, STATS_JOB_TIMEOUT_MS);
+  } catch {
+    return runStatsJob(request);
+  }
+}
+
 /** App-quit hook: kill the worker process (main.ts calls this from
- *  'before-quit' alongside the other flush/stop handlers). */
+ *  'before-quit' alongside the other flush/stop handlers).
+ *
+ *  GRACEFUL first: the worker is asked to kill ITS git children (an orphaned
+ *  `git fetch` would otherwise keep the network/AV busy for up to the OS TCP
+ *  timeout after the app is gone — the "closing the app leaves the machine
+ *  sluggish" report) and exit itself. If it doesn't exit within
+ *  WORKER_SHUTDOWN_GRACE_MS we hard-kill it; its children are then orphans,
+ *  which is the pre-existing behavior — strictly no worse.
+ */
 export function disposeGitPollWorker(): void {
-  killWorkerState();
+  const state = workerState;
+  if (!state || state.dead) return;
+  try {
+    state.proc.postMessage({ kind: 'shutdown' });
+  } catch {
+    // Worker already gone — fall through to the hard kill.
+    killWorkerState();
+    return;
+  }
+  // Planned kill from this point: the 'exit' handler must not count it as a
+  // crash. Marking dead early also makes ensureWorker() refork-race-free.
+  state.dead = true;
+  if (state.readyTimer !== null) {
+    clearTimeout(state.readyTimer);
+    state.readyTimer = null;
+  }
+  setTimeout(() => {
+    try {
+      state.proc.kill();
+    } catch {
+      /* already exited via the graceful path */
+    }
+  }, WORKER_SHUTDOWN_GRACE_MS);
 }
 
 /** Test-only: reset the manager's module state (kills the worker, clears

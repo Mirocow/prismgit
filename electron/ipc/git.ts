@@ -139,7 +139,15 @@ export function registerGitIpc(): void {
   // the 60s cached result. Without this, clicking refresh within 60s
   // of the last poll returns stale ↓/↑ numbers.
   ipcMain.handle('git:clearPollCache', (_e, repoPath?: string) =>
-    gitService.clearPollCache(repoPath)
+    // PERF (v3.4): the renderer's manual "Check all repositories" click must
+    // re-POLL (drop the 60s poll result cache) but NOT drop the remotes
+    // cache — `git remote -v` output doesn't change because the user clicked
+    // refresh, and dropping it made the next poll re-spawn one `git remote`
+    // per repo ON THE MAIN LOOP (the exact contention this button's fix is
+    // removing). Remotes have their own 60s TTL + explicit invalidation on
+    // add/remove-repo mutations; tests that need fresh remotes call
+    // clearPollCache() directly (default keeps the old full-wipe behavior).
+    gitService.clearPollCache(repoPath, { remotes: false })
   );
 
   // Diff

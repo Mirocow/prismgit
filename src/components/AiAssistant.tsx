@@ -637,7 +637,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                     >
                       <span className="flex-1 truncate">{p.name}</span>
                       {p.apiKey && (
-                        <span className="text-3xs text-status-added" title="API key saved">✓</span>
+                        <span className="text-3xs text-status-added" title={t('common.apiKeySaved')}>✓</span>
                       )}
                     </button>
                   ))}
