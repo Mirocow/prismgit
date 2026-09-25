@@ -4,7 +4,7 @@ import { runStatusJob } from './gitStatusCore.js';
 import type { StatusJobRequest } from './gitStatusCore.js';
 import { runStatsJob } from './gitStatsCore.js';
 import type { StatsJobRequest } from './gitStatsCore.js';
-import { installChildTracker, killAllChildren } from './childTracker.js';
+import { installChildTracker, killAllChildren, __trackedChildPidsForLog } from './childTracker.js';
 
 /**
  * GIT POLL WORKER — the entry file of the DEDICATED Electron utilityProcess
@@ -130,6 +130,9 @@ const port: ParentPort | undefined = (process as { parentPort?: ParentPort }).pa
 // only start after the 'ready' handshake below.
 installChildTracker();
 
+const WORKER_LOG = !!process.env.PRISMGIT_QUIT_LOG;
+if (WORKER_LOG) console.log(`[worker pid=${process.pid}] alive — child tracker installed`);
+
 if (port) {
   port.on('message', (event) => {
     const data = (event as { data?: unknown } | undefined)?.data;
@@ -138,7 +141,9 @@ if (port) {
       // Graceful stop: kill tracked git children FIRST (they have no killer
       // of their own once this process is gone), then exit. Main falls back
       // to a hard kill if we don't exit in time.
-      killAllChildren();
+      const killedPids = __trackedChildPidsForLog();
+      const killed = killAllChildren();
+      if (WORKER_LOG) console.log(`[worker pid=${process.pid}] shutdown received — killing pids [${killedPids.join(',')}] (issued=${killed}), exiting`);
       process.exit(0);
     }
     if (isPollMessage(data)) {

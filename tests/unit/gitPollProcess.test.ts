@@ -116,6 +116,7 @@ import {
   runStatusJobExternal,
   runStatsJobExternal,
   disposeGitPollWorker,
+  disposeGitPollWorkerAsync,
   __resetGitPollProcessForTests,
 } from '../../electron/services/gitPollProcess';
 import { runPollJob } from '../../electron/services/gitPollCore.js';
@@ -311,6 +312,13 @@ describe('gitPollProcess — separate-process status fetch', () => {
 
   it('disposeGitPollWorker kills the worker process (app-quit hook)', async () => {
     const promise = runPollJobExternal({ ...REQUEST });
+    // Attach handlers SYNCHRONOUSLY: the 500 ms hard-kill rejects the job
+    // during the waitFor below — a rejection without a handler yet is an
+    // unhandled rejection that fails the whole run.
+    const outcome = promise.then(
+      (v) => ({ ok: true as const, v }),
+      (e) => ({ ok: false as const, e }),
+    );
     await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
     const proc = lastProcess();
     proc.emit('message', { kind: 'ready' });
@@ -321,8 +329,14 @@ describe('gitPollProcess — separate-process status fetch', () => {
     expect(proc.posted).toContainEqual({ kind: 'shutdown' });
     expect(proc.killed).toBe(false);
     await vi.waitFor(() => expect(proc.killed).toBe(true));
-    // The pending job survives via the in-process fallback.
-    await expect(promise).resolves.toMatchObject({ branch: 'direct-branch' });
+    // QUIT-FIX (Sep 2026): the pending job REJECTS — the in-process
+    // fallback must NOT run during a quit disposal (it spawned orphaned
+    // `git fetch` children in the dying main process; verified live).
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(result.e).toBeInstanceOf(Error);
+    expect(String(result.e)).toMatch(/stopped|quitting/i);
+    expect(runPollJob).not.toHaveBeenCalled();
   });
 });
 
@@ -478,6 +492,27 @@ describe('gitPollProcess — sidebar stats jobs on the SAME worker', () => {
     // runStatsJobExternal swallows the worker failure → in-process result.
     await expect(promise).resolves.toMatchObject({ commitCount: 42 });
     expect(runStatsJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('QUIT regression: a job rejected by the quit disposal must NOT fall back in-process', async () => {
+    // Setup: live worker, job in flight.
+    const promise = runStatsJobExternal({ ...STATS_REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+
+    // The app quits: async disposal starts (posts 'shutdown', marks the
+    // worker dead) and the worker exits — rejecting the in-flight job.
+    const disposal = disposeGitPollWorkerAsync();
+    expect(proc.posted.some((m) => (m as { kind?: string }).kind === 'shutdown')).toBe(true);
+    proc.emit('exit');
+    await disposal;
+
+    // The pending job rejects (worker stopped) and MUST NOT re-run
+    // in-process — that path spawned orphaned `git fetch` children in the
+    // dying main process (quit-freeze root cause, Sep 2026).
+    await expect(promise).rejects.toThrow(/stopped|quitting/i);
+    expect(runStatsJob).not.toHaveBeenCalled();
   });
 
   it('shares ONE worker between poll, status AND stats jobs (no extra fork)', async () => {

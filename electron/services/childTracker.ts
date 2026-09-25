@@ -1,4 +1,5 @@
 import * as childProcess from 'child_process';
+import { execFileSync } from 'node:child_process';
 import * as path from 'path';
 import { createRequire } from 'node:module';
 
@@ -77,12 +78,24 @@ export function installChildTracker(): void {
       args: string[],
       options?: childProcess.SpawnOptions,
     ) => childProcess.ChildProcess;
-    const child = spawnFn.call(this, command, args as string[], opts);
+    // POSIX: make each git child its OWN PROCESS-GROUP LEADER (detached).
+    // A hung `git fetch` spawns helper chains (git remote-http → curl) that
+    // plain child.kill() can't reach — killing only the direct child leaves
+    // the transport helpers orphaned and holding the socket. As group
+    // leaders, kill(-pid) takes the whole tree down. Exit events still fire
+    // normally (detached does not detach stdio pipes). Windows: groups don't
+    // work that way — the tree kill there uses `taskkill /T` instead.
+    const mergedOpts = { ...opts };
+    if (process.platform !== 'win32') mergedOpts.detached = true;
+    const child = spawnFn.call(this, command, args as string[], mergedOpts);
     try {
       liveChildren.add(child);
       const drop = () => liveChildren.delete(child);
       child.once('close', drop);
       child.once('error', drop);
+      if (process.env.PRISMGIT_QUIT_LOG && child.pid != null) {
+        console.log(`[worker pid=${process.pid}] spawn pid=${child.pid} group=${mergedOpts.detached ? 'yes' : 'no'}: ${command} ${(args as string[]).slice(0, 3).join(' ')}`);
+      }
     } catch {
       /* tracking must never break spawning */
     }
@@ -92,23 +105,49 @@ export function installChildTracker(): void {
 }
 
 /**
- * Kill every tracked live child. Best-effort, synchronous issue of kills:
- * children that already exited are absent from the set; kill errors are
- * swallowed (a dying child races the bookkeeping). Returns the number of
- * children a kill was issued for.
+ * Kill every tracked live child — the WHOLE process tree, not just the
+ * direct child, and with SIGKILL, not SIGTERM. Best-effort: children that
+ * already exited are absent from the set; kill errors are swallowed (a
+ * dying child races the bookkeeping). Returns the number of children a
+ * kill was issued for.
+ *
+ * SIGTERM proved insufficient (verified live, Sep 2026): a `git fetch`
+ * blocked in connect() to an unreachable remote — and its remote-http
+ * helper chain — SURVIVED a SIGTERM sweep and lingered for minutes after
+ * the app quit. SIGKILL cannot be caught/blocked. `child.killed` only
+ * means "a signal was SENT earlier" — never trust it as "the child died",
+ * so the sweep re-kills unconditionally.
  */
 export function killAllChildren(): number {
   let killed = 0;
   for (const child of liveChildren) {
+    if (child.pid == null) continue;
     try {
-      // !child.killed filters processes we already sent a signal to; a child
-      // may still be winding down (exit event not yet delivered).
-      if (!child.killed && child.pid != null) {
-        child.kill();
-        killed++;
+      if (process.platform === 'win32') {
+        // Windows: child.kill() only terminates the DIRECT process and
+        // ignores the helper chain. taskkill /T walks the tree, /F forces
+        // (a wedged child never processes a graceful close).
+        try {
+          execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+        } catch {
+          /* already gone — race between 'close' bookkeeping and this sweep */
+        }
+      } else {
+        // POSIX: SIGKILL the process GROUP (children spawn detached = group
+        // leaders, see the patched spawn above). Reaching the group also
+        // kills the git-remote-http/curl helpers under a hung `git fetch`.
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // Group already gone — the direct child may still linger.
+          try {
+            child.kill('SIGKILL');
+          } catch { /* already gone */ }
+        }
       }
+      killed++;
     } catch {
-      /* already gone — race between 'close' bookkeeping and this sweep */
+      /* bookkeeping races must never block the shutdown sweep */
     }
   }
   liveChildren.clear();
@@ -118,6 +157,11 @@ export function killAllChildren(): number {
 /** Test-only: number of currently tracked live children. */
 export function __trackedChildrenForTests(): number {
   return liveChildren.size;
+}
+
+/** Diagnostics (PRISMGIT_QUIT_LOG): pids currently tracked as live. */
+export function __trackedChildPidsForLog(): number[] {
+  return [...liveChildren].map((c) => c.pid ?? -1).filter((p) => p > 0);
 }
 
 /** Test-only: reset module state (unpatch spawn, clear the set). */

@@ -20,7 +20,7 @@ import { windowBackgroundForTheme } from './services/themeDark.js';
 import { migrateLegacyGithubToken, flushGithubStore } from './services/github.js';
 import { migrateLegacyGitLabToken, flushGitlabStore } from './services/gitlab.js';
 import { flushSecrets } from './services/secrets.js';
-import { disposeGitPollWorker } from './services/gitPollProcess.js';
+import { disposeGitPollWorkerAsync } from './services/gitPollProcess.js';
 import { buildAppMenu } from './menu.js';
 import { setMenuLocale, normalizeMenuLocale } from './i18n-menu.js';
 import { resolveResourceIcon } from './appIcons.js';
@@ -97,6 +97,15 @@ const windowStateStore = new SimpleStore({
   name: 'prismgit-window-state',
   defaults: {},
 });
+
+// ── Quit-phase telemetry (PRISMGIT_QUIT_LOG=1) ────────────────────────────
+// Wedged quits are reported as "при закрытии зависает" — this log pinpoints
+// the phase that stalls. Timestamped ms since process start, one line per
+// phase, zero cost when disabled.
+const QUIT_LOG = !!process.env.PRISMGIT_QUIT_LOG;
+export function qlog(msg: string): void {
+  if (QUIT_LOG) console.log(`[quit +${Math.round(process.uptime() * 1000)}ms] ${msg}`);
+}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -217,8 +226,39 @@ function createWindow(): BrowserWindow {
   win.on('unmaximize', saveDebounced);
   win.on('enter-full-screen', saveDebounced);
   win.on('leave-full-screen', saveDebounced);
-  win.on('close', saveWindowState);
+  // ── Close deadline ──────────────────────────────────────────────────────
+  // Chromium's graceful window close must handshake with the RENDERER's JS
+  // thread (beforeunload handlers — e.g. the AI-chat history flush). When the
+  // renderer is mid-longtask (a poll-burst re-render), that handshake stalls
+  // for the WHOLE task — measured 5.9 s with a 6 s task, and user-reported as
+  // "при закрытии приложение намертво зависает". Give the graceful path
+  // CLOSE_DEADLINE_MS; if the window is still alive past it, destroy() it —
+  // destroy bypasses the handshake. The flush only ever ran when the renderer
+  // was responsive anyway, so nothing is lost in the pathological case.
+  const CLOSE_DEADLINE_MS = 800;
+  let closeDeadlineTimer: NodeJS.Timeout | null = null;
+
+  win.on('close', () => {
+    qlog('main window close');
+    saveWindowState();
+    if (closeDeadlineTimer == null) {
+      closeDeadlineTimer = setTimeout(() => {
+        closeDeadlineTimer = null;
+        if (!win.isDestroyed()) {
+          qlog(`close deadline (${CLOSE_DEADLINE_MS}ms) hit — destroying window (renderer handshake stalled)`);
+          win.destroy();
+        }
+      }, CLOSE_DEADLINE_MS);
+      // The deadline timer must never keep the process alive on its own.
+      closeDeadlineTimer.unref?.();
+    }
+  });
   win.on('closed', () => {
+    if (closeDeadlineTimer != null) {
+      clearTimeout(closeDeadlineTimer);
+      closeDeadlineTimer = null;
+    }
+    qlog('main window closed');
     mainWindow = null;
     // The keep-alive About window can outlive the main window — on Windows /
     // Linux 'window-all-closed' would then never fire and the app would keep
@@ -446,35 +486,64 @@ function handleCliArgs(args: string[]) {
 }
 
 app.on('window-all-closed', () => {
+  qlog('window-all-closed');
   stopAllWatchers();
   if (process.platform !== 'darwin') {
+    qlog('window-all-closed → app.quit()');
     app.quit();
   }
 });
 
-app.on('before-quit', () => {
-  // PERF (v3.4): kill the background git worker FIRST — it asks the worker
-  // to kill its in-flight git children (a hard kill of the worker alone
-  // ORPHANS `git fetch` processes that keep the network/AV busy for up to
-  // the OS TCP timeout AFTER the app is gone — the "closing the app leaves
-  // the machine sluggish" report), and it takes ≤500 ms.
-  disposeGitPollWorker();
-  saveWindowState();
-  stopAllWatchers();
-  // Flush any pending command-log batch — otherwise the last 100 ms of
-  // git commands would never reach the renderer's Output panel.
-  flushCommandLogBatch();
-  // Flush the debounced store writes — otherwise a quit within 100 ms of
-  // any settings/repo/auth/secrets change could lose it. Each store's
-  // writeNow() is synchronous (tmp-write + rename), so the app is
-  // guaranteed to have flushed before the process exits.
-  flushSecrets();
-  flushSettings();
-  flushGithubStore();
-  flushGitlabStore();
-  // The window-state store lives in this module — flush it too, even
-  // though saveWindowState() schedules a debounced write above.
-  windowStateStore.flush();
+app.on('will-quit', () => {
+  qlog('will-quit');
+});
+
+app.on('quit', () => {
+  qlog('quit (app lifecycle complete — process teardown next)');
+});
+
+process.on('exit', () => { qlog('process exit'); });
+// beforeExit fires only if the loop drained without an explicit exit —
+// for a wedged app this line NEVER appears, which is itself the diagnosis.
+process.on('beforeExit', (code) => { qlog(`process beforeExit code=${code} (event loop drained)`); });
+
+let quitDisposalComplete = false;
+
+app.on('before-quit', (event) => {
+  // First pass: PARK the quit until the git worker is verifiably dead.
+  // The old fire-and-forget dispose raced Electron's teardown: 'quit'
+  // completed ~50 ms later, the utilityProcess died WITHOUT running its
+  // kill-children handler, and in-flight `git fetch` chains were orphaned
+  // (verified: hung remote-http helpers, ppid=1, alive for minutes after
+  // the app closed — "после закрытия машина тормозит"). Parking costs at
+  // most WORKER_SHUTDOWN_GRACE_MS (500 ms) and closes the race completely.
+  if (quitDisposalComplete) return; // second (real) pass — let the quit run
+  quitDisposalComplete = true;
+  event.preventDefault();
+  qlog('before-quit → parking quit for worker disposal');
+  const t0 = Date.now();
+  void disposeGitPollWorkerAsync()
+    .catch(() => { /* disposal is best-effort; never block the quit */ })
+    .finally(() => {
+      qlog(`worker disposal complete (${Date.now() - t0} ms) — flushing and re-quitting`);
+      stopAllWatchers();
+      // Flush any pending command-log batch — otherwise the last 100 ms of
+      // git commands would never reach the renderer's Output panel.
+      flushCommandLogBatch();
+      // Flush the debounced store writes — otherwise a quit within 100 ms of
+      // any settings/repo/auth/secrets change could lose it. Each store's
+      // writeNow() is synchronous (tmp-write + rename), so the app is
+      // guaranteed to have flushed before the process exits.
+      flushSecrets();
+      flushSettings();
+      flushGithubStore();
+      flushGitlabStore();
+      // The window-state store lives in this module — flush it too, even
+      // though saveWindowState() schedules a debounced write above.
+      windowStateStore.flush();
+      qlog('before-quit flushes complete → app.quit() (second pass)');
+      app.quit();
+    });
 });
 
 // Expose dialog for renderer

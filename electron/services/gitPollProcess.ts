@@ -97,6 +97,16 @@ interface WorkerState {
 }
 
 let workerState: WorkerState | null = null;
+
+/**
+ * Set the moment a QUIT-driven disposal starts. While true, the in-process
+ * fallback paths in runXExternal() must NOT run: re-running a poll/status/
+ * stats job inside the DYING main process spawns untracked git children
+ * (verified: orphaned `git fetch --prune --quiet origin`, ppid=1, alive
+ * minutes after the app closed). The fallback exists for a SICK worker;
+ * a planned quit-shutdown is not sickness — reject instead.
+ */
+let quitDisposalStarted = false;
 let nextId = 1;
 let lastForkFailure = 0;
 const crashTimestamps: number[] = [];
@@ -233,6 +243,7 @@ async function ensureWorker(): Promise<WorkerState> {
 
   proc.on('exit', () => {
     if (workerState !== state) return;
+    if (process.env.PRISMGIT_QUIT_LOG) console.log(`[quit +${Math.round(process.uptime() * 1000)}ms] worker process exited (planned=${state.dead})`);
     workerState = null;
     if (state.readyTimer !== null) {
       clearTimeout(state.readyTimer);
@@ -291,11 +302,17 @@ export async function runPollJobExternal(request: PollJobRequest): Promise<PollJ
   }
   try {
     return await dispatchToWorker<PollJobResult>('poll', request, WORKER_JOB_TIMEOUT_MS);
-  } catch {
+  } catch (err) {
     // The fetch is idempotent and TTL-gated, so a single duplicate run
     // after a rare worker crash is safe; the alternative (surfacing the
     // failure as summary.error) would blank the sidebar counters and
     // back a healthy remote off for 5 minutes on a worker hiccup.
+    //
+    // QUIT is the exception (see quitDisposalStarted): re-running here
+    // spawns untracked git children in the dying process.
+    if (quitDisposalStarted) {
+      throw err instanceof Error ? err : new Error('git poll worker unavailable: app is quitting');
+    }
     return runPollJob(request);
   }
 }
@@ -314,7 +331,10 @@ export async function runStatusJobExternal(request: StatusJobRequest): Promise<S
   }
   try {
     return await dispatchToWorker<StatusJobResult>('status', request, STATUS_JOB_TIMEOUT_MS);
-  } catch {
+  } catch (err) {
+    if (quitDisposalStarted) {
+      throw err instanceof Error ? err : new Error('git poll worker unavailable: app is quitting');
+    }
     return runStatusJob(request);
   }
 }
@@ -332,7 +352,10 @@ export async function runStatsJobExternal(request: StatsJobRequest): Promise<Sta
   }
   try {
     return await dispatchToWorker<StatsJobResult>('stats', request, STATS_JOB_TIMEOUT_MS);
-  } catch {
+  } catch (err) {
+    if (quitDisposalStarted) {
+      throw err instanceof Error ? err : new Error('git poll worker unavailable: app is quitting');
+    }
     return runStatsJob(request);
   }
 }
@@ -348,6 +371,7 @@ export async function runStatsJobExternal(request: StatsJobRequest): Promise<Sta
  *  which is the pre-existing behavior — strictly no worse.
  */
 export function disposeGitPollWorker(): void {
+  quitDisposalStarted = true;
   const state = workerState;
   if (!state || state.dead) return;
   try {
@@ -373,6 +397,65 @@ export function disposeGitPollWorker(): void {
   }, WORKER_SHUTDOWN_GRACE_MS);
 }
 
+/**
+ * Async app-quit hook: send the worker 'shutdown' (it SIGKILLs its git
+ * children — process-group tree kill, see childTracker) and WAIT for the
+ * worker to actually exit, bounded by `deadlineMs`, then hard-kill as the
+ * backstop. main.ts parks the quit (before-quit + preventDefault) until
+ * this resolves.
+ *
+ * WHY THE WAIT EXISTS (quit-orphan race, verified live): the old
+ * fire-and-forget dispose raced Electron's quit lifecycle — 'quit' completed
+ * ~50 ms later, the app process tore the utilityProcess down WITHOUT the
+ * worker ever running its shutdown handler, and every in-flight
+ * `git fetch` chain (fetch → git remote-http → curl) was orphaned to init,
+ * holding the network/AV busy for minutes — the "after closing the app the
+ * whole machine stays sluggish" report. Parking the quit until the worker
+ * is verifiably dead closes the race at a bounded cost (≤ deadlineMs).
+ */
+export async function disposeGitPollWorkerAsync(deadlineMs: number = WORKER_SHUTDOWN_GRACE_MS): Promise<void> {
+  quitDisposalStarted = true;
+  const state = workerState;
+  if (!state || state.dead) return;
+  try {
+    state.proc.postMessage({ kind: 'shutdown' });
+  } catch {
+    // Worker already gone — nothing to wait for.
+    return;
+  }
+  // Planned kill from this point: the 'exit' handler must not count it as
+  // a crash, and ensureWorker() must not refork-race us.
+  state.dead = true;
+  if (state.readyTimer !== null) {
+    clearTimeout(state.readyTimer);
+    state.readyTimer = null;
+  }
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    // Backstop: hard-kill after the grace window.
+    const timer = setTimeout(() => {
+      try {
+        state.proc.kill();
+      } catch {
+        /* already exited via the graceful path */
+      }
+      // SIGKILL delivery is near-instant but 'exit' needs one loop turn —
+      // give it a beat, but never block the quit on it.
+      setTimeout(settle, 30);
+    }, deadlineMs);
+    // The normal path: worker killed its children and exited on its own.
+    state.proc.once('exit', () => {
+      clearTimeout(timer);
+      settle();
+    });
+  });
+}
+
 /** Test-only: reset the manager's module state (kills the worker, clears
  *  crash history). Production code must not call this. */
 export function __resetGitPollProcessForTests(): void {
@@ -395,4 +478,5 @@ export function __resetGitPollProcessForTests(): void {
   crashTimestamps.length = 0;
   lastForkFailure = 0;
   nextId = 1;
+  quitDisposalStarted = false;
 }
