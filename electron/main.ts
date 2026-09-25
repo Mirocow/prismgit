@@ -20,6 +20,7 @@ import { windowBackgroundForTheme } from './services/themeDark.js';
 import { migrateLegacyGithubToken, flushGithubStore } from './services/github.js';
 import { migrateLegacyGitLabToken, flushGitlabStore } from './services/gitlab.js';
 import { flushSecrets } from './services/secrets.js';
+import { disposeGitPollWorker } from './services/gitPollProcess.js';
 import { buildAppMenu } from './menu.js';
 import { setMenuLocale, normalizeMenuLocale } from './i18n-menu.js';
 import { resolveResourceIcon } from './appIcons.js';
@@ -450,6 +451,10 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   saveWindowState();
   stopAllWatchers();
+  // Kill the dedicated git-poll utility process (repository-list remote
+  // check) — its pending jobs reject and the poll callers already handle
+  // that silently.
+  disposeGitPollWorker();
   // Flush any pending command-log batch — otherwise the last 100 ms of
   // git commands would never reach the renderer's Output panel.
   flushCommandLogBatch();

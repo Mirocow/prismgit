@@ -14,7 +14,12 @@ export default defineConfig({
       : [
           electron({
             main: {
-              entry: 'electron/main.ts',
+              // gitPollWorker.ts is the entry of the DEDICATED utilityProcess
+              // that runs the repository-list remote check (status fetch) off
+              // the main process's event loop — built to dist-electron/
+              // gitPollWorker.js next to main.js (utilityProcess.fork loads
+              // it from there, works inside the packaged asar too).
+              entry: ['electron/main.ts', 'electron/services/gitPollWorker.ts'],
               vite: {
                 // __BUILD_DATE__ is baked into the main-process bundle and shown
                 // in the About window ("Build date" row).
