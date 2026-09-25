@@ -492,6 +492,49 @@ export const tauriApi = {
       const out = await callGit('git_raw', repoPath, ['rev-parse', ref]);
       return out.trim();
     },
+    tagShow: async (repoPath: string, name: string): Promise<{ name: string; annotated: boolean; message: string; tagger?: string; date?: string; targetHash: string } | null> => {
+      // Mirrors electron/services/git.ts tagShow via git_raw (cat-file).
+      const fullRef = `refs/tags/${name}`;
+      let objectType: string;
+      try {
+        objectType = (await callGit('git_raw', repoPath, ['cat-file', '-t', fullRef])).trim();
+      } catch {
+        return null; // no such tag
+      }
+      if (objectType === 'tag') {
+        const raw = await callGit('git_raw', repoPath, ['cat-file', 'tag', fullRef]);
+        const blank = raw.indexOf('\n\n');
+        const header = blank >= 0 ? raw.slice(0, blank) : raw;
+        const message = blank >= 0 ? raw.slice(blank + 2) : '';
+        let tagger: string | undefined;
+        let date: string | undefined;
+        let targetHash = '';
+        for (const line of header.split('\n')) {
+          if (line.startsWith('object ')) targetHash = line.slice('object '.length).trim();
+          if (line.startsWith('tagger ')) {
+            const m = line.match(/^tagger\s+(.*?)\s+<[^>]*>\s+(\d+)\s+([+-]\d{4})$/);
+            if (m) {
+              tagger = m[1];
+              date = new Date(Number(m[2]) * 1000).toISOString();
+            } else {
+              tagger = line.slice('tagger '.length).replace(/\s+<[^>]*>\s+\d+\s+[+-]\d{4}$/, '').trim();
+            }
+          }
+        }
+        if (!targetHash) {
+          try {
+            targetHash = (await callGit('git_raw', repoPath, ['rev-parse', `${fullRef}^{commit}`])).trim();
+          } catch { /* leave empty */ }
+        }
+        return { name, annotated: true, message: message.replace(/\n+$/, ''), tagger, date, targetHash };
+      }
+      // Lightweight: ref points straight at the commit.
+      let targetHash = '';
+      try {
+        targetHash = (await callGit('git_raw', repoPath, ['rev-parse', fullRef])).trim();
+      } catch { /* leave empty */ }
+      return { name, annotated: false, message: '', targetHash };
+    },
     reset: async (repoPath: string, mode: 'soft' | 'mixed' | 'hard' | 'keep', hash: string): Promise<void> => {
       await callGit('git_raw', repoPath, ['reset', `--${mode}`, hash]);
     },

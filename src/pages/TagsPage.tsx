@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Tag as TagIcon, Plus, Trash, RefreshCw, Check, Pencil, ChevronDown, ChevronRight, FolderTree, GitBranch } from '../components/icons';
 import { EmptyState } from '../components/EmptyState';
 import { useRepositoryStore } from '../stores/repositoryStore';
@@ -8,11 +8,10 @@ import { useOperationLogStore } from '../stores/operationLogStore';
 import { useGitStore } from '../stores/gitStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type TagInfo } from '../lib/api';
-import { shortHash } from '../lib/utils';
+import { copyToClipboard, shortHash } from '../lib/utils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useContextMenu } from '../lib/useContextMenu';
-import { copyToClipboard } from '../lib/utils';
 import { useI18n, t as standaloneT } from '../lib/i18n';
 
 /** SmartGit Manual: Tag-Grouping — group tags by pattern (e.g., v1.0.0, v1.0.1 → "v1.0"). */
@@ -64,9 +63,17 @@ export function TagsPage() {
   const [message, setMessage] = useState('');
   const [ref, setRef] = useState('HEAD');
   const [annotated, setAnnotated] = useState(true);
-  // Rename state — git has no tag rename, so we create new + delete old
-  const [renamingTag, setRenamingTag] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
+  // Tag EDIT dialog — full edit: rename AND message change. git has no tag
+  // mutation, so "edit" re-creates the tag at the same commit and (when the
+  // name changed) deletes the old name. The previous inline rename-only
+  // input silently DESTROYED the annotation + message of annotated tags
+  // (createTag was called without the message → lightweight tag).
+  const [editTag, setEditTag] = useState<TagInfo | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editMessage, setEditMessage] = useState('');
+  const [editAnnotated, setEditAnnotated] = useState(true);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
   // SmartGit Manual: Tag-Grouping toggle
   const [groupByPattern, setGroupByPattern] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -79,28 +86,70 @@ export function TagsPage() {
   // New Tag targets the commit selected in History/another tool when present.
   const selectedCommitHash = useSelectionStore((s) => s.selectedCommitHash);
 
-  const handleRename = async (tag: TagInfo) => {
-    const newName = renameValue.trim();
-    if (!newName || newName === tag.name) { setRenamingTag(null); return; }
+  /** Open the tag EDIT dialog — fetches the FULL message via tagShow
+   *  (tags() only returns the subject; prefilling from it would truncate
+   *  multi-line messages and the save would destroy the tail).
+   *  Token-guarded: if the user opens another tag (or closes the dialog)
+   *  while the fetch is in flight, the stale result is discarded. */
+  const editFetchToken = useRef(0);
+  const openEditTag = async (tag: TagInfo) => {
+    const token = ++editFetchToken.current;
+    setEditTag(tag);
+    setEditName(tag.name);
+    setEditMessage(tag.annotation ?? '');
+    setEditAnnotated(!tag.lightweight);
+    setEditLoading(true);
+    try {
+      const full = await api.git.tagShow(repo.path, tag.name);
+      if (editFetchToken.current === token && full) {
+        setEditMessage(full.message);
+        setEditAnnotated(full.annotated);
+      }
+    } catch { /* keep the tags()-derived prefill */ } finally {
+      if (editFetchToken.current === token) setEditLoading(false);
+    }
+  };
+
+  const closeEditTag = () => {
+    editFetchToken.current++; // invalidate any in-flight tagShow prefill
+    setEditTag(null);
+  };
+  useEscapeKey(!!editTag, closeEditTag);
+
+  const handleSaveEdit = async () => {
+    if (!editTag || !editName.trim()) return;
+    const oldTag = editTag;
+    const newName = editName.trim();
+    const renamed = newName !== oldTag.name;
+    setEditBusy(true);
     try {
       await useOperationLogStore.getState().logOperation(
-        `Rename Tag ${tag.name} → ${newName}`,
+        renamed ? `Rename Tag ${oldTag.name} → ${newName}` : `Edit Tag ${oldTag.name}`,
         repo.path,
-        `git tag ${newName} ${tag.hash} && git tag -d ${tag.name}`,
+        renamed
+          ? `git tag ${editAnnotated ? '-a ' : ''}${newName} ${oldTag.hash} && git tag -d ${oldTag.name}`
+          : `git tag -f ${editAnnotated ? '-a ' : ''}${newName} ${oldTag.hash}`,
         async () => {
-          // Create new tag pointing to the same commit.
-          // tag.lightweight = true means NOT annotated; pass annotated = !lightweight.
-          await api.git.createTag(repo.path, newName, undefined, tag.hash, false, !tag.lightweight);
-          // Delete old tag
-          await api.git.deleteTag(repo.path, tag.name);
+          if (renamed) {
+            // Rename: create the NEW tag at the same commit (annotation +
+            // message preserved), then delete the OLD name.
+            await api.git.createTag(repo.path, newName, editMessage || undefined, oldTag.hash, false, editAnnotated);
+            await api.git.deleteTag(repo.path, oldTag.name);
+          } else {
+            // Same name: force re-create so the new message/annotation sticks.
+            await api.git.createTag(repo.path, newName, editMessage || undefined, oldTag.hash, true, editAnnotated);
+          }
         }
       );
-      toast.success(t('tags.renamed', { old: tag.name, new: newName }));
-      setRenamingTag(null);
+      toast.success(
+        renamed ? t('tags.renamed', { old: oldTag.name, new: newName }) : t('tags.updated', { name: newName }),
+      );
+      setEditTag(null);
       await load();
     } catch (e) {
-      toast.error(t('tags.renameFailed'), String(e));
-      setRenamingTag(null);
+      toast.error(t('tags.editFailed'), String(e));
+    } finally {
+      setEditBusy(false);
     }
   };
 
@@ -148,7 +197,11 @@ export function TagsPage() {
         const tagHash = await api.git.addAnnotatedTag(repo.path, name, message, ref || undefined);
         toast.success(tagHash ? t('tags.annotatedCreatedHash', { name, hash: tagHash.slice(0, 7) }) : t('tags.annotatedCreated', { name }));
       } else {
-        await api.git.createTag(repo.path, name, undefined, ref || undefined);
+        // annotated=false EXPLICIT: createTag's default is annotated=true,
+        // and since the backend fix an explicit annotated choice is honored
+        // even with an empty message — omitting the flag here would silently
+        // create an annotated tag instead of the requested lightweight one.
+        await api.git.createTag(repo.path, name, undefined, ref || undefined, false, false);
         toast.success(t('tags.created', { name }));
       }
       setShowDialog(false);
@@ -305,11 +358,7 @@ export function TagsPage() {
                         <TagRow
                           key={t.name}
                           tag={t}
-                          renamingTag={renamingTag}
-                          renameValue={renameValue}
-                          setRenameValue={setRenameValue}
-                          setRenamingTag={setRenamingTag}
-                          handleRename={handleRename}
+                          handleEdit={openEditTag}
                           handleDelete={handleDelete}
                           handleCheckout={handleCheckout}
                           showContextMenu={showContextMenu}
@@ -326,11 +375,7 @@ export function TagsPage() {
               <TagRow
                 key={t.name}
                 tag={t}
-                renamingTag={renamingTag}
-                renameValue={renameValue}
-                setRenameValue={setRenameValue}
-                setRenamingTag={setRenamingTag}
-                handleRename={handleRename}
+                handleEdit={openEditTag}
                 handleDelete={handleDelete}
                 handleCheckout={handleCheckout}
                 showContextMenu={showContextMenu}
@@ -411,6 +456,69 @@ export function TagsPage() {
           </div>
         </div>
       )}
+
+      {/* Tag EDIT dialog — rename AND message edit in one place.
+          git has no tag mutation: save re-creates the tag at the same
+          commit (and deletes the old name when the name changed). */}
+      {editTag && (
+        <div
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
+          onClick={closeEditTag}
+        >
+          <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-medium mb-1 flex items-center gap-2">
+              <Pencil size={14} />
+              {t('tags.editTitle', { name: editTag.name })}
+            </h3>
+            <div className="text-2xs text-text-tertiary mb-4">
+              {t('tags.editDialogHint', { hash: shortHash(editTag.hash) })}
+              {editLoading && <span className="spinner inline-block ml-2 align-middle" />}
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">{t('tags.nameLabel')}</label>
+                <input
+                  type="text"
+                  className="w-full text-sm font-mono"
+                  placeholder="v2.0.0"
+                  value={editName}
+                  autoFocus
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editAnnotated}
+                  onChange={(e) => setEditAnnotated(e.target.checked)}
+                />
+                {t('tags.annotatedTag')}
+              </label>
+              {editAnnotated && (
+                <div>
+                  <label className="text-xs text-text-tertiary block mb-1">{t('tags.messageLabel')}</label>
+                  <textarea
+                    className="w-full text-sm h-24 resize-none"
+                    value={editMessage}
+                    onChange={(e) => setEditMessage(e.target.value)}
+                    placeholder={t('tags.messagePlaceholder')}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button className="btn btn-secondary" onClick={closeEditTag}>
+                {t('common.cancel')}
+              </button>
+              <button className="btn btn-primary" onClick={handleSaveEdit} disabled={!editName.trim() || editBusy}>
+                <Check size={13} />
+                {t('common.save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -418,22 +526,14 @@ export function TagsPage() {
 /** Tag row — used in both flat and grouped display. */
 function TagRow({
   tag: t2,
-  renamingTag,
-  renameValue,
-  setRenameValue,
-  setRenamingTag,
-  handleRename,
+  handleEdit,
   handleDelete,
   handleCheckout,
   showContextMenu,
   selected,
 }: {
   tag: TagInfo;
-  renamingTag: string | null;
-  renameValue: string;
-  setRenameValue: (v: string) => void;
-  setRenamingTag: (v: string | null) => void;
-  handleRename: (tag: TagInfo) => void;
+  handleEdit: (tag: TagInfo) => void;
   handleDelete: (tag: TagInfo) => void;
   handleCheckout: (tag: TagInfo) => void;
   showContextMenu: ReturnType<typeof useContextMenu>;
@@ -460,7 +560,7 @@ function TagRow({
           { label: t('tags.copyName'), clickId: 'copy-name' },
           { label: t('tags.copyHash'), clickId: 'copy-hash' },
           { type: 'separator' },
-          { label: t('tags.renameItem', { name: t2.name }), clickId: 'rename' },
+          { label: t('tags.editItem', { name: t2.name }), clickId: 'edit' },
           { label: t('tags.deleteTagItem', { name: t2.name }), clickId: 'delete' },
           { type: 'separator' },
           { label: t('tags.viewCommitInHistory'), clickId: 'view-commit' },
@@ -469,7 +569,7 @@ function TagRow({
             case 'checkout': handleCheckout(t2); break;
             case 'copy-name': copyToClipboard(t2.name); break;
             case 'copy-hash': copyToClipboard(t2.hash); break;
-            case 'rename': setRenamingTag(t2.name); setRenameValue(t2.name); break;
+            case 'edit': handleEdit(t2); break;
             case 'delete': handleDelete(t2); break;
             case 'view-commit':
               useSelectionStore.getState().selectTag(t2.name);
@@ -483,23 +583,7 @@ function TagRow({
       <TagIcon size={14} className="text-status-modified shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          {renamingTag === t2.name ? (
-            <input
-              type="text"
-              className="text-xs w-32 px-1 py-0.5"
-              autoFocus
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleRename(t2);
-                if (e.key === 'Escape') setRenamingTag(null);
-              }}
-              onBlur={() => handleRename(t2)}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : (
-            <span className="text-sm font-medium text-text-primary">{t2.name}</span>
-          )}
+          <span className="text-sm font-medium text-text-primary">{t2.name}</span>
           {!t2.lightweight && (
             <span className="badge badge-modified">{t('tags.annotatedBadge')}</span>
           )}
@@ -523,8 +607,8 @@ function TagRow({
         </button>
         <button
           className="icon-btn !w-6 !h-6"
-          title={t('common.rename')}
-          onClick={(e) => { e.stopPropagation(); setRenamingTag(t2.name); setRenameValue(t2.name); }}
+          title={t('common.edit')}
+          onClick={(e) => { e.stopPropagation(); handleEdit(t2); }}
         >
           <Pencil size={12} />
         </button>

@@ -16,10 +16,12 @@ import {
   GitMerge,
   GitPullRequest,
   Pencil,
+  Plus,
   RefreshCw,
   RotateCcw,
   StickyNote,
   Tag as TagIcon,
+  Trash,
   Undo,
   X
 } from '../components/icons';
@@ -296,6 +298,16 @@ export function HistoryPage() {
       }
       const result = await api.git.log(repo.path, logOpts);
       setEntries(result);
+      // TAG SYNC: refs may have changed since the last load (tag created /
+      // deleted / edited via the context menu, the tag section, or a RefBadge
+      // menu — all paths funnel through loadHistory). The per-commit
+      // tagsHere cache is cleared so the details panel re-fetches the tags
+      // of the selected commit; the allTags counter ("Tagged (N)" chip)
+      // reloads in the background. Without this, the tag section kept
+      // showing DELETED tags / missing NEW ones until the user switched
+      // commits or repos (stale-cache bug).
+      tagsHereCache.current.clear();
+      void api.git.tags(repo.path).then((tags) => setAllTags(tags.map((tg) => ({ name: tg.name, hash: tg.hash })))).catch(() => {});
       // If we got fewer than PAGE_SIZE commits, there are no more to load.
       // Otherwise assume more exist (we'll discover the end on the next fetch).
       setHasMore(result.length >= PAGE_SIZE);
@@ -1442,39 +1454,61 @@ export function HistoryPage() {
 
   const handleSaveTag = async () => {
     if (!tagTarget || !tagName.trim()) return;
+    const newName = tagName.trim();
     try {
-      // When editing (editingTagName is set), use force=true to overwrite
-      // the existing tag at the same commit with the new message.
-      const force = !!editingTagName;
-      await api.git.createTag(repo.path, tagName.trim(), tagMessage || undefined, tagTarget, force, tagAnnotated);
-      toast.success(
-        force ? t('history.tagUpdatedToast', { name: tagName }) : t('history.tagCreatedToast', { name: tagName }),
-        t('history.tagPointsTo', { hash: shortHash(tagTarget) })
-      );
+      if (editingTagName && editingTagName !== newName) {
+        // RENAME (git has no tag rename): create the tag under the NEW name
+        // at the same commit (message/annotation preserved via the form),
+        // then delete the OLD tag. The old code force-overwrote only the NEW
+        // name and silently left the old tag in place — a rename that
+        // duplicated the tag instead of renaming it.
+        await api.git.createTag(repo.path, newName, tagMessage || undefined, tagTarget, false, tagAnnotated);
+        await api.git.deleteTag(repo.path, editingTagName);
+        toast.success(
+          t('history.tagRenamedToast', { old: editingTagName, new: newName }),
+          t('history.tagPointsTo', { hash: shortHash(tagTarget) }),
+        );
+      } else {
+        // CREATE, or EDIT in place (same name) — force re-creates the tag
+        // object at the same commit so the new message/annotation sticks.
+        const force = !!editingTagName;
+        await api.git.createTag(repo.path, newName, tagMessage || undefined, tagTarget, force, tagAnnotated);
+        toast.success(
+          force ? t('history.tagUpdatedToast', { name: newName }) : t('history.tagCreatedToast', { name: newName }),
+          t('history.tagPointsTo', { hash: shortHash(tagTarget) }),
+        );
+      }
       setShowTagDialog(false);
       setEditingTagName(null);
       await loadHistory();
     } catch (e) { toast.error(t('history.tagCreateFailed'), String(e)); }
   };
 
-  // Edit an existing tag's message (annotated tags only). Re-creates the tag
-  // with force=true at the same commit so the message is updated. Lightweight
-  // tags have no message to edit — the menu offers Delete instead.
+  // Edit an existing tag (message + name). git has no tag mutation — editing
+  // re-creates the tag object with force at the same commit; a NAME change
+  // additionally deletes the old tag (rename semantics). Lightweight tags
+  // have no message to edit — the caller offers Delete instead.
   const handleEditTag = async (tagName: string, entry: LogEntry) => {
-    // Fetch the existing tag's annotation (if annotated) to pre-fill the dialog
+    // Full-fidelity read: tagsAt/tags only return the subject (FIRST LINE) —
+    // prefilling the dialog from that truncated a multi-line tag message,
+    // and the subsequent force-save silently DESTROYED the tail (data loss).
+    // tagShow reads the raw tag object (cat-file) so the message is
+    // byte-exact.
     try {
-      const tags = await api.git.tagsAt(repo.path, entry.hash);
-      const existing = tags.find(t => t.name === tagName);
-      const isAnnotated = existing?.annotated ?? false;
-      if (!isAnnotated) {
+      const tag = await api.git.tagShow(repo.path, tagName);
+      if (!tag) {
+        toast.error(t('history.tagLoadFailed'), t('history.tagNotFound', { name: tagName }));
+        return;
+      }
+      if (!tag.annotated) {
         toast.info(t('history.lightweightTagTitle'), t('history.lightweightTagMessage', { name: tagName }));
         return;
       }
-      // Open the tag dialog in "edit" mode — pre-fill name + message,
+      // Open the tag dialog in "edit" mode — pre-fill name + FULL message,
       // reuse the same dialog as Create (save uses force=true when editing).
-      setTagTarget(entry.hash);
+      setTagTarget(tag.targetHash || entry.hash);
       setTagName(tagName);
-      setTagMessage(existing?.message ?? '');
+      setTagMessage(tag.message);
       setTagAnnotated(true);
       setEditingTagName(tagName);
       setShowTagDialog(true);
@@ -2161,25 +2195,66 @@ export function HistoryPage() {
               )}
               {/* Tags and branch refs on this commit (shared badge renderer) */}
               <RefBadges refs={selected.refs} className="mb-3" hash={selected.hash} onChanged={loadHistory} />
-              {/* Annotated-tag details — SmartGit shows the tag message in the
-                  commit description. Lightweight tags only get a badge above. */}
-              {tagsHere.filter(t => t.annotated).length > 0 && (
-                <div className="mb-3 space-y-1">
-                  {tagsHere.filter(t => t.annotated).map((t) => (
-                    <div key={t.name} className="px-2 py-1.5 rounded bg-tag-bg/40 border border-tag-border/40">
-                      <div className="flex items-center gap-1.5 text-2xs text-tag-text">
-                        <TagIcon size={11} />
-                        <span className="font-semibold">{t.name}</span>
-                        {t.tagger && <span className="text-text-tertiary">· {t.tagger}</span>}
-                        {t.date && <span className="text-text-tertiary">· {formatTime(t.date)}</span>}
-                      </div>
-                      {t.message && (
-                        <div className="text-2xs text-text-secondary mt-0.5 whitespace-pre-wrap">{t.message}</div>
-                      )}
-                    </div>
-                  ))}
+              {/* TAGS ON THIS COMMIT — visible inline management: create (+),
+                  edit (pencil) and delete (trash) without hunting for the
+                  right-click menu. The context menu keeps the same actions;
+                  this section makes them discoverable. Shows ALL tags
+                  (annotated AND lightweight) — previously lightweight tags
+                  were only visible as a badge above. */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-2xs uppercase text-text-tertiary flex items-center gap-1">
+                    <TagIcon size={10} />
+                    {t('history.tagsSectionTitle')}
+                    <span className="text-text-tertiary/70">({tagsHere.length})</span>
+                  </span>
+                  <button
+                    className="icon-btn !w-4 !h-4"
+                    title={t('history.addTagTooltip')}
+                    onClick={() => handleCreateTag(selected)}
+                  >
+                    <Plus size={9} />
+                  </button>
                 </div>
-              )}
+                {tagsHere.length === 0 ? (
+                  <div className="text-2xs text-text-tertiary italic">{t('history.noTagsOnCommit')}</div>
+                ) : (
+                  <div className="space-y-1">
+                    {tagsHere.map((tg) => (
+                      <div key={tg.name} className="group px-2 py-1.5 rounded bg-tag-bg/40 border border-tag-border/40">
+                        <div className="flex items-center gap-1.5 text-2xs text-tag-text">
+                          <TagIcon size={11} className="shrink-0" />
+                          <span className="font-semibold">{tg.name}</span>
+                          {!tg.annotated && (
+                            <span className="px-1 rounded border border-tag-border/60 text-text-tertiary">{t('history.tagLightweightBadge')}</span>
+                          )}
+                          {tg.tagger && <span className="text-text-tertiary truncate">· {tg.tagger}</span>}
+                          {tg.date && <span className="text-text-tertiary shrink-0">· {formatTime(tg.date)}</span>}
+                          <span className="ml-auto flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100">
+                            <button
+                              className="icon-btn !w-5 !h-5"
+                              title={t('history.editTagTooltip')}
+                              onClick={() => handleEditTag(tg.name, selected)}
+                            >
+                              <Pencil size={10} />
+                            </button>
+                            <button
+                              className="icon-btn !w-5 !h-5 hover:!text-status-deleted"
+                              title={t('history.deleteTagTooltip')}
+                              onClick={() => handleDeleteTag(tg.name)}
+                            >
+                              <Trash size={10} />
+                            </button>
+                          </span>
+                        </div>
+                        {tg.annotated && tg.message && (
+                          <div className="text-2xs text-text-secondary mt-0.5 whitespace-pre-wrap">{tg.message}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-2 mb-3">
                 <CommitHashLink hash={selected.hash} />
                 <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success(t('history.copied')); }}>
@@ -2429,24 +2504,31 @@ export function HistoryPage() {
         </div>
       </div>
 
-      {/* Create Tag dialog */}
+      {/* Create / Edit Tag dialog */}
       {showTagDialog && (
         <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowTagDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-1 flex items-center gap-2">
-              <TagIcon size={16} /> Create Tag at {shortHash(tagTarget || '')}
+              <TagIcon size={16} />
+              {editingTagName
+                ? t('history.tagDialogEditTitle', { name: editingTagName })
+                : t('history.tagDialogCreateTitle', { hash: shortHash(tagTarget || '') })}
             </h3>
-            <div className="text-2xs text-text-tertiary mb-4">Tag will point to this commit.</div>
+            <div className="text-2xs text-text-tertiary mb-4">
+              {editingTagName && tagName.trim() && tagName.trim() !== editingTagName
+                ? t('history.tagDialogRenameHint')
+                : t('history.tagDialogTargetHint')}
+            </div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Tag name</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('history.tagNameLabel')}</label>
                 <input type="text" className="w-full text-sm font-mono" placeholder="v1.0.0"
                   value={tagName} autoFocus
                   onChange={(e) => setTagName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveTag()} />
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Message (optional, for annotated tags)</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('history.tagMessageLabel')}</label>
                 <textarea className="w-full text-sm h-20 resize-none"
                   value={tagMessage}
                   onChange={(e) => setTagMessage(e.target.value)}
@@ -2455,13 +2537,13 @@ export function HistoryPage() {
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={tagAnnotated}
                   onChange={(e) => setTagAnnotated(e.target.checked)} />
-                <span>Annotated tag (recommended — stores tagger + date + message)</span>
+                <span>{t('history.tagAnnotatedLabel')}</span>
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowTagDialog(false)}>{t('action.button.cancel')}</button>
               <button className="btn btn-primary" onClick={handleSaveTag} disabled={!tagName.trim()}>
-                <TagIcon size={13} /> Create Tag
+                <TagIcon size={13} /> {editingTagName ? t('history.tagSaveButton') : t('history.tagCreateButton')}
               </button>
             </div>
           </div>

@@ -403,6 +403,8 @@ export interface GitApi {
   mergeNestedCommits: (repoPath: string, hash: string) => Promise<LogEntry[]>;
   /** Tags pointing AT a commit with annotated-tag metadata (tagger, date, message). */
   tagsAt: (repoPath: string, hash: string) => Promise<{ name: string; annotated: boolean; tagger?: string; date?: string; message?: string }[]>;
+  /** Full-fidelity read of ONE tag (byte-exact multi-line message via cat-file) — the tag EDIT dialog's data source. null when the tag does not exist. */
+  tagShow: (repoPath: string, name: string) => Promise<{ name: string; annotated: boolean; message: string; tagger?: string; date?: string; targetHash: string } | null>;
   /** All tracked files (git ls-files) — file-name search for the Search tool. */
   trackedFiles: (repoPath: string) => Promise<string[]>;
   /**

@@ -4158,13 +4158,96 @@ export async function createTag(
   // arguments") because `-m` then becomes a positional. Argument injection
   // on tag names is mitigated upstream by UI input validation (tag names
   // cannot start with `-`).
-  if (annotated && message) {
-    args.push('-a', name, '-m', message);
+  // annotated=true is an EXPLICIT user choice: it must always produce a real
+  // tag object. A missing message previously fell through to the lightweight
+  // branch — silently losing the annotation the user asked for (and, on
+  // rename-flows, destroying the old tag's message). `git tag -a` without
+  // -m would open an editor and HANG the app, so an empty message is passed
+  // explicitly as `-m ''`.
+  if (annotated) {
+    args.push('-a', name, '-m', message ?? '');
   } else {
     args.push(name);
   }
   if (ref) args.push(ref);
   await git.raw(args);
+}
+
+/**
+ * Full-fidelity read of ONE tag — the EDIT dialog's data source.
+ *
+ * `tagsAt`/`tags` only return the subject (first line); pre-filling an edit
+ * dialog from those silently TRUNCATES multi-line tag messages, and saving
+ * then destroys the tail (data loss). This reads the raw tag object via
+ * `git cat-file tag` so the message is byte-exact, plus tagger/target info.
+ *
+ * Returns null for a tag that does not exist (cat-file fails).
+ */
+export interface TagShowResult {
+  name: string;
+  /** true = real tag object (annotated), false = lightweight (commit ref). */
+  annotated: boolean;
+  /** Full tag message (subject + body) — '' for lightweight tags. */
+  message: string;
+  /** Tagger display name — annotated only. */
+  tagger?: string;
+  /** ISO date — annotated only. */
+  date?: string;
+  /** Commit the tag ultimately points at. */
+  targetHash: string;
+}
+
+export async function tagShow(repoPath: string, name: string): Promise<TagShowResult | null> {
+  const git = getGit(repoPath);
+  const fullRef = `refs/tags/${name}`;
+  let objectType = '';
+  try {
+    objectType = (await git.raw(['cat-file', '-t', fullRef])).trim();
+  } catch {
+    return null; // no such tag
+  }
+  if (objectType === 'tag') {
+    // Raw tag object: "object <sha>\ntype commit\ntag <name>\ntagger N <e> ts tz\n\n<message>"
+    const raw = await git.raw(['cat-file', 'tag', fullRef]);
+    const blank = raw.indexOf('\n\n');
+    const header = blank >= 0 ? raw.slice(0, blank) : raw;
+    const message = blank >= 0 ? raw.slice(blank + 2) : '';
+    let tagger: string | undefined;
+    let date: string | undefined;
+    let targetHash = '';
+    for (const line of header.split('\n')) {
+      if (line.startsWith('object ')) targetHash = line.slice('object '.length).trim();
+      if (line.startsWith('tagger ')) {
+        // "tagger Name <email> 1700000000 +0300" → name + ISO date
+        const m = line.match(/^tagger\s+(.*?)\s+<[^>]*>\s+(\d+)\s+([+-]\d{4})$/);
+        if (m) {
+          tagger = m[1];
+          date = new Date(Number(m[2]) * 1000).toISOString();
+        } else {
+          tagger = line.slice('tagger '.length).replace(/\s+<[^>]*>\s+\d+\s+[+-]\d{4}$/, '').trim();
+        }
+      }
+    }
+    if (!targetHash) {
+      try {
+        targetHash = (await git.raw(['rev-parse', `${fullRef}^{commit}`])).trim();
+      } catch { /* leave empty */ }
+    }
+    return {
+      name,
+      annotated: true,
+      message: message.replace(/\n+$/, ''),
+      tagger,
+      date,
+      targetHash,
+    };
+  }
+  // Lightweight: the ref points straight at a commit — no message of its own.
+  let targetHash = '';
+  try {
+    targetHash = (await git.raw(['rev-parse', fullRef])).trim();
+  } catch { /* leave empty */ }
+  return { name, annotated: false, message: '', targetHash };
 }
 
 export async function deleteTag(repoPath: string, name: string, remote = false): Promise<void> {

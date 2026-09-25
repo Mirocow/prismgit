@@ -72,6 +72,7 @@ const api = {
     commitFiles: (repoPath: string, hash: string) => ipcRenderer.invoke('git:commitFiles', repoPath, hash),
     mergeNestedCommits: (repoPath: string, hash: string) => ipcRenderer.invoke('git:mergeNestedCommits', repoPath, hash),
     tagsAt: (repoPath: string, hash: string) => ipcRenderer.invoke('git:tagsAt', repoPath, hash),
+    tagShow: (repoPath: string, name: string) => ipcRenderer.invoke('git:tagShow', repoPath, name),
     trackedFiles: (repoPath: string) => ipcRenderer.invoke('git:trackedFiles', repoPath),
     diffCommit: (repoPath: string, hash: string, parentHash?: string) =>
       ipcRenderer.invoke('git:diffCommit', repoPath, hash, parentHash),

@@ -760,7 +760,11 @@ export function BranchesPage() {
   const executeAddTag = async (data: { name: string; message: string; ref: string; force: boolean }) => {
     setTagBusy(true);
     try {
-      await api.git.createTag(repo.path, data.name, data.message || undefined, data.ref, data.force);
+      // Message present → annotated; empty message → lightweight (the toast
+      // distinguishes the two). annotated flag passed EXPLICITLY — since the
+      // backend fix, createTag honors annotated=true even with an empty
+      // message, so the old implicit behavior would change here too.
+      await api.git.createTag(repo.path, data.name, data.message || undefined, data.ref, data.force, !!data.message);
       toast.success(data.message ? t('branches.tagCreatedAnnotated', { name: data.name }) : t('branches.tagCreated', { name: data.name }));
       setShowAddTag(false);
       setCollapsedGroups((prev) => { const n = new Set(prev); n.delete('tags'); return n; });

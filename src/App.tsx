@@ -716,7 +716,10 @@ export default function App() {
       if (!name) return;
       const target = useSelectionStore.getState().selectedCommitHash;
       try {
-        await api.git.createTag(repo.path, name, undefined, target || undefined);
+        // Lightweight tag by design (name-only prompt) — annotated=false
+        // EXPLICIT so the backend's annotated default can't turn this into
+        // an annotated tag.
+        await api.git.createTag(repo.path, name, undefined, target || undefined, false, false);
         toast.success(i18nT('toast.tag.created', { name, target: target ? ` at ${target.slice(0, 7)}` : '' }));
         useGitStore.getState().refreshStatus(repo.path);
       } catch (e) { toast.error(i18nT('toast.tag.createFailed'), String(e)); }

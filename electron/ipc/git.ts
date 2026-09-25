@@ -82,6 +82,7 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:commitFiles', (_e, p: string, h: string) => wrap(gitService.commitFiles)(p, h));
   ipcMain.handle('git:mergeNestedCommits', (_e, p: string, h: string) => wrap(gitService.mergeNestedCommits)(p, h));
   ipcMain.handle('git:tagsAt', (_e, p: string, h: string) => wrap(gitService.tagsAt)(p, h));
+  ipcMain.handle('git:tagShow', (_e, p: string, n: string) => wrap(gitService.tagShow)(p, n));
   ipcMain.handle('git:trackedFiles', (_e, p: string) => wrap(gitService.trackedFiles)(p));
   ipcMain.handle('git:diffCommit', (_e, p: string, h: string, ph?: string) => wrap(gitService.diffCommit)(p, h, ph));
   ipcMain.handle('git:commitExists', (_e, p: string, h: string) => wrap(gitService.commitExists)(p, h));

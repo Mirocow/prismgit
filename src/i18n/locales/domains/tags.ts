@@ -24,6 +24,12 @@ export const en: Record<string, string> = {
   'tags.checkoutFailed': 'Failed to checkout tag',
   'tags.renamed': "Tag '{old}' renamed to '{new}'",
   'tags.renameFailed': 'Failed to rename tag',
+  // Tag EDIT dialog (rename + message in one place)
+  'tags.editItem': "Edit Tag '{name}'...",
+  'tags.editTitle': "Edit Tag '{name}'",
+  'tags.editDialogHint': 'The tag keeps pointing at {hash}. A new name renames it (old name deleted).',
+  'tags.updated': "Tag '{name}' updated",
+  'tags.editFailed': 'Failed to edit tag',
   // Page chrome
   'tags.count': '{count} tags',
   'tags.groupTooltip': "Group tags by version pattern (e.g., v1.0.0, v1.0.1 → 'v1.0')",
@@ -82,6 +88,12 @@ export const ru: Record<string, string> = {
   'tags.checkoutFailed': 'Не удалось переключиться на тег',
   'tags.renamed': "Тег '{old}' переименован в '{new}'",
   'tags.renameFailed': 'Не удалось переименовать тег',
+  // Tag EDIT dialog (rename + message in one place)
+  'tags.editItem': "Редактировать тег '{name}'...",
+  'tags.editTitle': "Редактировать тег '{name}'",
+  'tags.editDialogHint': 'Тег продолжает указывать на {hash}. Новое имя переименовывает тег (старое имя будет удалено).',
+  'tags.updated': "Тег '{name}' обновлён",
+  'tags.editFailed': 'Не удалось изменить тег',
   // Page chrome
   'tags.count': 'Тегов: {count}',
   'tags.groupTooltip': "Группировать теги по шаблону версии (например, v1.0.0, v1.0.1 → 'v1.0')",
@@ -140,6 +152,12 @@ export const zh: Record<string, string> = {
   'tags.checkoutFailed': '检出标签失败',
   'tags.renamed': "标签 '{old}' 已重命名为 '{new}'",
   'tags.renameFailed': '重命名标签失败',
+  // Tag EDIT dialog (rename + message in one place)
+  'tags.editItem': "编辑标签 '{name}'...",
+  'tags.editTitle': "编辑标签 '{name}'",
+  'tags.editDialogHint': '标签继续指向 {hash}。新名称将重命名标签（旧名称将被删除）。',
+  'tags.updated': "标签 '{name}' 已更新",
+  'tags.editFailed': '编辑标签失败',
   // Page chrome
   'tags.count': '{count} 个标签',
   'tags.groupTooltip': "按版本模式分组标签（例如 v1.0.0、v1.0.1 → 'v1.0'）",
@@ -198,6 +216,12 @@ export const de: Record<string, string> = {
   'tags.checkoutFailed': 'Tag-Checkout fehlgeschlagen',
   'tags.renamed': "Tag '{old}' umbenannt in '{new}'",
   'tags.renameFailed': 'Tag konnte nicht umbenannt werden',
+  // Tag EDIT dialog (rename + message in one place)
+  'tags.editItem': "Tag '{name}' bearbeiten...",
+  'tags.editTitle': "Tag '{name}' bearbeiten",
+  'tags.editDialogHint': 'Der Tag zeigt weiterhin auf {hash}. Ein neuer Name benennt ihn um (alter Name wird gelöscht).',
+  'tags.updated': "Tag '{name}' aktualisiert",
+  'tags.editFailed': 'Tag konnte nicht bearbeitet werden',
   // Page chrome
   'tags.count': '{count} Tags',
   'tags.groupTooltip': "Tags nach Versionsmuster gruppieren (z. B. v1.0.0, v1.0.1 → 'v1.0')",
