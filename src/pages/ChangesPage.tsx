@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { AppSettings } from '../../electron/types/settings-api';
-import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
+import { CommitMessageEditor, type CommitMessageEditorHandle } from '../components/CommitMessageEditor';
 import { CommitTypeDropdown } from '../components/CommitTypeDropdown';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
 import { FilterInput } from '../components/FilterInput';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FileCheck, FilePlus, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Loader, Lock, Minus, Plus, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FileCheck, FilePlus, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Lock, Minus, Plus, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
 import { LazyFileList } from '../components/LazyFileList';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
@@ -247,7 +247,16 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   };
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
-  const [commitMsg, setCommitMsg] = useState('');
+  // RENDER-PERF: the commit-message draft lives in the isolated
+  // CommitMessageEditor child (ref-imperative API). Keeping the draft in
+  // THIS component's state re-rendered the entire page (~3k lines, three
+  // file lists, DiffViewer) on EVERY keystroke and on every AI-stream token
+  // (20-50 full-page renders/s during generation). The page now re-renders
+  // at most twice per message: on empty <-> non-empty transitions
+  // (commitMsgEmpty, used only for the Commit buttons' disabled state).
+  const editorRef = useRef<CommitMessageEditorHandle>(null);
+  const [commitMsgEmpty, setCommitMsgEmpty] = useState(true);
+  const handleCommitMsgEmptyChange = useCallback((empty: boolean) => setCommitMsgEmpty(empty), []);
   const [amend, setAmend] = useState(false);
   // ── Auto-suggest commit message ───────────────────────────────────────
   // When the user stages files and the commit message is empty, the AI
@@ -841,7 +850,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   };
 
   const handleCommit = async () => {
-    if (!commitMsg.trim()) {
+    if (!(editorRef.current?.getText() ?? '').trim()) {
       toast.warning(t('changes.commitMessageRequired'));
       return;
     }
@@ -912,7 +921,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const performCommit = async () => {
     try {
       // SmartGit Manual: AI Commit Messages — @ai placeholder → replace with AI-generated
-      let finalMsg = commitMsg.trim();
+      let finalMsg = (editorRef.current?.getText() ?? '').trim();
       const placeholder = detectAIPlaceholder(finalMsg);
       if (placeholder && settings?.aiCommitMessagesEnabled) {
         const provider = buildAIProvider(settings);
@@ -926,7 +935,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               recentMessages: journal.slice(0, 5).map(j => j.subject),
             });
             finalMsg = applyAIPlaceholder(finalMsg, aiMessage, placeholder);
-            setCommitMsg(finalMsg);
+            editorRef.current?.setText(finalMsg);
             toast.success(t('changes.aiMessageGenerated'), t('changes.reviewAndCommit'));
           } catch (e) {
             toast.warning(t('changes.aiGenFailedPlaceholder'), String(e));
@@ -997,7 +1006,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       const newHistory = [finalMsg, ...filtered].slice(0, 50);
       saveProjectPrefs(repo.path, { commitMessageHistory: newHistory });
       setCommitMsgHistory(newHistory);
-      setCommitMsg('');
+      editorRef.current?.setText('');
       setAmend(false);
       setCommitAll(false);
       await loadJournal();
@@ -1025,21 +1034,13 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
    */
   const handlePickCommitType = useCallback((type: string) => {
     const CONVENTIONAL_PREFIX = /^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert):\s/;
-    setCommitMsg((prev) => {
-      const stripped = prev.replace(CONVENTIONAL_PREFIX, '');
-      const trimmed = stripped.replace(/^\s+/, '');
-      return trimmed.length === 0 ? `${type}: ` : `${type}: ${trimmed}`;
-    });
+    const prev = editorRef.current?.getText() ?? '';
+    const stripped = prev.replace(CONVENTIONAL_PREFIX, '');
+    const trimmed = stripped.replace(/^\s+/, '');
+    editorRef.current?.setText(trimmed.length === 0 ? `${type}: ` : `${type}: ${trimmed}`);
     // Re-focus the textarea at end so the user can continue typing.
-    requestAnimationFrame(() => {
-      const ta = document.getElementById('commit-message-input') as HTMLTextAreaElement | null;
-      if (ta) {
-        ta.focus();
-        const end = ta.value.length;
-        ta.setSelectionRange(end, end);
-      }
-    });
-  }, [setCommitMsg]);
+    editorRef.current?.focusEnd();
+  }, []);
 
   // Load commit message history when repo changes
   useEffect(() => {
@@ -1067,8 +1068,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         return;
       }
       // LAR-1 — streaming AI: tokens arrive as they're generated, so the
-      // user sees the commit message compose itself in real time.
-      setCommitMsg(''); // clear the textarea so we can stream into it
+      // user sees the commit message compose itself in real time. Each
+      // token updates the ISOLATED editor only (ref imperative setText) —
+      // no page-level re-render per token.
+      editorRef.current?.setText(''); // clear the textarea so we can stream into it
       let accumulated = '';
       for await (const _tok of generateCommitMessageStream({
         diff: diffText,
@@ -1077,14 +1080,14 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       }, {
         onToken: (token) => {
           accumulated += token;
-          setCommitMsg(accumulated);
+          editorRef.current?.setText(accumulated);
         },
       })) {
         // tokens are applied via the onToken callback above; we don't
         // need to do anything extra in the loop body.
       }
       if (accumulated) {
-        setCommitMsg(accumulated.trim());
+        editorRef.current?.setText(accumulated.trim());
         toast.success(t('changes.aiMessageGenerated'), t('changes.reviewBeforeCommitting'));
       }
     } catch (e) {
@@ -1137,6 +1140,25 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     window.addEventListener('smartgit:stash-selection', handler);
     return () => window.removeEventListener('smartgit:stash-selection', handler);
   }, [selectedFiles, repo.path, refreshStatus, toast]);
+
+  // RENDER-PERF: stable callbacks for the memoized CommitMessageEditor.
+  // The ref-indirection keeps the identity stable across re-renders while
+  // always invoking the freshest handler — so the child never re-renders
+  // just because the page re-rendered.
+  const handleCommitRef = useRef(handleCommit);
+  handleCommitRef.current = handleCommit;
+  const handleCommitSubmit = useCallback(() => { void handleCommitRef.current(); }, []);
+  const handleSuggestionConsumed = useCallback(() => setAiSuggestion(null), []);
+
+  // RENDER-PERF: stable identity for the memoized DiffViewer's onStaged —
+  // an inline arrow broke the memo bailout on every page re-render.
+  const handleDiffStaged = useCallback(() => {
+    // Reset the skip-guard so the diff-reload effect re-runs when the
+    // refreshed status arrives (partial staging changes index, not worktree,
+    // so the fs watcher will NOT fire by itself).
+    lastLoadedFileRef.current = null;
+    refreshStatus(repo.path);
+  }, [refreshStatus, repo.path]);
 
   const handleCommitAndPush = async () => {
     await handleCommit();
@@ -1648,7 +1670,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     aiSuggestAbortRef.current = null;
 
     if (!settings?.aiCommitMessagesEnabled) { setAiSuggestion(null); return; }
-    if (commitMsg.trim()) { setAiSuggestion(null); return; }
+    if (!commitMsgEmpty) { setAiSuggestion(null); return; }
     if (stagedFiles.length === 0) { setAiSuggestion(null); return; }
 
     aiSuggestTimerRef.current = setTimeout(async () => {
@@ -1681,7 +1703,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     return () => {
       if (aiSuggestTimerRef.current) clearTimeout(aiSuggestTimerRef.current);
     };
-  }, [stagedFiles.length, commitMsg, settings?.aiCommitMessagesEnabled, settings, repo.path, journal]);
+  }, [stagedFiles.length, commitMsgEmpty, settings?.aiCommitMessagesEnabled, settings, repo.path, journal]);
 
   // Unstaged (changed, non-staged) files — always visible (default).
   // Exclude files that are part of a detected rename (old path = delete,
@@ -2213,12 +2235,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     .filter((f) => (f.working_dir as string) === 'D')
     .map((f) => f.path);
   // 1.4 Commit-message line length guides (SmartGit 50/72 convention).
+  // The guide columns themselves are computed inside CommitMessageEditor
+  // (primitive `lineGuides` prop → stable identity for the memoized child).
   const lineGuidesSetting = settings?.commitLineGuides ?? 'none';
-  const lineGuideCols: number[] =
-    lineGuidesSetting === '50' ? [50]
-    : lineGuidesSetting === '72' ? [72]
-    : lineGuidesSetting === '50+72' ? [50, 72]
-    : [];
   // 1.2 — Commit stays enabled while ANY change exists (nothing-staged
   // setting decides what gets staged); with an empty tree it stays disabled.
   const hasAnyCommittableChanges =
@@ -2251,6 +2270,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           <FilterInput
             value={fileFilter}
             onChange={setFileFilter}
+            debounceMs={150}
             placeholder={t('changes.fileFilter')}
             ariaLabel={t('changes.fileFilter')}
             isRegex={fileFilterRegex}
@@ -2738,7 +2758,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                         className="w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover truncate border-b border-border-subtle last:border-b-0"
                         title={msg}
                         onClick={() => {
-                          setCommitMsg(msg);
+                          editorRef.current?.setText(msg);
                           setShowMsgHistory(false);
                         }}
                       >
@@ -2752,7 +2772,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <button
                 className="btn btn-secondary text-xs"
                 onClick={handleCommitAndPush}
-                disabled={!commitMsg.trim() || (!commitAll && !hasAnyCommittableChanges) || isCommitBlocked(status)}
+                disabled={commitMsgEmpty || (!commitAll && !hasAnyCommittableChanges) || isCommitBlocked(status)}
                 title={isCommitBlocked(status) ? t('changes.operationBlockedTitle') : t('changes.commitThenPushTitle')}
               >
                 <GitPullRequest size={11} />
@@ -2761,7 +2781,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <button
                 className="btn btn-primary text-xs"
                 onClick={handleCommit}
-                disabled={!commitMsg.trim() || (!commitAll && !hasAnyCommittableChanges) || isCommitBlocked(status)}
+                disabled={commitMsgEmpty || (!commitAll && !hasAnyCommittableChanges) || isCommitBlocked(status)}
                 title={isCommitBlocked(status) ? t('changes.operationBlockedTitle') : t('changes.ctrlEnterHint')}
               >
                 <GitCommit size={11} />
@@ -2801,65 +2821,16 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 </button>
               </div>
             )}
-            <div className="flex-1 flex overflow-hidden flex-col">
-              {/* AI auto-suggestion hint — appears above the textarea when
-                  the AI has generated a suggestion in the background.
-                  Click to fill the textarea. Non-intrusive: subtle styling,
-                  dismissable by just typing in the textarea (which sets
-                  commitMsg → the useEffect clears the suggestion). */}
-              {aiSuggestion && !commitMsg.trim() && (
-                <button
-                  className="flex items-center gap-1.5 px-2 py-1 bg-accent-muted/50 border-b border-accent/20 text-2xs text-accent hover:bg-accent-muted transition-colors text-left"
-                  onClick={() => { setCommitMsg(aiSuggestion); setAiSuggestion(null); }}
-                  title={t('changes.aiSuggestionTitle')}
-                >
-                  <Sparkles size={9} className="shrink-0" />
-                  <span className="truncate flex-1 font-mono">{aiSuggestion.split('\n')[0]}</span>
-                  <span className="text-3xs text-text-tertiary shrink-0">{t('changes.aiSuggestionClickToUse')}</span>
-                </button>
-              )}
-              {aiSuggesting && !aiSuggestion && !commitMsg.trim() && (
-                <div className="flex items-center gap-1.5 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs text-text-tertiary">
-                  <Loader size={9} className="animate-spin" />
-                  <span>{t('changes.aiSuggesting')}</span>
-                </div>
-              )}
-              <div className="flex-1 flex overflow-hidden">
-                <div className="relative flex-1 flex overflow-hidden">
-                  {/* 1.4 — Line length guides (50/72, SmartGit "Show line length guides").
-                      Decorative overlay: pointer-events none, positioned at N·ch —
-                      ch resolves against the SAME font-mono text-sm metrics as the
-                      textarea, so the line lands exactly on column N (0.5rem = p-2). */}
-                  {lineGuideCols.map(col => (
-                    <div
-                      key={col}
-                      aria-hidden
-                      className="pointer-events-none absolute top-0 bottom-0 w-px bg-border-strong/40 font-mono text-sm"
-                      style={{ left: `calc(0.5rem + ${col}ch)` }}
-                    />
-                  ))}
-                  <textarea
-                id="commit-message-input"
-                className="flex-1 text-sm font-mono resize-none p-2 bg-bg-primary border-r border-border-subtle"
-                placeholder={t('changes.commitMessage')}
-                value={commitMsg}
-                onChange={(e) => setCommitMsg(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                    e.preventDefault();
-                    handleCommit();
-                  }
-                }}
-                style={{ minHeight: 0 }}
-              />
-                </div>
-              {showMarkdownPreview && (
-                <div className="flex-1 overflow-y-auto p-2 text-xs">
-                  <CommitMarkdownPreview content={commitMsg} />
-                </div>
-              )}
-              </div>
-            </div>
+            <CommitMessageEditor
+              ref={editorRef}
+              aiSuggestion={aiSuggestion}
+              aiSuggesting={aiSuggesting}
+              onSuggestionConsumed={handleSuggestionConsumed}
+              onSubmit={handleCommitSubmit}
+              onEmptyChange={handleCommitMsgEmptyChange}
+              showMarkdownPreview={showMarkdownPreview}
+              lineGuides={lineGuidesSetting}
+            />
           </div>
         </div>
 
@@ -2874,13 +2845,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 repoPath={repo.path}
                 filePath={selectedFile || undefined}
                 mode={selectedFile && (status?.staged.some((s) => s.path === selectedFile)) ? 'staged' : 'unstaged'}
-                onStaged={() => {
-                  // Reset the skip-guard so the diff-reload effect re-runs when the
-                  // refreshed status arrives (partial staging changes index, not worktree,
-                  // so the fs watcher will NOT fire by itself).
-                  lastLoadedFileRef.current = null;
-                  refreshStatus(repo.path);
-                }}
+                onStaged={handleDiffStaged}
               />
             </div>
           </>

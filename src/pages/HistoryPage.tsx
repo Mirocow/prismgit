@@ -16,8 +16,6 @@ import {
   GitMerge,
   GitPullRequest,
   Pencil,
-  PlugConnected,
-  PlugDisconnected,
   RefreshCw,
   RotateCcw,
   StickyNote,
@@ -26,11 +24,14 @@ import {
   X
 } from '../components/icons';
 import { RepoStateBanner } from '../components/RepoStateBanner';
+import { HistoryCommitRow, type HistoryRowSyncInfo } from '../components/history/HistoryCommitRow';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
 import { api, type BranchInfo, type CommitFile, type LogEntry, type RecyclableCommit, type StashEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
+// NOTE: getInitials/getAuthorColor are still used by the detail panel below;
+// the per-row usages moved into components/history/HistoryCommitRow.tsx.
 import { linkifyCommitMessage } from '../lib/bugtraq';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
 import { filterSymbolicHeads } from '../lib/branchFilter';
@@ -1243,6 +1244,30 @@ export function HistoryPage() {
     } catch (e) { toast.error(t('toast.generic.failed'), String(e)); }
   };
 
+  // ── RENDER-PERF: stable row callbacks for the memoized HistoryCommitRow ──
+  // Every scroll frame re-renders the visible window; with unstable
+  // callbacks every row would re-render on every frame, defeating the
+  // memo. The ref-indirection keeps identity stable while always calling
+  // the freshest closure.
+  const rowSelectHandler = useCallback((idx: number, hash: string) => {
+    setSelectedIdx(idx);
+    selectCommit(hash);
+  }, [selectCommit]);
+  // Typed lazily-assigned ref (showCommitContextMenu is defined below —
+  // a direct useRef(showCommitContextMenu) would hit the TDZ).
+  const ctxMenuRef = useRef<(e: React.MouseEvent, entry: LogEntry, idx: number) => void>(() => {});
+  const rowContextMenuHandler = useCallback((e: React.MouseEvent, entry: LogEntry, idx: number) => {
+    ctxMenuRef.current(e, entry, idx);
+  }, []);
+  // Sync info for the FIRST row's working-tree badge — primitives in,
+  // stable object identity out (only changes when the values change, so a
+  // status refresh re-renders at most ONE row, not the whole window).
+  const firstRowSync = useMemo<HistoryRowSyncInfo | null>(() => (
+    status?.current && status?.tracking
+      ? { current: status.current, tracking: status.tracking, ahead: status.ahead ?? 0, behind: status.behind ?? 0 }
+      : null
+  ), [status?.current, status?.tracking, status?.ahead, status?.behind]);
+
   const showCommitContextMenu = async (e: React.MouseEvent, entry: LogEntry, idx: number) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1368,6 +1393,9 @@ export function HistoryPage() {
       }
     });
   };
+  // Keep the memoized rows' context-menu ref pointing at the freshest
+  // closure (see ctxMenuRef above).
+  ctxMenuRef.current = showCommitContextMenu;
 
   // Git Notes — SmartGit Manual: Notes with custom categories
 
@@ -2055,143 +2083,33 @@ export function HistoryPage() {
                     const realIdx = lazyList.visibleRange.start + idx;
                     if (!row.node) return null;
                     const entry = row.node.entry;
-                    const initials = getInitials(entry.author.name);
-                const color = getAuthorColor(entry.author.name);
-                const isSelected = selectedIdx === realIdx;
-                const isHEAD = entry.refs.some(r => r.includes('HEAD'));
-                const isFirstOverall = realIdx === 0;
-                return (
-                  <div
-                    key={entry.hash}
-                    className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
-                      isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
-                      // Incoming (remote-only) commits get a subtle tinted background
-                      incomingHashes.has(entry.hash) && !isSelected && 'bg-blue-50/30 dark:bg-blue-950/10')}
-                    style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 4 }}
-                    onClick={() => { setSelectedIdx(realIdx); selectCommit(entry.hash); }}
-                    onContextMenu={(e) => showCommitContextMenu(e, entry, realIdx)}
-                  >
-                    {isHEAD && <span className="text-2xs text-text-primary shrink-0" style={{ width: 8 }}>▶</span>}
-
-                    {/**  Sync indicator */}
-                    {isFirstOverall && status?.current && status?.tracking && (
-                      <div
-                        className={cn('flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-2xs font-medium',
-                          status.ahead > 0 && status.behind > 0
-                            ? 'border-status-modified/40 bg-status-modified/10 text-status-modified'
-                            : status.ahead > 0
-                              ? 'border-status-added/40 bg-status-added/10 text-status-added'
-                              : status.behind > 0
-                                ? 'border-status-info/40 bg-status-info/10 text-status-info'
-                                : 'border-status-added/30 bg-status-added/5 text-status-added')}
-                        title={
-                          status.ahead === 0 && status.behind === 0
-                            ? `In sync with ${status.tracking}`
-                            : `Local: ${status.current} · Upstream: ${status.tracking}\n` +
-                              `↑ ${status.ahead} commit(s) ahead · ↓ ${status.behind} commit(s) behind`
-                        }
-                      >
-                        {status.ahead === 0 && status.behind === 0 ? (
-                          /* In sync — plug CONNECTED (вилка в розетке) */
-                          <span className="flex items-center gap-0.5">
-                            <PlugConnected size={14} />
-                          </span>
-                        ) : (
-                          /* Out of sync — plug DISCONNECTED (вилка отдельно) + counts */
-                          <>
-                            <PlugDisconnected size={14} />
-                            {status.ahead > 0 && (
-                              <span className="flex items-center gap-0.5 ml-0.5">
-                                <ArrowUp size={9} />
-                                {status.ahead}
-                              </span>
-                            )}
-                            {status.behind > 0 && (
-                              <span className="flex items-center gap-0.5 ml-0.5">
-                                <ArrowDown size={9} />
-                                {status.behind}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
-
-                    {!isHEAD && <span style={{ width: 8 }} className="shrink-0" />}
-
-                    {/* Decorations: tags first, then HEAD/branches/remotes — parsed
-                        from BOTH short and --decorate=full shapes (see refBadge). */}
-                    {/* Show up to 5 ref badges per row so tags (often grouped with
-                        branches and remotes) are visible at a glance. */}
-                    <RefBadges refs={entry.refs} max={5} hash={entry.hash} onChanged={loadHistory} />
-
-                    {/* Incoming badge — commit exists only on remote, not yet pulled.
-                        In VS Code style: a dashed "↓ incoming" label with the remote
-                        branch name. */}
-                    {incomingHashes.has(entry.hash) && (
-                      <span className="shrink-0 text-2xs px-1.5 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium flex items-center gap-0.5"
-                        title="Incoming — this commit exists on a remote but has not been pulled into a local branch yet. Use Pull to bring it into your local branch.">
-                        ↓
-                        {entry.refs.some(r => r.includes('refs/remotes/') || r.includes('/')) && (
-                          <span className="opacity-75">
-                            {entry.refs.find(r => r.includes('refs/remotes/'))?.replace('refs/remotes/', '') || entry.refs.find(r => r.includes('/'))}
-                          </span>
-                        )}
-                      </span>
-                    )}
-
-                    {/* GitHub Actions CI badge (SmartGit "My History" CI integrations) */}
-                    {ciStatus[entry.hash]?.conclusion && (
-                      <span
-                        className="shrink-0 text-2xs"
-                        title={`CI: ${ciStatus[entry.hash].conclusion} (${ciStatus[entry.hash].totalChecks} checks)`}
-                      >
-                        {ciStatus[entry.hash].conclusion === 'success' && <span className="text-green-500">●</span>}
-                        {ciStatus[entry.hash].conclusion === 'failure' && <span className="text-red-500">●</span>}
-                        {ciStatus[entry.hash].conclusion === 'running' && <span className="text-yellow-500 animate-pulse">●</span>}
-                      </span>
-                    )}
-
-                    <span className={cn('flex-1 truncate text-xs', isSelected ? 'font-semibold text-text-primary' : 'font-medium text-text-primary')}>
-                      {bugtraq
-                        ? linkifyCommitMessage(entry.subject, bugtraq).map((seg, i) =>
-                            seg.url ? (
-                              <a
-                                key={i}
-                                href={seg.url}
-                                className="text-accent hover:underline"
-                                onClick={(e) => { e.stopPropagation(); api.app.openExternal(seg.url!); }}
-                              >
-                                {seg.text}
-                              </a>
-                            ) : (
-                              <span key={i}>{seg.text}</span>
-                            )
-                          )
-                        : entry.subject}
-                    </span>
-
-                    {/* Hash — clicking ANY commit hash opens History focused on
-                        that commit (same as PARENTS links); copy lives in the
-                        right-click menu and the row menu. */}
-                    <CommitHashLink
-                      hash={entry.hash}
-                      plain
-                      display={entry.hashAbbrev || shortHash(entry.hash)}
-                      className="text-text-tertiary/60 shrink-0 truncate"
-                    />
-
-                    {/* Author avatar — Gravatar image if the author's email
-                        is from a known provider (GitHub / GitLab noreply),
-                        otherwise the colored-initial fallback badge.
-                        QW-6 / Task (gravatar). */}
-                    <Avatar name={entry.author.name} email={entry.author.email} size={16} />
-                    <span className="text-2xs text-text-tertiary shrink-0" style={{ width: 70, textAlign: 'right' }}>
-                      {formatTime(entry.author.date)}
-                    </span>
-                  </div>
-                );
-              })}
+                    // Precompute per-row values as PRIMITIVES so the memoized
+                    // HistoryCommitRow bails out on scroll frames (see the
+                    // component docblock for the prop discipline).
+                    const ci = ciStatus[entry.hash];
+                    const remoteLabel = entry.refs.some(r => r.includes('refs/remotes/') || r.includes('/'))
+                      ? (entry.refs.find(r => r.includes('refs/remotes/'))?.replace('refs/remotes/', '') || entry.refs.find(r => r.includes('/')) || null)
+                      : null;
+                    return (
+                      <HistoryCommitRow
+                        key={entry.hash}
+                        entry={entry}
+                        realIdx={realIdx}
+                        isSelected={selectedIdx === realIdx}
+                        sync={realIdx === 0 ? firstRowSync : null}
+                        isIncoming={incomingHashes.has(entry.hash)}
+                        incomingRemoteLabel={remoteLabel}
+                        ciConclusion={ci?.conclusion ?? null}
+                        ciTotalChecks={ci?.totalChecks ?? 0}
+                        showGraph={showGraph}
+                        graphWidth={graphWidth}
+                        bugtraqConfig={bugtraq}
+                        onRefsChanged={loadHistory}
+                        onSelect={rowSelectHandler}
+                        onContextMenu={rowContextMenuHandler}
+                      />
+                    );
+                  })}
                 </div>
               </div>
 

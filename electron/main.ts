@@ -229,7 +229,15 @@ function createWindow(): BrowserWindow {
 
   if (isDev) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173');
-    win.webContents.openDevTools({ mode: 'detach' });
+    // PERF (dev UX): do NOT auto-open DevTools on every `make dev`.
+    // An attached DevTools window instruments the WHOLE renderer —
+    // every event dispatch, style recalc and console message pays the
+    // inspector tax, which was a large part of "интерфейс тупит" reports
+    // from dev sessions. Use `make dev-debug` (DEBUG=1) or set
+    // PRISMGIT_DEVTOOLS=1 when the DevTools window is actually needed.
+    if (process.env.DEBUG || process.env.PRISMGIT_DEVTOOLS) {
+      win.webContents.openDevTools({ mode: 'detach' });
+    }
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'));
   }

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { memo, useState, useMemo, useCallback, useRef } from 'react';
 import { type DiffResult, type DiffHunk, type DiffLine } from '../lib/api';
 import { api } from '../lib/api';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -97,7 +97,7 @@ function highlightLine(content: string, lang: SupportedLang): React.ReactNode {
   return <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit', onStaged, onForceCompare }: DiffViewerProps) {
+function DiffViewerImpl({ diff, loading, repoPath, filePath, mode = 'commit', onStaged, onForceCompare }: DiffViewerProps) {
   const toast = useToastActions();
   const { t } = useI18n();
   const showContextMenu = useContextMenu();
@@ -935,3 +935,14 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
     </div>
   );
 }
+
+/**
+ * RENDER-PERF: DiffViewer is expensive to reconcile (its `rendered` useMemo
+ * guards the heavy tree, but every parent re-render still re-ran the whole
+ * function body + hook chain). memo() lets it bail out entirely when the
+ * parent re-renders for unrelated reasons (status refreshes, banner toggles,
+ * toasts) as long as props keep stable identities — ChangesPage now passes
+ * a useCallback'd onStaged and the diff/state props are stable between
+ * refreshes.
+ */
+export const DiffViewer = memo(DiffViewerImpl);
