@@ -34,7 +34,7 @@ import { RefBadges } from '../../lib/refBadge';
 import { cn, shortHash } from '../../lib/utils';
 import { ArrowDown, ArrowUp, PlugConnected, PlugDisconnected } from '../icons';
 
-export const HISTORY_ROW_HEIGHT = 28;
+export const HISTORY_ROW_HEIGHT = 32;
 
 export interface HistoryRowSyncInfo {
   current?: string | null;

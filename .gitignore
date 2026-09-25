@@ -61,3 +61,6 @@ tests/e2e/screenshots/
 # Tauri build artifacts
 src-tauri/target/
 src-tauri/gen/
+# Generated perf-profiling artifacts (repo-switch freeze triage)
+scripts/repo-switch-results.json
+scripts/perf-results.json

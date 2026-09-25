@@ -4,7 +4,11 @@ import { runStatusJob } from './gitStatusCore.js';
 import type { StatusJobRequest } from './gitStatusCore.js';
 import { runStatsJob } from './gitStatsCore.js';
 import type { StatsJobRequest } from './gitStatsCore.js';
+import { runRawJob } from './gitRawCore.js';
+import type { RawJobRequest } from './gitRawCore.js';
 import { installChildTracker, killAllChildren, __trackedChildPidsForLog } from './childTracker.js';
+import { WORKTREE_IGNORED } from './watcherIgnore.js';
+import chokidar, { type FSWatcher } from 'chokidar';
 
 /**
  * GIT POLL WORKER — the entry file of the DEDICATED Electron utilityProcess
@@ -27,11 +31,19 @@ import { installChildTracker, killAllChildren, __trackedChildPidsForLog } from '
  *             of "Check all repositories"): log -1 + branch list + remotes
  *             + commit count per repo — 4 spawns per repo that used to run
  *             on the MAIN loop while the user was clicking around.
+ *  - 'watch'  (Linux only) the WORKDIR chokidar watch: its initial readdir
+ *             scan of a big tree blocks the host event loop for ~100ms-2s
+ *             and its per-file inotify marks exhaust the 8192 default budget
+ *             on big repos (ENOSPC). Running it HERE keeps the main loop
+ *             free (repo-switch freeze fix, v3.6) and the failure isolated
+ *             — main degrades to a 10s synthetic poll on 'watch-error'.
  *
  * Protocol (see electron/services/gitPollProcess.ts — the main-side peer):
  *   main  → worker : { kind: 'poll',   id: number, request: PollJobRequest }
  *                    { kind: 'status', id: number, request: StatusJobRequest }
  *                    { kind: 'stats',  id: number, request: StatsJobRequest }
+ *                    { kind: 'watch-start', repoPath: string }   (Linux workdir)
+ *                    { kind: 'watch-stop',  repoPath: string }
  *                    { kind: 'shutdown' }            (dispose: kill git children)
  *   worker → main  : { kind: 'ready' }                       (once, at startup)
  *                    { kind: 'poll-result',   id, result: PollJobResult }
@@ -40,6 +52,8 @@ import { installChildTracker, killAllChildren, __trackedChildPidsForLog } from '
  *                    { kind: 'status-error',  id, message: string }
  *                    { kind: 'stats-result',  id, result: StatsJobResult }
  *                    { kind: 'stats-error',   id, message: string }
+ *                    { kind: 'watch-event', repoPath }       (throttled 50ms leading)
+ *                    { kind: 'watch-error', repoPath, code } (watch died — degrade)
  *
  * Everything is plain JSON-serializable data. The worker holds no settings,
  * no secrets, no Electron imports — the main process resolves which remotes
@@ -78,8 +92,24 @@ interface StatsMessage {
   request: StatsJobRequest;
 }
 
+interface RawMessage {
+  kind: 'raw';
+  id: number;
+  request: RawJobRequest;
+}
+
 interface ShutdownMessage {
   kind: 'shutdown';
+}
+
+interface WatchStartMessage {
+  kind: 'watch-start';
+  repoPath: string;
+}
+
+interface WatchStopMessage {
+  kind: 'watch-stop';
+  repoPath: string;
 }
 
 function isPollMessage(data: unknown): data is PollMessage {
@@ -116,11 +146,86 @@ function isStatsMessage(data: unknown): data is StatsMessage {
   );
 }
 
+function isRawMessage(data: unknown): data is RawMessage {
+  if (!data || typeof data !== 'object') return false;
+  const msg = data as { kind?: unknown; id?: unknown; request?: unknown; args?: unknown };
+  return (
+    msg.kind === 'raw' &&
+    typeof msg.id === 'number' &&
+    !!msg.request &&
+    typeof (msg.request as { repoPath?: unknown }).repoPath === 'string' &&
+    Array.isArray((msg.request as { args?: unknown }).args) &&
+    ((msg.request as { args?: unknown[] }).args as unknown[]).every((a) => typeof a === 'string')
+  );
+}
+
 function isShutdownMessage(data: unknown): data is ShutdownMessage {
   return !!data && typeof data === 'object' && (data as { kind?: unknown }).kind === 'shutdown';
 }
 
+function isWatchStartMessage(data: unknown): data is WatchStartMessage {
+  return !!data && typeof data === 'object' &&
+    (data as { kind?: unknown }).kind === 'watch-start' &&
+    typeof (data as { repoPath?: unknown }).repoPath === 'string';
+}
+
+function isWatchStopMessage(data: unknown): data is WatchStopMessage {
+  return !!data && typeof data === 'object' &&
+    (data as { kind?: unknown }).kind === 'watch-stop' &&
+    typeof (data as { repoPath?: unknown }).repoPath === 'string';
+}
+
 const port: ParentPort | undefined = (process as { parentPort?: ParentPort }).parentPort;
+
+// ── Linux workdir watch (runs HERE so the scan never blocks main) ─────────
+// One chokidar instance per watched repo. Events are throttled to ONE
+// postMessage per 50ms (leading edge) — main applies its own 500ms debounce
+// on top, so the process boundary never carries an event storm.
+const workdirWatchers = new Map<string, FSWatcher>();
+const watchThrottle = new Map<string, number>();
+const WATCH_EVENT_MIN_INTERVAL_MS = 50;
+
+function handleWatchStart(repoPath: string): void {
+  if (!port) return;
+  if (workdirWatchers.has(repoPath)) return; // idempotent
+  try {
+    const watcher = chokidar.watch(repoPath, {
+      persistent: false,
+      ignoreInitial: true,
+      ignored: WORKTREE_IGNORED,
+      awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
+    });
+    workdirWatchers.set(repoPath, watcher);
+    watcher.on('all', () => {
+      if (!port) return;
+      const now = Date.now();
+      const last = watchThrottle.get(repoPath) ?? 0;
+      if (now - last < WATCH_EVENT_MIN_INTERVAL_MS) return;
+      watchThrottle.set(repoPath, now);
+      port.postMessage({ kind: 'watch-event', repoPath });
+    });
+    // ENOSPC (inotify budget exhausted on huge repos) and other fatal errors
+    // are REPORTED — main degrades to its 10s synthetic poll. Never crash.
+    watcher.on('error', (err) => {
+      if (!port) return;
+      const code = (err as NodeJS.ErrnoException)?.code ?? 'unknown';
+      try { void watcher.close(); } catch { /* ignore */ }
+      workdirWatchers.delete(repoPath);
+      port.postMessage({ kind: 'watch-error', repoPath, code });
+    });
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code ?? 'unknown';
+    port.postMessage({ kind: 'watch-error', repoPath, code });
+  }
+}
+
+function handleWatchStop(repoPath: string): void {
+  const watcher = workdirWatchers.get(repoPath);
+  if (!watcher) return;
+  workdirWatchers.delete(repoPath);
+  watchThrottle.delete(repoPath);
+  try { void watcher.close(); } catch { /* ignore */ }
+}
 
 // Track every git child this process spawns so a 'shutdown' from main can
 // kill them before the process itself dies — an orphaned `git fetch` would
@@ -141,10 +246,34 @@ if (port) {
       // Graceful stop: kill tracked git children FIRST (they have no killer
       // of their own once this process is gone), then exit. Main falls back
       // to a hard kill if we don't exit in time.
+      for (const repoPath of workdirWatchers.keys()) handleWatchStop(repoPath);
       const killedPids = __trackedChildPidsForLog();
       const killed = killAllChildren();
       if (WORKER_LOG) console.log(`[worker pid=${process.pid}] shutdown received — killing pids [${killedPids.join(',')}] (issued=${killed}), exiting`);
       process.exit(0);
+    }
+    if (isRawMessage(data)) {
+      const { id, request } = data;
+      runRawJob(request)
+        .then((result) => {
+          port.postMessage({ kind: 'raw-result', id, result });
+        })
+        .catch((e: unknown) => {
+          port.postMessage({
+            kind: 'raw-error',
+            id,
+            message: e instanceof Error ? e.message : String(e),
+          });
+        });
+      return;
+    }
+    if (isWatchStartMessage(data)) {
+      handleWatchStart(data.repoPath);
+      return;
+    }
+    if (isWatchStopMessage(data)) {
+      handleWatchStop(data.repoPath);
+      return;
     }
     if (isPollMessage(data)) {
       const { id, request } = data;

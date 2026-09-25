@@ -56,7 +56,7 @@ import { useToastActions } from '../stores/toastStore';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
-const ROW_HEIGHT = 28;
+const ROW_HEIGHT = 32;
 const LANE_WIDTH = 24;
 const GRAPH_PAD = 8;
 

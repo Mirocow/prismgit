@@ -64,9 +64,14 @@
   /* ── typography ─────────────────────────────────────────────────────── */
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'monospace';
   --text-2xs: 0.6875rem;
-  --text-2xs--line-height: 1rem;
+  --text-2xs--line-height: 1.0625rem;
   --text-3xs: 0.625rem;
-  --text-3xs--line-height: 0.875rem;
+  --text-3xs--line-height: 0.9375rem;
+  /* v3.6 (density): text-xs/text-sm default line-heights (1rem/1.25rem =
+     1.33/1.43 ratio) made single-line rows of wrapped RU/DE labels read as
+     "строки слиплись" — multi-line labels need a 1.5 ratio to breathe. */
+  --text-xs--line-height: 1.125rem;
+  --text-sm--line-height: 1.375rem;
 
   /* ── radii (v3 config overrides; v4 defaults differ for --radius-sm) ── */
   --radius: 4px;
@@ -2170,7 +2175,7 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
     border: 1px solid transparent;
-    line-height: 1.2;
+    line-height: 1.3;
   }
 
   .badge-added {
@@ -2290,7 +2295,11 @@
   /* === Small text utility (replaces text-2xs misuses) === */
   .text-2xs {
     font-size: 10.5px;
-    line-height: 1.3;
+    /* v3.6 (density): 1.3 made every 2xs line box 13.65px — labels that
+       wrapped to two lines (RU/DE translations) rendered with near-zero
+       gap between them. 1.5 gives a 15.75px line box — the same ratio as
+       the body's text-sm, measured live in scripts/verify-density.mjs. */
+    line-height: 1.5;
   }
 
   /* === Left bar (Sidebar) font size — settings.fontSizeSidebar ===

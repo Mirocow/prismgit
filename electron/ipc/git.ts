@@ -38,6 +38,8 @@ function wrap<T>(fn: (...args: any[]) => Promise<T>): (...args: any[]) => Promis
 export function registerGitIpc(): void {
   // Status & working tree
   ipcMain.handle('git:status', (_e, p: string) => wrap(gitService.status)(p));
+  // v3.6: worker-process raw reads (repo-open burst off the main loop).
+  ipcMain.handle('git:rawBackground', (_e, p: string, args: string[]) => wrap(gitService.rawExternal)(p, args));
   // Watcher-driven background refresh — same result, computed in the
   // dedicated git worker process so the main loop never pumps git output
   // during IDE auto-save / build churn.

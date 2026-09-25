@@ -5,6 +5,8 @@ import { runStatusJob } from './gitStatusCore.js';
 import type { StatusJobRequest, StatusJobResult } from './gitStatusCore.js';
 import { runStatsJob } from './gitStatsCore.js';
 import type { StatsJobRequest, StatsJobResult } from './gitStatsCore.js';
+import { runRawJob } from './gitRawCore.js';
+import type { RawJobRequest } from './gitRawCore.js';
 
 /**
  * GIT POLL PROCESS — main-side manager of the DEDICATED utilityProcess that
@@ -57,6 +59,10 @@ const STATUS_JOB_TIMEOUT_MS = 5 * 60_000;
 /** Whole-job safety net for stats jobs: four quick reads; even a huge repo
  * never takes minutes — beyond this the worker is wedged. */
 const STATS_JOB_TIMEOUT_MS = 5 * 60_000;
+/** Whole-job safety net for raw read jobs: ls-files/diff/status output over
+ * a huge repo is string data — big, but never minutes. Beyond this the
+ * worker is wedged, not slow. */
+const RAW_JOB_TIMEOUT_MS = 2 * 60_000;
 /** Grace window for the worker's 'shutdown' (kill its git children, then
  * exit) before main hard-kills it. */
 const WORKER_SHUTDOWN_GRACE_MS = 500;
@@ -73,7 +79,7 @@ const CRASH_STORM_WINDOW_MS = 5 * 60_000;
 type ElectronUtilityProcess = import('electron').UtilityProcess;
 
 /** The job kinds this worker process serves. */
-type JobKind = 'poll' | 'status' | 'stats';
+type JobKind = 'poll' | 'status' | 'stats' | 'raw';
 
 interface PendingJob {
   resolve: (result: unknown) => void;
@@ -95,6 +101,24 @@ interface WorkerState {
   outbox: QueuedMessage[];
   readyTimer: ReturnType<typeof setTimeout> | null;
 }
+
+/** Workdir-watch commands are fire-and-forget (no reply, no job id) — they
+ * are buffered here until the worker says 'ready', mirroring the job outbox. */
+interface WatchCommand {
+  kind: 'watch-start' | 'watch-stop';
+  repoPath: string;
+}
+
+/** Listener events pushed to the watcher module:
+ *  - 'worktree': a (throttled) workdir change event arrived from the worker;
+ *  - 'error':    the worker-side watch DIED (e.g. ENOSPC) — caller degrades;
+ *  - 'lost':     the worker process itself died — the watch is gone, caller
+ *                should fall back to watching in-process. */
+export type WorkdirWatchEvent = 'worktree' | 'error' | 'lost';
+export type WorkdirWatchListener = (event: WorkdirWatchEvent) => void;
+
+const workdirWatchListeners = new Map<string, WorkdirWatchListener>();
+const watchOutbox: WatchCommand[] = [];
 
 let workerState: WorkerState | null = null;
 
@@ -200,7 +224,7 @@ async function ensureWorker(): Promise<WorkerState> {
   proc.on('message', (message: unknown) => {
     if (workerState !== state || state.dead) return;
     const msg = message as
-      | { kind?: unknown; id?: unknown; result?: unknown; message?: unknown }
+      | { kind?: unknown; id?: unknown; result?: unknown; message?: unknown; repoPath?: unknown }
       | null
       | undefined;
     if (!msg || typeof msg.kind !== 'string') return;
@@ -222,18 +246,41 @@ async function ensureWorker(): Promise<WorkerState> {
         }
       }
       state.outbox.length = 0;
+      // Fire-and-forget watch commands buffered while the worker booted.
+      // watch-stop for a repo nobody asked to watch anymore is a harmless
+      // no-op in the worker (map miss).
+      for (const cmd of watchOutbox) {
+        try {
+          state.proc.postMessage(cmd);
+        } catch {
+          break;
+        }
+      }
+      watchOutbox.length = 0;
+      return;
+    }
+
+    if (msg.kind === 'watch-event' && typeof msg.repoPath === 'string') {
+      workdirWatchListeners.get(msg.repoPath)?.('worktree');
+      return;
+    }
+    if (msg.kind === 'watch-error' && typeof msg.repoPath === 'string') {
+      workdirWatchListeners.get(msg.repoPath)?.('error');
+      workdirWatchListeners.delete(msg.repoPath);
       return;
     }
 
     if (
-      (msg.kind === 'poll-result' || msg.kind === 'status-result' || msg.kind === 'stats-result' || msg.kind === 'poll-error' || msg.kind === 'status-error' || msg.kind === 'stats-error') &&
+      (msg.kind === 'poll-result' || msg.kind === 'status-result' || msg.kind === 'stats-result' || msg.kind === 'raw-result' || msg.kind === 'poll-error' || msg.kind === 'status-error' || msg.kind === 'stats-error' || msg.kind === 'raw-error') &&
       typeof msg.id === 'number'
     ) {
       const job = state.pending.get(msg.id);
       if (!job) return; // late answer for an already-timeouted job — ignore
       state.pending.delete(msg.id);
       clearTimeout(job.timer);
-      if ((msg.kind === 'poll-result' || msg.kind === 'status-result' || msg.kind === 'stats-result') && msg.result && typeof msg.result === 'object') {
+      if (msg.kind === 'raw-result' && typeof msg.result === 'string') {
+        job.resolve(msg.result);
+      } else if ((msg.kind === 'poll-result' || msg.kind === 'status-result' || msg.kind === 'stats-result') && msg.result && typeof msg.result === 'object') {
         job.resolve(msg.result);
       } else {
         job.reject(new Error(typeof msg.message === 'string' && msg.message ? msg.message : 'git background worker job failed'));
@@ -252,7 +299,21 @@ async function ensureWorker(): Promise<WorkerState> {
     const planned = state.dead; // killed by us (timeout/dispose) vs. crash
     state.dead = true;
     state.outbox.length = 0;
+    watchOutbox.length = 0;
     rejectAllPending(state, planned ? 'git poll worker was stopped' : 'git poll worker exited unexpectedly');
+    // The worker's workdir watches died with it. Notify the watcher module
+    // so it can fall back to an in-process watch — UNLESS we're quitting:
+    // spinning up chokidar inside the DYING main process would leave
+    // untracked handles at quit time.
+    if (!quitDisposalStarted && workdirWatchListeners.size > 0) {
+      const listeners = [...workdirWatchListeners.entries()];
+      workdirWatchListeners.clear();
+      for (const [, listener] of listeners) {
+        try { listener('lost'); } catch { /* listener must not break the exit path */ }
+      }
+    } else {
+      workdirWatchListeners.clear();
+    }
     if (!planned) noteUnexpectedExit();
   });
 
@@ -287,6 +348,62 @@ async function dispatchToWorker<T>(kind: JobKind, request: unknown, timeoutMs: n
       state.outbox.push(message);
     }
   });
+}
+
+/**
+ * Start the WORKDIR watch in the dedicated worker process (Linux repo-switch
+ * freeze fix, v3.6). Fire-and-forget: no reply is expected; events arrive as
+ * listener('worktree') calls (throttled to ~50ms by the worker; the caller
+ * applies its own debounce). Returns false when the worker path is
+ * unavailable (non-Electron host, fork cooldown, dead worker) — the caller
+ * then falls back to its in-process watch. listener('error' | 'lost') tell
+ * the caller to degrade (10s poll / in-process chokidar).
+ */
+export async function startWorkdirWatchExternal(
+  repoPath: string,
+  listener: WorkdirWatchListener,
+): Promise<boolean> {
+  if (!isElectronMain()) return false; // vitest / plain node — caller falls back
+  workdirWatchListeners.set(repoPath, listener);
+  try {
+    const state = await ensureWorker();
+    if (workerState !== state || state.dead) {
+      workdirWatchListeners.delete(repoPath);
+      return false;
+    }
+    const cmd: WatchCommand = { kind: 'watch-start', repoPath };
+    if (state.ready) {
+      state.proc.postMessage(cmd);
+    } else {
+      // Drop a superseded queued command for the same repo, then buffer.
+      for (let i = watchOutbox.length - 1; i >= 0; i--) {
+        if (watchOutbox[i].repoPath === repoPath) watchOutbox.splice(i, 1);
+      }
+      watchOutbox.push(cmd);
+    }
+    return true;
+  } catch {
+    workdirWatchListeners.delete(repoPath);
+    return false;
+  }
+}
+
+/** Stop a worker-side workdir watch (repo switch / repo close). Best-effort:
+ * a dead worker has nothing to stop, and its 'exit' already cleared state. */
+export function stopWorkdirWatchExternal(repoPath: string): void {
+  workdirWatchListeners.delete(repoPath);
+  for (let i = watchOutbox.length - 1; i >= 0; i--) {
+    if (watchOutbox[i].repoPath === repoPath) watchOutbox.splice(i, 1);
+  }
+  const state = workerState;
+  if (state && !state.dead && state.ready) {
+    try {
+      state.proc.postMessage({ kind: 'watch-stop', repoPath });
+    } catch {
+      // Worker died between the check and the post — its 'exit' cleanup
+      // already discarded the watch.
+    }
+  }
 }
 
 /**
@@ -357,6 +474,26 @@ export async function runStatsJobExternal(request: StatsJobRequest): Promise<Sta
       throw err instanceof Error ? err : new Error('git poll worker unavailable: app is quitting');
     }
     return runStatsJob(request);
+  }
+}
+
+/**
+ * Run one RAW read job (`git <args>` from the read-only allow-list — see
+ * gitRawCore) in the same dedicated background worker process, falling back
+ * to the in-process gitService.raw() when the worker path is unavailable.
+ * Read-only and idempotent: a retry after a worker hiccup is always safe.
+ */
+export async function runRawJobExternal(request: RawJobRequest): Promise<string> {
+  if (!isElectronMain()) {
+    return runRawJob(request);
+  }
+  try {
+    return await dispatchToWorker<string>('raw', request, RAW_JOB_TIMEOUT_MS);
+  } catch (err) {
+    if (quitDisposalStarted) {
+      throw err instanceof Error ? err : new Error('git poll worker unavailable: app is quitting');
+    }
+    return runRawJob(request);
   }
 }
 

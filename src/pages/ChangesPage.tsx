@@ -510,7 +510,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // On a 50k-file repo this halves the repo-open index-scan cost.
   const loadTrackedAndIndexFlags = useCallback(async () => {
     try {
-      const out = await api.git.raw(repo.path, [...LS_FILES_V_ARGS]);
+      // v3.6: worker-process read — the whole-index ls-files output never
+      // crosses the main loop (repo-switch freeze fix).
+      const out = await api.git.rawBackground(repo.path, [...LS_FILES_V_ARGS]);
       const scan = parseLsFilesV(out);
       setTrackedTotal(scan.trackedTotal);
       setTrackedFilesList(scan.trackedFiles);
@@ -529,7 +531,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
    *  and returns both files and directories. */
   const loadIgnored = useCallback(async () => {
     try {
-      const out = await api.git.raw(repo.path, ['status', '--porcelain', '--ignored']);
+      const out = await api.git.rawBackground(repo.path, ['status', '--porcelain', '--ignored']);
       const list = out.split('\n')
         .filter(l => l.startsWith('!! '))
         .map(l => l.slice(3).trim())
@@ -553,7 +555,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         setSubmoduleChanges([]);
         return;
       }
-      const out = await api.git.raw(repo.path, ['submodule', 'summary']);
+      const out = await api.git.rawBackground(repo.path, ['submodule', 'summary']);
       // Format: '* <hash> <name> <commits>
       //          <commit lines>
       // Lines starting with '* ' are submodule entries with changes
@@ -576,9 +578,11 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // Load line-change counts (+N -M) for working tree and index in one go.
   const loadNumstat = useCallback(async () => {
     try {
+      // v3.6: numstat spawns run in the background worker process — the
+      // repo-open read burst stays off the main event loop.
       const [unstagedOut, stagedOut] = await Promise.all([
-        api.git.raw(repo.path, ['diff', '--numstat']),
-        api.git.raw(repo.path, ['diff', '--cached', '--numstat']),
+        api.git.rawBackground(repo.path, ['diff', '--numstat']),
+        api.git.rawBackground(repo.path, ['diff', '--cached', '--numstat']),
       ]);
       const parse = (out: string) => {
         const map = new Map<string, { add: number; del: number; binary: boolean }>();
@@ -2028,7 +2032,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       <div
         key={file.path}
         className={cn(
-          'group flex items-center gap-2 px-2 py-1 cursor-pointer text-xs border-b border-border-subtle',
+          'group flex items-center gap-2 px-2 py-1.5 cursor-pointer text-xs border-b border-border-subtle',
           isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
           isDimmed && 'opacity-50',
         )}
@@ -2265,7 +2269,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default bg-bg-tertiary">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium">{t('changes.files')}</span>
           {totalChanged > 0 && (
@@ -2550,7 +2554,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             {stagedFiles.length > 0 && (
               <>
                 <div
-                  className="px-2 py-1 bg-status-added/8 text-2xs font-bold uppercase text-status-added border-b border-status-added/20 border-l-2 border-l-status-added/40 flex items-center justify-between cursor-pointer hover:bg-status-added/12 transition-colors"
+                  className="px-2 py-1.5 bg-status-added/8 text-2xs font-bold uppercase text-status-added border-b border-status-added/20 border-l-2 border-l-status-added/40 flex items-center justify-between cursor-pointer hover:bg-status-added/12 transition-colors"
                   onClick={() => {
                     if (repo) {
                       useOperationLogStore.getState().logOperation(
@@ -2591,7 +2595,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               return (
                 <>
                   <div
-                    className="px-2 py-1 bg-status-modified/8 text-2xs font-bold uppercase text-status-modified border-b border-status-modified/20 border-l-2 border-l-status-modified/40 flex items-center justify-between cursor-pointer hover:bg-status-modified/12 transition-colors"
+                    className="px-2 py-1.5 bg-status-modified/8 text-2xs font-bold uppercase text-status-modified border-b border-status-modified/20 border-l-2 border-l-status-modified/40 flex items-center justify-between cursor-pointer hover:bg-status-modified/12 transition-colors"
                     onClick={() => {
                       if (repo) {
                         useGitStore.getState().stageAll(repo.path);
@@ -2613,10 +2617,22 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
              untrackedFiles.length === 0 && ignoredFileList.length === 0 &&
              assumeUnchangedFileList.length === 0 && skippedFileList.length === 0 &&
              submoduleFileList.length === 0 && unchangedFiles.length === 0 && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">
-                <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
-                {t('changes.workingTreeClean')}
-              </div>
+              status === null ? (
+                // Repo-switch window: status was cleared and the new repo's
+                // `git status` is still resolving in the worker. Showing
+                // "Working tree clean" here (the old behavior) during the
+                // 0.3-5s gap read as "the app hung and lost my changes".
+                // An explicit loading row tells the user data is coming.
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-secondary border-b border-border-default text-2xs text-text-secondary">
+                  <span className="spinner" />
+                  {t('changes.loadingRepository')}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">
+                  <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
+                  {t('changes.workingTreeClean')}
+                </div>
+              )
             )}
           </div>
 

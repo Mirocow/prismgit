@@ -330,6 +330,10 @@ export interface GitApi {
    *  the dedicated git worker process (keeps the main loop free of git
    *  output pumping during IDE auto-save / build churn). */
   statusBackground: (repoPath: string) => Promise<StatusResult>;
+  /** v3.6: raw git read executed in the dedicated background worker process
+   *  (read-only allow-list — see gitRawCore). Falls back to the in-process
+   *  shared instance when the worker is unavailable. */
+  rawBackground: (repoPath: string, args: string[]) => Promise<string>;
   add: (repoPath: string, files: string[]) => Promise<void>;
   addAll: (repoPath: string) => Promise<void>;
   /** Stage only tracked-file modifications (git add -u) — no untracked. */

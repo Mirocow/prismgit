@@ -1465,7 +1465,7 @@ export function BranchesPage() {
       <div
         key={b.name}
         className={cn(
-          'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
+          'group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
           b.current && 'bg-bg-active font-medium',
           isSingleSelected && 'bg-bg-selected',
           isMultiSelected && !b.current && 'bg-bg-selected',
@@ -1885,7 +1885,7 @@ export function BranchesPage() {
     return (
       <div key={groupKey}>
         <div
-          className="group flex items-center gap-1 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default cursor-pointer hover:bg-bg-hover"
+          className="group flex items-center gap-1 px-2 py-1.5 text-2xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default cursor-pointer hover:bg-bg-hover"
           onClick={() => toggleGroup(groupKey)}
           onContextMenu={onHeaderContextMenu}
         >
@@ -2009,7 +2009,7 @@ export function BranchesPage() {
     <div
       key={tag.name}
       className={cn(
-        'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
+        'group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
         globalSelectedTag === tag.name && 'bg-bg-selected'
       )}
       onClick={(e) => {
@@ -2047,7 +2047,7 @@ export function BranchesPage() {
       <div
         key={`stash-${s.index}`}
         className={cn(
-          'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
+          'group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
           globalSelectedStashIndex === s.index && 'bg-bg-selected'
         )}
         onClick={(e) => { handleStashShowInLog(s); e.stopPropagation(); }}

@@ -37,6 +37,7 @@ const api = {
     // Watcher-driven background refresh — computed in the dedicated git
     // worker process (see gitPollProcess/gitStatusCore), off the main loop.
     statusBackground: (repoPath: string) => ipcRenderer.invoke('git:statusBackground', repoPath),
+    rawBackground: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:rawBackground', repoPath, args),
     listDirectories: (repoPath: string, maxDepth?: number) => ipcRenderer.invoke('git:listDirectories', repoPath, maxDepth),
     listAllDirectories: (repoPath: string, maxDepth?: number) => ipcRenderer.invoke('git:listAllDirectories', repoPath, maxDepth),
     add: (repoPath: string, files: string[]) => ipcRenderer.invoke('git:add', repoPath, files),

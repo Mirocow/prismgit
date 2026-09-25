@@ -1514,7 +1514,18 @@ export default function App() {
       // previous status (or empty), then updates when the status resolves.
       // Previously this was also fire-and-forget but the loadMetadata() call
       // in openRepository was BLOCKING the repo from appearing in the UI.
-      void refreshStatus(currentRepo.path);
+      //
+      // v3.6 (repo-switch freeze): the switch refresh now runs in the
+      // DEDICATED git worker process (background transport) instead of the
+      // main loop. On big repos the foreground `git status` + its porcelain
+      // parse compete with every other repo-open spawn (numstat, ls-files -v,
+      // dir tree, metadata stats) on the MAIN event loop — measured as
+      // 40-60ms IPC latency spikes per switch even on a 2.5k-file repo,
+      // scaling into seconds on real ones. The worker computes the identical
+      // runStatusJob result off the main loop; the renderer's
+      // refreshInFlight map still dedupes concurrent refreshes, and the
+      // worker-failure fallback path lands in the same in-process run.
+      void refreshStatus(currentRepo.path, { background: true });
       setDismissRebase(false);
       const pendingPage = takePendingDeepLinkPage();
       navigate(pendingPage || '/changes');

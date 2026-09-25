@@ -107,6 +107,22 @@ export function qlog(msg: string): void {
   if (QUIT_LOG) console.log(`[quit +${Math.round(process.uptime() * 1000)}ms] ${msg}`);
 }
 
+// ── Main-loop lag telemetry (PRISMGIT_LOOP_LOG=1) ────────────────────────
+// Samples the event loop every 5ms; any >25ms gap means the MAIN loop was
+// blocked (repo-switch freeze triage — cross-reference with the switch
+// timeline from scripts/repo-switch-profile.mjs). Zero cost when disabled.
+if (process.env.PRISMGIT_LOOP_LOG) {
+  let loopPrev = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const lag = now - loopPrev - 5;
+    if (lag > 25) {
+      console.log(`[loop ${now}] +${lag}ms block on main`);
+    }
+    loopPrev = now;
+  }, 5);
+}
+
 let mainWindow: BrowserWindow | null = null;
 
 // Command-log batch buffer (see installGitCommandLogger below).

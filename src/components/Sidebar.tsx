@@ -610,7 +610,7 @@ export function Sidebar() {
         }}
         onContextMenu={(e) => showRepoMenu(e, repo.path, repo.groupId)}
         className={cn(
-          'group flex flex-col gap-0.5 py-1.5 pr-2 cursor-pointer text-xs transition-colors hover:bg-bg-hover',
+          'group flex flex-col gap-1 py-1.5 pr-2 cursor-pointer text-xs transition-colors hover:bg-bg-hover',
           isActive && 'bg-bg-active'
         )}
         style={{

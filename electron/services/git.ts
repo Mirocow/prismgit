@@ -23,7 +23,7 @@ import { buildSshEnv } from './ssh.js';
 import { getSetting } from './storage.js';
 import { DEFAULT_REMOTE_FETCH_TIMEOUT_MS } from './gitPollCore.js';
 import type { PollJobRequest } from './gitPollCore.js';
-import { runPollJobExternal, runStatusJobExternal } from './gitPollProcess.js';
+import { runPollJobExternal, runStatusJobExternal, runRawJobExternal } from './gitPollProcess.js';
 import { runStatusJob, type StatusJobRequest } from './gitStatusCore.js';
 
 /**
@@ -4580,6 +4580,21 @@ export async function revParse(repoPath: string, ref: string): Promise<string> {
       return '';
     }
     throw e;
+  }
+}
+
+export async function rawExternal(repoPath: string, args: string[]): Promise<string> {
+  // v3.6 (repo-switch freeze): the Changes page's repo-open read burst
+  // (ls-files -v / numstat x2 / submodule summary) spawns these reads in
+  // the DEDICATED git worker process instead of the main loop — measured
+  // 60-90ms main-loop blocks per switch on a 2.5k-file repo, scaling into
+  // seconds on 50k-file repos. Worker failure falls back to the in-process
+  // shared instance (read-only + idempotent, retry-safe). Read commands are
+  // allow-listed in gitRawCore; anything mutating stays on the main path.
+  try {
+    return await runRawJobExternal({ repoPath, args });
+  } catch {
+    return raw(repoPath, args);
   }
 }
 
