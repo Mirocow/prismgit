@@ -38,6 +38,10 @@ function wrap<T>(fn: (...args: any[]) => Promise<T>): (...args: any[]) => Promis
 export function registerGitIpc(): void {
   // Status & working tree
   ipcMain.handle('git:status', (_e, p: string) => wrap(gitService.status)(p));
+  // Watcher-driven background refresh — same result, computed in the
+  // dedicated git worker process so the main loop never pumps git output
+  // during IDE auto-save / build churn.
+  ipcMain.handle('git:statusBackground', (_e, p: string) => wrap(gitService.statusBackground)(p));
   ipcMain.handle('git:listDirectories', (_e, p: string, d?: number) => wrap(gitService.listDirectories)(p, d));
   ipcMain.handle('git:listAllDirectories', (_e, p: string, d?: number) => wrap(gitService.listAllDirectories)(p, d));
   ipcMain.handle('git:add', (_e, p: string, f: string[]) => wrap(gitService.add)(p, f));

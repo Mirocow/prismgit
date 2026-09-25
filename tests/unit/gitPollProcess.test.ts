@@ -37,6 +37,35 @@ vi.mock('../../electron/services/gitPollCore.js', () => {
   return { runPollJob, DEFAULT_REMOTE_FETCH_TIMEOUT_MS: 60_000 };
 });
 
+vi.mock('../../electron/services/gitStatusCore.js', () => {
+  const runStatusJob = vi.fn(
+    async (req: { repoPath: string }) =>
+      ({
+        current: 'direct-status-branch',
+        files: [],
+        not_added: [],
+        conflicted: [],
+        created: [],
+        deleted: [],
+        modified: [],
+        renamed: [],
+        staged: [],
+        ahead: 0,
+        behind: 0,
+        isClean: true,
+        isMerging: false,
+        isRebasing: false,
+        isCherryPicking: false,
+        isReverting: false,
+        isBisecting: false,
+        detached: false,
+        // repoPath in the answer proves WHICH request produced it
+        head: `direct:${req.repoPath}`,
+      }) as const
+  );
+  return { runStatusJob, resolveHeadSha: vi.fn(), detectRepoStateFromGitDir: vi.fn(() => ({})) };
+});
+
 vi.mock('electron', async () => {
   const { EventEmitter: EE } = await import('node:events');
 
@@ -64,10 +93,12 @@ vi.mock('electron', async () => {
 
 import {
   runPollJobExternal,
+  runStatusJobExternal,
   disposeGitPollWorker,
   __resetGitPollProcessForTests,
 } from '../../electron/services/gitPollProcess';
 import { runPollJob } from '../../electron/services/gitPollCore.js';
+import { runStatusJob } from '../../electron/services/gitStatusCore.js';
 
 const electronModule = (await import('electron')) as unknown as {
   utilityProcess: { fork: ReturnType<typeof vi.fn> };
@@ -94,6 +125,7 @@ beforeEach(() => {
   // Simulate the Electron main process inside this file's module graph.
   (process as { type?: string }).type = 'browser';
   vi.mocked(runPollJob).mockClear();
+  vi.mocked(runStatusJob).mockClear();
   electronModule.utilityProcess.fork.mockClear();
   electronModule.__processes.length = 0;
 });
@@ -263,5 +295,105 @@ describe('gitPollProcess — separate-process status fetch', () => {
     expect(proc.killed).toBe(true);
     // The pending job survives via the in-process fallback.
     await expect(promise).resolves.toMatchObject({ branch: 'direct-branch' });
+  });
+});
+
+describe('gitPollProcess — watcher status jobs on the SAME worker', () => {
+  const STATUS_REQUEST = { repoPath: '/repos/alpha', gitDir: '/repos/alpha/.git' } as const;
+
+  it('runs the status job IN-PROCESS outside the Electron main process (vitest fallback)', async () => {
+    (process as { type?: string }).type = undefined;
+    const result = await runStatusJobExternal({ ...STATUS_REQUEST });
+    expect(result.current).toBe('direct-status-branch');
+    expect(runStatusJob).toHaveBeenCalledWith({ ...STATUS_REQUEST });
+    expect(electronModule.utilityProcess.fork).not.toHaveBeenCalled();
+  });
+
+  it('dispatches a status job with kind:"status" and resolves on status-result', async () => {
+    const promise = runStatusJobExternal({ ...STATUS_REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+
+    // The request went out tagged as a STATUS job (not 'poll').
+    const sent = proc.posted[0] as { kind: string; id: number; request: unknown };
+    expect(sent.kind).toBe('status');
+    expect(sent.request).toEqual({ ...STATUS_REQUEST });
+
+    proc.emit('message', {
+      kind: 'status-result',
+      id: sent.id,
+      result: { current: 'worker-status-branch', files: [], isClean: true, head: 'abc' },
+    });
+    await expect(promise).resolves.toMatchObject({ current: 'worker-status-branch', head: 'abc' });
+    expect(runStatusJob).not.toHaveBeenCalled(); // no in-process fallback needed
+  });
+
+  it('shares ONE worker between poll and status jobs (no extra fork)', async () => {
+    const pollPromise = runPollJobExternal({ ...REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+    proc.emit('message', {
+      kind: 'poll-result',
+      id: (proc.posted[0] as { id: number }).id,
+      result: { fetched: true, error: null, branch: 'b', incoming: 0, outgoing: 0, dirty: 0 },
+    });
+    await pollPromise;
+
+    const statusPromise = runStatusJobExternal({ ...STATUS_REQUEST });
+    await vi.waitFor(() => expect(proc.posted.length).toBe(2));
+    expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1); // SAME process
+    const second = proc.posted[1] as { kind: string; id: number };
+    expect(second.kind).toBe('status');
+    proc.emit('message', {
+      kind: 'status-result',
+      id: second.id,
+      result: { current: 's', files: [], isClean: true },
+    });
+    await expect(statusPromise).resolves.toMatchObject({ current: 's' });
+  });
+
+  it('a status-error from the worker falls back to the in-process run', async () => {
+    const promise = runStatusJobExternal({ ...STATUS_REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+    const jobId = (proc.posted[0] as { id: number }).id;
+    proc.emit('message', { kind: 'status-error', id: jobId, message: 'status exploded' });
+    // runStatusJobExternal swallows the worker failure → in-process result.
+    await expect(promise).resolves.toMatchObject({ current: 'direct-status-branch' });
+    expect(runStatusJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('a crashed worker mid-status-job falls back in-process and the next job reforks', async () => {
+    const first = runStatusJobExternal({ ...STATUS_REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    lastProcess().emit('exit'); // crash before ready
+    await expect(first).resolves.toMatchObject({ current: 'direct-status-branch' });
+    expect(runStatusJob).toHaveBeenCalledTimes(1);
+
+    const second = runStatusJobExternal({ ...STATUS_REQUEST, repoPath: '/repos/beta', gitDir: '/repos/beta/.git' });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(2));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+    const sent = proc.posted[0] as { kind: string; id: number };
+    expect(sent.kind).toBe('status');
+    proc.emit('message', {
+      kind: 'status-result',
+      id: sent.id,
+      result: { current: 'ok', files: [], isClean: true },
+    });
+    await expect(second).resolves.toMatchObject({ current: 'ok' });
+  });
+
+  it('an invalid status-result payload is a protocol error → in-process fallback', async () => {
+    const promise = runStatusJobExternal({ ...STATUS_REQUEST });
+    await vi.waitFor(() => expect(electronModule.utilityProcess.fork).toHaveBeenCalledTimes(1));
+    const proc = lastProcess();
+    proc.emit('message', { kind: 'ready' });
+    const jobId = (proc.posted[0] as { id: number }).id;
+    proc.emit('message', { kind: 'status-result', id: jobId, result: null });
+    await expect(promise).resolves.toMatchObject({ current: 'direct-status-branch' });
   });
 });

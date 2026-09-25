@@ -1431,7 +1431,12 @@ export default function App() {
 
     const doRefresh = () => {
       lastRefreshTime.current = Date.now();
-      const p = refreshStatus(repoPath).catch(() => { /* status errors shown elsewhere */ });
+      // Background transport: the watcher fired because of external churn
+      // (IDE auto-save, build, another git client) — nobody is actively
+      // waiting for THIS refresh, so it must never compete with foreground
+      // git work: the identical status computation runs in the dedicated
+      // git worker process (v3.5), off the main event loop.
+      const p = refreshStatus(repoPath, { background: true }).catch(() => { /* status errors shown elsewhere */ });
       // Chain so a trailing refresh can wait for the in-flight one to settle
       refreshInFlight.current = p.finally(() => {
         if (refreshInFlight.current === p) refreshInFlight.current = null;

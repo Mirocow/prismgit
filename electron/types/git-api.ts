@@ -326,6 +326,10 @@ export interface AutoStashResult {
 
 export interface GitApi {
   status: (repoPath: string) => Promise<StatusResult>;
+  /** Watcher-driven background refresh — identical StatusResult, computed in
+   *  the dedicated git worker process (keeps the main loop free of git
+   *  output pumping during IDE auto-save / build churn). */
+  statusBackground: (repoPath: string) => Promise<StatusResult>;
   add: (repoPath: string, files: string[]) => Promise<void>;
   addAll: (repoPath: string) => Promise<void>;
   /** Stage only tracked-file modifications (git add -u) — no untracked. */

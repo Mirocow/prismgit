@@ -1,6 +1,6 @@
 /**
- * gitPollWorker — the utilityProcess entry of the separate status-fetch
- * process.
+ * gitPollWorker — the utilityProcess entry of the separate background git
+ * worker (poll + watcher-status jobs).
  *
  * The module is imported with a FAKE process.parentPort (an EventEmitter +
  * postMessage spy): exactly the channel shape a real Electron
@@ -8,7 +8,9 @@
  *  - posts { kind: 'ready' } at startup (main buffers requests until it);
  *  - { kind: 'poll', id, request } → runs the job → posts
  *    { kind: 'poll-result', id, result };
- *  - a throwing job → { kind: 'poll-error', id, message };
+ *  - { kind: 'status', id, request } → runs the status job → posts
+ *    { kind: 'status-result', id, result } / { kind: 'status-error', … };
+ *  - a throwing job → the matching *-error message;
  *  - malformed messages are ignored (never crash the worker).
  *
  * In any non-utility host parentPort is undefined and importing the module
@@ -29,7 +31,28 @@ vi.mock('../../electron/services/gitPollCore.js', () => ({
   DEFAULT_REMOTE_FETCH_TIMEOUT_MS: 60_000,
 }));
 
+vi.mock('../../electron/services/gitStatusCore.js', () => ({
+  runStatusJob: vi.fn(async (req: { repoPath: string; gitDir: string }) => ({
+    current: `branch-of:${req.repoPath}`,
+    files: [{ path: 'a.txt', index: 'M', working_dir: ' ', old_path: undefined }],
+    ahead: 0,
+    behind: 1,
+    isClean: false,
+    isMerging: false,
+    isRebasing: false,
+    isCherryPicking: false,
+    isReverting: false,
+    isBisecting: false,
+    detached: false,
+  })),
+  resolveHeadSha: vi.fn(() => 'deadbeef'),
+  detectRepoStateFromGitDir: vi.fn(() => ({
+    isMerging: false, isRebasing: false, isCherryPicking: false, isReverting: false, isBisecting: false,
+  })),
+}));
+
 import { runPollJob } from '../../electron/services/gitPollCore.js';
+import { runStatusJob } from '../../electron/services/gitStatusCore.js';
 
 interface FakePort extends EventEmitter {
   posted: unknown[];
@@ -109,11 +132,50 @@ describe('gitPollWorker — utilityProcess entry protocol', () => {
     fakePort.emit('message', { data: { kind: 'unknown-kind', id: 1 } });
     fakePort.emit('message', { data: { kind: 'poll', id: 'not-a-number', request: { ...REQUEST } } });
     fakePort.emit('message', { data: { kind: 'poll', id: 44, request: { repoPath: 123 } } });
+    fakePort.emit('message', { data: { kind: 'status', id: 45, request: { repoPath: '/x' } } }); // missing gitDir
     fakePort.emit('message', undefined);
     await flushMicrotasks();
 
     expect(fakePort.posted).toEqual([]);
     // Not a single NEW job run was triggered by the malformed messages.
     expect(runPollJob.mock.calls.length).toBe(callsBefore);
+    expect(runStatusJob).not.toHaveBeenCalled();
+  });
+
+  it('answers a status message with a status-result carrying the job result', async () => {
+    fakePort.posted.length = 0;
+    const statusRequest = { repoPath: '/repos/alpha', gitDir: '/repos/alpha/.git' };
+    fakePort.emit('message', { data: { kind: 'status', id: 77, request: statusRequest } });
+    await flushMicrotasks();
+
+    expect(runStatusJob).toHaveBeenCalledWith(statusRequest);
+    expect(fakePort.posted).toHaveLength(1);
+    const answer = fakePort.posted[0] as { kind: string; id: number; result: { current: string; behind: number } };
+    expect(answer.kind).toBe('status-result');
+    expect(answer.id).toBe(77);
+    expect(answer.result.current).toBe('branch-of:/repos/alpha');
+    expect(answer.result.behind).toBe(1);
+  });
+
+  it('answers a THROWING status job with status-error', async () => {
+    vi.mocked(runStatusJob).mockImplementationOnce(async () => {
+      throw new Error('status core exploded');
+    });
+    fakePort.posted.length = 0;
+    fakePort.emit('message', { data: { kind: 'status', id: 78, request: { repoPath: '/repos/alpha', gitDir: '/repos/alpha/.git' } } });
+    await flushMicrotasks();
+
+    expect(fakePort.posted).toEqual([{ kind: 'status-error', id: 78, message: 'status core exploded' }]);
+  });
+
+  it('routes poll and status jobs independently (both kinds on one worker)', async () => {
+    fakePort.posted.length = 0;
+    fakePort.emit('message', { data: { kind: 'poll', id: 100, request: { ...REQUEST } } });
+    fakePort.emit('message', { data: { kind: 'status', id: 101, request: { repoPath: '/repos/alpha', gitDir: '/repos/alpha/.git' } } });
+    await flushMicrotasks();
+
+    const kinds = fakePort.posted.map((m) => (m as { kind: string; id: number }));
+    expect(kinds.find((m) => m.id === 100)?.kind).toBe('poll-result');
+    expect(kinds.find((m) => m.id === 101)?.kind).toBe('status-result');
   });
 });

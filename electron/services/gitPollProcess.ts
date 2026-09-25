@@ -1,40 +1,54 @@
 import * as path from 'path';
 import { runPollJob } from './gitPollCore.js';
 import type { PollJobRequest, PollJobResult } from './gitPollCore.js';
+import { runStatusJob } from './gitStatusCore.js';
+import type { StatusJobRequest, StatusJobResult } from './gitStatusCore.js';
 
 /**
- * GIT POLL PROCESS — main-side manager of the dedicated utilityProcess that
- * executes repository-list remote checks (the "status fetch").
+ * GIT POLL PROCESS — main-side manager of the DEDICATED utilityProcess that
+ * executes the app's BACKGROUND git work off the main event loop:
  *
- * Lifecycle & failure policy:
- *  - The worker is forked LAZILY on the first poll job and reused for all
+ *  - 'poll'   the repository-list remote check (the "status fetch") —
+ *             background fetch + local counters per repo;
+ *  - 'status' the watcher-driven working-tree refresh (gitStatusCore) —
+ *             porcelain parse + repo-state reads; the exact computation
+ *             the foreground status() runs, just never on the main loop.
+ *
+ * Lifecycle & failure policy (applies to BOTH job kinds):
+ *  - The worker is forked LAZILY on the first job and reused for all
  *    subsequent ones (one OS process for the whole app session — not one
- *    per poll cycle).
+ *    per job).
  *  - Requests posted before the worker's 'ready' are buffered in `outbox`
  *    and flushed on 'ready' — nothing is lost during process boot. If
  *    'ready' never arrives (broken bundle, antivirus quarantined the file,
  *    …) a ready-timeout kills the worker and the job falls back to the
  *    in-process path.
- *  - A crashed worker rejects its pending jobs; `runPollJobExternal` then
- *    re-runs the job IN-PROCESS so a sick worker never blanks the sidebar
- *    counters (the fetch is idempotent). The next poll reforks the worker.
+ *  - A crashed worker rejects its pending jobs; the job runners then
+ *    re-run the job IN-PROCESS so a sick worker never blanks the sidebar
+ *    counters nor stalls a status refresh (both jobs are idempotent reads).
+ *    The next job reforks the worker.
  *  - Fork-storm guard: 3+ unexpected exits within 5 minutes put the manager
  *    in direct-mode cooldown for 60 s — a machine where the worker cannot
  *    start at all must not fork a process on every poll tick.
- *  - Whole-job timeout (10 min — far above the 60 s fetch kill + slowest
- *    legit rev-list walk) kills a wedged worker; the job falls back
- *    in-process.
+ *  - Whole-job timeouts (per kind — far above each job's slowest legit
+ *    path) kill a wedged worker; the job falls back in-process.
  *  - disposeGitPollWorker() on app quit kills the process and rejects
  *    pending jobs.
  *
  * In non-Electron hosts (vitest, plain node) `process.type` is undefined →
- * every job runs in-process via runPollJob — byte-for-byte the pre-split
- * behavior, which is what the existing poll unit/integration suites pin.
+ * every job runs in-process via its core runner — byte-for-byte the
+ * pre-split behavior, which is what the existing unit/integration suites
+ * pin.
  */
 
-/** Whole-job safety net: kill a worker that never answers at all. Legit
- *  worst case ≈ 60 s hung fetch (killed) + slow rev-list walks ≪ this. */
+/** Whole-job safety net for poll jobs: kill a worker that never answers at
+ * all. Legit worst case ≈ 60 s hung fetch (killed) + slow rev-list walks ≪
+ * this. */
 const WORKER_JOB_TIMEOUT_MS = 10 * 60_000;
+/** Whole-job safety net for status jobs: `git status` on a huge repo can be
+ * slow (tens of seconds) but never minutes — anything beyond this is a
+ * wedged worker, not a legit status. */
+const STATUS_JOB_TIMEOUT_MS = 5 * 60_000;
 /** The worker must say 'ready' within this window or the fork is treated as
  *  failed (and the manager cools down before reforking). */
 const WORKER_READY_TIMEOUT_MS = 15_000;
@@ -47,16 +61,19 @@ const CRASH_STORM_WINDOW_MS = 5 * 60_000;
 
 type ElectronUtilityProcess = import('electron').UtilityProcess;
 
+/** The job kinds this worker process serves. */
+type JobKind = 'poll' | 'status';
+
 interface PendingJob {
-  resolve: (result: PollJobResult) => void;
+  resolve: (result: unknown) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
 
 interface QueuedMessage {
-  kind: 'poll';
+  kind: JobKind;
   id: number;
-  request: PollJobRequest;
+  request: unknown;
 }
 
 interface WorkerState {
@@ -162,7 +179,7 @@ async function ensureWorker(): Promise<WorkerState> {
   proc.on('message', (message: unknown) => {
     if (workerState !== state || state.dead) return;
     const msg = message as
-      | { kind?: unknown; id?: unknown; result?: PollJobResult; message?: unknown }
+      | { kind?: unknown; id?: unknown; result?: unknown; message?: unknown }
       | null
       | undefined;
     if (!msg || typeof msg.kind !== 'string') return;
@@ -187,15 +204,18 @@ async function ensureWorker(): Promise<WorkerState> {
       return;
     }
 
-    if ((msg.kind === 'poll-result' || msg.kind === 'poll-error') && typeof msg.id === 'number') {
+    if (
+      (msg.kind === 'poll-result' || msg.kind === 'status-result' || msg.kind === 'poll-error' || msg.kind === 'status-error') &&
+      typeof msg.id === 'number'
+    ) {
       const job = state.pending.get(msg.id);
       if (!job) return; // late answer for an already-timeouted job — ignore
       state.pending.delete(msg.id);
       clearTimeout(job.timer);
-      if (msg.kind === 'poll-result' && msg.result && typeof msg.result === 'object') {
+      if ((msg.kind === 'poll-result' || msg.kind === 'status-result') && msg.result && typeof msg.result === 'object') {
         job.resolve(msg.result);
       } else {
-        job.reject(new Error(typeof msg.message === 'string' && msg.message ? msg.message : 'git poll worker job failed'));
+        job.reject(new Error(typeof msg.message === 'string' && msg.message ? msg.message : 'git background worker job failed'));
       }
     }
   });
@@ -217,11 +237,11 @@ async function ensureWorker(): Promise<WorkerState> {
   return state;
 }
 
-async function dispatchToWorker(request: PollJobRequest): Promise<PollJobResult> {
+async function dispatchToWorker<T>(kind: JobKind, request: unknown, timeoutMs: number): Promise<T> {
   const state = await ensureWorker();
-  return await new Promise<PollJobResult>((resolve, reject) => {
+  return await new Promise<T>((resolve, reject) => {
     if (workerState !== state || state.dead) {
-      reject(new Error('git poll worker died before the job was sent'));
+      reject(new Error('git background worker died before the job was sent'));
       return;
     }
     const id = nextId++;
@@ -229,9 +249,9 @@ async function dispatchToWorker(request: PollJobRequest): Promise<PollJobResult>
       // The worker went silent far beyond any legit worst case — kill it
       // (its pending jobs, this one included, are rejected by 'exit').
       killWorkerState();
-    }, WORKER_JOB_TIMEOUT_MS);
-    state.pending.set(id, { resolve, reject, timer });
-    const message: QueuedMessage = { kind: 'poll', id, request };
+    }, timeoutMs);
+    state.pending.set(id, { resolve: resolve as (result: unknown) => void, reject, timer });
+    const message: QueuedMessage = { kind, id, request };
     if (state.ready) {
       try {
         state.proc.postMessage(message);
@@ -259,13 +279,32 @@ export async function runPollJobExternal(request: PollJobRequest): Promise<PollJ
     return runPollJob(request);
   }
   try {
-    return await dispatchToWorker(request);
+    return await dispatchToWorker<PollJobResult>('poll', request, WORKER_JOB_TIMEOUT_MS);
   } catch {
     // The fetch is idempotent and TTL-gated, so a single duplicate run
     // after a rare worker crash is safe; the alternative (surfacing the
     // failure as summary.error) would blank the sidebar counters and
     // back a healthy remote off for 5 minutes on a worker hiccup.
     return runPollJob(request);
+  }
+}
+
+/**
+ * Run one WATCHER status job (gitStatusCore.runStatusJob) — in the same
+ * dedicated background worker process when running inside the Electron
+ * main process, in-process otherwise (vitest, plain node). Worker failure
+ * for ANY reason falls back to the in-process run: a status refresh is an
+ * idempotent read, so re-running it can't corrupt anything — the renderer
+ * just sees the answer a bit later.
+ */
+export async function runStatusJobExternal(request: StatusJobRequest): Promise<StatusJobResult> {
+  if (!isElectronMain()) {
+    return runStatusJob(request);
+  }
+  try {
+    return await dispatchToWorker<StatusJobResult>('status', request, STATUS_JOB_TIMEOUT_MS);
+  } catch {
+    return runStatusJob(request);
   }
 }
 

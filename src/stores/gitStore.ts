@@ -113,7 +113,7 @@ interface GitState {
   error: string | null;
   lastRefresh: number;
 
-  refreshStatus: (repoPath: string) => Promise<void>;
+  refreshStatus: (repoPath: string, opts?: { background?: boolean }) => Promise<void>;
   /**
    * Clear the cached `status` (e.g. when switching repositories).
    * Called from App.tsx on `currentRepo?.path` change BEFORE
@@ -183,7 +183,7 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   clearStatus: () => set({ status: null, loading: false, error: null, lastRefresh: 0 }),
 
-  refreshStatus: async (repoPath: string) => {
+  refreshStatus: async (repoPath: string, opts?: { background?: boolean }) => {
     // RACE FIX: if a status refresh is already in flight for this repo,
     // don't start a second one — return the existing promise. This was
     // the #1 cause of UI freezes: the file watcher (5s), commit/push
@@ -196,13 +196,21 @@ export const useGitStore = create<GitState>((set, get) => ({
     // Keyed by repoPath: switching A → B while status(A) is running no
     // longer makes status(B) piggyback on status(A)'s promise (which
     // would skip B's status call entirely and leave its UI stale).
+    //
+    // opts.background (v3.5): the WATCHER-driven refreshes ask for the
+    // background transport — the identical computation runs in the
+    // dedicated git worker process instead of the main loop. Foreground
+    // refreshes (page switches, repo open, post-mutation) keep the shared
+    // in-process path with its read coalescing.
     const existing = refreshInFlight.get(repoPath);
     if (existing) return existing;
 
     set({ loading: true, error: null });
     const promise = (async () => {
       try {
-        const status = await api.git.status(repoPath);
+        const status = opts?.background
+          ? await api.git.statusBackground(repoPath)
+          : await api.git.status(repoPath);
         // Only commit the status if we're STILL on the same repo. If the
         // user has switched to repo B in the meantime, dropping the result
         // is correct — refreshStatus(B) is running its own status() call.

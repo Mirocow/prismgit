@@ -71,24 +71,41 @@ Wraps `simple-git` library with:
 - **Split commit** — interactive rebase with edit action
 - **Line staging** — stage/unstage specific line ranges
 
-#### Git Poll Worker (`gitPollCore.ts` / `gitPollWorker.ts` / `gitPollProcess.ts`)
+#### Background Git Worker (`gitPollCore.ts` / `gitStatusCore.ts` / `gitPollWorker.ts` / `gitPollProcess.ts`)
 
-The repository-list remote check (the sidebar's `git fetch` + incoming/
-outgoing/dirty counters) runs in a **dedicated `utilityProcess`**, not on
-the main event loop:
-- `gitPollCore.ts` — electron-free job core (fetch + 4 local reads); also
-  the in-process fallback for non-Electron hosts (vitest) and for a sick
-  worker (crash / failed fork / protocol timeout → job re-runs in-process,
-  so the sidebar never blanks).
+The app's BACKGROUND git work runs in a **dedicated `utilityProcess`**, not
+on the main event loop — one OS process serving TWO job kinds:
+
+- **`poll`** — the repository-list remote check (the sidebar's `git fetch` +
+  incoming/outgoing/dirty counters);
+- **`status`** — the watcher-driven working-tree refresh (the exact
+  `gitService.status()` computation: porcelain parse + repo-state reads) that
+  used to pump/parse git output on the main loop on every IDE auto-save /
+  build churn (renderer asks via `git:statusBackground` →
+  `gitService.statusBackground`).
+
+Modules:
+- `gitPollCore.ts` — electron-free poll job core (fetch + 4 local reads);
+  also the in-process fallback for non-Electron hosts (vitest) and for a
+  sick worker (crash / failed fork / protocol timeout → job re-runs
+  in-process, so the sidebar never blanks).
+- `gitStatusCore.ts` — electron-free status job core (the full StatusResult
+  computation, `runStatusJob(req, git?)`); `gitService.status()` delegates
+  to it with its SHARED instance (keeps read coalescing + command log), the
+  worker runs it with a private instance. `resolveHeadSha` /
+  `detectRepoStateFromGitDir` (pure fs probes) live here too.
 - `gitPollWorker.ts` — the utilityProcess entry (`dist-electron/
-  gitPollWorker.js`); plain-data protocol `{kind:'poll',id,request}` →
-  `{kind:'poll-result',id,result}`, `ready` handshake on boot.
+  gitPollWorker.js`); plain-data protocol `{kind:'poll'|'status',id,request}`
+  → `{kind:'poll-result'|'status-result',id,result}`, `ready` handshake on
+  boot; malformed messages ignored.
 - `gitPollProcess.ts` — main-side manager: lazy fork, request buffering
-  until `ready`, crash-storm cooldown (no fork per poll tick), 10-minute
-  job watchdog, `disposeGitPollWorker()` on app quit.
+  until `ready`, crash-storm cooldown (no fork per tick), per-kind job
+  watchdogs (poll 10 min, status 5 min), `disposeGitPollWorker()` on app
+  quit.
 - Settings and secrets (SSH askpass, HTTP auth args) are resolved in the
   MAIN process and passed as plain serializable data — the worker never
-  imports electron/settings/storage.
+  imports electron/settings/storage. The status job's `gitDir` is resolved
+  main-side through the session cache (zero extra subprocesses).
 
 #### GitHub Service (`github.ts`)
 

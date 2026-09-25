@@ -256,6 +256,13 @@ export const tauriApi = {
       };
     },
 
+    /** Background status — under Tauri there is no background git worker;
+     *  the same (stub) result as status() keeps the watcher refresh path
+     *  working until the Tauri side grows a real porcelain parser. */
+    statusBackground: async (repoPath: string): Promise<unknown> => {
+      return tauriApi.git.status(repoPath);
+    },
+
     branches: async (repoPath: string): Promise<RawBranchInfo[]> => {
       const out = await callGit('git_branches', repoPath);
       return out.split('\n').filter(Boolean).map(line => {

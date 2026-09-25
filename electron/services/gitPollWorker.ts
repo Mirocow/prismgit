@@ -1,27 +1,39 @@
 import { runPollJob } from './gitPollCore.js';
 import type { PollJobRequest } from './gitPollCore.js';
+import { runStatusJob } from './gitStatusCore.js';
+import type { StatusJobRequest } from './gitStatusCore.js';
 
 /**
  * GIT POLL WORKER — the entry file of the DEDICATED Electron utilityProcess
- * that owns the repository-list remote check (gitPollProcess.fork() loads
- * the compiled `dist-electron/gitPollWorker.js`).
+ * that owns the app's BACKGROUND git work (gitPollProcess.fork() loads the
+ * compiled `dist-electron/gitPollWorker.js`).
  *
- * The status fetch ("проверка удалённых репозиториев") runs here — in its
- * own OS process, with its own event loop — instead of the Electron main
- * process. The main process stays free to broker renderer IPC, which is
- * what keeps the UI responsive while a poll against slow/hung remotes is
- * in flight (and while `status --porcelain` / `rev-list` walks chew through
- * big repositories).
+ * Two job kinds share this one OS process (with its own event loop), so the
+ * Electron main process stays free to broker renderer IPC:
+ *
+ *  - 'poll'   the repository-list remote check ("проверка удалённых
+ *             репозиториев"): background fetch + local counters; the thing
+ *             that kept the UI unresponsive while slow/hung remotes were
+ *             being fetched;
+ *  - 'status' the WATCHER-driven working-tree refresh: the full
+ *             `gitService.status()` computation (porcelain parse of
+ *             potentially thousands of entries + repo-state reads) that
+ *             used to be pumped/parsed on the MAIN loop on every IDE
+ *             auto-save / build churn.
  *
  * Protocol (see electron/services/gitPollProcess.ts — the main-side peer):
- *   main  → worker : { kind: 'poll', id: number, request: PollJobRequest }
+ *   main  → worker : { kind: 'poll',   id: number, request: PollJobRequest }
+ *                    { kind: 'status', id: number, request: StatusJobRequest }
  *   worker → main  : { kind: 'ready' }                       (once, at startup)
- *                    { kind: 'poll-result', id, result: PollJobResult }
- *                    { kind: 'poll-error',  id, message: string }
+ *                    { kind: 'poll-result',   id, result: PollJobResult }
+ *                    { kind: 'poll-error',    id, message: string }
+ *                    { kind: 'status-result', id, result: StatusJobResult }
+ *                    { kind: 'status-error',  id, message: string }
  *
  * Everything is plain JSON-serializable data. The worker holds no settings,
  * no secrets, no Electron imports — the main process resolves which remotes
- * to fetch, the SSH env and the HTTP auth args and passes them per request.
+ * to fetch, the SSH env, the HTTP auth args AND the gitDir (from its session
+ * cache) and passes them per request.
  *
  * NOTE: in a utility process `process.parentPort` is the MessagePort-like
  * channel to the main process (undefined everywhere else — importing this
@@ -43,6 +55,12 @@ interface PollMessage {
   request: PollJobRequest;
 }
 
+interface StatusMessage {
+  kind: 'status';
+  id: number;
+  request: StatusJobRequest;
+}
+
 function isPollMessage(data: unknown): data is PollMessage {
   if (!data || typeof data !== 'object') return false;
   const msg = data as { kind?: unknown; id?: unknown; request?: unknown };
@@ -54,29 +72,62 @@ function isPollMessage(data: unknown): data is PollMessage {
   );
 }
 
+function isStatusMessage(data: unknown): data is StatusMessage {
+  if (!data || typeof data !== 'object') return false;
+  const msg = data as { kind?: unknown; id?: unknown; request?: unknown };
+  return (
+    msg.kind === 'status' &&
+    typeof msg.id === 'number' &&
+    !!msg.request &&
+    typeof (msg.request as { repoPath?: unknown }).repoPath === 'string' &&
+    typeof (msg.request as { gitDir?: unknown }).gitDir === 'string'
+  );
+}
+
 const port: ParentPort | undefined = (process as { parentPort?: ParentPort }).parentPort;
 
 if (port) {
   port.on('message', (event) => {
     const data = (event as { data?: unknown } | undefined)?.data;
-    if (!isPollMessage(data)) return; // malformed/unknown messages are ignored, never crash the worker
-    const { id, request } = data;
-    runPollJob(request)
-      .then((result) => {
-        port.postMessage({ kind: 'poll-result', id, result });
-      })
-      .catch((e: unknown) => {
-        // runPollJob is designed not to throw (fetch errors land in
-        // result.error); this is the belt-and-braces protocol branch.
-        port.postMessage({
-          kind: 'poll-error',
-          id,
-          message: e instanceof Error ? e.message : String(e),
+    // malformed/unknown messages are ignored, never crash the worker
+    if (isPollMessage(data)) {
+      const { id, request } = data;
+      runPollJob(request)
+        .then((result) => {
+          port.postMessage({ kind: 'poll-result', id, result });
+        })
+        .catch((e: unknown) => {
+          // runPollJob is designed not to throw (fetch errors land in
+          // result.error); this is the belt-and-braces protocol branch.
+          port.postMessage({
+            kind: 'poll-error',
+            id,
+            message: e instanceof Error ? e.message : String(e),
+          });
         });
-      });
+      return;
+    }
+    if (isStatusMessage(data)) {
+      const { id, request } = data;
+      runStatusJob(request)
+        .then((result) => {
+          port.postMessage({ kind: 'status-result', id, result });
+        })
+        .catch((e: unknown) => {
+          // A status error (vanished repo, unreadable git dir, …) is a REAL
+          // answer the main side must see — runStatusJobExternal falls back
+          // to the in-process run, which surfaces the same error to the
+          // renderer's refreshStatus error handling.
+          port.postMessage({
+            kind: 'status-error',
+            id,
+            message: e instanceof Error ? e.message : String(e),
+          });
+        });
+    }
   });
 
-  // Tell the main process the listener is registered. Main buffers poll
+  // Tell the main process the listener is registered. Main buffers job
   // requests until 'ready' arrives (plus a ready-timeout escape hatch), so
   // no request posted immediately after fork can be lost while this module
   // is still being required.
