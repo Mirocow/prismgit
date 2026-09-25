@@ -314,6 +314,12 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:configGet', (_e, p: string, k: string, s?: 'system' | 'global' | 'local') =>
     wrap(gitService.configGet)(p, k, s)
   );
+  ipcMain.handle('git:configGetMany', (_e, p: string, k: string[]) =>
+    wrap(gitService.configGetMany)(p, k)
+  );
+  ipcMain.handle('git:configSetMany', (_e, p: string, entries: { key: string; value: string | null }[]) =>
+    wrap(gitService.configSetMany)(p, entries)
+  );
   ipcMain.handle('git:configSet', (_e, p: string, k: string, v: string, s?: 'system' | 'global' | 'local') =>
     wrap(gitService.configSet)(p, k, v, s)
   );

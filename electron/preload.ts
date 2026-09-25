@@ -205,6 +205,13 @@ const api = {
       ipcRenderer.invoke('git:splitOffFiles', repoPath, hash, files, message),
     configGet: (repoPath: string, key: string, scope?: 'system' | 'global' | 'local') =>
       ipcRenderer.invoke('git:configGet', repoPath, key, scope),
+    // Batched dialog access — ONE `git config --list -z` subprocess instead
+    // of one spawn per key (Repository Settings used to fire 19 parallel
+    // configGet round-trips through the shared git queue).
+    configGetMany: (repoPath: string, keys: string[]) =>
+      ipcRenderer.invoke('git:configGetMany', repoPath, keys),
+    configSetMany: (repoPath: string, entries: { key: string; value: string | null }[]) =>
+      ipcRenderer.invoke('git:configSetMany', repoPath, entries),
     configSet: (repoPath: string, key: string, value: string, scope?: 'system' | 'global' | 'local') =>
       ipcRenderer.invoke('git:configSet', repoPath, key, value, scope),
     configList: (repoPath: string, scope?: 'system' | 'global' | 'local') =>

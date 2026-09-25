@@ -15,6 +15,33 @@ import { Loader, Settings as SettingsIcon, X } from './icons';
 const TABS = ['User', 'Fetch and Pull', 'Push', 'Credential Helper', 'Signing', 'Encoding', 'Tag-Grouping', 'Performance'] as const;
 type Tab = (typeof TABS)[number];
 
+/** Every key the dialog reads — fetched with ONE `git config --list -z`
+ * subprocess via api.git.configGetMany (used to be 19 parallel configGet
+ * IPC round-trips; on slow-spawn machines the busy spinner sat for many
+ * seconds and the app read as frozen — "Repository Settings зависло
+ * приложение при открытии"). */
+const CONFIG_KEYS = [
+  'user.name', 'user.email', 'pull.rebase', 'fetch.prune',
+  'fetch.recurseSubmodules', 'push.recurseSubmodules',
+  'commit.gpgsign', 'user.signingkey', 'gpg.program', 'gui.encoding',
+  'smartgit.tag-grouping.pattern', 'smartgit.tag-grouping.single', 'smartgit.tag-grouping.order',
+  'credential.helper', 'submodule.recurse', 'submodule.active',
+  'feature.manyFiles', 'core.fsmonitor', 'fetch.writeCommitGraph',
+];
+
+/** Busy-spinner guard: even if the main process/queue wedges, the dialog
+ * becomes editable (with defaults) after this window instead of spinning
+ * forever — a stuck spinner is exactly what reads as "the app froze". */
+const CONFIG_LOAD_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => void; remoteName?: string }) {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const toast = useToastActions();
@@ -53,34 +80,37 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
 
   const load = useCallback(async () => {
     setBusy(true);
-    const p = repo.path;
-    const get = (k: string, def = '') => api.git.configGet(p, k).then((v) => v ?? def).catch(() => def);
     try {
-      const [n, e, pr, fp, frs, prs, sc, sk, gp, enc, tgp, tgp2, tgo, mf, fsm, wcg, ch, su, si] = await Promise.all([
-        get('user.name'), get('user.email'),
-        get('pull.rebase', 'false'), get('fetch.prune', 'false'),
-        get('fetch.recurseSubmodules', 'on-demand'),
-        get('push.recurseSubmodules', 'check'),
-        get('commit.gpgsign', 'false'), get('user.signingkey'), get('gpg.program'),
-        get('gui.encoding', 'UTF-8'),
-        get('smartgit.tag-grouping.pattern'), get('smartgit.tag-grouping.single'), get('smartgit.tag-grouping.order'),
-        get('credential.helper'),
-        get('submodule.recurse', 'false'), get('submodule.active',''),
-        get('feature.manyFiles'), get('core.fsmonitor'), get('fetch.writeCommitGraph'),
-      ]);
-      setUserName(n); setUserEmail(e);
+      const values = await withTimeout(
+        api.git.configGetMany(repo.path, CONFIG_KEYS),
+        CONFIG_LOAD_TIMEOUT_MS,
+        'Repository Settings load',
+      );
+      const v = (key: string, def = '') => values[key] ?? def;
+      const pr = v('pull.rebase');
+      setUserName(v('user.name'));
+      setUserEmail(v('user.email'));
       setPullRebase(pr === 'true' || pr === 'input' ? pr : 'false');
-      setFetchPrune(fp);
-      setFetchRecurseSubmodules(frs);
-      setPushSubmodules(prs);
-      setSignCommits(sc); setSigningKey(sk); setGpgProgram(gp);
-      setEncoding(enc);
-      setTagGroupPattern(tgp); setTagGroupSinglePattern(tgp2); setTagGroupOrder(tgo);
-      setCredentialHelper(ch);
-      setSubmoduleUpdate(su === 'true'); setSubmoduleInit(si);
-      setRepoManyFiles(mf); setRepoFsmonitor(fsm); setRepoCommitGraph(wcg);
+      setFetchPrune(v('fetch.prune', 'false'));
+      setFetchRecurseSubmodules(v('fetch.recurseSubmodules', 'on-demand'));
+      setPushSubmodules(v('push.recurseSubmodules', 'check'));
+      setSignCommits(v('commit.gpgsign', 'false'));
+      setSigningKey(v('user.signingkey'));
+      setGpgProgram(v('gpg.program'));
+      setEncoding(v('gui.encoding', 'UTF-8'));
+      setTagGroupPattern(v('smartgit.tag-grouping.pattern'));
+      setTagGroupSinglePattern(v('smartgit.tag-grouping.single'));
+      setTagGroupOrder(v('smartgit.tag-grouping.order'));
+      setCredentialHelper(v('credential.helper'));
+      setSubmoduleUpdate(v('submodule.recurse') === 'true');
+      setSubmoduleInit(v('submodule.active'));
+      setRepoManyFiles(v('feature.manyFiles'));
+      setRepoFsmonitor(v('core.fsmonitor'));
+      setRepoCommitGraph(v('fetch.writeCommitGraph'));
     } catch (e) {
       toast.error(t('toast.repo.settingsLoadFailed'), String(e));
+      // Fields keep their defaults — the dialog stays usable and closable;
+      // a busy spinner that never ends must never read as "the app froze".
     } finally {
       setBusy(false);
     }
@@ -96,48 +126,46 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
     // written as empty values. Writing user.name="" breaks every future
     // commit with "empty ident name not allowed"; writing gpg.program=""
     // is what tripped simple-git's allowUnsafeGpgProgram block before.
-    const setOrUnset = async (k: string, v: string) => {
-      if (v.trim()) await api.git.configSet(p, k, v.trim());
-      else await api.git.configUnset(p, k).catch(() => {});
-    };
-    const set = (k: string, v: string) => api.git.configSet(p, k, v);
+    // The whole dialog is written with ONE api.git.configSetMany call —
+    // sequential in the main process (git holds .git/config.lock per
+    // write), with lock-contention retry; used to be ~20 awaited IPC
+    // round-trips in a row.
+    const entries: { key: string; value: string | null }[] = [];
+    const put = (key: string, value: string | null) => entries.push({ key, value });
+    const setOrUnset = (key: string, value: string) => put(key, value.trim() || null);
+    const set = (key: string, value: string) => put(key, value);
+
+    setOrUnset('user.name', userName);
+    setOrUnset('user.email', userEmail);
+    set('pull.rebase', pullRebase);
+    set('fetch.prune', fetchPrune);
+    set('fetch.recurseSubmodules', fetchRecurseSubmodules);
+    set('push.recurseSubmodules', pushSubmodules);
+    set('commit.gpgsign', signCommits);
+    setOrUnset('user.signingkey', signingKey);
+    setOrUnset('gpg.program', gpgProgram);
+    set('gui.encoding', encoding);
+    if (tagGroupPattern.trim()) {
+      set('smartgit.tag-grouping.pattern', tagGroupPattern.trim());
+      set('smartgit.tag-grouping.order', tagGroupOrder.trim() || 'ascending');
+      setOrUnset('smartgit.tag-grouping.single', tagGroupSinglePattern);
+    } else {
+      put('smartgit.tag-grouping.pattern', null);
+      put('smartgit.tag-grouping.single', null);
+      put('smartgit.tag-grouping.order', null);
+    }
+    // Credential Helper
+    setOrUnset('credential.helper', credentialHelper);
+    // Submodule update/init
+    set('submodule.recurse', String(submoduleUpdate));
+    setOrUnset('submodule.active', submoduleInit);
+    // Performance — per-repo overrides (local scope)
+    setOrUnset('feature.manyFiles', repoManyFiles);
+    setOrUnset('core.fsmonitor', repoFsmonitor);
+    setOrUnset('fetch.writeCommitGraph', repoCommitGraph);
+
     try {
-      await setOrUnset('user.name', userName);
-      await setOrUnset('user.email', userEmail);
-      await set('pull.rebase', pullRebase);
-      await set('fetch.prune', fetchPrune);
-      await set('fetch.recurseSubmodules', fetchRecurseSubmodules);
-      await set('push.recurseSubmodules', pushSubmodules);
-      await set('commit.gpgsign', signCommits);
-      await setOrUnset('user.signingkey', signingKey);
-      await setOrUnset('gpg.program', gpgProgram);
-      await set('gui.encoding', encoding);
-      if (tagGroupPattern.trim()) {
-        await set('smartgit.tag-grouping.pattern', tagGroupPattern.trim());
-        await set('smartgit.tag-grouping.order', tagGroupOrder.trim() || 'ascending');
-        if (tagGroupSinglePattern.trim()) {
-          await set('smartgit.tag-grouping.single', tagGroupSinglePattern.trim());
-        } else {
-          await api.git.configUnset(p, 'smartgit.tag-grouping.single').catch(() => {});
-        }
-      } else {
-        await api.git.configUnset(p, 'smartgit.tag-grouping.pattern').catch(() => {});
-        await api.git.configUnset(p, 'smartgit.tag-grouping.single').catch(() => {});
-        await api.git.configUnset(p, 'smartgit.tag-grouping.order').catch(() => {});
-      }
-      // Credential Helper
-      await setOrUnset('credential.helper', credentialHelper);
-      // Submodule update/init
-      await set('submodule.recurse', String(submoduleUpdate));
-      if (submoduleInit.trim()) {
-        await setOrUnset('submodule.active', submoduleInit);
-      } else {
-        await api.git.configUnset(p, 'submodule.active').catch(() => {});
-      }
-      // Performance — per-repo overrides (local scope)
-      await setOrUnset('feature.manyFiles', repoManyFiles);
-      await setOrUnset('core.fsmonitor', repoFsmonitor);
-      await setOrUnset('fetch.writeCommitGraph', repoCommitGraph);
+      await api.git.configSetMany(p, entries);
       toast.success(t('toast.repo.settingsSaved'));
       onClose();
     } catch (e) {

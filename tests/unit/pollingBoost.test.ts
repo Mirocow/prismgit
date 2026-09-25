@@ -80,11 +80,14 @@ describe('gitStore mutations bump the remote poll (explicit, not via lastRefresh
   const boostDelta = (): number => __boostUntilForTests() - Date.now();
 
   it('commit arms the boost window', async () => {
-    const before = boostDelta();
+    const beforeUntil = __boostUntilForTests();
     await useGitStore.getState().commit(REPO, 'test commit');
     // Boost must now be armed for (nearly) the full 2 minutes.
-    expect(boostDelta()).toBeGreaterThan(BOOST_DURATION_MS - 1_000);
-    expect(boostDelta()).toBeGreaterThan(before);
+    expect(__boostUntilForTests()).toBeGreaterThan(Date.now() + BOOST_DURATION_MS - 1_000);
+    // Re-arm means "never earlier than it was". Equality is legitimate when
+    // the whole mocked commit finishes inside one Date.now() millisecond —
+    // the old `delta > before` assertion flaked exactly on that granularity.
+    expect(__boostUntilForTests()).toBeGreaterThanOrEqual(beforeUntil);
   });
 
   it('push arms the boost window and clears the poll cache before re-checking', async () => {

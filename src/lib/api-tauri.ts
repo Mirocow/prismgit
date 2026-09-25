@@ -208,6 +208,37 @@ export const tauriApi = {
       return callGit('git_raw', repoPath, args);
     },
 
+    /** Batched config read — ONE `git config --list -z` for all keys
+     *  (mirrors Electron's git:configGetMany; Repository Settings). */
+    configGetMany: async (repoPath: string, keys: string[]): Promise<Record<string, string | undefined>> => {
+      const out: Record<string, string | undefined> = {};
+      for (const k of keys) out[k] = undefined;
+      try {
+        const raw = await callGit('git_raw', repoPath, ['config', '--list', '-z']);
+        // -z records: "key\nvalue", NUL-separated.
+        for (const entry of String(raw).split('\0')) {
+          if (!entry) continue;
+          const idx = entry.indexOf('\n');
+          if (idx <= 0) continue;
+          const key = entry.substring(0, idx);
+          if (key in out) out[key] = entry.substring(idx + 1);
+        }
+      } catch { /* missing config file → all keys stay undefined */ }
+      return out;
+    },
+
+    /** Batched config write — sequential git_raw config calls (git holds
+     *  .git/config.lock per write); value null/'' → unset. */
+    configSetMany: async (repoPath: string, entries: { key: string; value: string | null }[]): Promise<void> => {
+      for (const e of entries) {
+        if (e.value == null || e.value.trim() === '') {
+          await callGit('git_raw', repoPath, ['config', '--unset', e.key]).catch(() => {});
+        } else {
+          await callGit('git_raw', repoPath, ['config', e.key, e.value.trim()]);
+        }
+      }
+    },
+
     /** git status --porcelain — parsed into the same StatusResult shape. */
     status: async (_repoPath: string): Promise<{ files: unknown[]; staged: unknown[]; modified: string[]; not_added: string[]; current: string | null; ahead: number; behind: number; detached: boolean }> => {
       // TODO: parse porcelain output into StatusResult. For now, return

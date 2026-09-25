@@ -508,6 +508,10 @@ export interface GitApi {
   splitOffFiles: (repoPath: string, hash: string, files: string[], message: string) => Promise<void>;
 
   configGet: (repoPath: string, key: string, scope?: 'system' | 'global' | 'local') => Promise<string | undefined>;
+  /** Batched read — ONE `git config --list -z` subprocess for all keys. */
+  configGetMany: (repoPath: string, keys: string[]) => Promise<Record<string, string | undefined>>;
+  /** Batched write (sequential in main, lock-contention retried). value null/'' → unset. */
+  configSetMany: (repoPath: string, entries: { key: string; value: string | null }[]) => Promise<void>;
   configSet: (repoPath: string, key: string, value: string, scope?: 'system' | 'global' | 'local') => Promise<void>;
   configList: (repoPath: string, scope?: 'system' | 'global' | 'local') => Promise<GitConfigEntry[]>;
   configUnset: (repoPath: string, key: string, scope?: 'system' | 'global' | 'local') => Promise<void>;

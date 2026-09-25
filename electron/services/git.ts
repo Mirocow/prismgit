@@ -5360,6 +5360,97 @@ export async function configSet(
   }
 }
 
+// ─── Batched config access for dialogs ──────────────────────────────────────
+//
+// PERF (v3.4, "Repository Settings зависло приложение при открытии"):
+// RepoSettingsDialog used to read its ~19 keys through 19 PARALLEL
+// configGet IPC round-trips — 19 git subprocess spawns through the shared
+// getGit() queue (4 slots). On machines where a spawn is expensive
+// (Windows with antivirus, cold FS cache, a background poll cycle landing
+// in the same queue) the dialog's busy spinner sat there for many seconds
+// and the whole app read as frozen. One `git config --list -z` returns
+// every scope (system + global + local merged, include.path honored) in a
+// SINGLE subprocess; for repeated keys the LAST entry wins — exactly the
+// value `git config --get <key>` answers (the coalescing classifier also
+// recognizes --list/-l as a read, so concurrent identical batches share
+// one subprocess).
+
+export async function configGetMany(
+  repoPath: string,
+  keys: string[]
+): Promise<Record<string, string | undefined>> {
+  const out: Record<string, string | undefined> = {};
+  for (const k of keys) out[k] = undefined;
+  if (keys.length === 0) return out;
+  const git = getGit(repoPath);
+  let raw: string;
+  try {
+    raw = await git.raw(['config', '--list', '-z']);
+  } catch (err) {
+    // Missing config file (e.g. no /etc/gitconfig on minimal systems) →
+    // every requested key stays undefined — the same answer an individual
+    // configGet's catch() gives.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!MISSING_CONFIG_FILE_RE.test(msg)) throw err;
+    return out;
+  }
+  // -z: records are NUL-separated "key\nvalue" (the key/value separator is
+  // a NEWLINE in the -z format, unlike the '=' of the plain format — values
+  // with '=' in them stay intact); the final record may lack the trailing
+  // NUL — tolerate both.
+  for (const entry of raw.split('\0')) {
+    if (!entry) continue;
+    const idx = entry.indexOf('\n');
+    if (idx <= 0) continue;
+    const key = entry.substring(0, idx);
+    if (key in out) out[key] = entry.substring(idx + 1); // later scopes override earlier
+  }
+  return out;
+}
+
+/** One batched config write. `value: null | ''` → the key is UNSET. */
+export interface ConfigSetEntry {
+  key: string;
+  value: string | null;
+}
+
+/** git fails with this when .git/config.lock is held by a concurrent writer. */
+const CONFIG_LOCK_RE = /config\.lock|another git process|file exists/i;
+
+export async function configSetMany(
+  repoPath: string,
+  entries: ConfigSetEntry[]
+): Promise<void> {
+  // Sequential ON PURPOSE: every `git config` write takes .git/config.lock —
+  // parallel writes would fight over the lock and fail with "Another git
+  // process seems to be operating". The wins over per-key IPC round-trips
+  // are (a) ONE renderer→main call for the whole dialog, and (b) the
+  // lock-contention retry below — a watcher refresh, an open IDE or an
+  // external terminal can hold .git/config.lock for a moment while the
+  // user hits Save.
+  for (const entry of entries) {
+    const attempt = async (): Promise<void> => {
+      if (entry.value == null || entry.value.trim() === '') {
+        // Unsetting an absent key must stay a NO-OP — the same contract the
+        // dialog's old `configUnset(...).catch(() => {})` had.
+        await configUnset(repoPath, entry.key).catch(() => {});
+      } else {
+        await configSet(repoPath, entry.key, entry.value.trim());
+      }
+    };
+    try {
+      await attempt();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!CONFIG_LOCK_RE.test(msg)) throw err;
+      // .git/config.lock held by a concurrent writer — brief backoff, ONE
+      // retry; a second failure is a real error and propagates.
+      await new Promise((r) => setTimeout(r, 150));
+      await attempt();
+    }
+  }
+}
+
 /**
  * Matches the git error for a missing config file, e.g.:
  *   fatal: unable to read config file '/etc/gitconfig': No such file or directory

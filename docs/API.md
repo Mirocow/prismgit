@@ -261,6 +261,13 @@ git.configGet(repoPath: string, key: string, scope?: 'system' | 'global' | 'loca
 git.configSet(repoPath: string, key: string, value: string, scope?: 'system' | 'global' | 'local'): Promise<void>
 git.configList(repoPath: string, scope?: 'system' | 'global' | 'local'): Promise<GitConfigEntry[]>
 git.configUnset(repoPath: string, key: string, scope?: 'system' | 'global' | 'local'): Promise<void>
+// Batched dialog access — ONE `git config --list -z` subprocess instead of
+// one spawn per key (Repository Settings froze on open with 19 parallel
+// configGet round-trips on slow-spawn machines). Writes are sequential in
+// main (git holds .git/config.lock per write) with lock-contention retry;
+// value null/'' → unset.
+git.configGetMany(repoPath: string, keys: string[]): Promise<Record<string, string | undefined>>
+git.configSetMany(repoPath: string, entries: { key: string; value: string | null }[]): Promise<void>
 ```
 
 #### Reset
