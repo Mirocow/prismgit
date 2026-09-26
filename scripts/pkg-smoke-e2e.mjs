@@ -10,10 +10,20 @@
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import * as http from 'node:http';
+import * as net from 'node:net';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execSync } from 'node:child_process';
+
+// Random FREE port — a fixed port once made this suite silently attach to a
+// stale PrismGit instance from an earlier run (the new child could not bind,
+// the test drove the OLD app and printed a false PASS).
+const freePort = () => new Promise((res) => {
+  const s = net.createServer();
+  s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); });
+});
+const PORT = await freePort();
 
 const BIN = process.argv[2] || path.join(process.cwd(), 'release/linux-unpacked/prismgit');
 if (!fs.existsSync(BIN)) { console.error(`packaged binary not found: ${BIN}`); process.exit(1); }
@@ -34,7 +44,6 @@ fs.writeFileSync(path.join(userDataDir, 'prismgit-window-state.json'), JSON.stri
   windowState: { bounds: { x: 0, y: 0, width: 1440, height: 900 }, isMaximized: false, isFullScreen: false },
 }, null, 2));
 
-const PORT = 9333;
 const t0 = Date.now();
 const child = spawn(BIN, ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', `--remote-debugging-port=${PORT}`], {
   env: { ...process.env, NODE_ENV: 'production', DISPLAY: process.env.DISPLAY || ':99', PRISMGIT_USER_DATA: userDataDir },
@@ -58,6 +67,17 @@ const browser = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
 const ctx = browser.contexts()[0];
 let page = ctx.pages()[0];
 if (!page) page = await ctx.waitForPage('domcontentloaded', { timeout: 20000 });
+
+// Anti-foreign-instance guard: the page we drive MUST belong to the packaged
+// app we just spawned (its app.asar lives next to BIN). A mismatch means we
+// attached to someone else's DevTools — fail instead of printing a fake PASS.
+const expectedDir = path.dirname(BIN);
+const pageUrl = decodeURIComponent(page.url());
+if (!pageUrl.includes(expectedDir)) {
+  console.error(`FAIL: connected page does not belong to ${BIN} (got ${pageUrl}) — foreign CDP instance`);
+  try { child.kill('SIGKILL'); } catch { /* already gone */ }
+  process.exit(1);
+}
 console.log(`CDP pages: ${ctx.pages().length}, using: ${page.url().slice(0, 60)}`);
 
 // Boot lands on the welcome screen (lastOpened does NOT auto-open) — click the repo
@@ -82,8 +102,28 @@ console.log(`SIGTERM -> process death: ${quitMs}ms ${quitMs < 3000 ? '(within bu
 const leftovers = execSync("ps -eo comm --no-headers | grep -c '^git$' || true", { encoding: 'utf8' }).trim();
 console.log(`orphaned git after quit: ${leftovers}`);
 
-const PASS = navOk && quitMs < 3000 && leftovers === '0';
+// Hard death check: after the main pid is gone, ALL processes of OUR binary
+// (zygote + gpu + renderer + utility children) must exit too. They normally
+// follow the main within ~1s — the zombie that spawned this fix proved they
+// CAN linger forever, so poll with a deadline instead of racing them.
+const selfCount = () => {
+  // Count in Node, NOT via `grep -F "$BIN"` in a shell pipeline — the grep/sh
+  // processes of the measurement itself carry BIN in argv and self-match
+  // (the exact false-positive class probe-main-git.mjs already taught us).
+  // Real app processes have the binary path at argv[0]; shells/greps do not.
+  const out = execSync('ps -eo args --no-headers', { encoding: 'utf8' });
+  return out.split('\n').filter((l) => l.startsWith(BIN)).length;
+};
+let selfLeft = selfCount();
+const teardownDeadline = Date.now() + 8000;
+while (selfLeft > 0 && Date.now() < teardownDeadline) {
+  await new Promise((r) => setTimeout(r, 250));
+  selfLeft = selfCount();
+}
+console.log(`SIGTERM -> full teardown (all binary processes gone): ${Date.now() - tq}ms (left: ${selfLeft})`);
+
+const PASS = navOk && quitMs < 3000 && leftovers === '0' && selfLeft === 0;
 console.log(PASS ? '\nPASS: packaged binary boots, opens a repo, navigates, quits clean'
-                 : `\nFAIL (nav=${navOk} quit=${quitMs}ms orphans=${leftovers})`);
+                 : `\nFAIL (nav=${navOk} quit=${quitMs}ms orphans=${leftovers} selfLeft=${selfLeft})`);
 try { await browser.close(); } catch { /* app already dead */ }
 process.exit(PASS ? 0 : 1);
