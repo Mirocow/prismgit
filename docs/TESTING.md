@@ -325,6 +325,18 @@ Notes:
 - Current baselines on the ci-scale repos: heap peak ~35 MB, DOM delta < 100
   nodes under scroll, 60 FPS, quit < 100 ms, zero orphans (see
   `scripts/perf-cdp-results.json`).
+- **Extreme-scale baselines** (200k-commit / 10k-file 400k-line diff / 180k-file
+  flat): heap peak 34.5 MB, DOM delta 0, 52.9–60 FPS, quit 61–545 ms, zero
+  orphans. Repo-switch into the 180k-file repo: ~4.4–5 s wall on a **2-CPU
+  container** — attributed via `scripts/probe-switch-cpu.mjs` +
+  `scripts/probe-main-git.mjs` to CPU contention (main's own CPU ≤ 21%, only
+  trivial `git stash list` / `git rev-parse HEAD` main-born spawns); the heavy
+  work stays in the git worker + renderer per the architecture. On 8+ core
+  hosts the parallelizable stages overlap, so treat these numbers as the
+  worst-case floor.
+- The 250k-file extreme flat-wide repo needs ~500k inodes (worktree + loose
+  objects) — beyond small containers (655k total). Generate a reduced shape
+  with `--type flat --files 180000` instead, or skip flat at extreme.
 
 ## Best Practices
 
