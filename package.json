@@ -3,7 +3,7 @@
   "productName": "PrismGit",
   "version": "2.1.0",
   "description": "A modern Git client built on Electron + React + TypeScript — visual history, smart merges, and a clean Ayu palette.",
-  "author": "PrismGit Team",
+  "author": "Mirocow <mr.mirocow@gmail.com>",
   "license": "MIT",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -135,5 +135,6 @@
         }
       ]
     }
-  }
+  },
+  "homepage": "http://178.140.10.58:8082/web/git/gitclient"
 }
