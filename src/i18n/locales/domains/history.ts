@@ -286,25 +286,12 @@ export const en: Record<string, string> = {
   'history.branchStartsAt': 'Branch will start from this commit.',
   'history.splitOffTitle': 'Split Off Files Into New Commit',
   'history.splitOffMessageLabel': 'Message for the new commit',
-  // ── Squash-transfer: multi-select commit group → another branch as ONE commit ──
-  'history.squashToBar': '{count} commit(s) selected',
-  'history.squashToBarAction': 'Send to branch…',
-  'history.squashToClear': 'Clear',
-  'history.squashToMenu': 'Send {count} commit(s) to branch as one…',
-  'history.squashToTitle': 'Send to branch as one commit',
-  'history.squashToCommits': 'Commits to send ({count}), oldest first',
-  'history.squashToTarget': 'Target branch',
-  'history.squashToNoBranches': 'No other local branches — create one first',
-  'history.squashToMessage': 'Commit message',
-  'history.squashToWarning': 'The commits above will be applied on top of the target branch as a single new commit. Your current branch will be checked out back automatically.',
-  'history.squashToSameBranch': 'Pick another branch — these commits are already on {branch}.',
-  'history.squashToDirty': 'Commit or stash your changes first — a clean working tree is required.',
-  'history.squashToAction': 'Send',
-  'history.squashToDone': 'Sent {count} commit(s) to {branch} as one commit ({hash})',
-  'history.squashToFailed': 'Failed to send commits to branch',
-  'history.squashToConflict': 'Conflicts while applying onto {branch} — transfer aborted, nothing changed.',
-  'history.squashToNothingNew': 'Nothing new to apply — {branch} already contains these changes.',
 
+  // ── squash-to-branch (History multi-selection) ──
+  'history.nCommitsSelected': 'Commits selected: {count}',
+  'history.squashGroupToBranch': 'Squash {count} commits to a branch…',
+  'history.squashGroupToBranchAction': 'Squash to branch…',
+  'history.squashGroupToBranchTitle': 'Carry the selected commits to another branch as ONE squashed commit',
 };
 
 export const ru: Record<string, string> = {
@@ -586,25 +573,12 @@ export const ru: Record<string, string> = {
   'history.branchStartsAt': 'Ветка начнётся с этого коммита.',
   'history.splitOffTitle': 'Вынести файлы в отдельный коммит',
   'history.splitOffMessageLabel': 'Сообщение для нового коммита',
-  // ── Сквош-перенос: группа коммитов → в другую ветку одним коммитом ──
-  'history.squashToBar': 'Выбрано коммитов: {count}',
-  'history.squashToBarAction': 'Отправить в ветку…',
-  'history.squashToClear': 'Сбросить',
-  'history.squashToMenu': 'Отправить {count} коммит(ов) в ветку одним…',
-  'history.squashToTitle': 'Отправить в ветку одним коммитом',
-  'history.squashToCommits': 'Переносимые коммиты ({count}), старые сверху',
-  'history.squashToTarget': 'Целевая ветка',
-  'history.squashToNoBranches': 'Других локальных веток нет — сначала создайте ветку',
-  'history.squashToMessage': 'Сообщение коммита',
-  'history.squashToWarning': 'Выбранные коммиты будут применены поверх целевой ветки как один новый коммит. На исходную ветку вы вернётесь автоматически.',
-  'history.squashToSameBranch': 'Выберите другую ветку — эти коммиты уже есть в {branch}.',
-  'history.squashToDirty': 'Сначала закоммитьте или засташьте изменения — требуется чистое рабочее дерево.',
-  'history.squashToAction': 'Отправить',
-  'history.squashToDone': 'Отправлено {count} коммит(ов) в {branch} одним коммитом ({hash})',
-  'history.squashToFailed': 'Не удалось отправить коммиты в ветку',
-  'history.squashToConflict': 'Конфликт при применении на {branch} — перенос отменён, ничего не изменилось.',
-  'history.squashToNothingNew': 'Нет новых изменений — {branch} уже содержит эти изменения.',
 
+  // ── squash-to-branch (History multi-selection) ──
+  'history.nCommitsSelected': 'Выбрано коммитов: {count}',
+  'history.squashGroupToBranch': 'Сквошить {count} коммитов в ветку…',
+  'history.squashGroupToBranchAction': 'Сквошить в ветку…',
+  'history.squashGroupToBranchTitle': 'Перенести выбранные коммиты в другую ветку одним сквош-коммитом',
 };
 
 export const zh: Record<string, string> = {
@@ -886,25 +860,12 @@ export const zh: Record<string, string> = {
   'history.branchStartsAt': '分支将从此提交开始。',
   'history.splitOffTitle': '将文件拆分为新提交',
   'history.splitOffMessageLabel': '新提交的提交信息',
-  // ── 合并转移：多选提交组 → 作为一个提交发送到另一分支 ──
-  'history.squashToBar': '已选择 {count} 个提交',
-  'history.squashToBarAction': '发送到分支…',
-  'history.squashToClear': '清除',
-  'history.squashToMenu': '将 {count} 个提交合并为一个发送到分支…',
-  'history.squashToTitle': '合并为一个提交发送到分支',
-  'history.squashToCommits': '要发送的提交（{count}），最旧的在前',
-  'history.squashToTarget': '目标分支',
-  'history.squashToNoBranches': '没有其他本地分支 — 请先创建一个',
-  'history.squashToMessage': '提交信息',
-  'history.squashToWarning': '以上提交将作为一个新提交应用到目标分支顶部。您当前的分支会自动切回。',
-  'history.squashToSameBranch': '请选择其他分支 — 这些提交已经在 {branch} 上。',
-  'history.squashToDirty': '请先提交或贮藏您的更改 — 需要干净的工作区。',
-  'history.squashToAction': '发送',
-  'history.squashToDone': '已将 {count} 个提交作为一个提交发送到 {branch}（{hash}）',
-  'history.squashToFailed': '发送提交到分支失败',
-  'history.squashToConflict': '应用到 {branch} 时发生冲突 — 已中止，未做任何更改。',
-  'history.squashToNothingNew': '没有可应用的新更改 — {branch} 已包含这些更改。',
 
+  // ── squash-to-branch (History multi-selection) ──
+  'history.nCommitsSelected': '已选提交：{count}',
+  'history.squashGroupToBranch': '将 {count} 个提交压合到分支…',
+  'history.squashGroupToBranchAction': '压合到分支…',
+  'history.squashGroupToBranchTitle': '将所选提交作为一个压合提交搬运到另一分支',
 };
 
 export const de: Record<string, string> = {
@@ -1186,23 +1147,10 @@ export const de: Record<string, string> = {
   'history.branchStartsAt': 'Der Branch beginnt bei diesem Commit.',
   'history.splitOffTitle': 'Dateien in einen neuen Commit abspalten',
   'history.splitOffMessageLabel': 'Nachricht für den neuen Commit',
-  // ── Squash-Transfer: Commit-Gruppe → als EIN Commit in einen anderen Branch ──
-  'history.squashToBar': '{count} Commit(s) ausgewählt',
-  'history.squashToBarAction': 'In Branch senden…',
-  'history.squashToClear': 'Auswahl aufheben',
-  'history.squashToMenu': '{count} Commit(s) als einen in Branch senden…',
-  'history.squashToTitle': 'Als einen Commit in einen Branch senden',
-  'history.squashToCommits': 'Zu übertragende Commits ({count}), älteste zuerst',
-  'history.squashToTarget': 'Ziel-Branch',
-  'history.squashToNoBranches': 'Keine anderen lokalen Branches — zuerst einen erstellen',
-  'history.squashToMessage': 'Commit-Nachricht',
-  'history.squashToWarning': 'Die obigen Commits werden als ein neuer Commit auf den Ziel-Branch angewendet. Ihr aktueller Branch wird automatisch zurückgewechselt.',
-  'history.squashToSameBranch': 'Wählen Sie einen anderen Branch — diese Commits sind bereits auf {branch}.',
-  'history.squashToDirty': 'Committen oder stashen Sie zuerst Ihre Änderungen — ein sauberes Arbeitsverzeichnis ist erforderlich.',
-  'history.squashToAction': 'Senden',
-  'history.squashToDone': '{count} Commit(s) als ein Commit an {branch} gesendet ({hash})',
-  'history.squashToFailed': 'Senden der Commits in den Branch fehlgeschlagen',
-  'history.squashToConflict': 'Konflikte beim Anwenden auf {branch} — Übertragung abgebrochen, nichts geändert.',
-  'history.squashToNothingNew': 'Nichts Neues anzuwenden — {branch} enthält diese Änderungen bereits.',
 
+  // ── squash-to-branch (History multi-selection) ──
+  'history.nCommitsSelected': 'Ausgewählte Commits: {count}',
+  'history.squashGroupToBranch': '{count} Commits in einen Branch squashen…',
+  'history.squashGroupToBranchAction': 'In Branch squashen…',
+  'history.squashGroupToBranchTitle': 'Die ausgewählten Commits als EINEN Squash-Commit in einen anderen Branch übertragen',
 };

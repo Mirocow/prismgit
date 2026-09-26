@@ -92,6 +92,54 @@ export interface RemoteInfo {
   refs: { fetch: string; push: string };
 }
 
+// ── Squash-to-branch (History tool) ─────────────────────────────────────────
+
+/** Where the squashed group of commits should land. */
+export interface SquashToBranchTarget {
+  /** 'existing' — put the squash on an already-existing local branch. */
+  kind: 'existing' | 'new';
+  /** kind='existing': the local branch to receive the squashed commit. */
+  branch?: string;
+  /** kind='new': the name of the branch to create. */
+  name?: string;
+  /**
+   * kind='new' only: where to fork the new branch from:
+   *  - 'range-base' (default) — the parent of the oldest selected commit
+   *    (the squash then contains exactly the selected changes, conflict-free);
+   *  - anything else is resolved as a ref (branch name, hash, 'HEAD').
+   */
+  base?: string;
+}
+
+export interface SquashToBranchParams {
+  /** Commit hashes ordered OLDEST → NEWEST (the UI reverses its list order). */
+  commits: string[];
+  target: SquashToBranchTarget;
+  /** Commit message for the squashed commit (required). */
+  message: string;
+  /** Preserve the original author (of the oldest commit). Default: true. */
+  keepAuthor?: boolean;
+  /**
+   * When the dry-run finds conflicts:
+   *  - false (default): touch nothing, return 'conflicts-preview' with the
+   *    file list so the UI can ask the user to confirm;
+   *  - true: run the live route (checkout + carrier cherry-pick) and leave
+   *    the conflicts in the working tree for the standard resolve flow.
+   */
+  proceedOnConflict?: boolean;
+  /** Check out the target branch afterwards. Default: new branch → true, existing → false. */
+  switchToTarget?: boolean;
+}
+
+export type SquashToBranchResult =
+  | { status: 'ok'; branch: string; commit: string; switchedTo?: string; switchWarning?: string }
+  /** Dry-run found conflicts; NOTHING was touched — ask the user, then retry with proceedOnConflict. */
+  | { status: 'conflicts-preview'; branch: string; conflicts: string[] }
+  /** Live route ran; conflicts are in the working tree — resolve in Changes and Continue. */
+  | { status: 'conflicts'; branch: string; conflicts: string[] }
+  /** The target already contains these changes — nothing was carried. */
+  | { status: 'empty'; branch: string };
+
 /**
  * Result of a periodic remote check for one repository in the sidebar list:
  * fetches all remotes, then counts incoming/outgoing commits and local
@@ -492,6 +540,14 @@ export interface GitApi {
   /** Skip the current pick (git cherry-pick --skip) — drops an empty step. */
   cherryPickSkip: (repoPath: string) => Promise<void>;
 
+  /**
+   * History tool: carry a contiguous group of commits to ANOTHER branch as a
+   * single squashed commit (existing branch, or a NEW branch created on the
+   * fly). Read-only dry-run first — 'conflicts-preview' touches nothing until
+   * the caller retries with proceedOnConflict.
+   */
+  squashToBranch: (repoPath: string, params: SquashToBranchParams) => Promise<SquashToBranchResult>;
+
   revert: (repoPath: string, hashes: string[], noCommit?: boolean) => Promise<{ conflicts: string[] }>;
   revertAbort: (repoPath: string) => Promise<void>;
   revertContinue: (repoPath: string) => Promise<void>;
@@ -685,7 +741,6 @@ export interface GitApi {
   /** Squash-transfer: apply a group of commits onto ANOTHER branch as one
    *  new commit, then check the original branch back out (History multi-select
    *  → "Send to branch as one commit"). */
-  squashToBranch: (repoPath: string, hashes: string[], targetBranch: string, message: string) => Promise<{ newHash: string }>;
 
   // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
   /** Smart Pull — prevents divergence after remote force-push. */

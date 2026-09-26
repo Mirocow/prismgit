@@ -24,7 +24,7 @@ import { getSetting } from './storage.js';
 import { DEFAULT_REMOTE_FETCH_TIMEOUT_MS } from './gitPollCore.js';
 import type { PollJobRequest } from './gitPollCore.js';
 import { runPollJobExternal, runStatusJobExternal, runRawJobExternal } from './gitPollProcess.js';
-import { runStatusJob, type StatusJobRequest } from './gitStatusCore.js';
+import { runStatusJob, type StatusJobRequest, detectRepoStateFromGitDir } from './gitStatusCore.js';
 
 /**
  * Global environment overrides — see git-env.ts for the actual constants.
@@ -53,6 +53,8 @@ import type {
   RemoteCheckSummary,
   RemoteInfo,
   RemoteProperties,
+  SquashToBranchParams,
+  SquashToBranchResult,
   StashEntry,
   StatusResult,
   SubmoduleInfo,
@@ -7814,100 +7816,295 @@ export async function coalesceCommits(
   await squashCommits(repoPath, older, newer, messages.join('\n\n'));
 }
 
-/**
- * Squash-TRANSFER (user request: «выделение группы коммитов и отправка их в
- * другую ветку в виде одного (сквош)»): apply a group of commits onto
- * ANOTHER branch as a single new commit, then check the original branch
- * back out — the user stays where they were.
- *
- * Mechanics (no editor needed anywhere):
- *   1. remember the original HEAD (branch name, or hash when detached);
- *   2. `git checkout <target>`;
- *   3. `git cherry-pick --no-commit h1 h2 …` — stages the combined changes
- *      (explicit hashes, so the group may include the ROOT commit);
- *   4. `git commit -m <message>` — the ONE squashed commit;
- *   5. `git checkout <original>` — restore the user's context.
- *
- * Rollback: on a cherry-pick conflict (or a failed/empty commit) the pick is
- * aborted and the original branch checked back out — the repo is left exactly
- * as it was (the caller had to pass a clean working tree, so reset --hard to
- * the target tip is safe as a last-resort cleanup of a half-applied pick).
- */
+// ═════════════════════════════════════════════════════════════════════════
+// Squash-to-branch (History tool): carry a contiguous group of commits to
+// ANOTHER branch as a single squashed commit — onto an existing branch, or
+// onto a NEW branch created on the fly.
+//
+// The user asked for: "выделение группы коммитов и отправка их в другую
+// ветку в виде одного (сквош)" + "могут быть ещё и конфликты" + "не только
+// в существующую ветку, но и создавать новую".
+//
+// Two execution paths, chosen by an upfront READ-ONLY conflict dry-run:
+//
+//  FAST PATH (clean) — pure plumbing, zero worktree impact:
+//    1. git merge-tree --write-tree --merge-base=<oldest^> <targetTip> <newest>
+//       → merged tree (this is exactly "apply the range's net diff to the
+//       target": ours=target, theirs=newest, base=range base).
+//    2. git commit-tree <mergedTree> -p <targetTip> -m <message> with the
+//       ORIGINAL author (name/email/date of the oldest commit) via env.
+//    3. git update-ref refs/heads/<target> <new> <oldTip> — atomic CAS.
+//    Works with a dirty working tree, does not switch branches, never
+//    touches HEAD — the user's current context is fully preserved.
+//
+//  LIVE ROUTE (conflicts) — reuses the cherry-pick machinery:
+//    A synthetic "carrier" commit S = commit-tree(<newest's tree>, -p <oldest^>,
+//    message, original author) carries the net range diff. We check out the
+//    target and run a plain `git cherry-pick S`:
+//      - conflicts → CHERRY_PICK_HEAD + MERGE_MSG(= S's message = the squash
+//        message) — the app's existing resolve flow takes over (repo-state
+//        banner, Continue/Skip/Abort in Changes). `--continue` then commits
+//        with S's message AND S's author, so both the message and the
+//        preserved author survive the conflict resolution.
+//      - no conflicts (dry-run false alarm / branch moved meanwhile) → the
+//        cherry-pick itself created the squashed commit — same guarantees.
+//
+// The dry-run is completely read-only: on 'conflicts-preview' NOTHING has
+// been touched yet — the UI asks the user, then re-invokes with
+// proceedOnConflict: true to actually run the live route.
+// Types (SquashToBranchTarget/Params/Result) live in types/git-api.ts.
+// ═════════════════════════════════════════════════════════════════════════
+
+/** git's well-known empty tree OID (used as the merge base for root-commit ranges). */
+const SQUASH_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
 export async function squashToBranch(
   repoPath: string,
-  hashes: string[],
-  targetBranch: string,
-  message: string
-): Promise<{ newHash: string }> {
+  params: SquashToBranchParams,
+): Promise<SquashToBranchResult> {
   const git = getGit(repoPath);
-  if (!hashes || hashes.length === 0) throw new Error('squashToBranch: no commits selected');
-  if (!targetBranch) throw new Error('squashToBranch: target branch is required');
+  const commits = (params.commits ?? []).map((h) => String(h).trim()).filter(Boolean);
+  const n = commits.length;
+  if (n === 0) throw new Error('squashToBranch: no commits selected');
+  const message = (params.message ?? '').trim();
+  if (!message) throw new Error('squashToBranch: commit message is required');
 
-  // Target branch must exist. NOTE: `rev-parse --verify --quiet` exits 1 with
-  // EMPTY stderr — simple-git does NOT throw on that (same pitfall documented
-  // in squashCommits). `show-ref --verify` writes to stderr on failure.
-  await git.raw(['show-ref', '--verify', `refs/heads/${targetBranch}`]);
+  const oldest = commits[0];
+  const newest = commits[n - 1];
 
-  // A clean working tree is required — we check out another branch and back.
-  const dirty = await git.raw(['status', '--porcelain']);
-  if (dirty.trim()) throw new Error('squashToBranch: working tree is not clean — commit or stash first');
-
-  // Remember where the user is (branch name, or 'HEAD' when detached).
-  const origBranch = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-  const origHead = (await git.raw(['rev-parse', 'HEAD'])).trim();
-  const checkoutBack = () =>
-    origBranch === 'HEAD'
-      ? git.raw(['checkout', '--detach', origHead])
-      : git.raw(['checkout', origBranch]);
-
-  try {
-    await git.raw(['checkout', targetBranch]);
-  } catch (e) {
-    // Checkout itself failed (e.g. would clobber local changes) — nothing done yet.
-    throw e;
+  // ── 1. The selection must be ONE gap-free linear range. ──────────────────
+  // Two output-based checks (simple-git RESOLVES exit-1 failures with empty
+  // stderr — never throws — so exceptions cannot be relied on here):
+  //   a) count(oldest..newest) == n-1  → the oldest IS an ancestor of the
+  //      newest and nothing outside the selection lies between them;
+  //   b) count(oldest^..newest) == n   → including the oldest, the range is
+  //      gap-free AND spans no merges (a merge's side-branch commits would
+  //      be reachable but not selected — the tree-level squash would
+  //      silently carry their changes, so refuse).
+  let rootCase = false;
+  {
+    const parentsOut = await git.raw(['rev-list', '--parents', '-n', '1', oldest]);
+    rootCase = parentsOut.trim().split(/\s+/).filter(Boolean).length < 2;
+  }
+  const spanRaw = rootCase
+    ? await git.raw(['rev-list', '--count', newest])
+    : await git.raw(['rev-list', '--count', `${oldest}^..${newest}`]);
+  const span = parseInt(spanRaw.trim(), 10) || 0;
+  if (span !== n) {
+    throw new Error(
+      `The selection is not a contiguous range: ${span} commit(s) exist between the oldest and newest selected commit, but ${n} are selected. Re-select with Shift so the range has no gaps and no merge commits.`,
+    );
+  }
+  const betweenRaw = await git.raw(['rev-list', '--count', `${oldest}..${newest}`]);
+  const between = parseInt(betweenRaw.trim(), 10) || 0;
+  if (between !== n - 1) {
+    throw new Error('The selected commits are not on one line of history: the oldest selected commit is not an ancestor of the newest one. Select commits from the same branch with Shift+click.');
   }
 
-  let newHash = '';
-  try {
-    await git.raw(['cherry-pick', '--no-commit', ...hashes]);
-    // EMPTY-RESULT GUARD: when the target already contains every selected
-    // change (e.g. the user re-sends the same group), the pick stages
-    // NOTHING — but `git commit` would still succeed: concluding a pick is
-    // one of the few paths where git allows an EMPTY commit. That commit
-    // would silently lie to the user, so refuse it instead. The tree was
-    // verified clean before the checkout, so ANY porcelain line here is
-    // the pick's own staged work.
-    const postPick = await git.raw(['status', '--porcelain']);
-    if (!postPick.trim()) {
-      throw new Error(`squashToBranch: nothing new to apply — ${targetBranch} already contains these changes`);
-    }
-    // CHERRY_PICK_HEAD is present after --no-commit; an explicit `git
-    // commit -m` concludes the pick with OUR message (git's own author
-    // default for the pick is overridden by -m).
-    await git.raw(['commit', '-m', message]);
-    newHash = (await git.raw(['rev-parse', 'HEAD'])).trim();
-  } catch (e) {
-    // Roll the target branch back to its pre-transfer state and rethrow.
-    // `reset --hard HEAD` is safe in every failure path here: the tree was
-    // clean at entry and no commit succeeded, so HEAD is still the target
-    // tip — the reset only clears the half-applied pick.
+  // ── 2. Preserve the original author (oldest commit's name/email/date). ───
+  let authorEnv: Record<string, string> = {};
+  if (params.keepAuthor !== false) {
     try {
-      try { await git.raw(['cherry-pick', '--abort']); } catch { /* not mid-pick — fine */ }
-      await git.raw(['reset', '--hard', 'HEAD']);
-    } catch { /* best effort — the checkout-back below still runs */ }
-    try { await checkoutBack(); } catch { /* best effort */ }
-    throw e;
+      const raw = await git.raw(['log', '-1', '--format=%an%x1f%ae%x1f%aI', oldest]);
+      const parts = raw.trim().split('\x1f');
+      if (parts[0] && parts[1]) {
+        authorEnv = { GIT_AUTHOR_NAME: parts[0], GIT_AUTHOR_EMAIL: parts[1] };
+        if (parts[2]) authorEnv.GIT_AUTHOR_DATE = parts[2];
+      }
+    } catch { /* fall back to the committer identity */ }
+  }
+  // A PRIVATE instance carrying the author env (the cached getGit instance
+  // shares a live env view without per-call extras).
+  const gitAuthor = withMergedGitEnv(
+    simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }),
+    authorEnv,
+  );
+
+  // ── 3. Guard: no sequencer/rebase/merge/bisect may be in progress. ───────
+  {
+    const gitDir = await resolveGitDir(repoPath, git);
+    const st = detectRepoStateFromGitDir(gitDir);
+    if (st.isMerging || st.isRebasing || st.isCherryPicking || st.isReverting || st.isBisecting) {
+      throw new Error('Repository is in the middle of another operation (merge/rebase/cherry-pick/revert/bisect) — finish or abort it first.');
+    }
   }
 
-  // Success — put the user back on their original branch.
-  try {
-    await checkoutBack();
-  } catch (e) {
-    // The squash commit EXISTS on the target branch; only the return trip
-    // failed. Surface it but keep the hash — the caller can still report it.
-    throw new Error(`squashToBranch: committed ${newHash.slice(0, 8)} onto ${targetBranch} but failed to switch back to ${origBranch}: ${e instanceof Error ? e.message : String(e)}`);
+  // ── 4. Resolve the target branch and its tip. ───────────────────────────
+  let branch: string;
+  let targetTip: string | null = null; // null → new branch with NO parent commit
+  let trivial = false; // new branch forked at the range base → conflicts impossible
+  if (params.target?.kind === 'new') {
+    const name = (params.target.name ?? '').trim();
+    if (!name) throw new Error('New branch name is required');
+    try {
+      await git.raw(['check-ref-format', '--branch', name]);
+    } catch {
+      throw new Error(`Invalid branch name: "${name}"`);
+    }
+    // Must not exist yet (refs/heads scope = local branches only).
+    const existsOut = await git.raw(['rev-parse', '--verify', '--quiet', `refs/heads/${name}`]);
+    if (existsOut.trim()) throw new Error(`Branch "${name}" already exists — pick a different name, or select it as an existing branch.`);
+    branch = name;
+    const base = (params.target.base ?? '').trim() || 'range-base';
+    if (base === 'range-base') {
+      trivial = true;
+      if (rootCase) targetTip = null; // the squashed commit becomes the branch ROOT
+      else {
+        targetTip = (await git.raw(['rev-parse', '--verify', '--quiet', `${oldest}^`])).trim();
+        if (!targetTip) throw new Error('Could not resolve the range base commit.');
+      }
+    } else {
+      const tip = (await git.raw(['rev-parse', '--verify', '--quiet', `${base}^{commit}`])).trim();
+      if (!tip) throw new Error(`Could not resolve the new branch base: "${base}"`);
+      targetTip = tip;
+    }
+  } else {
+    const name = (params.target?.branch ?? '').trim();
+    if (!name) throw new Error('Target branch is required');
+    const tip = (await git.raw(['rev-parse', '--verify', '--quiet', `refs/heads/${name}`])).trim();
+    if (!tip) throw new Error(`Branch "${name}" was not found among the local branches.`);
+    // Squashing onto the CURRENT branch is a different feature (in-branch
+    // squash via Interactive Rebase) — refuse it here, otherwise update-ref
+    // would move HEAD under the user's feet.
+    let cur: string | null = null;
+    try {
+      cur = (await git.raw(['symbolic-ref', '--short', 'HEAD'])).trim() || null;
+    } catch { cur = null; }
+    if (cur && name === cur) {
+      throw new Error(`"${name}" is the current branch. Use Interactive Rebase (Ctrl+Shift+R) to squash within the current branch.`);
+    }
+    branch = name;
+    targetTip = tip;
   }
-  return { newHash };
+
+  const newestTree = (await git.raw(['rev-parse', `${newest}^{tree}`])).trim();
+
+  // ── 5. Conflict dry-run (read-only) — unless conflicts are impossible. ───
+  let mergedTree = '';
+  let dryConflicts: string[] = [];
+  let dryRunUnavailable = false;
+  if (trivial) {
+    // New branch at the range base: merging newest onto its own parent with
+    // itself as the base yields newest's tree, always clean.
+    mergedTree = newestTree;
+  } else {
+    const baseArg = rootCase ? SQUASH_EMPTY_TREE : `${oldest}^`;
+    let out = '';
+    try {
+      out = await git.raw([
+        'merge-tree', '--write-tree', '--name-only', '--merge-base', baseArg,
+        targetTip ?? SQUASH_EMPTY_TREE, newest,
+      ]);
+    } catch {
+      // git < 2.38 (no merge-tree --write-tree) or a hard error. Without the
+      // dry-run we cannot pre-detect conflicts — take the live route and let
+      // cherry-pick surface them naturally.
+      dryRunUnavailable = true;
+    }
+    if (out) {
+      // Output format: "<tree OID>\n<conflicted files…>\n\n<info messages>".
+      // On the CLEAN path the tree line is all there is. With --name-only the
+      // conflict block is bare file paths (stop at the blank separator line —
+      // do NOT trim entries: filenames may contain spaces).
+      const lines = out.split('\n');
+      mergedTree = (lines[0] ?? '').trim();
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i] === '') break;
+        dryConflicts.push(lines[i]);
+      }
+    }
+  }
+
+  // ── 6. Empty diff: the target already contains these changes. ───────────
+  if (mergedTree && targetTip) {
+    const targetTree = (await git.raw(['rev-parse', `${targetTip}^{tree}`])).trim();
+    if (mergedTree === targetTree) return { status: 'empty', branch };
+  }
+
+  if (dryConflicts.length > 0 && !params.proceedOnConflict) {
+    // Read-only outcome: the UI shows the file list and asks the user.
+    return { status: 'conflicts-preview', branch, conflicts: dryConflicts };
+  }
+
+  if (dryConflicts.length === 0 && !dryRunUnavailable) {
+    // ── 7a. FAST PATH — plumbing only, no worktree/HEAD impact. ────────────
+    const commitArgs = ['commit-tree', mergedTree, '-m', message];
+    if (targetTip) commitArgs.push('-p', targetTip);
+    const newCommit = (await gitAuthor.raw(commitArgs)).trim();
+    if (!newCommit) throw new Error('squashToBranch: commit-tree produced no commit');
+    if (params.target.kind === 'new') {
+      await git.raw(['update-ref', `refs/heads/${branch}`, newCommit]);
+    } else {
+      // Atomic CAS: fails loudly if the branch moved since we read its tip.
+      await git.raw(['update-ref', `refs/heads/${branch}`, newCommit, targetTip!]);
+    }
+    const wantSwitch = params.switchToTarget ?? (params.target.kind === 'new');
+    let switchedTo: string | undefined;
+    let switchWarning: string | undefined;
+    if (wantSwitch) {
+      try {
+        await git.raw(['checkout', branch]);
+        switchedTo = branch;
+      } catch (e) {
+        switchWarning = e instanceof Error ? e.message : String(e);
+      }
+    }
+    return { status: 'ok', branch, commit: newCommit, ...(switchedTo ? { switchedTo } : {}), ...(switchWarning ? { switchWarning } : {}) };
+  }
+
+  // ── 7b. LIVE ROUTE — checkout target + carrier cherry-pick. ──────────────
+  // Requires a clean working tree: the checkout would otherwise drag the
+  // user's uncommitted changes onto another branch.
+  {
+    const porcelain = await git.raw(['status', '--porcelain']);
+    if (porcelain.trim() !== '') {
+      throw new Error('Working tree is not clean — commit or stash your changes before carrying the squash with conflicts.');
+    }
+  }
+  // Carrier commit S: newest's tree parented on the range base, carrying the
+  // user's message and the original author. A plain cherry-pick of S applies
+  // the range's net diff to the target; on conflicts, --continue commits with
+  // S's message AND author (both survive the resolution).
+  const carrierArgs = ['commit-tree', newestTree, '-m', message];
+  if (!rootCase) carrierArgs.push('-p', `${oldest}^`);
+  const carrier = (await gitAuthor.raw(carrierArgs)).trim();
+  if (!carrier) throw new Error('squashToBranch: could not create the carrier commit');
+
+  if (params.target.kind === 'new') {
+    // Fork the new branch at its base, then pick onto it.
+    const startPoint = targetTip ?? (rootCase ? undefined : `${oldest}^`);
+    const coArgs = ['checkout', '-b', branch];
+    if (startPoint) coArgs.push(startPoint);
+    await git.raw(coArgs);
+  } else {
+    await git.raw(['checkout', branch]);
+  }
+
+  // Plain (committing) cherry-pick of the carrier; conflicts leave the
+  // standard CHERRY_PICK_HEAD + MERGE_MSG state for the app's resolve flow.
+  let pickErr = '';
+  try {
+    await git.raw(['cherry-pick', carrier]);
+  } catch (e) {
+    pickErr = e instanceof Error
+      ? (((e as { stderr?: string }).stderr || e.message) as string)
+      : String(e);
+  }
+  const statusRes = await status(repoPath);
+  if (statusRes.conflicted.length > 0) {
+    return { status: 'conflicts', branch, conflicts: statusRes.conflicted };
+  }
+  if (statusRes.isCherryPicking) {
+    // Pick stuck without conflicts (empty pick) — abort it and report: the
+    // target already had the changes (dry-run raced with a concurrent update).
+    await git.raw(['cherry-pick', '--abort']);
+    return { status: 'empty', branch };
+  }
+  if (pickErr) throw new Error(pickErr);
+  // The pick succeeded cleanly (dry-run false alarm or the branch moved in
+  // between): the cherry-pick itself created the squashed commit.
+  const newHead = (await git.raw(['rev-parse', 'HEAD'])).trim();
+  return { status: 'ok', branch, commit: newHead, switchedTo: branch };
 }
 
 /** Tag-Grouping: group tags by patterns (e.g., v1.0.0, v1.0.1 → group "v1.0") */

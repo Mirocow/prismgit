@@ -29,6 +29,9 @@ import type {
   BugtraqConfig,
   RemoteCheckSummary,
   PushResult,
+  SquashToBranchTarget,
+  SquashToBranchParams,
+  SquashToBranchResult,
 } from '../../electron/types/git-api';
 import type {
   GithubUser,
@@ -85,6 +88,9 @@ export type {
   BugtraqConfig,
   RemoteCheckSummary,
   PushResult,
+  SquashToBranchTarget,
+  SquashToBranchParams,
+  SquashToBranchResult,
   CommandLogEntry,
   GithubUser,
   GithubRepository,

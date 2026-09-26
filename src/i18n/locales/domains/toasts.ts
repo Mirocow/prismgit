@@ -180,6 +180,15 @@ export const en: Record<string, string> = {
   'toast.app.selectStashApply': 'Select a stash and click Apply',
   'toast.app.useTrackButton': 'Use the Track button on the LFS page',
   'toast.app.perspectiveReset': 'Perspective reset — layout preferences cleared',
+
+  // ── squash-to-branch (History multi-selection) ──
+  'toast.squashToBranch.done': 'Squashed onto {branch}',
+  'toast.squashToBranch.switched': 'Switched to {branch}',
+  'toast.squashToBranch.switchFailed': 'Could not switch branches',
+  'toast.squashToBranch.conflicts': 'Conflicts: {count} on {branch}',
+  'toast.squashToBranch.conflictsDetail': 'Resolve them in Changes, then Continue — the squash lands as one commit',
+  'toast.squashToBranch.empty': '{branch} already contains these changes',
+  'toast.squashToBranch.failed': 'Squash to branch failed',
 };
 
 export const ru: Record<string, string> = {
@@ -318,6 +327,15 @@ export const ru: Record<string, string> = {
   'toast.app.selectStashApply': 'Выберите stash и нажмите Apply',
   'toast.app.useTrackButton': 'Используйте кнопку Track на странице LFS',
   'toast.app.perspectiveReset': 'Перспектива сброшена — настройки раскладки очищены',
+
+  // ── squash-to-branch (History multi-selection) ──
+  'toast.squashToBranch.done': 'Сквош применён к {branch}',
+  'toast.squashToBranch.switched': 'Переключено на {branch}',
+  'toast.squashToBranch.switchFailed': 'Не удалось переключить ветку',
+  'toast.squashToBranch.conflicts': 'Конфликтов: {count} на {branch}',
+  'toast.squashToBranch.conflictsDetail': 'Разрешите их в «Изменениях», затем Continue — сквош станет одним коммитом',
+  'toast.squashToBranch.empty': '{branch} уже содержит эти изменения',
+  'toast.squashToBranch.failed': 'Не удалось сделать сквош в ветку',
 };
 
 export const zh: Record<string, string> = {
@@ -456,6 +474,15 @@ export const zh: Record<string, string> = {
   'toast.app.selectStashApply': '选择一个贮藏并点击应用',
   'toast.app.useTrackButton': '使用 LFS 页面上的 Track 按钮',
   'toast.app.perspectiveReset': '布局已重置 — 布局偏好已清除',
+
+  // ── squash-to-branch (History multi-selection) ──
+  'toast.squashToBranch.done': '已压合到 {branch}',
+  'toast.squashToBranch.switched': '已切换到 {branch}',
+  'toast.squashToBranch.switchFailed': '无法切换分支',
+  'toast.squashToBranch.conflicts': '{branch} 上有 {count} 个冲突',
+  'toast.squashToBranch.conflictsDetail': '在「更改」中解决冲突后点击继续——压合将作为单个提交落地',
+  'toast.squashToBranch.empty': '{branch} 已包含这些更改',
+  'toast.squashToBranch.failed': '压合到分支失败',
 };
 
 export const de: Record<string, string> = {
@@ -594,6 +621,15 @@ export const de: Record<string, string> = {
   'toast.app.selectStashApply': 'Wählen Sie einen Stash und klicken Sie auf Apply',
   'toast.app.useTrackButton': 'Verwenden Sie die Track-Schaltfläche auf der LFS-Seite',
   'toast.app.perspectiveReset': 'Perspektive zurückgesetzt — Layout-Einstellungen gelöscht',
+
+  // ── squash-to-branch (History multi-selection) ──
+  'toast.squashToBranch.done': 'Auf {branch} gesquasht',
+  'toast.squashToBranch.switched': 'Zu {branch} gewechselt',
+  'toast.squashToBranch.switchFailed': 'Branch-Wechsel fehlgeschlagen',
+  'toast.squashToBranch.conflicts': 'Konflikte: {count} auf {branch}',
+  'toast.squashToBranch.conflictsDetail': 'In Änderungen auflösen, dann Weiter — der Squash wird ein einzelner Commit',
+  'toast.squashToBranch.empty': '{branch} enthält diese Änderungen bereits',
+  'toast.squashToBranch.failed': 'Squash in Branch fehlgeschlagen',
 };
 
 // ── App.tsx remaining toasts ──

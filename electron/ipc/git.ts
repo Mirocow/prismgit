@@ -282,6 +282,10 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:cherryPickAbort', (_e, p: string) => wrap(gitService.cherryPickAbort)(p));
   ipcMain.handle('git:cherryPickContinue', (_e, p: string, allowEmpty?: boolean) => wrap(gitService.cherryPickContinue)(p, allowEmpty));
   ipcMain.handle('git:cherryPickSkip', (_e, p: string) => wrap(gitService.cherryPickSkip)(p));
+  // History tool: carry a commit group to another branch as ONE squashed commit.
+  ipcMain.handle('git:squashToBranch', (_e, p: string, params: import('../types/git-api.js').SquashToBranchParams) =>
+    wrap(gitService.squashToBranch)(p, params)
+  );
 
   // Revert (SmartGit 20+)
   ipcMain.handle('git:revert', (_e, p: string, h: string[], nc?: boolean) => wrap(gitService.revert)(p, h, nc));
@@ -508,8 +512,6 @@ export function registerGitIpc(): void {
   // Squash-transfer (History multi-select → "Send to branch as one commit"):
   // cherry-picks a commit group onto another branch as ONE new commit and
   // checks the original branch back out.
-  ipcMain.handle('git:squashToBranch', (_e, p: string, hashes: string[], targetBranch: string, message: string) =>
-    wrap(gitService.squashToBranch)(p, hashes, targetBranch, message));
 
   // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
   ipcMain.handle('git:smartPull', (_e, p: string, r?: string, b?: string) => wrap(gitService.smartPull)(p, r, b));
