@@ -8,7 +8,8 @@ import { api, type GithubPullRequest, type GitLabMergeRequest, type GitLabMRComm
 import { useI18n } from '../lib/i18n';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { prHeadRefspec, prCommitsToLogEntries, ensureCommitsLocal } from '../lib/prSquash';
-import { cn, formatDate, shortHash } from '../lib/utils';
+import { useContextMenu } from '../lib/useContextMenu';
+import { cn, copyToClipboard, formatDate, shortHash } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useProviderStore } from '../stores/providerStore';
@@ -81,6 +82,9 @@ export function PullRequestsPage() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeKey(showCreate, () => setShowCreate(false));
+  // Native right-click menu for PR rows — labeled actions, discoverable
+  // without hover (user feedback: hover-only icon buttons were invisible).
+  const showMenu = useContextMenu();
   // ── Whole-PR squash-to-branch ──
   // Row action: fetch the PR's commits from the provider API, make sure the
   // objects exist locally (fetching the PR head ref when needed), then hand
@@ -366,6 +370,65 @@ export function PullRequestsPage() {
       setSquashPR(null);
     }
   };
+
+  // ── Row actions plumbing ────────────────────────────────────────────────
+  // User feedback: «В инструменте Pull Requests кнопки не видны и не понятны».
+  // The old trailing icons were hover-revealed (opacity-0 until row hover) —
+  // the squash one was a bare GitBranch glyph with no label, the
+  // external-link one wasn't even a button (dead <ExternalLink/> icon, no
+  // onClick). Row actions are now ALWAYS visible, labeled, and duplicated in
+  // a right-click menu so every entry point is discoverable without hovering.
+  const openPRInReviews = useCallback((pr: UnifiedPR) => {
+    selectPRAction({
+      number: pr.number,
+      title: pr.title,
+      state: pr.state,
+      html_url: pr.html_url,
+      author: { login: pr.author.login, avatar_url: pr.author.avatar_url },
+      head: { ref: pr.head.ref, sha: pr.head.sha },
+      base: { ref: pr.base.ref, sha: pr.base.sha },
+      created_at: pr.created_at,
+      updated_at: pr.updated_at,
+      merged_at: pr.merged_at,
+    });
+    window.location.hash = '#/reviews';
+  }, [selectPRAction]);
+
+  // Right-click on a PR row: the same actions the visible row buttons offer,
+  // plus a Copy submenu (title / number / link / head / base).
+  const rowContextMenuHandler = useCallback((e: React.MouseEvent, pr: UnifiedPR) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showMenu([
+      { label: t('pages.prOpenReview'), clickId: 'open-review' },
+      { label: t('common.openExternal'), clickId: 'browser' },
+      { type: 'separator' },
+      { label: t('pages.prSquashToBranch'), clickId: 'squash', title: t('pages.prSquashToBranchTitle') },
+      { type: 'separator' },
+      {
+        label: t('ctx.group.copy'),
+        submenu: [
+          { label: t('pages.prCopyTitle'), clickId: 'copy-title' },
+          { label: t('pages.prCopyNumber'), clickId: 'copy-number' },
+          { label: t('pages.prCopyLink'), clickId: 'copy-link' },
+          { type: 'separator' },
+          { label: t('pages.prCopyHeadBranch'), clickId: 'copy-head' },
+          { label: t('pages.prCopyBaseBranch'), clickId: 'copy-base' },
+        ],
+      },
+    ], (clickId) => {
+      switch (clickId) {
+        case 'open-review': openPRInReviews(pr); break;
+        case 'browser': void api.app.openExternal(pr.html_url); break;
+        case 'squash': void handleSquashPR(pr); break;
+        case 'copy-title': void copyToClipboard(pr.title); break;
+        case 'copy-number': void copyToClipboard(`#${pr.number}`); break;
+        case 'copy-link': void copyToClipboard(pr.html_url); break;
+        case 'copy-head': void copyToClipboard(pr.head.ref); break;
+        case 'copy-base': void copyToClipboard(pr.base.ref); break;
+      }
+    });
+  }, [t, showMenu, openPRInReviews, handleSquashPR]);
 
   const handleCreate = async () => {
     if (!repoInfo.owner || !repoInfo.repo) return;
@@ -691,20 +754,9 @@ export function PullRequestsPage() {
                 // в нем и должен происходить кодревью он и должен быть
                 // синхронизирован с пулреквест'. So we DON'T open a modal
                 // here anymore — we hand off to Reviews.
-                selectPRAction({
-                  number: pr.number,
-                  title: pr.title,
-                  state: pr.state,
-                  html_url: pr.html_url,
-                  author: { login: pr.author.login, avatar_url: pr.author.avatar_url },
-                  head: { ref: pr.head.ref, sha: pr.head.sha },
-                  base: { ref: pr.base.ref, sha: pr.base.sha },
-                  created_at: pr.created_at,
-                  updated_at: pr.updated_at,
-                  merged_at: pr.merged_at,
-                });
-                window.location.hash = '#/reviews';
+                openPRInReviews(pr);
               }}
+              onContextMenu={(e) => rowContextMenuHandler(e, pr)}
             >
               <GitPullRequest
                 size={16}
@@ -749,25 +801,33 @@ export function PullRequestsPage() {
                   <span>{formatDate(pr.updated_at)}</span>
                 </div>
               </div>
-              <ExternalLink size={12} className="text-text-tertiary opacity-0 group-hover:opacity-100" />
-              {/* Whole-PR squash-to-branch: carry ALL commits of this PR to
-                  another branch (existing or NEW) as ONE squashed commit.
-                  Hover-revealed like the external-link icon; the row click
-                  itself still navigates to the Reviews surface. */}
-              <button
-                className={cn(
-                  'shrink-0 p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-opacity',
-                  squashPR === pr.number ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                )}
-                title={t('pages.prSquashToBranchTitle')}
-                disabled={squashPR !== null}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void handleSquashPR(pr);
-                }}
-              >
-                {squashPR === pr.number ? <Loader size={12} className="spin" /> : <GitBranch size={12} />}
-              </button>
+              {/* Row actions — ALWAYS visible, with labels (user feedback:
+                  «кнопки не видны и не понятны»). stopPropagation so the row
+                  click (navigate to Reviews) doesn't fire on button clicks. */}
+              <div className="flex items-center gap-1 shrink-0 mt-0.5" onClick={(e) => e.stopPropagation()}>
+                {/* Whole-PR squash-to-branch: carry ALL commits of this PR to
+                    another branch (existing or NEW) as ONE squashed commit.
+                    Labeled button, always visible — was a hover-revealed bare
+                    GitBranch glyph before. Tooltip explains the action. */}
+                <button
+                  className="btn btn-secondary text-2xs !py-0.5 !px-2 flex items-center gap-1"
+                  title={t('pages.prSquashToBranchTitle')}
+                  disabled={squashPR !== null}
+                  onClick={() => void handleSquashPR(pr)}
+                >
+                  {squashPR === pr.number ? <Loader size={11} className="spin" /> : <GitBranch size={11} />}
+                  <span className="hidden sm:inline">{t('pages.prSquashToBranch')}</span>
+                </button>
+                {/* Open the PR in the browser. Previously a DEAD icon — bare
+                    <ExternalLink/>, no onClick, hover-revealed. */}
+                <button
+                  className="icon-btn !w-6 !h-6"
+                  title={t('common.openExternal')}
+                  onClick={() => void api.app.openExternal(pr.html_url)}
+                >
+                  <ExternalLink size={12} />
+                </button>
+              </div>
               {/* LAR-2 — wire up GitHub PR actions to the existing backend
                   methods (electron/services/github.ts: submitPRReview /
                   mergePR / closePR / reopenPR). Buttons are shown only

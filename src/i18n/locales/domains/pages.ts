@@ -794,6 +794,14 @@ export const en: Record<string, string> = {
   'pages.prSquashFetchFailed': 'Could not fetch the PR commits from the remote',
   'pages.prSquashMissing': 'Some PR commits are not available locally: {hashes}',
   'pages.reviewsSquashOutsideWindow': 'Some selected commits are outside the loaded history window — open History to squash them',
+
+  // ── Pull Requests row actions (visible buttons + right-click menu) ──
+  'pages.prOpenReview': 'Open in Reviews',
+  'pages.prCopyTitle': 'Copy PR title',
+  'pages.prCopyNumber': 'Copy PR number',
+  'pages.prCopyLink': 'Copy PR link',
+  'pages.prCopyHeadBranch': 'Copy source branch',
+  'pages.prCopyBaseBranch': 'Copy target branch',
 };
 
 export const ru: Record<string, string> = {
@@ -1577,6 +1585,14 @@ export const ru: Record<string, string> = {
   'pages.prSquashFetchFailed': 'Не удалось получить коммиты PR с сервера',
   'pages.prSquashMissing': 'Некоторые коммиты PR недоступны локально: {hashes}',
   'pages.reviewsSquashOutsideWindow': 'Некоторые выбранные коммиты вне загруженного окна истории — откройте History, чтобы сквошить их',
+
+  // ── Действия над строкой PR (видимые кнопки + меню правой кнопки) ──
+  'pages.prOpenReview': 'Открыть в Reviews',
+  'pages.prCopyTitle': 'Копировать заголовок PR',
+  'pages.prCopyNumber': 'Копировать номер PR',
+  'pages.prCopyLink': 'Копировать ссылку на PR',
+  'pages.prCopyHeadBranch': 'Копировать исходную ветку',
+  'pages.prCopyBaseBranch': 'Копировать целевую ветку',
 };
 
 export const zh: Record<string, string> = {
@@ -2360,6 +2376,14 @@ export const zh: Record<string, string> = {
   'pages.prSquashFetchFailed': '无法从远端获取 PR 提交',
   'pages.prSquashMissing': '部分 PR 提交在本地不可用：{hashes}',
   'pages.reviewsSquashOutsideWindow': '部分所选提交超出了已加载的历史窗口——请打开 History 进行压合',
+
+  // ── PR 行操作（可见按钮 + 右键菜单） ──
+  'pages.prOpenReview': '在 Reviews 中打开',
+  'pages.prCopyTitle': '复制 PR 标题',
+  'pages.prCopyNumber': '复制 PR 编号',
+  'pages.prCopyLink': '复制 PR 链接',
+  'pages.prCopyHeadBranch': '复制源分支',
+  'pages.prCopyBaseBranch': '复制目标分支',
 };
 
 export const de: Record<string, string> = {
@@ -3143,4 +3167,12 @@ export const de: Record<string, string> = {
   'pages.prSquashFetchFailed': 'Die PR-Commits konnten nicht vom Server geholt werden',
   'pages.prSquashMissing': 'Einige PR-Commits sind lokal nicht verfügbar: {hashes}',
   'pages.reviewsSquashOutsideWindow': 'Einige ausgewählte Commits liegen außerhalb des geladenen History-Fensters — öffnen Sie History, um sie zu squashen',
+
+  // ── PR-Zeilenaktionen (sichtbare Buttons + Rechtsklick-Menü) ──
+  'pages.prOpenReview': 'In Reviews öffnen',
+  'pages.prCopyTitle': 'PR-Titel kopieren',
+  'pages.prCopyNumber': 'PR-Nummer kopieren',
+  'pages.prCopyLink': 'PR-Link kopieren',
+  'pages.prCopyHeadBranch': 'Quell-Branch kopieren',
+  'pages.prCopyBaseBranch': 'Ziel-Branch kopieren',
 };
