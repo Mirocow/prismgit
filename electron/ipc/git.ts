@@ -505,6 +505,11 @@ export function registerGitIpc(): void {
   // NOTE: git:squashCommits, git:coalesceCommits IPC handlers were removed
   // as dead code — no renderer callers. The underlying gitService.*
   // functions are kept (covered by integration tests).
+  // Squash-transfer (History multi-select → "Send to branch as one commit"):
+  // cherry-picks a commit group onto another branch as ONE new commit and
+  // checks the original branch back out.
+  ipcMain.handle('git:squashToBranch', (_e, p: string, hashes: string[], targetBranch: string, message: string) =>
+    wrap(gitService.squashToBranch)(p, hashes, targetBranch, message));
 
   // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
   ipcMain.handle('git:smartPull', (_e, p: string, r?: string, b?: string) => wrap(gitService.smartPull)(p, r, b));

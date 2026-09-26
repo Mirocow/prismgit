@@ -682,6 +682,11 @@ export interface GitApi {
   // renderer-side code). The underlying gitService.* functions are kept
   // for integration tests.
 
+  /** Squash-transfer: apply a group of commits onto ANOTHER branch as one
+   *  new commit, then check the original branch back out (History multi-select
+   *  → "Send to branch as one commit"). */
+  squashToBranch: (repoPath: string, hashes: string[], targetBranch: string, message: string) => Promise<{ newHash: string }>;
+
   // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
   /** Smart Pull — prevents divergence after remote force-push. */
   smartPull: (repoPath: string, remote?: string, branch?: string) => Promise<SmartPullResult>;

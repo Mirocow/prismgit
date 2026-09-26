@@ -48,6 +48,8 @@ interface HistoryCommitRowProps {
   /** Row index in the FULL graphRows array (virtualization-independent). */
   realIdx: number;
   isSelected: boolean;
+  /** Multi-select (squash-transfer): row is part of the commit GROUP selection. */
+  isMultiSelected?: boolean;
   /** Only the first overall row renders the working-tree sync indicator. */
   sync: HistoryRowSyncInfo | null;
   /** Precomputed: incomingHashes.has(entry.hash). */
@@ -61,7 +63,9 @@ interface HistoryCommitRowProps {
   graphWidth: number;
   bugtraqConfig: Parameters<typeof linkifyCommitMessage>[1];
   onRefsChanged: () => void;
-  onSelect: (idx: number, hash: string) => void;
+  /** Click with modifier info: ctrl/meta toggles group selection, shift
+   *  selects a range (History squash-transfer multi-select). */
+  onSelect: (idx: number, hash: string, mods: { ctrl: boolean; shift: boolean }) => void;
   onContextMenu: (e: React.MouseEvent, entry: LogEntry, idx: number) => void;
 }
 
@@ -69,6 +73,7 @@ export const HistoryCommitRow = memo(function HistoryCommitRow({
   entry,
   realIdx,
   isSelected,
+  isMultiSelected = false,
   sync,
   isIncoming,
   incomingRemoteLabel,
@@ -86,11 +91,16 @@ export const HistoryCommitRow = memo(function HistoryCommitRow({
   return (
     <div
       className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
-        isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
+        isMultiSelected
+          // Group selection (squash-transfer): accent tint + accent inset bar
+          ? 'bg-accent/15 shadow-[inset_2px_0_0_0_var(--accent)]'
+          : isSelected
+            ? 'bg-bg-selected'
+            : 'hover:bg-bg-hover',
         // Incoming (remote-only) commits get a subtle tinted background
-        isIncoming && !isSelected && 'bg-blue-50/30 dark:bg-blue-950/10')}
+        isIncoming && !isSelected && !isMultiSelected && 'bg-blue-50/30 dark:bg-blue-950/10')}
       style={{ height: HISTORY_ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 4 }}
-      onClick={() => onSelect(realIdx, entry.hash)}
+      onClick={(e) => onSelect(realIdx, entry.hash, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })}
       onContextMenu={(e) => onContextMenu(e, entry, realIdx)}
     >
       {isHEAD && <span className="text-2xs text-text-primary shrink-0" style={{ width: 8 }}>▶</span>}

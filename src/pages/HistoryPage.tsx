@@ -15,6 +15,7 @@ import {
   GitBranch,
   GitMerge,
   GitPullRequest,
+  Layers,
   Pencil,
   Plus,
   RefreshCw,
@@ -27,6 +28,7 @@ import {
 } from '../components/icons';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { HistoryCommitRow, type HistoryRowSyncInfo } from '../components/history/HistoryCommitRow';
+import { SquashToBranchDialog } from '../components/SquashToBranchDialog';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
@@ -156,6 +158,37 @@ export function HistoryPage() {
   // pointing at them (refs/tags/*). Mirrors the "Mine"/"Merges"/"Recent"
   // quick-filter pattern so the user can scope History to release points.
   const [taggedActive, setTaggedActive] = useState(false);
+  // ── Multi-select commit GROUP (squash-transfer: «отправить группу коммитов
+  // в другую ветку одним коммитом»). Ctrl/Cmd+click toggles a commit,
+  // Shift+click selects a range; a plain click clears the group. ──
+  const [multiSel, setMultiSel] = useState<Set<string>>(new Set());
+  // Index of the last plain/ctrl click — the Shift+click range anchor.
+  const lastClickIdxRef = useRef<number | null>(null);
+  const [squashDialog, setSquashDialog] = useState(false);
+  const [squashBusy, setSquashBusy] = useState(false);
+  // The selected commit GROUP in application order (OLDEST → newest): the
+  // raw log is newest-first, so reverse. Ordering by `entries` (not the
+  // filtered view) keeps the order correct even when the visible list is a
+  // subset — membership is still driven by what the user clicked.
+  const selectedForSquash = useMemo<LogEntry[]>(() => (
+    multiSel.size === 0 ? [] : entries.filter(e => multiSel.has(e.hash)).reverse()
+  ), [multiSel, entries]);
+  // Local branches offered as squash-transfer targets (current one excluded —
+  // transferring onto the branch you're standing on is just a local squash).
+  const squashTargetBranches = useMemo(
+    () => branches.filter(b => !b.remote && b.name !== status?.current).map(b => b.name),
+    [branches, status?.current]
+  );
+  // Esc clears the commit GROUP selection (but not while the transfer dialog
+  // is open — its own Esc handling closes the dialog first).
+  useEffect(() => {
+    if (multiSel.size === 0 || squashDialog) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMultiSel(new Set());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [multiSel.size, squashDialog]);
   // Cache of all tags in the repo (name + hash) — used for the Tagged filter
   // and the Tags header section. Loaded once per repo, refreshed on demand.
   const [allTags, setAllTags] = useState<{ name: string; hash: string }[]>([]);
@@ -381,6 +414,9 @@ export function HistoryPage() {
       // (Previously fired on every History page open, blocking UI for seconds
       //  on large repos for data the user wasn't viewing.)
       setSelectedIdx(0);
+      // A fresh (re)load may show a different repo/filter — a stale commit
+      // GROUP selection must not survive it.
+      setMultiSel(new Set());
       // Preserve an existing global selection when it is still visible in the
       // (re)loaded log — clobbering it with the first commit broke other tools
       // (e.g. Notes "Add note" silently attached to the wrong commit).
@@ -1093,6 +1129,57 @@ export function HistoryPage() {
     } catch (e) { toast.error(t('toast.merge.rebaseFailed'), String(e)); }
   };
 
+  // ── Squash-transfer: send the selected commit GROUP to another branch as
+  // ONE commit («отправить группу коммитов в другую ветку одним коммитом»).
+  // Backend: checkout target → cherry-pick --no-commit <group> → one commit
+  // → checkout back. Requires a clean tree (we switch branches underneath).
+  const handleSquashToBranch = async () => {
+    if (selectedForSquash.length === 0) return;
+    if (await blockedByRepoState()) return;
+    if (status && status.files && status.files.length > 0) {
+      toast.warning(t('history.squashToDirty'));
+      return;
+    }
+    if (squashTargetBranches.length === 0) {
+      toast.warning(t('history.squashToNoBranches'));
+      return;
+    }
+    setSquashDialog(true);
+  };
+
+  const submitSquashToBranch = async (branch: string, message: string) => {
+    if (selectedForSquash.length === 0) return;
+    setSquashBusy(true);
+    try {
+      const res = await api.git.squashToBranch(
+        repo.path,
+        selectedForSquash.map(c => c.hash),
+        branch,
+        message
+      );
+      toast.success(t('history.squashToDone', {
+        count: selectedForSquash.length,
+        branch,
+        hash: shortHash(res.newHash),
+      }));
+      setSquashDialog(false);
+      setMultiSel(new Set());
+      await refreshStatus(repo.path);
+      await loadHistory();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/CONFLICT|conflict/i.test(msg)) {
+        toast.error(t('history.squashToConflict', { branch }), msg);
+      } else if (/already contains these changes/i.test(msg)) {
+        toast.warning(t('history.squashToNothingNew', { branch }));
+      } else {
+        toast.error(t('history.squashToFailed'), msg);
+      }
+    } finally {
+      setSquashBusy(false);
+    }
+  };
+
   // Full commit diff via git diff <hash>^..<hash> — rendered in the compare modal
   const handleShowCommitDiff = async (entry: LogEntry) => {
     try {
@@ -1261,10 +1348,39 @@ export function HistoryPage() {
   // callbacks every row would re-render on every frame, defeating the
   // memo. The ref-indirection keeps identity stable while always calling
   // the freshest closure.
-  const rowSelectHandler = useCallback((idx: number, hash: string) => {
+  const rowSelectHandler = useCallback((idx: number, hash: string, mods: { ctrl: boolean; shift: boolean }) => {
+    const anchor = lastClickIdxRef.current;
+    lastClickIdxRef.current = idx;
+    // Ctrl/Cmd+click — toggle ONE commit in the group selection (the details
+    // pane stays where it was; group selection is a separate interaction).
+    if (mods.ctrl) {
+      setMultiSel(prev => {
+        const next = new Set(prev);
+        if (next.has(hash)) next.delete(hash); else next.add(hash);
+        return next;
+      });
+      return;
+    }
+    // Shift+click — select the RANGE from the last click anchor to here
+    // (merged into the existing group, standard file-manager semantics).
+    if (mods.shift && anchor != null) {
+      setMultiSel(prev => {
+        const next = new Set(prev);
+        const [a, b] = anchor < idx ? [anchor, idx] : [idx, anchor];
+        for (let i = a; i <= b; i++) {
+          const row = graphRows[i];
+          if (row?.node) next.add(row.node.entry.hash);
+        }
+        return next;
+      });
+      return;
+    }
+    // Plain click — normal single selection; a group selection would only
+    // get in the way of the next action.
+    setMultiSel(new Set());
     setSelectedIdx(idx);
     selectCommit(hash);
-  }, [selectCommit]);
+  }, [selectCommit, graphRows]);
   // Typed lazily-assigned ref (showCommitContextMenu is defined below —
   // a direct useRef(showCommitContextMenu) would hit the TDZ).
   const ctxMenuRef = useRef<(e: React.MouseEvent, entry: LogEntry, idx: number) => void>(() => {});
@@ -1334,6 +1450,13 @@ export function HistoryPage() {
         label: t('ctx.group.branches'),
         submenu: [
           { label: t('history.createBranchHere'), clickId: 'create-branch' },
+          { type: 'separator' },
+          // Squash-transfer of the multi-selected commit GROUP (Ctrl/Shift+click).
+          {
+            label: t('history.squashToMenu', { count: multiSel.size }),
+            clickId: 'squash-to-branch',
+            enabled: multiSel.size > 0,
+          },
         ],
       },
       { type: 'separator' },
@@ -1417,6 +1540,7 @@ export function HistoryPage() {
         case 'reset-hard': handleReset(entry.hash, 'hard'); break;
         case 'reset-keep': handleReset(entry.hash, 'keep'); break;
         case 'rebase': handleRebase(entry.hash); break;
+        case 'squash-to-branch': handleSquashToBranch(); break;
         case 'create-tag': handleCreateTag(entry); break;
         case 'create-branch': handleCreateBranchAt(entry); break;
         case 'open-in-diff': {
@@ -2186,6 +2310,7 @@ export function HistoryPage() {
                         entry={entry}
                         realIdx={realIdx}
                         isSelected={selectedIdx === realIdx}
+                        isMultiSelected={multiSel.has(entry.hash)}
                         sync={realIdx === 0 ? firstRowSync : null}
                         isIncoming={incomingHashes.has(entry.hash)}
                         incomingRemoteLabel={remoteLabel}
@@ -2710,6 +2835,45 @@ export function HistoryPage() {
           </div>
         </div>
       )}
+
+      {/* ── Commit-GROUP selection bar (squash-transfer) ──
+          Floating pill: N selected + the action. Shown whenever the user has
+          a multi-selection (Ctrl/Shift+click); hidden while the transfer
+          dialog is open so it doesn't fight for attention. */}
+      {multiSel.size > 0 && !squashDialog && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 panel shadow-lg flex items-center gap-3 px-3 py-2 animate-fade-in">
+          <Layers size={14} className="text-accent shrink-0" />
+          <span className="text-xs font-medium whitespace-nowrap">
+            {t('history.squashToBar', { count: multiSel.size })}
+          </span>
+          <button
+            className="btn btn-primary text-xs flex items-center gap-1.5"
+            onClick={() => handleSquashToBranch()}
+            disabled={squashBusy}
+          >
+            <GitBranch size={12} />
+            {t('history.squashToBarAction')}
+          </button>
+          <button
+            className="btn text-xs"
+            onClick={() => setMultiSel(new Set())}
+            disabled={squashBusy}
+          >
+            {t('history.squashToClear')}
+          </button>
+        </div>
+      )}
+
+      {/* Squash-transfer dialog: target branch + the ONE commit message. */}
+      <SquashToBranchDialog
+        open={squashDialog}
+        branches={squashTargetBranches}
+        currentBranch={status?.current ?? ''}
+        commits={selectedForSquash.map(c => ({ hash: c.hash, subject: c.subject }))}
+        busy={squashBusy}
+        onSubmit={submitSquashToBranch}
+        onClose={() => { if (!squashBusy) setSquashDialog(false); }}
+      />
     </div>
   );
 }

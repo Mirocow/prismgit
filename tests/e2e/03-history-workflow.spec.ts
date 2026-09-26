@@ -82,4 +82,51 @@ test.describe('History workflow', () => {
       await ctx.close();
     }
   });
+
+  // ── Squash-transfer multi-select (user request: «выделение группы
+  // коммитов и отправка их в другую ветку в виде одного (сквош)») ──
+  // The full git mechanics are covered by the integration suite
+  // (squash-transfer describe); here we verify the UI WIRING: Ctrl+click
+  // builds a group, the floating selection bar appears, and the transfer
+  // dialog opens with the prefilled message and the branch picker.
+  test('multi-selects commits and opens the squash-transfer dialog', async () => {
+    const ctx = await launchApp();
+    try {
+      await navigateTo(ctx.page, 'History');
+      await ctx.page.waitForTimeout(3000);
+
+      // Ctrl+click two commit rows — the group selection.
+      const row1 = ctx.page.locator('div.cursor-pointer', { hasText: 'Latest main commit' }).first();
+      await row1.waitFor({ state: 'visible', timeout: 5000 });
+      await row1.click({ modifiers: ['Control'] });
+
+      const row2 = ctx.page.locator('div.cursor-pointer', { hasText: 'Merge feature/auth into main' }).first();
+      await row2.waitFor({ state: 'visible', timeout: 5000 });
+      await row2.click({ modifiers: ['Control'] });
+
+      // The floating selection bar shows the group size (locale pinned to EN).
+      const bar = ctx.page.locator('text=2 commit(s) selected');
+      await bar.waitFor({ state: 'visible', timeout: 5000 });
+      await screenshot(ctx.page, 'history-squash-selection-bar');
+
+      // Open the transfer dialog from the bar.
+      await ctx.page.locator('button', { hasText: 'Send to branch' }).first().click();
+      const dialog = ctx.page.locator('text=Send to branch as one commit');
+      await dialog.waitFor({ state: 'visible', timeout: 5000 });
+
+      // The message is prefilled GitHub-squash-style with the subjects of
+      // BOTH selected commits.
+      const prefilled = await ctx.page.locator('textarea').first().inputValue();
+      expect(prefilled).toContain('Latest main commit');
+      expect(prefilled).toContain('Merge feature/auth into main');
+
+      // The branch picker offers the fixture repo's other local branches.
+      const options = await ctx.page.locator('select option').allTextContents();
+      expect(options.some(o => o.includes('develop') || o.includes('staging'))).toBe(true);
+
+      await screenshot(ctx.page, 'history-squash-dialog');
+    } finally {
+      await ctx.close();
+    }
+  });
 });

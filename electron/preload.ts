@@ -342,6 +342,9 @@ const api = {
     isCommitPushed: (repoPath: string, hash: string) => ipcRenderer.invoke('git:isCommitPushed', repoPath, hash),
     // NOTE: squashCommits, coalesceCommits IPCs were removed (dead
     // renderer-side code).
+    // Squash-transfer: History multi-select → "Send to branch as one commit".
+    squashToBranch: (repoPath: string, hashes: string[], targetBranch: string, message: string) =>
+      ipcRenderer.invoke('git:squashToBranch', repoPath, hashes, targetBranch, message),
 
     // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
     smartPull: (repoPath: string, remote?: string, branch?: string) =>

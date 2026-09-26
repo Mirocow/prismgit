@@ -7814,6 +7814,102 @@ export async function coalesceCommits(
   await squashCommits(repoPath, older, newer, messages.join('\n\n'));
 }
 
+/**
+ * Squash-TRANSFER (user request: «выделение группы коммитов и отправка их в
+ * другую ветку в виде одного (сквош)»): apply a group of commits onto
+ * ANOTHER branch as a single new commit, then check the original branch
+ * back out — the user stays where they were.
+ *
+ * Mechanics (no editor needed anywhere):
+ *   1. remember the original HEAD (branch name, or hash when detached);
+ *   2. `git checkout <target>`;
+ *   3. `git cherry-pick --no-commit h1 h2 …` — stages the combined changes
+ *      (explicit hashes, so the group may include the ROOT commit);
+ *   4. `git commit -m <message>` — the ONE squashed commit;
+ *   5. `git checkout <original>` — restore the user's context.
+ *
+ * Rollback: on a cherry-pick conflict (or a failed/empty commit) the pick is
+ * aborted and the original branch checked back out — the repo is left exactly
+ * as it was (the caller had to pass a clean working tree, so reset --hard to
+ * the target tip is safe as a last-resort cleanup of a half-applied pick).
+ */
+export async function squashToBranch(
+  repoPath: string,
+  hashes: string[],
+  targetBranch: string,
+  message: string
+): Promise<{ newHash: string }> {
+  const git = getGit(repoPath);
+  if (!hashes || hashes.length === 0) throw new Error('squashToBranch: no commits selected');
+  if (!targetBranch) throw new Error('squashToBranch: target branch is required');
+
+  // Target branch must exist. NOTE: `rev-parse --verify --quiet` exits 1 with
+  // EMPTY stderr — simple-git does NOT throw on that (same pitfall documented
+  // in squashCommits). `show-ref --verify` writes to stderr on failure.
+  await git.raw(['show-ref', '--verify', `refs/heads/${targetBranch}`]);
+
+  // A clean working tree is required — we check out another branch and back.
+  const dirty = await git.raw(['status', '--porcelain']);
+  if (dirty.trim()) throw new Error('squashToBranch: working tree is not clean — commit or stash first');
+
+  // Remember where the user is (branch name, or 'HEAD' when detached).
+  const origBranch = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+  const origHead = (await git.raw(['rev-parse', 'HEAD'])).trim();
+  const checkoutBack = () =>
+    origBranch === 'HEAD'
+      ? git.raw(['checkout', '--detach', origHead])
+      : git.raw(['checkout', origBranch]);
+
+  try {
+    await git.raw(['checkout', targetBranch]);
+  } catch (e) {
+    // Checkout itself failed (e.g. would clobber local changes) — nothing done yet.
+    throw e;
+  }
+
+  let newHash = '';
+  try {
+    await git.raw(['cherry-pick', '--no-commit', ...hashes]);
+    // EMPTY-RESULT GUARD: when the target already contains every selected
+    // change (e.g. the user re-sends the same group), the pick stages
+    // NOTHING — but `git commit` would still succeed: concluding a pick is
+    // one of the few paths where git allows an EMPTY commit. That commit
+    // would silently lie to the user, so refuse it instead. The tree was
+    // verified clean before the checkout, so ANY porcelain line here is
+    // the pick's own staged work.
+    const postPick = await git.raw(['status', '--porcelain']);
+    if (!postPick.trim()) {
+      throw new Error(`squashToBranch: nothing new to apply — ${targetBranch} already contains these changes`);
+    }
+    // CHERRY_PICK_HEAD is present after --no-commit; an explicit `git
+    // commit -m` concludes the pick with OUR message (git's own author
+    // default for the pick is overridden by -m).
+    await git.raw(['commit', '-m', message]);
+    newHash = (await git.raw(['rev-parse', 'HEAD'])).trim();
+  } catch (e) {
+    // Roll the target branch back to its pre-transfer state and rethrow.
+    // `reset --hard HEAD` is safe in every failure path here: the tree was
+    // clean at entry and no commit succeeded, so HEAD is still the target
+    // tip — the reset only clears the half-applied pick.
+    try {
+      try { await git.raw(['cherry-pick', '--abort']); } catch { /* not mid-pick — fine */ }
+      await git.raw(['reset', '--hard', 'HEAD']);
+    } catch { /* best effort — the checkout-back below still runs */ }
+    try { await checkoutBack(); } catch { /* best effort */ }
+    throw e;
+  }
+
+  // Success — put the user back on their original branch.
+  try {
+    await checkoutBack();
+  } catch (e) {
+    // The squash commit EXISTS on the target branch; only the return trip
+    // failed. Surface it but keep the hash — the caller can still report it.
+    throw new Error(`squashToBranch: committed ${newHash.slice(0, 8)} onto ${targetBranch} but failed to switch back to ${origBranch}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return { newHash };
+}
+
 /** Tag-Grouping: group tags by patterns (e.g., v1.0.0, v1.0.1 → group "v1.0") */
 export interface TagGroup {
   name: string;
