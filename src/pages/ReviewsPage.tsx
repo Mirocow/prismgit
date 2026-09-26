@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { GitPullRequest, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText, ExternalLink, ArrowLeft } from '../components/icons';
+import { GitPullRequest, GitBranch, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText, ExternalLink, ArrowLeft } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -9,6 +9,7 @@ import { useProviderStore } from '../stores/providerStore';
 import { api, type LogEntry } from '../lib/api';
 import { ProviderChip } from '../components/ProviderChip';
 import { PRReview } from '../components/PRReview';
+import { SquashToBranchDialog } from '../components/SquashToBranchDialog';
 import {
   loadReviews,
   addReviewComment,
@@ -55,6 +56,14 @@ export function ReviewsPage() {
   useEscapeKey(showAdd, () => setShowAdd(false));
   const [newComment, setNewComment] = useState<Partial<ReviewComment>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  // ── Group squash-to-branch (local review mode) ──
+  // Same interaction model as History / the PR Commits tab: Shift+click
+  // range, Ctrl/Cmd+click toggle, plain click resets (and selects the
+  // commit for the comments panel, as before).
+  const [multiSel, setMultiSel] = useState<ReadonlySet<string>>(new Set());
+  const multiAnchorRef = useRef<string | null>(null);
+  const [squashDialog, setSquashDialog] = useState<{ commits: LogEntry[] } | null>(null);
+  useEscapeKey(multiSel.size >= 2 && !squashDialog, () => setMultiSel(new Set()));
 
   // ─── Single source of truth: shared with PullRequestsPage via providerStore
   // The user's explicit request: 'Зачем делали тогда инструмент Reviews — в
@@ -254,6 +263,70 @@ export function ReviewsPage() {
     0
   );
 
+  // ── Group squash-to-branch (local review mode) ──────────────────────────
+  // Sort the reviewed-commit rows by git-log order (newest first) instead of
+  // the arbitrary git-notes listing order. This does two things: the panel
+  // reads like History, and Shift-range selections map onto REAL git ranges
+  // (squashToBranch refuses gap selections).
+  const orderedReviews = useMemo(() => {
+    const idx = new Map(commits.map((c, i) => [c.hash, i]));
+    return [...reviews].sort((a, b) =>
+      (idx.get(a.commitHash) ?? Number.MAX_SAFE_INTEGER) - (idx.get(b.commitHash) ?? Number.MAX_SAFE_INTEGER));
+  }, [reviews, commits]);
+  // Drop selected hashes that vanished after a reload.
+  useEffect(() => {
+    if (multiSel.size === 0) return;
+    const alive = new Set(reviews.map((r) => r.commitHash));
+    const next = new Set([...multiSel].filter((h) => alive.has(h)));
+    if (next.size !== multiSel.size) setMultiSel(next);
+  }, [reviews, multiSel]);
+
+  const handleReviewRowClick = useCallback((e: React.MouseEvent, review: Review) => {
+    if (e.shiftKey) {
+      const anchor = multiAnchorRef.current ?? review.commitHash;
+      const aIdx = orderedReviews.findIndex((r) => r.commitHash === anchor);
+      const idx = orderedReviews.findIndex((r) => r.commitHash === review.commitHash);
+      const from = Math.min(aIdx < 0 ? idx : aIdx, idx);
+      const to = Math.max(aIdx < 0 ? idx : aIdx, idx);
+      const set = new Set<string>();
+      for (let i = from; i <= to; i++) {
+        const r = orderedReviews[i];
+        if (r) set.add(r.commitHash);
+      }
+      setMultiSel(set);
+    } else if (e.ctrlKey || e.metaKey) {
+      setMultiSel((prev) => {
+        const next = new Set(prev);
+        if (next.has(review.commitHash)) next.delete(review.commitHash); else next.add(review.commitHash);
+        return next;
+      });
+      multiAnchorRef.current = review.commitHash;
+    } else {
+      multiAnchorRef.current = review.commitHash;
+      setMultiSel((prev) => (prev.size === 0 ? prev : new Set()));
+    }
+    // The comments panel keeps following the last clicked commit.
+    selectCommit(review.commitHash);
+  }, [orderedReviews, selectCommit]);
+
+  /** Open the squash dialog for the selected reviewed commits. Ordered
+   *  OLDEST → NEWEST via the git-log array; hashes outside the loaded
+   *  100-commit window cannot be mapped to LogEntry — refuse with a hint. */
+  const openSquashToBranch = useCallback(() => {
+    if (multiSel.size < 2) return;
+    const sel = new Set(multiSel);
+    const ordered = [...commits].reverse().filter((c) => sel.has(c.hash));
+    if (ordered.length < multiSel.size) {
+      toast.error(
+        t('toast.squashToBranch.failed'),
+        t('pages.reviewsSquashOutsideWindow'),
+      );
+      return;
+    }
+    if (ordered.length < 2) return;
+    setSquashDialog({ commits: ordered });
+  }, [multiSel, commits, toast, t]);
+
   const filteredReviews = selectedCommit
     ? reviews.filter(r => r.commitHash.startsWith(selectedCommit))
     : reviews;
@@ -371,6 +444,33 @@ export function ReviewsPage() {
           <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default">
             {t('pages.reviewedCommits', { count: reviews.length })}
           </div>
+          {/* Group-selection action bar (Shift/Ctrl+click), mirroring
+              History and the PR Commits tab. */}
+          {multiSel.size >= 2 && (
+            <div
+              className="sticky top-0 z-10 flex items-center gap-1.5 px-2 py-1.5 bg-accent/15 border-b border-accent/40 text-xs text-text-primary"
+              style={{ backdropFilter: 'blur(4px)' }}
+            >
+              <GitBranch size={13} className="text-accent shrink-0" />
+              <span className="font-medium">
+                {t('history.nCommitsSelected', { count: multiSel.size })}
+              </span>
+              <button
+                className="btn btn-primary text-2xs !py-0.5 !px-2 ml-1"
+                onClick={openSquashToBranch}
+                title={t('history.squashGroupToBranchTitle')}
+              >
+                {t('history.squashGroupToBranchAction')}
+              </button>
+              <span className="flex-1" />
+              <button
+                className="btn btn-secondary text-2xs !py-0.5 !px-2"
+                onClick={() => setMultiSel(new Set())}
+              >
+                {t('common.clear')}
+              </button>
+            </div>
+          )}
           {loading ? (
             <div className="p-4 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
           ) : reviews.length === 0 ? (
@@ -378,17 +478,22 @@ export function ReviewsPage() {
               {t('pages.noReviewsYet')}
             </div>
           ) : (
-            reviews.map(review => {
+            orderedReviews.map(review => {
               const commit = commits.find(c => c.hash === review.commitHash);
               const unresolved = review.comments.filter(c => !c.resolved).length;
+              const inGroup = multiSel.size > 1 && multiSel.has(review.commitHash);
               return (
                 <div
                   key={review.commitHash}
                   className={cn(
                     'px-3 py-2 cursor-pointer border-b border-border-subtle hover:bg-bg-hover',
-                    selectedCommit && review.commitHash.startsWith(selectedCommit) && 'bg-bg-selected'
+                    selectedCommit && review.commitHash.startsWith(selectedCommit) && !inGroup && 'bg-bg-selected',
+                    inGroup && 'bg-accent/15'
                   )}
-                  onClick={() => selectCommit(review.commitHash)}
+                  style={inGroup && !(selectedCommit && review.commitHash.startsWith(selectedCommit))
+                    ? { boxShadow: 'inset 2px 0 0 0 var(--accent)' }
+                    : undefined}
+                  onClick={(e) => handleReviewRowClick(e, review)}
                 >
                   <div className="flex items-center gap-2">
                     <code className="text-2xs mono text-text-tertiary">{shortHash(review.commitHash)}</code>
@@ -581,6 +686,22 @@ export function ReviewsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Group squash-to-branch (local review mode multi-selection). */}
+      {squashDialog && (
+        <SquashToBranchDialog
+          commits={squashDialog.commits}
+          onClose={() => setSquashDialog(null)}
+          onChanged={() => {
+            setSquashDialog(null);
+            setMultiSel(new Set());
+            multiAnchorRef.current = null;
+            // The git log (and possibly the reviewed-commit subjects)
+            // changed — reload the local review data.
+            void load();
+          }}
+        />
       )}
     </div>
   );

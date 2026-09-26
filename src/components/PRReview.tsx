@@ -28,7 +28,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  GitPullRequest, GitCommit, X, ExternalLink, Loader, Check, FileText,
+  GitPullRequest, GitCommit, GitBranch, X, ExternalLink, Loader, Check, FileText,
   MessageSquare, Plus, Minus, ArrowRight, RefreshCw, AlertCircle, Sparkles,
 } from './icons';
 import { useI18n } from '../lib/i18n';
@@ -36,13 +36,20 @@ import { useToastActions } from '../stores/toastStore';
 import {
   api, type GithubPullRequest, type GithubPRFile, type GithubPRComment,
   type GithubPRCommit, type GitLabMergeRequestDetail, type GitLabMRFile,
-  type GitLabMRNote, type GitLabMRCommit,
+  type GitLabMRNote, type GitLabMRCommit, type LogEntry,
 } from '../lib/api';
 import { Avatar } from './Avatar';
 import MarkdownRenderer from './MarkdownRenderer';
 import { cn, formatDate, shortHash } from '../lib/utils';
 import { confirmDialog } from './ConfirmDialog';
 import type { SelectedPR } from '../stores/providerStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
+import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
+import { resolveDefaultRemote } from '../lib/remotes';
+import {
+  prHeadRefspec, prCommitsToLogEntries, ensureCommitsLocal,
+} from '../lib/prSquash';
+import { SquashToBranchDialog } from './SquashToBranchDialog';
 
 type Tab = 'overview' | 'commits' | 'files' | 'discussion';
 
@@ -83,6 +90,20 @@ export function PRReview({
   const [filesCommitFilter, setFilesCommitFilter] = useState<string | null>(null);
   const [filteredFiles, setFilteredFiles] = useState<GithubPRFile[] | null>(null);
   const [loading, setLoading] = useState(true);
+  // ── Group squash-to-branch (Commits tab multi-selection) ──
+  // Same interaction model as the History tool: Shift+click = range,
+  // Ctrl/Cmd+click = toggle, plain click = reset + single-select (which
+  // also keeps the inline diff view working as before).
+  // `commits` comes from the provider API OLDEST → NEWEST — exactly the
+  // order SquashToBranchDialog expects, so NO reversal is needed here
+  // (unlike History where the log is newest-first).
+  const [multiSel, setMultiSel] = useState<ReadonlySet<string>>(new Set());
+  const multiAnchorIdxRef = useRef<number | null>(null);
+  const [squashDialog, setSquashDialog] = useState<{ commits: LogEntry[] } | null>(null);
+  // While rev-parse checks / the PR head ref fetch run (before the dialog).
+  const [squashBusy, setSquashBusy] = useState(false);
+  const repoEntry = useRepositoryStore((s) => s.currentRepo);
+  const showContextMenu = useContextMenu();
   // Anti-spam: deduplicate concurrent loads. Without this, the load()
   // effect fires multiple times when:
   //   1. gitlabProjectId transitions from null → number (after on-demand
@@ -266,7 +287,12 @@ export function PRReview({
           }));
         setComments(normalizedComments);
         // Map MR commits → GithubPRCommit shape.
-        const normalizedCommits: GithubPRCommit[] = mrCommits.map((c: GitLabMRCommit) => ({
+        // ORDER: GitLab's MR-commits endpoint lists the HEAD (newest) commit
+        // FIRST; GitHub lists oldest-first. The `commits` state is the single
+        // source for the Commits tab display, the multi-selection ranges and
+        // the squash-to-branch group — all of which need OLDEST → NEWEST —
+        // so normalize here once.
+        const normalizedCommits: GithubPRCommit[] = mrCommits.slice().reverse().map((c: GitLabMRCommit) => ({
           sha: c.sha,
           commit: {
             message: c.commit.message,
@@ -382,6 +408,111 @@ export function PRReview({
       setCommitFilesLoading(false);
     }
   }, [provider, owner, repo, gitlabProjectId, pr.number, toast, t]);
+
+  // ── Group squash-to-branch (PR Commits tab) ──────────────────────────────
+  // Reset the multi-selection when the PR itself changes (navigating between
+  // PRs from the list) or after a reload prunes commits.
+  useEffect(() => {
+    setMultiSel(new Set());
+    multiAnchorIdxRef.current = null;
+  }, [pr.number, provider]);
+  // Prune hashes that vanished from the (reloaded) commit list.
+  useEffect(() => {
+    if (multiSel.size === 0) return;
+    const alive = new Set(commits.map((c) => c.sha));
+    const next = new Set([...multiSel].filter((h) => alive.has(h)));
+    if (next.size !== multiSel.size) setMultiSel(next);
+  }, [commits, multiSel]);
+
+  /** Row click with multi-select modifiers (same semantics as History). */
+  const handleCommitRowClick = useCallback((e: React.MouseEvent, c: GithubPRCommit, idx: number) => {
+    if (e.shiftKey) {
+      const anchor = multiAnchorIdxRef.current ?? idx;
+      const from = Math.min(anchor, idx);
+      const to = Math.max(anchor, idx);
+      const set = new Set<string>();
+      for (let i = from; i <= to; i++) {
+        const x = commits[i];
+        if (x) set.add(x.sha);
+      }
+      setMultiSel(set);
+    } else if (e.ctrlKey || e.metaKey) {
+      setMultiSel((prev) => {
+        const next = new Set(prev);
+        if (next.has(c.sha)) next.delete(c.sha); else next.add(c.sha);
+        return next;
+      });
+      multiAnchorIdxRef.current = idx;
+    } else {
+      multiAnchorIdxRef.current = idx;
+      setMultiSel((prev) => (prev.size === 0 ? prev : new Set()));
+    }
+    // Single-commit inline diff keeps working on every variant of the click.
+    setSelectedCommit(c);
+    void loadCommitFiles(c.sha);
+  }, [commits, loadCommitFiles]);
+
+  /**
+   * Open SquashToBranchDialog for a set of PR commits. The provider API
+   * lists SHAs that may not exist in the LOCAL clone (never-fetched PR
+   * branch, fork PR): ensureCommitsLocal() rev-parses each SHA and, when
+   * some are missing, fetches the canonical PR head ref (FETCH_HEAD only,
+   * no tracking refs created) before the dialog touches anything.
+   */
+  const openSquashToBranch = useCallback(async (selected: GithubPRCommit[]) => {
+    if (selected.length < 2) {
+      toast.info(t('pages.prSquashSingleCommit', { count: selected.length }));
+      return;
+    }
+    const repoPath = repoEntry?.path;
+    if (!repoPath) {
+      toast.error(t('pages.prSquashFailed'), 'No repository is open.');
+      return;
+    }
+    setSquashBusy(true);
+    try {
+      const hashes = selected.map((c) => c.sha);
+      const remote = (await resolveDefaultRemote(repoPath).catch(() => null)) || 'origin';
+      const spec = prHeadRefspec(provider, pr.number);
+      const res = await ensureCommitsLocal(repoPath, hashes, () =>
+        api.git.fetchRef(repoPath, remote, spec));
+      if (!res.ok) {
+        if (res.reason === 'fetch-failed') {
+          toast.error(t('pages.prSquashFetchFailed'), res.detail);
+        } else {
+          toast.error(
+            t('pages.prSquashFailed'),
+            t('pages.prSquashMissing', { hashes: res.missing.map(shortHash).join(', ') }),
+          );
+        }
+        return;
+      }
+      setSquashDialog({ commits: prCommitsToLogEntries(selected) });
+    } finally {
+      setSquashBusy(false);
+    }
+  }, [repoEntry, provider, pr.number, toast, t]);
+
+  /** Commits tab row context menu — group squash + copy hash. */
+  const showCommitRowMenu = useCallback((e: React.MouseEvent, c: GithubPRCommit) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const items: ContextMenuItem[] = [];
+    if (multiSel.size >= 2 && multiSel.has(c.sha)) {
+      items.push(
+        { label: t('history.squashGroupToBranch', { count: multiSel.size }), clickId: 'squash-to-branch' },
+        { type: 'separator' },
+      );
+    }
+    items.push({ label: t('ctx.commit.copyShortHash'), clickId: 'copy-sha' });
+    showContextMenu(items, (clickId) => {
+      if (clickId === 'squash-to-branch') {
+        void openSquashToBranch(commits.filter((x) => multiSel.has(x.sha)));
+      } else if (clickId === 'copy-sha') {
+        void navigator.clipboard?.writeText(c.sha);
+      }
+    });
+  }, [multiSel, commits, t, showContextMenu, openSquashToBranch]);
 
   // Normalize GithubPullRequest.user → SelectedPR.author so the rest of the
   // component reads one field.
@@ -554,6 +685,19 @@ export function PRReview({
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {/* Group squash-to-branch — carry ALL commits of this PR to another
+              branch (existing or NEW) as ONE squashed commit. Same flow the
+              Commits tab offers for a SELECTED group; here the group is the
+              whole PR. */}
+          <button
+            className="btn btn-secondary text-xs flex items-center gap-1"
+            title={t('pages.prSquashToBranchTitle')}
+            onClick={() => void openSquashToBranch(commits)}
+            disabled={squashBusy || loading || commits.length < 2}
+          >
+            {squashBusy ? <Loader size={12} className="animate-spin" /> : <GitBranch size={12} />}
+            <span className="hidden md:inline">{t('pages.prSquashToBranch')}</span>
+          </button>
           {/* Analyze PR with AI — sends the PR diff to the AI Assistant
               for code review. Opens the AI panel with a pre-filled prompt. */}
           <button
@@ -739,25 +883,59 @@ Please review this PR — identify potential issues, suggest improvements, and s
           <div className="flex h-full">
             {/* Commits list (left) */}
             <div className={`${selectedCommit ? 'w-1/2' : 'w-full'} border-r border-border-subtle overflow-y-auto shrink-0`}>
+              {/* Group-selection action bar — sticky above the list while a
+                  2+ multi-selection is active (Shift/Ctrl+click), mirroring
+                  the History tool. */}
+              {multiSel.size >= 2 && (
+                <div
+                  className="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 bg-accent/15 border-b border-accent/40 text-xs text-text-primary"
+                  style={{ backdropFilter: 'blur(4px)' }}
+                >
+                  <GitBranch size={13} className="text-accent shrink-0" />
+                  <span className="font-medium">
+                    {t('history.nCommitsSelected', { count: multiSel.size })}
+                  </span>
+                  <button
+                    className="btn btn-primary text-2xs !py-0.5 !px-2 ml-1"
+                    onClick={() => void openSquashToBranch(commits.filter((c) => multiSel.has(c.sha)))}
+                    disabled={squashBusy}
+                    title={t('history.squashGroupToBranchTitle')}
+                  >
+                    {squashBusy ? <Loader size={11} className="animate-spin" /> : null}
+                    {t('history.squashGroupToBranchAction')}
+                  </button>
+                  <span className="flex-1" />
+                  <button
+                    className="btn btn-secondary text-2xs !py-0.5 !px-2"
+                    onClick={() => setMultiSel(new Set())}
+                  >
+                    {t('common.clear')}
+                  </button>
+                </div>
+              )}
               {commits.length === 0 ? (
                 <div className="p-8 text-center text-text-tertiary text-xs italic">
                   {t('pages.prNoCommits', { defaultValue: 'No commits found.' })}
                 </div>
               ) : (
-                commits.map((c) => (
+                commits.map((c, idx) => {
+                  const inGroup = multiSel.size > 1 && multiSel.has(c.sha);
+                  return (
                   <div
                     key={c.sha}
                     className={cn(
                       'px-4 py-2 border-b border-border-subtle hover:bg-bg-hover cursor-pointer flex items-start gap-2',
-                      selectedCommit?.sha === c.sha && 'bg-accent-muted'
+                      selectedCommit?.sha === c.sha && !inGroup && 'bg-accent-muted',
+                      inGroup && 'bg-accent/15'
                     )}
-                    onClick={() => {
-                      setSelectedCommit(c);
-                      void loadCommitFiles(c.sha);
-                    }}
+                    style={inGroup && selectedCommit?.sha !== c.sha
+                      ? { boxShadow: 'inset 2px 0 0 0 var(--accent)' }
+                      : undefined}
+                    onClick={(e) => handleCommitRowClick(e, c, idx)}
+                    onContextMenu={(e) => showCommitRowMenu(e, c)}
                     title={t('pages.prClickCommitForDiff', { defaultValue: 'Click to view changes in this commit' })}
                   >
-                    <GitCommit size={12} className="mt-0.5 text-text-tertiary shrink-0" />
+                    <GitCommit size={12} className={cn('mt-0.5 shrink-0', inGroup ? 'text-accent' : 'text-text-tertiary')} />
                     <div className="flex-1 min-w-0">
                       <div className="text-xs text-text-primary whitespace-pre-wrap wrap-break-word">
                         {c.commit.message.split('\n')[0]}
@@ -781,7 +959,8 @@ Please review this PR — identify potential issues, suggest improvements, and s
                       </div>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
             {/* Selected commit diff (right) */}
@@ -1016,6 +1195,22 @@ Please review this PR — identify potential issues, suggest improvements, and s
           </div>
         )}
       </div>
+
+      {/* Group squash-to-branch (PR commits multi-selection / whole PR).
+          The PR itself is not modified — the squashed commit lands on a
+          LOCAL branch (existing or new), so no PR reload is needed; the
+          dialog already refreshes the git status. */}
+      {squashDialog && (
+        <SquashToBranchDialog
+          commits={squashDialog.commits}
+          onClose={() => setSquashDialog(null)}
+          onChanged={() => {
+            setSquashDialog(null);
+            setMultiSel(new Set());
+            multiAnchorIdxRef.current = null;
+          }}
+        />
+      )}
     </div>
   );
 }

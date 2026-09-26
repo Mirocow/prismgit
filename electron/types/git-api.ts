@@ -392,6 +392,13 @@ export interface GitApi {
   pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) => Promise<AutoStashResult>;
   fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) => Promise<void>;
   fetchAll: (repoPath: string, prune?: boolean) => Promise<void>;
+  /**
+   * Fetch ONE server-side refspec into FETCH_HEAD (no tracking refs created,
+   * no existing ref touched). Used by the Pull Requests / Reviews squash
+   * flow to materialize PR/MR commit objects locally before squashToBranch:
+   * GitHub `refs/pull/<n>/head`, GitLab `refs/merge-requests/<n>/head`.
+   */
+  fetchRef: (repoPath: string, remote: string, refspec: string) => Promise<void>;
   /** Deepen a shallow clone by N commits (git fetch --deepen=N). */
   fetchDeepen: (repoPath: string, remote?: string, commits?: number) => Promise<void>;
   /**

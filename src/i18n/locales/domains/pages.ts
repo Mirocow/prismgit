@@ -785,6 +785,15 @@ export const en: Record<string, string> = {
   // ── v3.4 hardcoded-string sweep ──
   'pages.currentBranchHead': 'Current branch (HEAD)',
   'pages.upstreamDeletedWarning': 'Upstream branch was deleted on the remote. Pull will fail — Push to recreate it, or set a new tracked branch.',
+
+  // ── squash-to-branch (Pull Requests / Reviews) ──
+  'pages.prSquashToBranch': 'Squash to branch…',
+  'pages.prSquashToBranchTitle': 'Carry the commits of this PR to another branch (existing or new) as ONE squashed commit',
+  'pages.prSquashSingleCommit': 'Nothing to squash — only {count} commit(s) in this selection',
+  'pages.prSquashFailed': 'Could not squash this PR',
+  'pages.prSquashFetchFailed': 'Could not fetch the PR commits from the remote',
+  'pages.prSquashMissing': 'Some PR commits are not available locally: {hashes}',
+  'pages.reviewsSquashOutsideWindow': 'Some selected commits are outside the loaded history window — open History to squash them',
 };
 
 export const ru: Record<string, string> = {
@@ -1559,6 +1568,15 @@ export const ru: Record<string, string> = {
   // ── v3.4 hardcoded-string sweep ──
   'pages.currentBranchHead': 'Текущая ветка (HEAD)',
   'pages.upstreamDeletedWarning': 'Ветка upstream удалена на remote. Pull не сработает — отправьте Push, чтобы воссоздать её, или укажите новую отслеживаемую ветку.',
+
+  // ── squash-to-branch (Pull Requests / Reviews) ──
+  'pages.prSquashToBranch': 'Сквошить в ветку…',
+  'pages.prSquashToBranchTitle': 'Перенести коммиты этого PR в другую ветку (существующую или новую) одним сквош-коммитом',
+  'pages.prSquashSingleCommit': 'Нечего сквошить — в выборе всего {count} коммит(ов)',
+  'pages.prSquashFailed': 'Не удалось сквошить этот PR',
+  'pages.prSquashFetchFailed': 'Не удалось получить коммиты PR с сервера',
+  'pages.prSquashMissing': 'Некоторые коммиты PR недоступны локально: {hashes}',
+  'pages.reviewsSquashOutsideWindow': 'Некоторые выбранные коммиты вне загруженного окна истории — откройте History, чтобы сквошить их',
 };
 
 export const zh: Record<string, string> = {
@@ -2333,6 +2351,15 @@ export const zh: Record<string, string> = {
   // ── v3.4 hardcoded-string sweep ──
   'pages.currentBranchHead': '当前分支（HEAD）',
   'pages.upstreamDeletedWarning': '上游分支已在远程删除。Pull 将失败——请 Push 重新创建，或设置新的跟踪分支。',
+
+  // ── squash-to-branch (Pull Requests / Reviews) ──
+  'pages.prSquashToBranch': '压合到分支…',
+  'pages.prSquashToBranchTitle': '将该 PR 的提交作为一个压合提交搬运到另一分支（已有或新建）',
+  'pages.prSquashSingleCommit': '无需压合——此选择只有 {count} 个提交',
+  'pages.prSquashFailed': '无法压合此 PR',
+  'pages.prSquashFetchFailed': '无法从远端获取 PR 提交',
+  'pages.prSquashMissing': '部分 PR 提交在本地不可用：{hashes}',
+  'pages.reviewsSquashOutsideWindow': '部分所选提交超出了已加载的历史窗口——请打开 History 进行压合',
 };
 
 export const de: Record<string, string> = {
@@ -3107,4 +3134,13 @@ export const de: Record<string, string> = {
   // ── v3.4 hardcoded-string sweep ──
   'pages.currentBranchHead': 'Aktueller Branch (HEAD)',
   'pages.upstreamDeletedWarning': 'Der Upstream-Branch wurde im Remote gelöscht. Pull schlägt fehl — mit Push neu erstellen oder einen neuen getrackten Branch setzen.',
+
+  // ── squash-to-branch (Pull Requests / Reviews) ──
+  'pages.prSquashToBranch': 'In Branch squashen…',
+  'pages.prSquashToBranchTitle': 'Die Commits dieses PRs als EINEN Squash-Commit in einen anderen (bestehenden oder neuen) Branch übertragen',
+  'pages.prSquashSingleCommit': 'Nichts zu squashen — nur {count} Commit(s) in dieser Auswahl',
+  'pages.prSquashFailed': 'Dieser PR konnte nicht gesquasht werden',
+  'pages.prSquashFetchFailed': 'Die PR-Commits konnten nicht vom Server geholt werden',
+  'pages.prSquashMissing': 'Einige PR-Commits sind lokal nicht verfügbar: {hashes}',
+  'pages.reviewsSquashOutsideWindow': 'Einige ausgewählte Commits liegen außerhalb des geladenen History-Fensters — öffnen Sie History, um sie zu squashen',
 };

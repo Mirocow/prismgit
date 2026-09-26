@@ -56,6 +56,9 @@ const api = {
     fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) =>
       ipcRenderer.invoke('git:fetch', repoPath, remote, prune, tags),
     fetchAll: (repoPath: string, prune?: boolean) => ipcRenderer.invoke('git:fetchAll', repoPath, prune),
+    /** PR/MR head fetch for squash-to-branch (refs/pull/N/head etc.). */
+    fetchRef: (repoPath: string, remote: string, refspec: string) =>
+      ipcRenderer.invoke('git:fetchRef', repoPath, remote, refspec),
     fetchDeepen: (repoPath: string, remote?: string, commits?: number) =>
       ipcRenderer.invoke('git:fetchDeepen', repoPath, remote, commits),
     /** BUGFIX "не получаю все ветки": refspec map for single-branch detection. */

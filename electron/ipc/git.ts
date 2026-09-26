@@ -69,6 +69,8 @@ export function registerGitIpc(): void {
     wrap(gitService.fetch)(p, r, pr, t)
   );
   ipcMain.handle('git:fetchAll', (_e, p: string, pr?: boolean) => wrap(gitService.fetchAll)(p, pr));
+  // PR/MR head fetch for squash-to-branch (refs/pull/N/head, refs/merge-requests/N/head)
+  ipcMain.handle('git:fetchRef', (_e, p: string, r: string, ref: string) => wrap(gitService.fetchRef)(p, r, ref));
   ipcMain.handle('git:fetchDeepen', (_e, p: string, r?: string, c?: number) => wrap(gitService.fetchDeepen)(p, r, c ?? 100));
   // BUGFIX "не получаю все ветки": single-branch clone detection + remediation
   ipcMain.handle('git:remoteFetchSpecs', (_e, p: string) => wrap(gitService.remoteFetchSpecs)(p));

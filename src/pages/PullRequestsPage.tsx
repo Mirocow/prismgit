@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Avatar } from '../components/Avatar';
-import { ArrowDown, CloudDownload, ExternalLink, GitPullRequest, Loader, Plus, RefreshCw, Search, X } from '../components/icons';
+import { ArrowDown, CloudDownload, ExternalLink, GitBranch, GitPullRequest, Loader, Plus, RefreshCw, Search, X } from '../components/icons';
 import { ProviderChip } from '../components/ProviderChip';
-import { api, type GithubPullRequest, type GitLabMergeRequest } from '../lib/api';
+import { SquashToBranchDialog } from '../components/SquashToBranchDialog';
+import { api, type GithubPullRequest, type GitLabMergeRequest, type GitLabMRCommit, type GithubPRCommit, type LogEntry } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { resolveDefaultRemote } from '../lib/remotes';
-import { cn, formatDate } from '../lib/utils';
+import { prHeadRefspec, prCommitsToLogEntries, ensureCommitsLocal } from '../lib/prSquash';
+import { cn, formatDate, shortHash } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useProviderStore } from '../stores/providerStore';
@@ -79,6 +81,13 @@ export function PullRequestsPage() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   useEscapeKey(showCreate, () => setShowCreate(false));
+  // ── Whole-PR squash-to-branch ──
+  // Row action: fetch the PR's commits from the provider API, make sure the
+  // objects exist locally (fetching the PR head ref when needed), then hand
+  // the group to SquashToBranchDialog. `squashPR` holds the PR number while
+  // the provider + git round-trips run (row button shows a spinner).
+  const [squashPR, setSquashPR] = useState<number | null>(null);
+  const [squashDialog, setSquashDialog] = useState<{ commits: LogEntry[] } | null>(null);
   // The selected PR is held in providerStore (not local state) so it survives
   // navigation to Reviews — that's where the code review surface lives.
   // Clicking a PR row here calls selectPR(pr); the Reviews page reads
@@ -300,6 +309,62 @@ export function PullRequestsPage() {
       const result = window.prompt(t('pages.prCommentPrompt'));
       resolve(result);
     });
+  };
+
+  // ── Whole-PR squash-to-branch ────────────────────────────────────────────
+  // Pull the PR's commit list from the provider, materialize the objects in
+  // the LOCAL clone (fetching the canonical PR head ref when SHAs are not
+  // present), then open SquashToBranchDialog with the whole PR as the group.
+  const handleSquashPR = async (pr: UnifiedPR) => {
+    if (!repoInfo.owner || !repoInfo.repo) return;
+    setSquashPR(pr.number);
+    try {
+      let prCommits: GithubPRCommit[] = [];
+      if (repoInfo.provider === 'github') {
+        prCommits = await api.github.listPRCommits(repoInfo.owner, repoInfo.repo, pr.number);
+      } else if (repoInfo.provider === 'gitlab') {
+        let projectId = gitlabProjectId;
+        if (projectId == null) {
+          const project = await api.gitlab.getProjectByPath(`${repoInfo.owner}/${repoInfo.repo}`);
+          projectId = project.id;
+          setGitlabProjectId(project.id);
+        }
+        // Normalize MR commits → GithubPRCommit (same mapping PRReview uses).
+        // ORDER: GitLab lists the MR head (newest) FIRST — reverse to the
+        // OLDEST → NEWEST order squashToBranch requires.
+        prCommits = (await api.gitlab.listMRCommits(projectId, pr.number)).slice().reverse().map(
+          (c: GitLabMRCommit): GithubPRCommit => ({
+            sha: c.sha,
+            commit: { message: c.commit.message, author: c.commit.author },
+            html_url: c.web_url,
+          })
+        );
+      }
+      if (prCommits.length < 2) {
+        toast.info(t('pages.prSquashSingleCommit', { count: prCommits.length }));
+        return;
+      }
+      const remote = (await resolveDefaultRemote(repo.path).catch(() => null)) || 'origin';
+      const spec = prHeadRefspec(repoInfo.provider as 'github' | 'gitlab', pr.number);
+      const res = await ensureCommitsLocal(repo.path, prCommits.map((c) => c.sha), () =>
+        api.git.fetchRef(repo.path, remote, spec));
+      if (!res.ok) {
+        if (res.reason === 'fetch-failed') {
+          toast.error(t('pages.prSquashFetchFailed'), res.detail);
+        } else {
+          toast.error(
+            t('pages.prSquashFailed'),
+            t('pages.prSquashMissing', { hashes: res.missing.map(shortHash).join(', ') }),
+          );
+        }
+        return;
+      }
+      setSquashDialog({ commits: prCommitsToLogEntries(prCommits) });
+    } catch (e) {
+      toast.error(t('pages.prSquashFailed'), String(e));
+    } finally {
+      setSquashPR(null);
+    }
   };
 
   const handleCreate = async () => {
@@ -685,6 +750,24 @@ export function PullRequestsPage() {
                 </div>
               </div>
               <ExternalLink size={12} className="text-text-tertiary opacity-0 group-hover:opacity-100" />
+              {/* Whole-PR squash-to-branch: carry ALL commits of this PR to
+                  another branch (existing or NEW) as ONE squashed commit.
+                  Hover-revealed like the external-link icon; the row click
+                  itself still navigates to the Reviews surface. */}
+              <button
+                className={cn(
+                  'shrink-0 p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-opacity',
+                  squashPR === pr.number ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                )}
+                title={t('pages.prSquashToBranchTitle')}
+                disabled={squashPR !== null}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleSquashPR(pr);
+                }}
+              >
+                {squashPR === pr.number ? <Loader size={12} className="spin" /> : <GitBranch size={12} />}
+              </button>
               {/* LAR-2 — wire up GitHub PR actions to the existing backend
                   methods (electron/services/github.ts: submitPRReview /
                   mergePR / closePR / reopenPR). Buttons are shown only
@@ -806,6 +889,19 @@ export function PullRequestsPage() {
             </div>
           </div>
         </div>
+      )}
+      {/* Whole-PR squash-to-branch dialog. Only local branches change — the
+          PR list itself is not reloaded (the PR is untouched), but the git
+          status IS refreshed so the new branch/checkout shows up app-wide. */}
+      {squashDialog && (
+        <SquashToBranchDialog
+          commits={squashDialog.commits}
+          onClose={() => setSquashDialog(null)}
+          onChanged={() => {
+            setSquashDialog(null);
+            void refreshStatus(repo.path);
+          }}
+        />
       )}
     </div>
   );

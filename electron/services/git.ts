@@ -2237,6 +2237,42 @@ export function fetchAll(repoPath: string, prune = false): Promise<void> {
 }
 
 /**
+ * Fetch ONE server-side refspec into FETCH_HEAD — the PR/MR head ref for the
+ * squash-to-branch flow in the Pull Requests / Reviews tools.
+ *
+ *   GitHub: refs/pull/<n>/head        (always exists in the BASE repo, even
+ *                                      for PRs from forks)
+ *   GitLab: refs/merge-requests/<n>/head
+ *
+ * The provider APIs list a PR's commits by SHA, but those objects may not
+ * exist in the local clone at all (the PR branch was never fetched, or the
+ * PR comes from a fork whose branch is absent locally). `git cat-file` /
+ * `merge-tree` / `cherry-pick` would then fail with "not a valid object".
+ * Fetching the canonical PR head ref brings the whole commit chain down
+ * WITHOUT creating any remote-tracking branch or touching any existing ref
+ * — the objects land in the local object store and FETCH_HEAD points at the
+ * PR head.
+ *
+ * Uses the same credential-aware network path as fetch() (stored HTTP
+ * credentials, SSH key env, proxy args), so it works for private repos.
+ */
+export function fetchRef(repoPath: string, remote: string, refspec: string): Promise<void> {
+  // Distinct in-flight key from plain fetch(): a running full fetch must not
+  // collapse a PR-ref fetch (and vice versa).
+  return runExclusiveFetch(repoPath, `${remote}\u0002${refspec}`, async () => {
+    const { git, cleanup } = await networkGit(repoPath, remote);
+    const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'fetch', remote, refspec];
+    try {
+      await git.raw(args);
+    } catch (e) {
+      throw describeNetworkError(e, 'fetch');
+    } finally {
+      cleanup();
+    }
+  });
+}
+
+/**
  * BUGFIX "не получаю все ветки хотя в Remotes они есть":
  * Read the configured fetch refspecs (`remote.<name>.fetch`) for every
  * remote. A clone made with `--depth N` (git implies `--single-branch`)
