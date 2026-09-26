@@ -116,6 +116,29 @@ async function apiJson<T>(
   endpoint: string,
   options: { method?: string; body?: string; token?: string } = {}
 ): Promise<T> {
+  return apiJsonRequest<T>(endpoint, options, 0);
+}
+
+/**
+ * HTTP(S) request for the GitLab API.
+ *
+ * FOLLOWS 3xx redirects (up to 5 hops). This is REQUIRED for renamed /
+ * transferred projects: GET /projects/<old-url-encoded-path> answers 301 →
+ * /projects/<new-id>, and plain http.request does NOT follow redirects —
+ * the MR list then failed with "GitLab API 301" and the Pull Requests tool
+ * showed an EMPTY list even though open MRs existed (real-world case: this
+ * repo's remote path web/git/gitclient → project web/git/prismgit).
+ *
+ * Redirect rules (browser-like):
+ *   - same host: the PRIVATE-TOKEN header is preserved;
+ *   - cross host: the token is DROPPED (never leak the PAT to a third party);
+ *   - 307/308 keep the method+body; 301/302/303 rewrite non-GET to GET.
+ */
+function apiJsonRequest<T>(
+  endpoint: string,
+  options: { method?: string; body?: string; token?: string },
+  redirects: number,
+): Promise<T> {
   const baseUrl = getBaseUrl();
   const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}/api/v4${endpoint}`;
   const u = new URL(url);
@@ -149,6 +172,31 @@ async function apiJson<T>(
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
           const status = res.statusCode ?? 0;
+          const location = res.headers.location;
+          if (status >= 300 && status < 400 && typeof location === 'string' && location && redirects < 5) {
+            // Follow the redirect: log, then re-request (same-host keeps the
+            // PAT; cross-host drops it — never leak the token).
+            finishApiCall(handle, { status, body: `→ ${location}` });
+            let next: URL;
+            try {
+              next = new URL(location, u);
+            } catch {
+              reject(new Error(`GitLab API ${status}: invalid redirect "${location}"`));
+              return;
+            }
+            const nextOpts: { method?: string; body?: string; token?: string } = { token: options.token };
+            const nextMethod = (options.method || 'GET').toUpperCase();
+            if (status === 307 || status === 308) {
+              nextOpts.method = nextMethod;
+              if (options.body) nextOpts.body = options.body;
+            } else if (nextMethod !== 'GET') {
+              // 301/302/303: rewrite non-GET to GET and drop the body.
+              nextOpts.method = 'GET';
+            }
+            if (next.host !== u.host) delete nextOpts.token;
+            resolve(apiJsonRequest<T>(next.toString(), nextOpts, redirects + 1));
+            return;
+          }
           if (status >= 200 && status < 300) {
             try {
               finishApiCall(handle, { status, body: data });
