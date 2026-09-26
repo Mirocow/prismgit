@@ -104,14 +104,14 @@ test.describe('History workflow', () => {
       await row2.waitFor({ state: 'visible', timeout: 5000 });
       await row2.click({ modifiers: ['Control'] });
 
-      // The floating selection bar shows the group size (locale pinned to EN).
-      const bar = ctx.page.locator('text=2 commit(s) selected');
+      // The sticky selection bar shows the group size (locale pinned to EN).
+      const bar = ctx.page.locator('text=/Commits selected: 2/');
       await bar.waitFor({ state: 'visible', timeout: 5000 });
       await screenshot(ctx.page, 'history-squash-selection-bar');
 
       // Open the transfer dialog from the bar.
-      await ctx.page.locator('button', { hasText: 'Send to branch' }).first().click();
-      const dialog = ctx.page.locator('text=Send to branch as one commit');
+      await ctx.page.locator('button', { hasText: 'Squash to branch' }).first().click();
+      const dialog = ctx.page.locator('text=Squash commits to a branch');
       await dialog.waitFor({ state: 'visible', timeout: 5000 });
 
       // The message is prefilled GitHub-squash-style with the subjects of
