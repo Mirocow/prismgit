@@ -4,7 +4,8 @@
 # All-in-one entry point for development, build, and packaging.
 #
 # Common targets:
-#   make install       — install dependencies
+#   make install       — install dependencies (auto-retries via the public
+#                        registry if a local npm mirror 404s a lockfile tarball)
 #   make dev           — start dev server with HMR (React dev build: slower,
 #                        prints the React DevTools banner — that's normal)
 #   make run           — build once + launch the PRODUCTION app (fast)
@@ -124,15 +125,15 @@ help: ## Show this help message
 # =============================================================================
 
 .PHONY: install
-install: ## Install npm dependencies
+install: ## Install npm dependencies (mirror-404 → public-registry retry)
 	@echo "$(COLOR_YELLOW)→ Installing dependencies...$(COLOR_RESET)"
-	$(NPM) install
+	@sh scripts/npm-install-with-retry.sh install
 	@echo "$(COLOR_GREEN)✓ Dependencies installed$(COLOR_RESET)"
 
 .PHONY: install-ci
 install-ci: ## Install dependencies (CI mode, no audit/fund)
 	@echo "$(COLOR_YELLOW)→ Installing dependencies (CI)...$(COLOR_RESET)"
-	$(NPM) ci --no-audit --no-fund
+	@sh scripts/npm-install-with-retry.sh ci --no-audit --no-fund
 	@echo "$(COLOR_GREEN)✓ Dependencies installed$(COLOR_RESET)"
 
 .PHONY: dev
