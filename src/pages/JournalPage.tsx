@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { RotateCcw, RefreshCw, CornerDownRight, Copy, GitCommit } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
@@ -66,7 +66,12 @@ export function JournalPage() {
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) {
-        toast.warning(t('pages.conflictsCount', { count: result.conflicts.length }), result.conflicts.join('\n'));
+        // Conflict-reaction audit (v3.6): navigate to the resolver (Changes
+        // tool + banner) instead of a transient count-only toast.
+        await surfaceConflictedState(repo.path, {
+          title: t('toast.git.cherryPickConflicts'),
+          detail: t('toast.git.cherryPickConflictsHint'),
+        });
       } else {
         toast.success(t('pages.cherryPicked'));
       }

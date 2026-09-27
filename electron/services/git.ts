@@ -3938,6 +3938,26 @@ export async function stashPush(
   return out.trim();
 }
 
+/**
+ * Conflict-reaction audit (v3.6): `git stash pop|apply` prints CONFLICT to
+ * STDOUT with an EMPTY stderr, so simple-git's raw() RESOLVES as success —
+ * the UI was told «stash popped» while the working tree filled up with
+ * conflict markers (user report: «просто промолчать и отчитаться в лог»).
+ * merge()/cherryPick() already detect conflicts from the post-run status;
+ * stash gets the same treatment, but THROWS a typed error so every existing
+ * catch handler reacts: `.conflicts` carries the unmerged file list.
+ */
+async function throwIfStashConflict(repoPath: string): Promise<void> {
+  const st = await status(repoPath);
+  if ((st.conflicted?.length ?? 0) > 0) {
+    const err = new Error(
+      `stash: conflicts in ${st.conflicted.join(', ')}`
+    ) as Error & { conflicts: string[] };
+    err.conflicts = st.conflicted;
+    throw err;
+  }
+}
+
 export async function stashPop(repoPath: string, index = 0, keepIndex = false): Promise<void> {
   const git = getGit(repoPath);
   // --index restores the staged/unstaged split recorded in the stash
@@ -3946,6 +3966,9 @@ export async function stashPop(repoPath: string, index = 0, keepIndex = false): 
     ? ['stash', 'pop', '--index', `stash@{${index}}`]
     : ['stash', 'pop', `stash@{${index}}`]);
   invalidateDiffCache(repoPath);
+  // git keeps the stash entry when the pop conflicts — surface it, never
+  // report success with a conflicted working tree.
+  await throwIfStashConflict(repoPath);
 }
 
 export async function stashApply(repoPath: string, index = 0, keepIndex = false): Promise<void> {
@@ -3954,6 +3977,7 @@ export async function stashApply(repoPath: string, index = 0, keepIndex = false)
     ? ['stash', 'apply', '--index', `stash@{${index}}`]
     : ['stash', 'apply', `stash@{${index}}`]);
   invalidateDiffCache(repoPath);
+  await throwIfStashConflict(repoPath);
 }
 
 export async function stashDrop(repoPath: string, index = 0): Promise<void> {

@@ -11,6 +11,8 @@
 
 import { api } from './api';
 import { surfaceConflictedState } from '../stores/gitStore';
+import { useToastStore } from '../stores/toastStore';
+import { t as i18nT } from './i18n';
 import { useSettingsStore } from '../stores/settingsStore';
 
 // ── Configurable limits (read from AppSettings at runtime) ──────────────
@@ -600,7 +602,18 @@ export const gitPullTool: AITool = {
       // Pull failed — if we stashed, restore the local changes so the user
       // is back to where they started.
       if (stashed) {
-        try { await api.git.stashPop(repoPath, 0); } catch { /* ignore — the pull error is more important */ }
+        try { await api.git.stashPop(repoPath, 0); } catch (popErr) {
+          // Conflict-reaction audit (v3.6): surface instead of silently
+          // ignoring — the pull error below is returned to the chat, but a
+          // conflicted pop ALSO leaves unmerged paths the user must see.
+          void surfaceConflictedState(repoPath, {
+            title: i18nT('stashes.popConflicts'),
+            detail: i18nT('stashes.popConflictsHint'),
+          }).catch(() => undefined);
+          if (!/conflict|does not apply/i.test(String(popErr))) {
+            useToastStore.getState().warning('Auto-stash restore failed', String(popErr));
+          }
+        }
       }
       // Keep the UI in sync with the real repo state — a conflicted pull
       // leaves the repo mid-merge, and without a status refresh the app
@@ -904,7 +917,16 @@ export const gitSyncWithRemoteTool: AITool = {
     } catch (e) {
       // Fetch failed — restore the stash if we made one.
       if (stashed) {
-        try { await api.git.stashPop(repoPath, 0); } catch { /* ignore — fetch error is more important */ }
+        try { await api.git.stashPop(repoPath, 0); } catch (popErr) {
+          // Conflict-reaction audit (v3.6): as above — never silent.
+          void surfaceConflictedState(repoPath, {
+            title: i18nT('stashes.popConflicts'),
+            detail: i18nT('stashes.popConflictsHint'),
+          }).catch(() => undefined);
+          if (!/conflict|does not apply/i.test(String(popErr))) {
+            useToastStore.getState().warning('Auto-stash restore failed', String(popErr));
+          }
+        }
       }
       return `Sync failed: could not fetch from ${remote}. Local changes restored (if any). Error: ${String(e)}`;
     }
@@ -915,7 +937,16 @@ export const gitSyncWithRemoteTool: AITool = {
     } catch (e) {
       const msg = String(e);
       if (stashed) {
-        try { await api.git.stashPop(repoPath, 0); } catch { /* ignore — reset error is more important */ }
+        try { await api.git.stashPop(repoPath, 0); } catch (popErr) {
+          // Conflict-reaction audit (v3.6): as above — never silent.
+          void surfaceConflictedState(repoPath, {
+            title: i18nT('stashes.popConflicts'),
+            detail: i18nT('stashes.popConflictsHint'),
+          }).catch(() => undefined);
+          if (!/conflict|does not apply/i.test(String(popErr))) {
+            useToastStore.getState().warning('Auto-stash restore failed', String(popErr));
+          }
+        }
       }
       if (msg.includes('index.lock')) {
         return `Sync failed: git index is locked (.git/index.lock exists). Wait a moment and retry. Local changes restored.\n\nOriginal error: ${msg}`;

@@ -48,7 +48,7 @@ import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { useLazyList } from '../lib/useLazyList';
 import { cn, copyToClipboard, shortHash } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -1056,7 +1056,14 @@ export function HistoryPage() {
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) {
-        toast.warning(t('history.nConflicts', { count: result.conflicts.length }), t('history.cherryPickConflictsDetail'));
+        // Conflict-reaction audit (v3.6): the toast-only reaction left the
+        // user in History with a conflicted cherry-pick in progress and no
+        // visible next step. Same state-based reaction as pull now: land on
+        // the Changes tool where the conflicts + Continue/Abort banner live.
+        await surfaceConflictedState(repo.path, {
+          title: t('toast.git.cherryPickConflicts'),
+          detail: t('toast.git.cherryPickConflictsHint'),
+        });
       } else if (result.empty) {
         toast.warning(
           t('history.cherryPickEmpty'),
@@ -1085,8 +1092,14 @@ export function HistoryPage() {
     }))) return;
     try {
       const result = await api.git.revert(repo.path, [entry.hash]);
-      if (result.conflicts.length > 0) toast.warning(t('history.nConflicts', { count: result.conflicts.length }));
-      else toast.success(t('toast.revert.reverted'));
+      if (result.conflicts.length > 0) {
+        // Conflict-reaction audit (v3.6): navigate to the resolver instead
+        // of a transient count-only toast.
+        await surfaceConflictedState(repo.path, {
+          title: t('toast.git.revertConflicts'),
+          detail: t('toast.git.revertConflictsHint'),
+        });
+      } else toast.success(t('toast.revert.reverted'));
       await refreshStatus(repo.path); await loadHistory();
     } catch (e) { toast.error(t('toast.revert.failed'), String(e)); }
   };
@@ -1119,7 +1132,19 @@ export function HistoryPage() {
       await api.git.rebase(repo.path, hash);
       toast.success(t('toast.merge.rebaseStarted'));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error(t('toast.merge.rebaseFailed'), String(e)); }
+    } catch (e) {
+      // Conflict-reaction audit (v3.6): a conflicted rebase left the repo
+      // mid-rebase with only a raw error toast — the user had no Continue /
+      // Skip / Abort surface offered. Detect from the repo state (git
+      // streams CONFLICT to stdout; message matching is brittle) and land
+      // on the Changes tool banner, exactly like a conflicted pull.
+      const conflicted = await surfaceConflictedState(repo.path, {
+        title: t('toast.git.rebaseConflicts'),
+        detail: t('toast.git.rebaseConflictsHint'),
+      });
+      if (!conflicted) toast.error(t('toast.merge.rebaseFailed'), String(e));
+      await refreshStatus(repo.path); await loadHistory();
+    }
   };
 
   // Full commit diff via git diff <hash>^..<hash> — rendered in the compare modal

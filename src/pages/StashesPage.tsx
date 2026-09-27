@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Package, RefreshCw, Plus, Trash, Download, Upload, Check, FileText, ChevronDown, ChevronRight, X, GitBranch } from '../components/icons';
 import { EmptyState } from '../components/EmptyState';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type StashEntry, type DiffResult } from '../lib/api';
@@ -90,7 +90,17 @@ export function StashesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error(t('stashes.popFailed'), String(e));
+      // Conflict-reaction audit (v3.6): a conflicted pop leaves unmerged
+      // paths in the working tree (NO sequencer state — MERGE_HEAD etc.
+      // don't exist) while the stash entry itself is KEPT. The old raw
+      // error toast told the user neither. Now: state-based detection →
+      // Changes tool + a message that says the stash was kept.
+      const conflicted = await surfaceConflictedState(repo.path, {
+        title: t('stashes.popConflicts'),
+        detail: t('stashes.popConflictsHint'),
+      });
+      if (!conflicted) toast.error(t('stashes.popFailed'), String(e));
+      await load();
     }
   };
 
@@ -104,7 +114,13 @@ export function StashesPage() {
       );
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error(t('stashes.applyFailed'), String(e));
+      // Conflict-reaction audit (v3.6): same state-based reaction as pop —
+      // conflicted apply leaves unmerged paths, the stash is kept.
+      const conflicted = await surfaceConflictedState(repo.path, {
+        title: t('stashes.applyConflicts'),
+        detail: t('stashes.applyConflictsHint'),
+      });
+      if (!conflicted) toast.error(t('stashes.applyFailed'), String(e));
     }
   };
 

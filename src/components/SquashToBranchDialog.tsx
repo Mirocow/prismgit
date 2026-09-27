@@ -19,7 +19,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, GitBranch, AlertTriangle, Loader, Check, User } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastActions } from '../stores/toastStore';
 import { api, type LogEntry, type BranchInfo, type SquashToBranchResult } from '../lib/api';
 import { cn, shortHash } from '../lib/utils';
@@ -137,12 +137,14 @@ export function SquashToBranchDialog({ commits, onClose, onChanged }: SquashToBr
         case 'conflicts': {
           // Live route ran: conflicts are in the worktree on the target
           // branch; the standard cherry-pick resolve flow takes over.
-          toast.warning(
-            t('toast.squashToBranch.conflicts', { count: result.conflicts.length, branch: result.branch }),
-            t('toast.squashToBranch.conflictsDetail'),
-          );
+          // Conflict-reaction audit (v3.6): don't just toast — take the
+          // user to the Changes tool (conflicts + Continue/Abort banner)
+          // like every other conflicted operation.
+          await surfaceConflictedState(repo.path, {
+            title: t('toast.squashToBranch.conflicts', { count: result.conflicts.length, branch: result.branch }),
+            detail: t('toast.squashToBranch.conflictsDetail'),
+          });
           onChanged();
-          void refreshStatus(repo.path);
           onClose();
           break;
         }

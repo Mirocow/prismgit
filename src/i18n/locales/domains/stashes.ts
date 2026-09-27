@@ -15,6 +15,10 @@ export const en: Record<string, string> = {
   'stashes.renameFailed': 'Stash rename failed',
   'stashes.dropFailed': 'Stash drop failed',
   'stashes.popFailed': 'Stash pop failed',
+  'stashes.popConflicts': "Stash pop resulted in conflicts",
+  'stashes.popConflictsHint': "The stash entry was KEPT. Resolve the conflicts in the Changes tool, then commit (or discard the changes)",
+  'stashes.applyConflicts': "Stash apply resulted in conflicts",
+  'stashes.applyConflictsHint': "The stash entry was kept. Resolve the conflicts in the Changes tool, then commit (or discard the changes)",
   'stashes.branchFailed': 'Stash branch failed',
   'stashes.loadFailed': 'Failed to load stashes',
   // Apply
@@ -105,6 +109,10 @@ export const ru: Record<string, string> = {
   'stashes.renameFailed': 'Не удалось переименовать stash',
   'stashes.dropFailed': 'Не удалось удалить stash',
   'stashes.popFailed': 'Не удалось выполнить pop stash',
+  'stashes.popConflicts': "Pop stash привёл к конфликтам",
+  'stashes.popConflictsHint': "Запись stash сохранена. Разрешите конфликты в инструменте Changes, затем закоммитьте (или отбросьте изменения)",
+  'stashes.applyConflicts': "Применение stash привело к конфликтам",
+  'stashes.applyConflictsHint': "Запись stash сохранена. Разрешите конфликты в инструменте Changes, затем закоммитьте (или отбросьте изменения)",
   'stashes.branchFailed': 'Не удалось создать ветку из stash',
   'stashes.loadFailed': 'Не удалось загрузить stash',
   // Apply
@@ -195,6 +203,10 @@ export const zh: Record<string, string> = {
   'stashes.renameFailed': '重命名贮藏失败',
   'stashes.dropFailed': '删除贮藏失败',
   'stashes.popFailed': '弹出贮藏失败',
+  'stashes.popConflicts': "弹出贮藏产生了冲突",
+  'stashes.popConflictsHint': "贮藏条目已保留。请在更改工具中解决冲突，然后提交（或放弃更改）",
+  'stashes.applyConflicts': "应用贮藏产生了冲突",
+  'stashes.applyConflictsHint': "贮藏条目已保留。请在更改工具中解决冲突，然后提交（或放弃更改）",
   'stashes.branchFailed': '从贮藏创建分支失败',
   'stashes.loadFailed': '加载贮藏列表失败',
   // Apply
@@ -285,6 +297,10 @@ export const de: Record<string, string> = {
   'stashes.renameFailed': 'Stash umbenennen fehlgeschlagen',
   'stashes.dropFailed': 'Stash löschen fehlgeschlagen',
   'stashes.popFailed': 'Stash pop fehlgeschlagen',
+  'stashes.popConflicts': "Stash pop führte zu Konflikten",
+  'stashes.popConflictsHint': "Der Stash-Eintrag wurde BEHALTEN. Konflikte im Changes-Werkzeug lösen, dann committen (oder Änderungen verwerfen)",
+  'stashes.applyConflicts': "Stash anwenden führte zu Konflikten",
+  'stashes.applyConflictsHint': "Der Stash-Eintrag wurde behalten. Konflikte im Changes-Werkzeug lösen, dann committen (oder Änderungen verwerfen)",
   'stashes.branchFailed': 'Branch aus Stash fehlgeschlagen',
   'stashes.loadFailed': 'Stashes konnten nicht geladen werden',
   // Apply

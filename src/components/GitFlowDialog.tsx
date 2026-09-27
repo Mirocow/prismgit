@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, GitBranch, Tag, AlertCircle, Loader, GitMerge, CornerDownRight } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -9,6 +9,7 @@ import { useI18n } from '../lib/i18n';
 import {
   detectGitFlowConfig,
   flowPrefix,
+  GitFlowConflictError,
   startFeature,
   finishFeature,
   startRelease,
@@ -142,7 +143,30 @@ export function GitFlowDialog({
       await refreshStatus(repo.path);
       onClose();
     } catch (e) {
-      toast.error(t('pages.operationFailed'), String(e));
+      // Conflict-reaction audit (v3.6): a conflicted finish (merge result
+      // conflicts → GitFlowConflictError, or a mid-flow rebase throw) used
+      // to end as a generic error toast while the branch was already
+      // force-deleted and/or pushed. Now: detect the conflicted repo STATE
+      // and take the user to the Changes tool (banner + conflicts), with
+      // wording that says exactly what was and was NOT done.
+      const conflicts = e instanceof GitFlowConflictError ? e.conflicts : undefined;
+      const conflicted = await surfaceConflictedState(repo.path, conflicts
+        ? {
+            title: t('toast.gitflow.finishConflicts'),
+            detail: `${t('toast.gitflow.finishConflictsHint')}${conflicts.length ? `\n${conflicts.join('\n')}` : ''}`,
+          }
+        : {
+            title: t('toast.git.rebaseConflicts'),
+            detail: t('toast.git.rebaseConflictsHint'),
+          });
+      if (!conflicted) {
+        toast.error(t('pages.operationFailed'), String(e));
+      } else {
+        // Conflicted → the user is now on the Changes resolver; the modal
+        // must not sit on top of it.
+        onClose();
+      }
+      await refreshStatus(repo.path);
     } finally {
       setLoading(false);
     }

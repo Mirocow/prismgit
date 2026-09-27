@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { FileText, Loader, Check, X } from './icons';
+import { FileText, Loader, Check, X, GitMerge } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -35,6 +35,14 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
   const [index, setIndex] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  // Conflict-reaction audit (v3.6): a patch that "does not apply" used to be
+  // a dead end — raw error toast, modal closed, nothing to react to. Now the
+  // failed run is remembered and a "Retry with 3-way merge" action is
+  // offered: `git apply --3way` tolerates conflicts, writes conflict markers
+  // into the files and the user resolves them in the Changes tool like every
+  // other conflicted operation.
+  const [lastRun, setLastRun] = useState<{ patch: string | string[]; options: string[] } | null>(null);
+  const [retry3way, setRetry3way] = useState(false);
 
   // The backend's applyPatch detects raw unified-diff content (paste mode) and
   // writes it to a temp file itself; file mode passes the path straight through.
@@ -62,6 +70,7 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
       if (checkOnly) options.push('--check');
       if (reverse) options.push('--reverse');
       if (index) options.push('--index');
+      setLastRun({ patch: patchArg, options });
       const output = await api.git.applyPatch(repo.path, patchArg, options);
       const msg = checkOnly
         ? t('dialogs.patchCheckPassed')
@@ -73,10 +82,39 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
     } catch (e) {
       toast.error(t('dialogs.applyPatchFailed'), String(e));
       setResult(String(e));
+      // "patch does not apply" / textual conflicts → offer the 3-way retry.
+      // (Not for --check runs — a check result is not an applied state.)
+      setRetry3way(!checkOnly && /does not apply|patch failed|conflict|already exists|error: /i.test(String(e)));
     } finally {
       setBusy(false);
     }
   }, [repo, mode, patchFile, patchText, checkOnly, reverse, index, toast, refreshStatus, onClose, t]);
+
+  // Retry with `--3way`: conflicts become conflict markers in the working
+  // tree (git exits 1 AFTER writing them) → the standard Changes-tool
+  // resolver flow takes over via surfaceConflictedState.
+  const handleRetry3way = useCallback(async () => {
+    if (!repo || !lastRun) return;
+    setBusy(true);
+    try {
+      await api.git.applyPatch(repo.path, lastRun.patch, [...lastRun.options, '--3way']);
+      toast.success(t('dialogs.patchApplied'));
+      setResult(t('dialogs.patchApplied'));
+      await refreshStatus(repo.path);
+      onClose();
+    } catch (e) {
+      const conflicted = await surfaceConflictedState(repo.path, {
+        title: t('dialogs.applyPatch3wayDone'),
+        detail: t('dialogs.applyPatch3wayHint'),
+      });
+      if (!conflicted) toast.error(t('dialogs.applyPatchFailed'), String(e));
+      setResult(String(e));
+      onClose();
+    } finally {
+      setBusy(false);
+      setRetry3way(false);
+    }
+  }, [repo, lastRun, toast, refreshStatus, onClose, t]);
 
   useEffect(() => {
     if (open) {
@@ -87,6 +125,8 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
       setIndex(false);
       setResult(null);
       setMode('paste');
+      setLastRun(null);
+      setRetry3way(false);
     }
   }, [open]);
 
@@ -175,6 +215,17 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
 
         <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border-default">
           <button className="btn btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
+          {retry3way && (
+            <button
+              className="btn btn-secondary flex items-center gap-1"
+              onClick={handleRetry3way}
+              disabled={busy}
+              title={t('dialogs.applyPatch3wayHint')}
+            >
+              <GitMerge size={12} />
+              {t('dialogs.applyPatch3wayRetry')}
+            </button>
+          )}
           <button className="btn btn-primary" onClick={handleApply} disabled={busy}>
             {busy ? <Loader size={13} className="spin" /> : <Check size={13} />}
             {checkOnly ? t('dialogs.checkPatch') : t('dialogs.applyPatchButton')}

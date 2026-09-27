@@ -154,22 +154,34 @@ interface GitState {
  * Used by: gitStore.pull, the Toolbar Pull dialog, the one-click Git
  * Toolbar pull, the app-menu smartPull handler — so EVERY pull entry point
  * reacts identically.
+ *
+ * v3.6 — generalized for the conflict-reaction audit: `opts` lets callers
+ * from other operations (merge-rebase strategy, rebase onto, cherry-pick,
+ * revert, stash pop/apply, git-flow finish, squash-to-branch) reuse the
+ * same state-based reaction with their OWN wording while defaulting to
+ * the pull message. The condition covers EVERY conflicted shape:
+ * sequencer states (merge/rebase) AND bare unmerged index entries (e.g. a
+ * conflicted `git stash pop`, which leaves NO sequencer state file at
+ * all — only unmerged paths).
  */
-export async function surfaceConflictedState(repoPath: string): Promise<boolean> {
+export async function surfaceConflictedState(
+  repoPath: string,
+  opts?: { title?: string; detail?: string },
+): Promise<boolean> {
   try {
     await useGitStore.getState().refreshStatus(repoPath);
   } catch {
     /* status itself failed — nothing more to surface */
   }
   const st = useGitStore.getState().status;
-  const conflicted = !!(st && (st.isMerging || (st.conflicted?.length ?? 0) > 0));
+  const conflicted = !!(st && (st.isMerging || st.isRebasing || (st.conflicted?.length ?? 0) > 0));
   if (conflicted) {
     // Bring the user to where the conflicts are actually shown.
     // (hash routing — same navigation pattern as HistoryPage / ChangesPage.)
     window.location.hash = '#/changes';
     useToastStore.getState().warning(
-      i18nT('toast.git.pullConflicts'),
-      i18nT('pages.pullConflictsHint', { defaultValue: 'Resolve them in the Changes tool' }),
+      opts?.title ?? i18nT('toast.git.pullConflicts'),
+      opts?.detail ?? i18nT('pages.pullConflictsHint', { defaultValue: 'Resolve them in the Changes tool' }),
     );
   }
   return conflicted;
@@ -350,7 +362,12 @@ export const useGitStore = create<GitState>((set, get) => ({
       if (res?.autoStashed) {
         const toastApi = useToastStore.getState();
         if (res.popFailed) {
-          toastApi.warning(i18nT('changes.autoStashPopFailed'), i18nT('changes.autoStashHintShort'));
+          // Conflict-reaction audit (v3.6): a failed pop may be a CONFLICT
+          // (stashPop throws with .conflicts now) — the pull itself
+          // succeeded, but the tree is full of conflict markers the user
+          // must resolve. State-based reaction, not a bare warning toast.
+          const conflicted = await surfaceConflictedState(repoPath);
+          if (!conflicted) toastApi.warning(i18nT('changes.autoStashPopFailed'), i18nT('changes.autoStashHintShort'));
         } else {
           toastApi.success(i18nT('changes.autoStashRestored'));
         }

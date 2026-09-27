@@ -14,6 +14,38 @@ import { api } from './api';
 import type { BranchInfo } from './api';
 
 /**
+ * Conflict-reaction audit (v3.6): error thrown by every git-flow finish
+ * merge when it lands on conflicts. `conflicts` carries the file list so
+ * the dialog can show the state-based reaction (Changes tool + banner)
+ * with the branch/delete/push steps NEVER reached — before this, the
+ * merge result was ignored and the flow continued to force-delete the
+ * feature branch and push while the repo sat in a conflicted merge.
+ */
+export class GitFlowConflictError extends Error {
+  conflicts: string[];
+  constructor(branch: string, conflicts: string[]) {
+    super(`git-flow finish stopped: merge of ${branch} resulted in ${conflicts.length} conflict(s)`);
+    this.name = 'GitFlowConflictError';
+    this.conflicts = conflicts;
+  }
+}
+
+/** Merge step of every finish flow — refuses to continue on conflicts. */
+async function mergeOrFail(
+  repoPath: string,
+  branchName: string,
+  opts: { noFf?: boolean; squash?: boolean } = {},
+): Promise<void> {
+  const result = await api.git.merge(repoPath, branchName, opts);
+  if (result.conflicts?.length) {
+    // The merge leaves the repo mid-merge (MERGE_HEAD + unmerged paths) —
+    // the perfect state for the standard resolve flow. Stop HERE: no tag,
+    // no second merge, no branch delete, no push.
+    throw new GitFlowConflictError(branchName, result.conflicts);
+  }
+}
+
+/**
  * The set of Git-Flow branch kinds. 'feature'/'release'/'hotfix' are the
  * canonical AVH git-flow set; 'fix' and 'support' are added for teams that
  * use those prefixes. Each kind has its own start/finish semantics below.
@@ -289,7 +321,7 @@ export async function finishFix(repoPath: string, name: string, options: {
     await api.git.rebase(repoPath, cfg.developBranch);
   }
   await api.git.checkout(repoPath, cfg.developBranch);
-  await api.git.merge(repoPath, branchName, { noFf: noFF, squash });
+  await mergeOrFail(repoPath, branchName, { noFf: noFF, squash });
   if (deleteBranch) {
     try { await api.git.deleteBranch(repoPath, branchName, false); }
     catch { await api.git.deleteBranch(repoPath, branchName, true); }
@@ -336,7 +368,7 @@ export async function finishFeature(repoPath: string, name: string, options: {
 
   // Merge into develop
   await api.git.checkout(repoPath, cfg.developBranch);
-  await api.git.merge(repoPath, branchName, { noFf: noFF, squash });
+  await mergeOrFail(repoPath, branchName, { noFf: noFF, squash });
 
   if (deleteBranch) {
     // -d (safe) first; fall back to -D if git refuses (e.g. not fully merged
@@ -376,14 +408,14 @@ export async function finishRelease(repoPath: string, version: string, options: 
 
   // Merge into master
   await api.git.checkout(repoPath, cfg.masterBranch);
-  await api.git.merge(repoPath, branchName, { noFf: noFF });
+  await mergeOrFail(repoPath, branchName, { noFf: noFF });
 
   // Tag the release
   await api.git.createTag(repoPath, tagName, tagMessage || `Release ${version}`, undefined, false, true);
 
   // Merge back into develop
   await api.git.checkout(repoPath, cfg.developBranch);
-  await api.git.merge(repoPath, branchName, { noFf: noFF });
+  await mergeOrFail(repoPath, branchName, { noFf: noFF });
 
   if (deleteBranch) {
     try {
@@ -423,14 +455,14 @@ export async function finishHotfix(repoPath: string, version: string, options: {
 
   // Merge into master
   await api.git.checkout(repoPath, cfg.masterBranch);
-  await api.git.merge(repoPath, branchName, { noFf: noFF });
+  await mergeOrFail(repoPath, branchName, { noFf: noFF });
 
   // Tag the hotfix
   await api.git.createTag(repoPath, tagName, tagMessage || `Hotfix ${version}`, undefined, false, true);
 
   // Merge back into develop
   await api.git.checkout(repoPath, cfg.developBranch);
-  await api.git.merge(repoPath, branchName, { noFf: noFF });
+  await mergeOrFail(repoPath, branchName, { noFf: noFF });
 
   if (deleteBranch) {
     try {

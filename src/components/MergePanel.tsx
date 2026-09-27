@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, AlertCircle, Check, RotateCcw, Loader, GitMerge, GitPullRequest, ArrowDown, ArrowUp, Sparkles } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { api } from '../lib/api';
@@ -132,8 +132,26 @@ export function MergePanel({
         if (noFf && strategy === 'merge') opts.noFf = true;
 
         if (strategy === 'rebase') {
-          // Rebase current branch onto target
-          await api.git.rebase(repo.path, targetBranch);
+          // Rebase current branch onto target. Conflict-reaction audit
+          // (v3.6): a conflicted rebase used to die as a RAW error toast
+          // («Merge failed» + git stderr) while the repo sat mid-rebase.
+          // Now the conflict is detected from the repo STATE and the user
+          // is taken to the Changes tool (Continue / Skip / Abort banner)
+          // — the same reaction every pull entry point already had.
+          try {
+            await api.git.rebase(repo.path, targetBranch);
+          } catch (rebaseErr) {
+            const conflicted = await surfaceConflictedState(repo.path, {
+              title: t('toast.git.rebaseConflicts'),
+              detail: t('toast.git.rebaseConflictsHint'),
+            });
+            if (conflicted) {
+              await loadState();
+              onClose();
+              return;
+            }
+            throw rebaseErr; // non-conflict failure → generic catch below
+          }
           toast.success(t('changes.rebasedOnto', { branch: targetBranch }));
           onClose();
           await refreshStatus(repo.path);
@@ -175,7 +193,14 @@ export function MergePanel({
               await api.git.stashPop(repo.path);
               toast.success(t('changes.autoStashRestored'));
             } catch (popErr) {
-              toast.warning(t('changes.autoStashPopFailed'), String(popErr));
+              // Conflict-reaction audit (v3.6): a conflicted auto-stash pop
+              // (stashPop throws with .conflicts now) must land the user in
+              // the Changes resolver, not end as a bare warning toast.
+              const conflicted = await surfaceConflictedState(repo.path, {
+                title: t('stashes.popConflicts'),
+                detail: t('stashes.popConflictsHint'),
+              });
+              if (!conflicted) toast.warning(t('changes.autoStashPopFailed'), String(popErr));
             }
           }
         } else {
