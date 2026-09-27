@@ -35,6 +35,10 @@ interface UnifiedPR {
   created_at: string;
   updated_at: string;
   merged_at?: string | null;
+  /** Provider says the branches CONFLICT — the MR/PR cannot be merged until
+   *  they're resolved (GitLab merge_status=cannot_be_merged; GitHub
+   *  mergeable=false — list endpoint usually leaves it undefined). */
+  conflicts?: boolean;
 }
 
 function githubToUnified(pr: GithubPullRequest): UnifiedPR {
@@ -49,6 +53,7 @@ function githubToUnified(pr: GithubPullRequest): UnifiedPR {
     created_at: pr.created_at,
     updated_at: pr.updated_at,
     merged_at: pr.merged_at,
+    conflicts: pr.mergeable === false,
   };
 }
 
@@ -64,6 +69,10 @@ function gitlabToUnified(mr: GitLabMergeRequest): UnifiedPR {
     created_at: mr.created_at,
     updated_at: mr.updated_at,
     merged_at: mr.merged_at,
+    // GitLab's LIST endpoint does return merge_status — surface it as the
+    // conflict badge so the user sees WHICH PRs are blocked BEFORE opening
+    // them ('unchecked' → no badge: not yet computed).
+    conflicts: mr.merge_status === 'cannot_be_merged',
   };
 }
 
@@ -769,6 +778,14 @@ export function PullRequestsPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-text-primary truncate">{pr.title}</span>
                   <span className="text-2xs text-text-tertiary shrink-0">#{pr.number}</span>
+                  {pr.state === 'open' && pr.conflicts && (
+                    <span
+                      className="text-2xs px-1.5 py-0.5 rounded font-medium shrink-0 bg-status-modified/15 text-status-modified"
+                      title={t('pages.prConflictsTooltip')}
+                    >
+                      {t('pages.prConflictsBadge')}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
                   <Avatar name={pr.author.login} email={undefined} size={14} avatarUrl={pr.author.avatar_url} />

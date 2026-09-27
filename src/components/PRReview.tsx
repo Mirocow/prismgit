@@ -656,6 +656,19 @@ export function PRReview({
             {displayPR.draft && (
               <span className="text-2xs px-1.5 py-0.5 rounded bg-bg-tertiary text-text-secondary">DRAFT</span>
             )}
+            {/* Provider-reported MERGE CONFLICT (GitLab merge_status=
+                cannot_be_merged / GitHub mergeable=false) — the PR cannot be
+                merged until the branches are reconciled. Shown as an amber
+                badge next to the state so the user knows BEFORE clicking
+                Merge (the merge button is disabled with an explanation). */}
+            {displayPR.state === 'open' && displayPR.mergeable === false && (
+              <span
+                className="text-2xs px-1.5 py-0.5 rounded font-medium bg-status-modified/15 text-status-modified"
+                title={t('pages.prConflictsTooltip')}
+              >
+                {t('pages.prConflictsBadge')}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
             <Avatar name={displayPR.author.login} email={undefined} size={12} avatarUrl={displayPR.author.avatar_url} />
@@ -760,8 +773,14 @@ Please review this PR — identify potential issues, suggest improvements, and s
           <button
             className="btn btn-primary text-xs flex items-center gap-1"
             onClick={handleMerge}
-            disabled={actionInProgress !== null || displayPR.draft === true}
-            title={displayPR.draft ? t('pages.prMergeDraftBlocked', { defaultValue: 'Draft PRs cannot be merged' }) : t('pages.prMergeTooltip')}
+            disabled={actionInProgress !== null || displayPR.draft === true || displayPR.mergeable === false}
+            title={
+              displayPR.draft
+                ? t('pages.prMergeDraftBlocked', { defaultValue: 'Draft PRs cannot be merged' })
+                : displayPR.mergeable === false
+                  ? t('pages.prMergeConflictBlocked')
+                  : t('pages.prMergeTooltip')
+            }
           >
             {actionInProgress === 'merge' ? <Loader size={11} className="animate-spin" /> : <GitPullRequest size={11} />}
             {t('pages.prMerge')}

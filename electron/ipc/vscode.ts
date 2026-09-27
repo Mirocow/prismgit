@@ -2,7 +2,7 @@
  * IPC surface for the VSCode integration (see services/vscode.ts).
  */
 import { ipcMain } from 'electron';
-import simpleGit from 'simple-git';
+import { simpleGit } from 'simple-git';
 import { GIT_UNSAFE_OPTIONS, withMergedGitEnv } from '../services/git-env.js';
 import {
   detectVsCodeCached,

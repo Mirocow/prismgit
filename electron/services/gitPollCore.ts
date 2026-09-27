@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import simpleGit from 'simple-git';
+import { simpleGit } from 'simple-git';
 import type { SimpleGit } from 'simple-git';
 import { GIT_SSH_UNSAFE_OPTIONS, GIT_UNSAFE_OPTIONS, withMergedGitEnv } from './git-env.js';
 

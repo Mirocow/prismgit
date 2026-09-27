@@ -27,6 +27,7 @@ import { isCommitBlocked } from '../lib/repoState';
 import { useContextMenu } from '../lib/useContextMenu';
 import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
+import { offerPushRejection } from '../stores/pushRejectionStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore, type FileDisplayFlag } from '../stores/selectionStore';
@@ -1190,7 +1191,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       else if (t.kind === 'info') toast.info(t.title, t.detail);
       else toast.success(t.title, t.detail);
     } catch (e) {
-      toast.error(t('changes.pushFailed'), String(e));
+      // Remote-conflict reaction — same matrix as the Toolbar push: the
+      // dialog offers pull/rebase/force recovery instead of a raw toast.
+      if (!offerPushRejection(e, { repoPath: repo.path })) toast.error(t('changes.pushFailed'), String(e));
     }
   };
 

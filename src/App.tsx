@@ -49,6 +49,9 @@ const RepoInfoDialog = lazy(() => import('./components/RepoInfoDialog').then(m =
 const ApplyPatchModal = lazy(() => import('./components/ApplyPatchModal').then(m => ({ default: m.ApplyPatchModal })));
 const IndexEditorDialog = lazy(() => import('./components/IndexEditorDialog').then(m => ({ default: m.IndexEditorDialog })));
 const RepoSettingsDialog = lazy(() => import('./components/RepoSettingsDialog').then(m => ({ default: m.RepoSettingsDialog })));
+// Remote-conflict reaction surface — opened from ANY push catch site via
+// offerPushRejection() (pushRejectionStore). Mounted once, self-gating on ctx.
+const PushRejectionDialog = lazy(() => import('./components/PushRejectionDialog').then(m => ({ default: m.PushRejectionDialog })));
 // Rarely-used overlays — lazy-load to keep the initial bundle small.
 // These are triggered by keyboard shortcuts / toolbar buttons, so a
 // ~50ms chunk fetch on first open is invisible to the user.
@@ -1770,6 +1773,7 @@ export default function App() {
         <InteractiveRebaseDialog open={showIRebase} onClose={() => setShowIRebase(false)} />
         <RepoInfoDialog open={showRepoInfo} onClose={() => setShowRepoInfo(false)} />
         <ApplyPatchModal open={showApplyPatch} onClose={() => setShowApplyPatch(false)} />
+        <PushRejectionDialog />
       </Suspense>
       <Suspense fallback={null}><KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} /></Suspense>
       <Suspense fallback={null}>{refAction && <RefActionDialog action={refAction} onClose={() => setRefAction(null)} />}</Suspense>

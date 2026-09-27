@@ -25,8 +25,19 @@ function wrap<T>(fn: (...args: any[]) => Promise<T>): (...args: any[]) => Promis
       const msg = e instanceof Error ? e.message : String(e);
       // Extract useful lines from git error output (skip the stack trace
       // and the "task:" dump that simple-git adds).
+      //
+      // Push-rejection contract (v3.7 remote-conflict audit): the REJECTED
+      // ref lines and the server's own message are what the renderer's
+      // PushRejectionDialog classifies the failure by —
+      //   `! [rejected]        main -> main (fetch first | stale info)`
+      //   `! [remote rejected] main -> main (pre-receive hook declined)`
+      //   `remote: GitLab: You are not allowed to push code to a protected branch…`
+      // Filtering them out here (the old error:/fatal: only filter) left the
+      // renderer with a bare "error: failed to push some refs" — nothing to
+      // react to, the exact «промолчать и отчитаться в лог» class of bug.
       const lines = msg.split('\n').filter(l =>
-        l.includes('error:') || l.includes('fatal:') || l.includes('git-lfs')
+        l.includes('error:') || l.includes('fatal:') || l.includes('git-lfs') ||
+        l.includes('rejected]') || l.includes('remote:') || l.trimStart().startsWith('hint:')
       );
       const cleanMsg = lines.length > 0 ? lines.join('\n') : msg.split('\n')[0] || msg;
       throw new Error(cleanMsg);

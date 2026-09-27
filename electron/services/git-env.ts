@@ -91,6 +91,62 @@ export function buildGitEnv(settings?: {
 export const GIT_ENV_LFS_SKIP: Record<string, string> = buildGitEnv();
 
 /**
+ * simple-git v4 `allowEnvironment` guard (semantics pinned empirically —
+ * the probe in tests/unit + the failing suites after the 3→4 upgrade):
+ *
+ * The guard protects GIT-RELEVANT variables — every key that is
+ *   a) `GIT_*`-prefixed (case-insensitive), or
+ *   b) one of the editor/pager variables git itself reads
+ *      (EDITOR / PAGER / VISUAL)
+ * may NOT be set through the `.env()` builder unless it is ALSO listed in
+ * the `allowEnvironment` simpleGit() option; otherwise every git operation
+ * throws `Use of "X" is blocked by the environment guard …`.
+ * NON-git variables (PATH, HOME, LANG, TERM, SSH_*, proxies, custom vars)
+ * are not guarded and pass through freely.
+ *
+ * The app's child env is a LIVE merge of process.env + GIT_* overrides
+ * (trusted main-process environment, see gitChildEnv), and tests/ops
+ * legitimately introduce git keys AFTER module load (GIT_EDITOR,
+ * GIT_CONFIG_GLOBAL, per-call GIT_CONFIG_KEY_n…). The allowEnvironment
+ * list is snapshotted when the instance is constructed, so we:
+ *   1. allowlist every ambient key + the app's override keys + the KNOWN
+ *      dynamic git keys (below);
+ *   2. have the live view SKIP any guarded key that is NOT allowlisted —
+ *      a late-appearing unknown git var is dropped from the child instead
+ *      of throwing, which is exactly what simple-git v4 does to unknown
+ *      ambient git keys when no `.env()` is used at all.
+ */
+const EDITOR_PAGER_ENV_KEYS = ['EDITOR', 'PAGER', 'VISUAL'];
+const KNOWN_DYNAMIC_GIT_ENV_KEYS: readonly string[] = [
+  'GIT_EDITOR', 'GIT_SEQUENCE_EDITOR', 'GIT_ASKPASS', 'GIT_TERMINAL_PROMPT',
+  'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM',
+  'GIT_CONFIG_COUNT', 'GIT_CONFIG_LOCK_TIMEOUT', 'GIT_CONFIG_PARAMETERS',
+  'GIT_LFS_SKIP_SMUDGE', 'GIT_LFS_DISABLE',
+  'GIT_SSH_COMMAND', 'GIT_SSH_VARIANT', 'GIT_ALLOW_PROTOCOL',
+  'GIT_PROTOCOL_COMMAND', 'GIT_MERGE_AUTOEDIT',
+  'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_AUTHOR_DATE',
+  'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_COMMITTER_DATE',
+  // Indexed GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n pairs (gitChildEnv merges
+  // ambient + app indices; remoteNetworkArgs adds its own).
+  ...Array.from({ length: 64 }, (_, i) => `GIT_CONFIG_KEY_${i}`),
+  ...Array.from({ length: 64 }, (_, i) => `GIT_CONFIG_VALUE_${i}`),
+];
+
+/** Is this key one the simple-git v4 environment guard protects? */
+const isGuardedEnvKey = (key: string): boolean =>
+  /^git_/i.test(key) || EDITOR_PAGER_ENV_KEYS.includes(key.toUpperCase());
+
+const ALLOWED_ENV_KEYS: ReadonlySet<string> = new Set([
+  ...Object.keys(process.env),
+  ...Object.keys(GIT_ENV_LFS_SKIP),
+  ...KNOWN_DYNAMIC_GIT_ENV_KEYS,
+]);
+
+/** May the live executor env expose this key without tripping the guard? */
+const guardSafeEnvKey = (key: string): boolean =>
+  !isGuardedEnvKey(key) || ALLOWED_ENV_KEYS.has(key);
+
+/**
  * The simple-git options to use with every simpleGit() call.
  * Combines the env override with the unsafe flags that allow GIT_CONFIG_COUNT
  * and core.hooksPath override (both blocked by simple-git's safety plugin).
@@ -101,6 +157,12 @@ export const GIT_ENV_LFS_SKIP: Record<string, string> = buildGitEnv();
  *   "Configuring filter.smudge is not permitted without enabling allowUnsafeFilter"
  */
 export const GIT_UNSAFE_OPTIONS = {
+  // simple-git v4 allowEnvironment — every git-relevant key the live env
+  // forwards (ambient + app overrides + known dynamic keys; see
+  // ALLOWED_ENV_KEYS above). Without this, the first git operation throws
+  // `Use of "GIT_LFS_SKIP_SMUDGE"/"EDITOR"/… is blocked by the environment
+  // guard` — the 3→4 upgrade regression.
+  allowEnvironment: [...ALLOWED_ENV_KEYS] as string[],
   env: GIT_ENV_LFS_SKIP,
   unsafe: {
     allowUnsafeConfigEnvCount: true as const,
@@ -234,22 +296,33 @@ export function gitChildEnv(extra: Record<string, string> = {}): Record<string, 
  * taken at spawn time.
  */
 function liveGitEnv(extra: Record<string, string> = {}): Record<string, string> {
+  // simple-git v4 guard filter — the executor env may only expose keys the
+  // guard accepts: non-git keys freely, guarded (git_* / EDITOR / PAGER /
+  // VISUAL) keys only when allowlisted (see ALLOWED_ENV_KEYS). A guarded key
+  // that is NOT allowlisted is skipped instead of forwarded, so no spawn
+  // can ever throw "Use of X is blocked by the environment guard".
   const target: Record<string, string> = {};
   return new Proxy(target, {
     ownKeys() {
-      return Reflect.ownKeys(gitChildEnv(extra));
+      return Reflect.ownKeys(gitChildEnv(extra)).filter(
+        (k) => typeof k !== 'string' || guardSafeEnvKey(k),
+      );
     },
     get(_t, key) {
       if (typeof key !== 'string') return undefined;
+      if (!guardSafeEnvKey(key)) return undefined;
       return gitChildEnv(extra)[key];
     },
     getOwnPropertyDescriptor(_t, key) {
       if (typeof key !== 'string') return undefined;
+      if (!guardSafeEnvKey(key)) return undefined;
       const merged = gitChildEnv(extra);
       if (!(key in merged)) return undefined;
       return { value: merged[key], writable: true, enumerable: true, configurable: true };
     },
     has(_t, key) {
+      if (typeof key !== 'string') return false;
+      if (!guardSafeEnvKey(key)) return false;
       return key in gitChildEnv(extra);
     },
   });

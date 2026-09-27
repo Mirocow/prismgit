@@ -131,7 +131,12 @@ interface GitState {
   stageAll: (repoPath: string) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean) => Promise<string>;
   push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, targetBranch?: string, forceMode?: 'lease' | 'force') => Promise<PushResult>;
-  pull: (repoPath: string, remote?: string, branch?: string) => Promise<void>;
+  /**
+   * strategyOverride: the PushRejectionDialog's «Стянуть и слить / Стянуть с
+   * rebase» recovery actions bypass the persisted Pull strategy setting —
+   * the user picks the recovery per-incident. Undefined → settings value.
+   */
+  pull: (repoPath: string, remote?: string, branch?: string, strategyOverride?: 'merge' | 'rebase') => Promise<void>;
   fetch: (repoPath: string, remote?: string, prune?: boolean) => Promise<void>;
 }
 
@@ -333,7 +338,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  pull: async (repoPath, remote, branch) => {
+  pull: async (repoPath, remote, branch, strategyOverride) => {
     const log = useOperationLogStore.getState();
     // Read the user's Pull strategy setting — Settings → Git →
     // "When pulling: Merge / Rebase". Default is 'merge' when unset.
@@ -341,7 +346,9 @@ export const useGitStore = create<GitState>((set, get) => ({
     // turn passes `--rebase` or `--no-rebase` to `git pull` so git
     // never refuses with "Need to specify how to reconcile divergent
     // branches" on repos without `pull.rebase` configured.
-    const pullStrategy = useSettingsStore.getState().settings.pullStrategy ?? 'merge';
+    // The strategyOverride (PushRejectionDialog recovery) wins over the
+    // persisted setting — per-incident choice beats global preference.
+    const pullStrategy = strategyOverride ?? useSettingsStore.getState().settings.pullStrategy ?? 'merge';
     const shouldRebase = pullStrategy === 'rebase';
     const cmd = `git pull ${remote || 'origin'} ${branch || ''} ${shouldRebase ? '--rebase' : '--no-rebase'}`.trim();
     const opId = log.startOp(shouldRebase ? 'Pull (Rebase)' : 'Pull (Merge)', repoPath, cmd);

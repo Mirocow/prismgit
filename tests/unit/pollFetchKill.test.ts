@@ -42,7 +42,7 @@ vi.mock('simple-git', () => {
     instances.push(opts ?? {});
     return { raw, getRemotes, env: vi.fn().mockReturnThis() };
   });
-  return { default: simpleGit, __mocks: { raw, getRemotes } };
+  return { default: simpleGit, simpleGit, __mocks: { raw, getRemotes } };
 });
 
 vi.mock('../../electron/services/storage.js', () => ({

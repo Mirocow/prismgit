@@ -81,6 +81,9 @@ describe('filesWithRealChanges (batch EOL detection)', () => {
     expect(real).toEqual(expectedReal);
   });
 
+  // simple-git v4 adds ~50 ms per silent spawn (its completion plugin waits
+  // for late output) — 47 spawns ≈ 7 s. The parity walk is 45 sequential
+  // isEolOnlyChange calls + the batch, hence the raised timeout.
   it('SEMANTIC PARITY with the old per-file isEolOnlyChange() for every file', async () => {
     const all = fs.readdirSync(work).filter((f) => f.endsWith('.txt')).sort();
     const real = new Set(await gitService.filesWithRealChanges(work, all));
@@ -89,7 +92,7 @@ describe('filesWithRealChanges (batch EOL detection)', () => {
       // eolOnly === true ⟺ NOT in the real-changes set.
       expect(eolOnly).toBe(!real.has(f));
     }
-  });
+  }, 30_000);
 
   it('wall-clock: batch (2 chunks) beats 45 per-file spawns by a wide margin', async () => {
     const all = fs.readdirSync(work).filter((f) => f.endsWith('.txt')).sort();
@@ -104,7 +107,7 @@ describe('filesWithRealChanges (batch EOL detection)', () => {
     const perFileMs = Date.now() - t1;
     // Generous threshold (CI jitter): per-file must be at least 2x slower.
     expect(perFileMs).toBeGreaterThan(batchMs * 2);
-  });
+  }, 30_000);
 
   it('a vanished pathspec degrades exactly like the old per-file call (empty diff = EOL-only)', async () => {
     // `git diff -- <unknown-pathspec>` does NOT fail — it prints nothing

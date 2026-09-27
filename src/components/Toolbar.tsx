@@ -13,6 +13,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
+import { offerPushRejection } from '../stores/pushRejectionStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
 import appLogo from '../assets/app-logo.png';
@@ -132,7 +133,12 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
       else if (pr.kind === 'info') toast.info(pr.title, pr.detail);
       else toast.success(pr.title, pr.detail);
     }
-    catch (e) { toast.error(t('shell.pushFailed'), String(e)); }
+    catch (e) {
+      // Remote-conflict reaction (non-fast-forward / lease-stale /
+      // protected / policy) — dialog with recovery actions; plain network
+      // errors keep the old error toast.
+      if (!offerPushRejection(e, { repoPath: currentRepo.path })) toast.error(t('shell.pushFailed'), String(e));
+    }
   };
   const handlePull = async () => {
     if (!currentRepo) return;
@@ -146,7 +152,11 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
       await pull(currentRepo.path);
       await push(currentRepo.path);
       toast.success(t('shell.synchronized'));
-    } catch (e) { toast.error(t('shell.synchronizeFailed'), String(e)); }
+    } catch (e) {
+      // The pull half may conflict (handled by gitStore.pull's own catch);
+      // the push half may be REJECTED by the remote — react to that here.
+      if (!offerPushRejection(e, { repoPath: currentRepo.path })) toast.error(t('shell.synchronizeFailed'), String(e));
+    }
   };
   const handleOpenInBrowser = async () => {
     if (!currentRepo) return;
@@ -516,7 +526,17 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
       else if (t2.kind === 'info') toast.info(t2.title, t2.detail);
       else toast.success(t2.title, t2.detail);
     } catch (e) {
-      toast.error(t('shell.pushFailed'), String(e));
+      // Push To… carries its OWN parameters — the recovery actions must
+      // retry the same remote/branch/target/force combination.
+      const offered = offerPushRejection(e, {
+        repoPath: currentRepo.path,
+        remote: selectedRemote,
+        branch: b,
+        targetBranch: remoteBranch.trim() || undefined,
+        force,
+        forceMode,
+      });
+      if (!offered) toast.error(t('shell.pushFailed'), String(e));
     }
     setOpen(false);
     setForce(false);

@@ -24,7 +24,7 @@ vi.mock('simple-git', () => {
   // supported .env() builder — the mock must accept (and ignore) it.
   const simpleGit = vi.fn(() => ({ raw, getRemotes, env: vi.fn().mockReturnThis() }));
   // Expose the shared mocked methods — every getGit() instance returns them.
-  return { default: simpleGit, __mocks: { raw, getRemotes } };
+  return { default: simpleGit, simpleGit, __mocks: { raw, getRemotes } };
 });
 
 vi.mock('../../electron/services/storage.js', () => ({

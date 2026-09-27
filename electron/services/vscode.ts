@@ -27,7 +27,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import simpleGit, { type SimpleGit } from 'simple-git';
+import { simpleGit, type SimpleGit } from 'simple-git';
 import { GIT_UNSAFE_OPTIONS, withMergedGitEnv } from './git-env.js';
 import { getSetting } from './storage.js';
 

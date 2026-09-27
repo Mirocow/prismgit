@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-import simpleGit, { type SimpleGit } from 'simple-git';
+import { simpleGit, type SimpleGit } from 'simple-git';
 import type { PushRefStatus, PushResult, PushVerification } from '../types/git-api.js';
 import type { RemoteCredential } from '../types/settings-api.js';
 import type { SshEnvResult } from '../types/ssh-api.js';
