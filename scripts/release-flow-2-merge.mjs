@@ -104,7 +104,11 @@ const waitForRemote = async (ref, want, what, timeoutS = 120) => {
   return false;
 };
 
-// ═══ 1. Commit the docs release ═════════════════════════════════════════════
+// ═══ 1. Commit the docs release (skipped on re-run: already committed) ═════
+let relHead = sh('git rev-parse HEAD');
+const alreadyReleased = sh('git status --porcelain').trim() === ''
+  && sh('git log -1 --pretty=%B').startsWith('docs(release)');
+if (!alreadyReleased) {
 await nav('#/changes', 2500);
 await page.locator('span:has-text("Изменения ("), span:has-text("Индекс (")').first()
   .waitFor({ timeout: 10000 });
@@ -117,7 +121,7 @@ await shot(page, '08-docs-commit-message.png');
 await page.keyboard.press('Escape');
 await page.locator('button:text-is("Коммит")').first().click();
 await page.waitForTimeout(4000);
-const relHead = sh('git rev-parse HEAD');
+relHead = sh('git rev-parse HEAD');
 console.log('docs commit:', relHead.slice(0, 8));
 await shot(page, '09-docs-committed.png');
 
@@ -125,16 +129,25 @@ await shot(page, '09-docs-committed.png');
 await page.locator('button[title*="Отправить текущую ветку"]').first().click();
 await (await waitForRemote(`refs/heads/${BRANCH}`, relHead.slice(0, 8), 'docs push'));
 await shot(page, '10-docs-pushed.png');
+} else { console.log('docs release commit already exists:', relHead.slice(0, 8)); }
 
-// ═══ 2. Checkout main (branch context menu → «Переключиться...») ════════════
+// ═══ 2. Checkout main (remote row origin/main → «Переключиться...») ════════
+// This sandbox clone carries only the feature branch locally — main exists
+// as origin/main. Its context-menu checkout creates a local tracking main,
+// exactly what a user cloning fresh would do.
 await nav('#/branches', 3000);
 await shot(page, '11-branches-feature-current.png');
-await page.locator('span.truncate:text-is("main")').first().click({ button: 'right' });
+await page.locator('span.truncate:text-is("origin/main")').first().click({ button: 'right' });
 await page.waitForTimeout(600);
+await shot(page, '12-checkout-menu.png').catch(() => {});
 await clickMenuItem('Переключиться...');
-await page.waitForTimeout(4000);
+await page.waitForTimeout(1200);
+// In-page confirm: «Переключиться на удалённую ветку 'origin/main'?»
+await shot(page, '13-checkout-confirm.png');
+await page.locator('button:text-is("Переключиться")').first().click();
+await page.waitForTimeout(5000);
 console.log('current branch now:', sh('git rev-parse --abbrev-ref HEAD'));
-await shot(page, '12-branches-main-current.png');
+await shot(page, '14-branches-main-current.png');
 
 // ═══ 3. Merge feature/smartgit-electron-v3 into main (MergePanel) ═══════════
 // Conflicts are impossible by construction (origin/main == merge-base), but
@@ -143,21 +156,21 @@ await page.locator(`span.truncate:text-is("${BRANCH}")`).first().click({ button:
 await page.waitForTimeout(600);
 await clickMenuItem('Слияние...');
 await page.waitForTimeout(1200);
-await shot(page, '13-merge-dialog.png');
+await shot(page, '15-merge-dialog.png');
 await page.locator('button:text-is("Слить")').first().click();
 await page.waitForTimeout(5000);
 const mainHead = sh('git rev-parse HEAD');
 console.log('main after merge:', mainHead.slice(0, 8), '== release head:', mainHead === relHead);
-await shot(page, '14-merge-done.png');
+await shot(page, '16-merge-done.png');
 
 // ═══ 4. Push main ═══════════════════════════════════════════════════════════
 await page.locator('button[title*="Отправить текущую ветку"]').first().click();
 await (await waitForRemote('refs/heads/main', mainHead.slice(0, 8), 'main push'));
-await shot(page, '15-main-pushed.png');
+await shot(page, '17-main-pushed.png');
 
 // ═══ 5. Tag v2.2.0 (Tags tool → «Новый тег») ═══════════════════════════════
 await nav('#/tags', 2500);
-await shot(page, '16-tags-empty.png');
+await shot(page, '18-tags-empty.png');
 await page.locator('button:has-text("Новый тег")').first().click();
 await page.waitForTimeout(800);
 await page.locator('input[placeholder="v1.0.0"]').fill('v2.2.0');
@@ -165,26 +178,26 @@ await page.locator('textarea[placeholder="Release v1.0.0"]')
   .fill('PrismGit 2.2.0 — conflict reactions, push rejection recovery, '
     + 'squash-to-branch, counters audit, secrets manager, deps at latest');
 await page.waitForTimeout(400);
-await shot(page, '17-tag-dialog.png');
+await shot(page, '19-tag-dialog.png');
 await page.locator('button:text-is("Создать")').first().click();
 await page.waitForTimeout(3000);
 console.log('tag created:', sh('git rev-parse v2.2.0'), '→ points at', sh('git rev-parse v2.2.0^{commit}').slice(0, 8));
-await shot(page, '18-tags-created.png');
+await shot(page, '20-tags-created.png');
 
 // ═══ 6. Push the tag (toolbar Push options → «Отправить теги») ══════════════
 await page.locator('button[title^="Параметры push"]').first().click();
 await page.waitForTimeout(600);
-await shot(page, '19-push-options.png');
+await shot(page, '21-push-options.png');
 await page.locator('label:has-text("Отправить теги") input[type="checkbox"]').check();
 await page.locator('button:has-text("Отправить в origin")').first().click();
 await page.waitForTimeout(3000);
 const tagLanded = await waitForRemote('refs/tags/v2.2.0', sh('git rev-parse v2.2.0').slice(0, 8), 'tag push', 60);
-await shot(page, '20-tag-pushed.png');
+await shot(page, '22-tag-pushed.png');
 
 // ═══ 7. Final state: History on main with the release tag ══════════════════
 await nav('#/history', 3500);
 await page.locator('span.truncate:text-is("main")').first().waitFor({ timeout: 5000 }).catch(() => {});
-await shot(page, '21-history-main-final.png');
+await shot(page, '23-history-main-final.png');
 
 await app.close();
 
