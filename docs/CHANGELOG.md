@@ -5,7 +5,23 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.2.0] - 2026-09-28
+
+### Added — Every conflicted operation now REACTS
+- **Uniform conflict reaction matrix** — pull (merge/rebase/ff-only strategies), merge, rebase, cherry-pick, revert, stash pop/apply, git-flow finish (×4 flows), squash-to-branch, patch 3-way merge and the AI auto-stash pop ALL navigate to the Changes conflict resolver with the in-progress banner («Слияние/Rebase/Применяется» + Continue / Skip / Abort), a Conflicts section and an operation-specific warning toast
+- **Git-Flow never continues past a conflict** — finish flows stop at a conflicted merge: no tag, no branch delete, no push while conflicted
+- **Stash pop/apply is honest** — simple-git resolves conflicted `git stash pop|apply` as success; a post-op status check now detects the conflicted shape, throws a typed error with `.conflicts`, keeps the stash entry and surfaces the resolver (was: success toast + cleared selection while the tree filled with markers)
+- Live-verified: `scripts/verify-conflict-reactions.mjs` — 17/17 checks in the running app (RU)
+
+### Added — Push rejection recovery (remote conflicts)
+- **PushRejectionDialog** — pushes that git rejects open a dialog classified by cause, with per-cause recovery: non-fast-forward → «Стянуть и слить» + automatic push retry; stale force-with-lease → fetch + re-lease retry; protected branch → create MR/PR; policy blocks explained. Wired into all push catch sites (toolbar push/sync/Push-To, Changes commit&push, git-flow finish)
+- **IPC error filter fixed** — the wrap() in `electron/ipc/git.ts` kept only `error:/fatal:` lines: `! [rejected]` and `remote: GitLab:` lines were STRIPPED before the renderer, so no dialog could ever open. Now rejected]/remote:/hint: lines pass through
+- **PR/MR conflict badges** — GitLab `merge_status` / GitHub `mergeable` shown as row badges and in the review header; Merge button disabled with tooltip when unmergeable
+- Live-verified: `scripts/verify-push-rejections.mjs` — 16/16 in the running app (non-FF dialog + pull-merge auto-retry, force-with-lease, stale-lease fetch-retry)
+
+### Added — Squash a group of commits to another branch
+- Select a commit range in History (or a PR/MR group from Pull Requests/Reviews) and land it on another branch as ONE commit — existing branch or NEW branch, with full conflict handling in the dialog
+- Supersedes the old-API squash suite with a conflict-aware one; whole-PR squash E2E kept compatible
 
 ### Added — Secrets manager (Settings → Security)
 - **Stored secrets section** — every entry of the encrypted vault is listed (metadata only: namespace, name, encrypted flag) grouped by category: access tokens, repository/remote passwords, AI provider keys, GitHub, SSH passphrases
@@ -18,16 +34,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New repositories created or cloned with PrismGit automatically get the identity written into their local `user.name` / `user.email` — no more "Please tell me who you are" on the first commit
 - `commit()` retries once with the default identity as `-c` overrides when git refuses the commit because no identity is configured anywhere; the error otherwise explains where to set it
 
+### Fixed — Counters (user-visible numbers audit)
+- **History «Tagged (N)» chip** — N is now the TAGGED-COMMITS-IN-VIEW count (exactly what the filter shows for the current branch selection); the tooltip carries both numbers (in-view + repo-wide). Was: allTags.length — a tag on a branch outside the view made the chip disagree with the rows
+- **Per-commit «Теги на этом коммите (N)»** — counts only the tags pointing at the commit (two tags on one commit → (2), names listed)
+- **Branches summary Russian grammar** — new opt-in plural pipe in t(): `{name|one|few|many}` picks a CLDR plural form («1 локальная · 2 локальные · 5 локальных · 6 тегов»); en/zh/de keep plain placeholders and render byte-identically
+- **Sidebar follows the startup locale** — nav labels/groups were frozen at module-load time, so a RU profile first launch showed an English sidebar until a manual refresh; NAV_ITEMS is now evaluated per render (sidebar, command palette, help banners)
+- Cross-tool counter sync: deleting a tag in Tags updates the History chip immediately
+- Live-verified: `scripts/verify-counters.mjs` — 17/17 in the running app vs git CLI ground truth
+
 ### Fixed — "Failed to save settings" (gpg.program)
 - Repository Settings → Signing could not be saved: simple-git blocks `git config gpg.program` (and other "unsafe" keys) unless `allowUnsafeGpgProgram` is enabled. `configSet` / `configUnset` now detect the plugin rejection and retry the write on an instance with config-write flags enabled — explicit user edits in a GUI client are intent
 - The Signing tab no longer writes `gpg.program` unconditionally: empty fields are UNSET from `.git/config` instead of written (also fixes un-cleareable user.signingkey and the dangerous `user.name=""` write that would break every commit with "empty ident name not allowed")
+
+### Fixed — GitLab / PR surfaces
+- **GitLab apiJson follows 3xx redirects** — renamed/moved projects (gitclient → prismgit) broke the MR list with silent 404s
+- **Pull Requests row actions are visible and understandable** — hover-revealed cryptic icons → always-visible labeled buttons + right-click menu (Open in Reviews / browser / Squash / Copy group)
+
+### Fixed — Install / packaging
+- **`make install` survives a local npm mirror 404** — `scripts/npm-install-with-retry.sh` wraps npm install/ci, reads the outcome from npm's own output (tee eats exit codes), and on E404 auto-retries once with `--registry=https://registry.npmjs.org`; EBADENGINE gets a friendly Node-upgrade hint; a killed run can never fake success
+- deb-packaging metadata + production-package smoke E2E — packaging that survives real-world machines
+
+### Fixed — Stability
+- **Quit watchdog** — close can no longer hang: 3 s hard watchdog, worker children never orphaned
+- **Repo switch freeze killed** — status, workdir watch and raw reads run in the git worker; density fix (v3.6)
+- **Remote-check fetch storm** — boost loop broken, hung fetches killed, poll decoupled from the foreground queue; remote-status fetch moved to a dedicated utilityProcess
+- **Render isolation** — per-keystroke/per-token/per-frame re-renders isolated; the 5 s full-tree re-render storm from status refreshes removed
+- **i18n layout** — interface no longer breaks on RU/DE string lengths
 
 ### Changed — Performance: slow git operations after LFS problems
 - Network commands (fetch / pull / push / ls-remote) no longer run on the shared per-repo simple-git instance (`maxConcurrentProcesses: 2`) that every local operation uses — a slow or hung network command (unreachable LFS-enabled server, credential dialog waiting for input, huge fetch) used to occupy the 2 queue slots and stall ALL git operations of the repository
 - All network commands run with `GIT_TERMINAL_PROMPT=0` — an unanswered credential prompt fails fast with a clear error instead of hanging invisibly (matches the push path)
 
+### Changed — Dependencies (all at latest)
+- **simple-git 3 → 4** — named-import migration; the new environment guard tamed (`allowEnvironment` contract for GIT_* keys, empirically pinned by probe)
+- vite 8.3, vitest 5, @types/node 26, @tauri-apps/* 2.12 (React 19 / Electron 44 / TypeScript 7 / Tailwind 4 were already current)
+
 ### Tests
-- `tests/integration/gitService.identityConfig.test.ts` — gpg.program set/unset, identity on init, commit fallback, no-identity error message (global/system git config neutralized via `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`)
+- **1963 passing** (was 1009 at 2.1.0) / 0 failed / 34 environment-dependent skips; tsc clean
+- New layers: conflict reaction integration suite (real bare remote, true divergence), push-rejection scenarios (non-FF, stale lease, pre-receive protected emulation), counters E2E, i18n plural engine, squash-to-branch conflict-aware API, enterprise QA perf suite (monster-repo generator, CDP memory/DOM/FPS + zombie audit)
+- `tests/integration/gitService.identityConfig.test.ts` — gpg.program set/unset, identity on init, commit fallback, no-identity error message
 - `scripts/secrets-smoke.cjs` extended with secrets-manager round-trip checks (list metadata-only, set+reveal, delete)
 
 ## [2.1.0] - 2026-09-13
