@@ -430,7 +430,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-start justify-center pt-[8vh] z-70 animate-fade-in"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-start justify-center pt-[8vh] z-70 animate-fade-in"
       onClick={onClose}
     >
       <div

@@ -97,13 +97,22 @@ export function TagsPage() {
     setEditTag(tag);
     setEditName(tag.name);
     setEditMessage(tag.annotation ?? '');
-    setEditAnnotated(!tag.lightweight);
+    // BUGFIX ("При редактировании тега если ранее тег не содержал комментарий
+    //  то окно ввода комментария не отображается"): lightweight tags used to
+    // open with editAnnotated=false, hiding the message textarea — the user
+    // had no way to ADD a comment. Now the dialog always opens with the
+    // annotated checkbox ON so the field is visible and a comment can be
+    // added (unchecking keeps the tag lightweight on save).
+    setEditAnnotated(true);
     setEditLoading(true);
     try {
       const full = await api.git.tagShow(repo.path, tag.name);
       if (editFetchToken.current === token && full) {
         setEditMessage(full.message);
-        setEditAnnotated(full.annotated);
+        // Keep the checkbox ON for lightweight tags too (see openEditTag):
+        // tagShow reports annotated=false there, but the whole point of the
+        // edit dialog is to let the user ADD a comment.
+        setEditAnnotated(full.annotated || !!tag.lightweight);
       }
     } catch { /* keep the tags()-derived prefill */ } finally {
       if (editFetchToken.current === token) setEditLoading(false);

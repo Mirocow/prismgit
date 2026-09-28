@@ -461,4 +461,51 @@ describe('ConflictMergeView (MergeEditor3Way)', () => {
     window.dispatchEvent(evOut);
     expect(evOut.defaultPrevented).toBe(true);
   }, 10000);
+  it('vertical splitters resize the Ours/Theirs panes', async () => {
+    // Perf-round user report: «В инструменте 3-way нехватает вертикальных
+    // сплиттеров для изменения размера левой и правой панели» — two
+    // .split-divider handles must exist and dragging must change the
+    // side-pane widths.
+    const { ConflictMergeView } = await import('../../src/components/ConflictMergeView');
+
+    const { container } = render(React.createElement(ConflictMergeView, {
+      filePath: 'file.ts',
+      onResolved: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="merge-result-textarea"]')).toBeTruthy();
+    }, { timeout: 5000 });
+
+    // Two splitters: Ours|Result and Result|Theirs (sticky wrappers).
+    const splitters = container.querySelectorAll('.split-divider');
+    expect(splitters.length).toBe(2);
+
+    // Both side panes start at ~33% width.
+    const scroll = container.querySelector('[data-testid="merge-scroll-container"]') as HTMLElement;
+    const paneWidth = () => {
+      const panes = scroll.querySelectorAll(':scope > div');
+      const left = panes[0] as HTMLElement;
+      return parseFloat(left.style.width);
+    };
+    const before = paneWidth();
+    expect(before).toBeCloseTo(33.3, 0);
+
+    // Drag the LEFT splitter 90px right → +10% width for Ours. The drag
+    // listeners live on DOCUMENT (window-dispatched events never reach it).
+    const leftSplitter = splitters[0];
+    leftSplitter.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 300, clientY: 100 }));
+    await act(async () => { await new Promise(r => setTimeout(r, 20)); });
+    await act(async () => {
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 390, clientY: 100 }));
+      await new Promise(r => setTimeout(r, 20));
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 20));
+    });
+
+    const after = paneWidth();
+    // 90px / 1000px fallback width = +9%.
+    expect(after).toBeCloseTo(before + 9, 0);
+    expect(after).toBeLessThanOrEqual(60); // clamped
+  }, 10000);
 });

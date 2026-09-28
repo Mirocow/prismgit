@@ -29,6 +29,7 @@ import {
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
 import { describePushResult } from '../lib/pushResult';
 import { getRepoInProgressState } from '../lib/repoState';
+import { showErrorDialog } from '../stores/errorDialogStore';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { filterSymbolicHeads, filterSymbolicHeadNames } from '../lib/branchFilter';
 import { isSingleBranchRefspec } from '../lib/remoteSpecs';
@@ -72,6 +73,16 @@ export function BranchesPage() {
   // other HEAD-movers) would DISCARD it, so they are blocked until the user
   // finishes it on the Changes page (Continue / Skip / Abort / Reset).
   const repoState = getRepoInProgressState(status);
+  // RENDER-SAFE pure predicate — safe to call from JSX (`disabled={...}`)
+  // during render. NEVER toast from here: this used to fire a toast on every
+  // re-render (two multi-selection buttons + the EmptyState action each call
+  // it in their `disabled` prop), and BranchesPage re-renders in bursts on
+  // mount (load() sets branches/tags/stashes, then refreshStatus lands, then
+  // the 3s watcher refresher) — the user got "более 10 сообщений на 1 экране"
+  // of identical "Merge in progress" boxes after switching tools mid-merge.
+  // The toast lives in blockedByRepoState() below, called ONLY from click
+  // handlers (one toast per actual user action).
+  const isBlockedByRepoState = (): boolean => !!repoState;
   const blockedByRepoState = (): boolean => {
     if (!repoState) return false;
     toast.error(
@@ -286,7 +297,55 @@ export function BranchesPage() {
         }
         return; // user cancelled — keep current branch
       }
-      toast.error(t('branches.checkoutFailed'), msg);
+      // Errors of explicit user actions surface as a centered dialog, not a
+      // toast (user request: «словил сообщение а не диалоговое окно»).
+      showActionError('branches.checkoutFailed', msg);
+    }
+  };
+
+  /**
+   * Surface a failed git ACTION as a centered modal dialog (user report:
+   * «При переключении на Remote ветку словил сообщение а не диалоговое
+   * окно») — errors of explicit user actions are dialogs, not toasts. */
+  const showActionError = (titleKey: string, e: unknown): void => {
+    showErrorDialog({ title: t(titleKey), detail: String(e) });
+  };
+
+  /**
+   * Checkout a REMOTE branch (e.g. origin/main) — SmartGit semantics.
+   *
+   * BUGFIX ("fatal: a branch named 'main' already exists"): the three
+   * remote-checkout entry points (context menu, double-click, row ✓ button)
+   * used to always run `git checkout --track origin/main`, which dies when
+   * a local branch with the same short name already exists — even though
+   * switching to that local branch is exactly what the user wants. Now:
+   *   - local branch with the same name exists → delegate to handleCheckout
+   *     (plain switch, incl. its auto-stash recovery path);
+   *   - no local branch → confirm + `--track` (create tracking branch).
+   */
+  const handleCheckoutRemote = async (b: BranchInfo) => {
+    if (blockedByRepoState()) return;
+    const localName = b.name.replace(/^[^/]+\//, '');
+    const localBranch = branches.find((x) => !x.remote && x.name === localName);
+    if (localBranch) {
+      toast.info(t('branches.switchedToLocalNote', { local: localName, remote: b.name }));
+      if (localBranch.current) return;
+      await handleCheckout(localBranch);
+      return;
+    }
+    if (!(await confirmDialog({
+      title: t('branches.checkoutRemoteTitle', { name: b.name }),
+      message: t('branches.checkoutRemoteMessage', { local: localName, remote: b.name }),
+      confirmLabel: t('branches.checkout'),
+    }))) return;
+    if (!(await guardSubmoduleCheckout(b.name))) return; // 2.1 — .gitmodules diff warning
+    try {
+      await api.git.checkout(repo.path, b.name, { track: true });
+      toast.success(t('branches.checkedOutTracking', { local: localName, remote: b.name }));
+      await load();
+      refreshStatus(repo.path);
+    } catch (e) {
+      showActionError('branches.checkoutFailed', e);
     }
   };
 
@@ -1304,17 +1363,7 @@ export function BranchesPage() {
 
         // === Checkout remote (create local tracking branch) ===
         else if (action === 'checkout-remote') {
-          const localName = b.name.replace(/^[^/]+\//, '');
-          if (!(await confirmDialog({
-            title: t('branches.checkoutRemoteTitle', { name: b.name }),
-            message: t('branches.checkoutRemoteMessage', { local: localName, remote: b.name }),
-            confirmLabel: t('branches.checkout'),
-          }))) return;
-          if (!(await guardSubmoduleCheckout(b.name))) return; // 2.1 — .gitmodules diff warning
-          api.git.checkout(repo.path, b.name, { track: true }).then(() => {
-            toast.success(t('branches.checkedOutTracking', { local: localName, remote: b.name }));
-            load(); refreshStatus(repo.path);
-          }).catch((e) => toast.error(t('branches.checkoutFailed'), String(e)));
+          await handleCheckoutRemote(b);
         }
 
         // === Merge ===
@@ -1557,19 +1606,9 @@ export function BranchesPage() {
           // Double-click is the explicit "checkout this branch" gesture.
           // (Mirrors IDE file trees where single-click selects, double-click opens.)
           if (b.remote) {
-            // For remote branches: confirm + create tracking local branch.
-            const localName = b.name.replace(/^[^/]+\//, '');
-            confirmDialog({
-              title: `Checkout remote branch '${b.name}'`,
-              message: `This creates a local branch '${localName}' tracking '${b.name}' and switches to it.`,
-              confirmLabel: 'Checkout',
-            }).then(async (ok) => {
-              if (!ok) return;
-              if (!(await guardSubmoduleCheckout(b.name))) return; // 2.1 — .gitmodules diff warning
-              api.git.checkout(repo.path, b.name, { track: true })
-                .then(() => { toast.success(t('toast.git.checkoutSuccess', { ref: localName })); load(); refreshStatus(repo.path); })
-                .catch((err) => toast.error(t('toast.git.checkoutFailed'), String(err)));
-            });
+            // For remote branches: local-exists → switch to the local branch;
+            // otherwise confirm + create a tracking local branch.
+            void handleCheckoutRemote(b);
             return;
           }
           if (!b.current) handleCheckout(b);
@@ -1752,18 +1791,7 @@ export function BranchesPage() {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isInProgress) return;
-                  const localName = b.name.replace(/^[^/]+\//, '');
-                  confirmDialog({
-                    title: t('branches.checkoutRemoteTitle', { name: b.name }),
-                    message: t('branches.checkoutRemoteMessage', { local: localName, remote: b.name }),
-                    confirmLabel: t('branches.checkout'),
-                  }).then(async (ok) => {
-                    if (!ok) return;
-                    if (!(await guardSubmoduleCheckout(b.name))) return; // 2.1 — .gitmodules diff warning
-                    api.git.checkout(repo.path, b.name, { track: true })
-                      .then(() => { toast.success(t('branches.checkedOut', { name: localName })); load(); refreshStatus(repo.path); })
-                      .catch((err) => toast.error(t('branches.checkoutFailed'), String(err)));
-                  });
+                  void handleCheckoutRemote(b);
                 }}
               >
                 <Check size={11} />
@@ -2167,7 +2195,7 @@ export function BranchesPage() {
             type="button"
             className="text-2xs px-2 py-0.5 rounded bg-status-deleted/15 text-status-deleted hover:bg-status-deleted/25 border border-status-deleted/30 flex items-center gap-1"
             onClick={handleDeleteSelected}
-            disabled={blockedByRepoState()}
+            disabled={isBlockedByRepoState()}
             title={t('branches.batchDeleteTooltip')}
           >
             <Trash size={10} />
@@ -2177,7 +2205,7 @@ export function BranchesPage() {
             type="button"
             className="text-2xs px-2 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 border border-status-added/30 flex items-center gap-1"
             onClick={handlePushSelected}
-            disabled={blockedByRepoState()}
+            disabled={isBlockedByRepoState()}
             title={t('branches.batchPushTooltip')}
           >
             <Upload size={10} />
@@ -2232,7 +2260,7 @@ export function BranchesPage() {
             icon={GitBranch}
             title={search ? t('branches.nothingMatches') : t('branches.empty')}
             description={search ? undefined : t('branches.emptyHint')}
-            action={search ? undefined : { label: t('branches.newButton'), onClick: () => setShowNewDialog(true), disabled: blockedByRepoState() }}
+            action={search ? undefined : { label: t('branches.newButton'), onClick: () => setShowNewDialog(true), disabled: isBlockedByRepoState() }}
           />
         ) : (
           <>

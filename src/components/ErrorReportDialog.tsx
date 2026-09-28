@@ -206,7 +206,7 @@ export function ErrorReportDialog({ error, onClose, onReload }: ErrorReportDialo
 
   return (
     <div
-      className="fixed inset-0 bg-black/70 flex items-center justify-center z-10000 animate-fade-in p-4"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-10000 animate-fade-in p-4"
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="error-dialog-title"

@@ -179,7 +179,7 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
   const inputCls = selectCls;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/30 dark:bg-black/55 flex items-center justify-center p-6" onClick={onClose}>
       <div className="panel w-full max-w-3xl max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center px-4 py-3 border-b border-border">
           <span className="text-sm font-semibold">{t('action.label.repositorySettings')}</span>

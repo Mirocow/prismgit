@@ -99,6 +99,7 @@ export const en: Record<string, string> = {
   'branches.copyUrl': 'Copy URL',
   // Checkout / rebase / merge handlers
   'branches.checkedOutTracking': "Checked out '{local}' (tracking {remote})",
+  'branches.switchedToLocalNote': "Local branch '{local}' already exists — switched to it instead of {remote}.",
   'branches.rebaseOntoTitle': "Rebase onto '{name}'",
   'branches.rebaseOntoMessage': "This rebases your current branch onto '{name}'.",
   'branches.rebaseFailed': 'Rebase failed',
@@ -354,6 +355,7 @@ export const ru: Record<string, string> = {
   'branches.copyUrl': 'Копировать URL',
   // Checkout / rebase / merge handlers
   'branches.checkedOutTracking': "Переключено на '{local}' (отслеживает {remote})",
+  'branches.switchedToLocalNote': "Локальная ветка '{local}' уже существует — выполнено переключение на неё вместо {remote}.",
   'branches.rebaseOntoTitle': "Перебазировать на '{name}'",
   'branches.rebaseOntoMessage': "Текущая ветка будет перебазирована на '{name}'.",
   'branches.rebaseFailed': 'Не удалось выполнить rebase',
@@ -608,6 +610,7 @@ export const zh: Record<string, string> = {
   'branches.copyUrl': '复制 URL',
   // Checkout / rebase / merge handlers
   'branches.checkedOutTracking': "已切换到 '{local}'（跟踪 {remote}）",
+  'branches.switchedToLocalNote': "本地分支 '{local}' 已存在——已切换到该分支而非 {remote}。",
   'branches.rebaseOntoTitle': "变基到 '{name}'",
   'branches.rebaseOntoMessage': "当前分支将变基到 '{name}'。",
   'branches.rebaseFailed': '变基失败',
@@ -862,6 +865,7 @@ export const de: Record<string, string> = {
   'branches.copyUrl': 'URL kopieren',
   // Checkout / rebase / merge handlers
   'branches.checkedOutTracking': "'{local}' ausgecheckt (trackt {remote})",
+  'branches.switchedToLocalNote': "Lokaler Branch '{local}' existiert bereits — zu ihm gewechselt statt zu {remote}.",
   'branches.rebaseOntoTitle': "Auf '{name}' rebasen",
   'branches.rebaseOntoMessage': "Der aktuelle Branch wird auf '{name}' rebased.",
   'branches.rebaseFailed': 'Rebase fehlgeschlagen',

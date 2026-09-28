@@ -276,7 +276,12 @@ describe('TagsPage — tag EDIT dialog', () => {
     expect(toastMock.error).not.toHaveBeenCalled();
   });
 
-  it('lightweight tag edit → dialog opens with annotated checkbox unchecked', async () => {
+  it('lightweight tag edit → comment textarea is SHOWN so a comment can be added', async () => {
+    // BUGFIX («При редактировании тега если ранее тег не содержал комментарий
+    // то окно ввода комментария не отображается»): lightweight tags used to
+    // open with editAnnotated=false, hiding the message textarea entirely —
+    // there was no way to ADD a comment. Now the annotated checkbox defaults
+    // to ON and the textarea is visible (unchecking keeps it lightweight).
     apiGitMock.tagShow.mockResolvedValueOnce({
       name: 'lw',
       annotated: false,
@@ -293,7 +298,10 @@ describe('TagsPage — tag EDIT dialog', () => {
     });
     await waitFor(() => {
       const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
-      expect(checkbox.checked).toBe(false);
+      expect(checkbox.checked).toBe(true);
     });
+    // The comment input is present (empty) — ready for a new comment.
+    expect(getEditTextarea()).toBeInTheDocument();
+    expect(getEditTextarea().value).toBe('');
   });
 });

@@ -57,6 +57,7 @@ import { MergeToolbar } from './MergeToolbar';
 import { MergePane } from './MergePane';
 import { MergeResultEditor } from './MergeResultEditor';
 import { ConflictRegionBar } from './ConflictRegionBar';
+import { ResizableSplitter } from '../ResizableSplitter';
 
 export interface MergeEditor3WayProps {
   filePath: string;
@@ -237,6 +238,29 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
   // ============ Viewport (single scroll container) ============
 
   const viewport = useMergeViewport({ totalRows: alignedRows.length, enabled: !loading });
+
+  // ============ Resizable panes (perf round: «В инструменте 3-way
+  //  нехватает вертикальных сплиттеров для изменения размера левой и
+  //  правой панели») ============
+  // Ours/Theirs pane widths as a % of the editor row; the middle (Result)
+  // pane takes the remainder. The splitters live INSIDE the shared
+  // scroller (the panes are tall columns there); they are sticky +
+  // viewport-high so they stay grabbable at any scroll offset.
+  const [leftPct, setLeftPct] = useState(33.3);
+  const [rightPct, setRightPct] = useState(33.3);
+  const clampPct = (n: number): number => Math.max(15, Math.min(60, n));
+  const handleLeftResize = useCallback((deltaPx: number) => {
+    // `|| 1000` (not ??): jsdom and degenerate 0-width layouts report
+    // clientWidth = 0 — fall back to a sane default instead of Infinity.
+    const w = viewport.scrollRef.current?.clientWidth || 1000;
+    setLeftPct((p) => clampPct(p + (deltaPx / w) * 100));
+  }, [viewport.scrollRef]);
+  // Panel is RIGHT of its splitter → dragging right SHRINKS it (see the
+  // ResizableSplitter sign convention).
+  const handleRightResize = useCallback((deltaPx: number) => {
+    const w = viewport.scrollRef.current?.clientWidth || 1000;
+    setRightPct((p) => clampPct(p - (deltaPx / w) * 100));
+  }, [viewport.scrollRef]);
   // The middle pane's line space is the RESULT's (markers add rows vs the
   // aligned side model) — compute its own visible window from the same
   // scrollTop/viewportHeight the side panes use.
@@ -572,15 +596,22 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
           full-height with no internal vertical scroll, so caret movement
           (typing at the screen edge) scrolls THIS container. */}
       <div ref={viewport.scrollRef} className="flex-1 overflow-auto flex" data-testid="merge-scroll-container">
-        {/* Left: Ours (read-only, windowed) */}
-        <MergePane
-          side="ours"
-          alignedRows={alignedRows}
-          visibleRange={viewport.visibleRange}
-          totalHeight={viewport.totalHeight}
-          lang={langRef.current}
-          lines={oursLines}
-        />
+        {/* Left: Ours (read-only, windowed) — width controlled by the splitter */}
+        <div className="min-w-0 shrink-0" style={{ width: `${leftPct}%`, height: viewport.totalHeight }}>
+          <MergePane
+            side="ours"
+            alignedRows={alignedRows}
+            visibleRange={viewport.visibleRange}
+            totalHeight={viewport.totalHeight}
+            lang={langRef.current}
+            lines={oursLines}
+          />
+        </div>
+        {/* Vertical splitter — Ours | Result. Sticky so it stays grabbable
+            while the shared scroller is scrolled down. */}
+        <div style={{ position: 'sticky', top: 0, height: viewport.viewportHeight }} className="flex-shrink-0">
+          <ResizableSplitter direction="horizontal" onResize={handleLeftResize} />
+        </div>
 
         {/* Middle: Result (editable) + floating per-conflict action bars */}
         <div className="flex-1 min-w-0 relative">
@@ -608,15 +639,22 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
           ))}
         </div>
 
-        {/* Right: Theirs (read-only, windowed) */}
-        <MergePane
-          side="theirs"
-          alignedRows={alignedRows}
-          visibleRange={viewport.visibleRange}
-          totalHeight={viewport.totalHeight}
-          lang={langRef.current}
-          lines={theirsLines}
-        />
+        {/* Vertical splitter — Result | Theirs (sticky, see above). */}
+        <div style={{ position: 'sticky', top: 0, height: viewport.viewportHeight }} className="flex-shrink-0">
+          <ResizableSplitter direction="horizontal" onResize={handleRightResize} />
+        </div>
+
+        {/* Right: Theirs (read-only, windowed) — width controlled by the splitter */}
+        <div className="min-w-0 shrink-0" style={{ width: `${rightPct}%`, height: viewport.totalHeight }}>
+          <MergePane
+            side="theirs"
+            alignedRows={alignedRows}
+            visibleRange={viewport.visibleRange}
+            totalHeight={viewport.totalHeight}
+            lang={langRef.current}
+            lines={theirsLines}
+          />
+        </div>
       </div>
 
       {/* Bottom status bar */}

@@ -659,7 +659,7 @@ function invalidateCache(repoPath?: string) {
 // is ALREADY staleness-safe on its own terms:
 //   - gitDirCache     — .git dir path, immutable for a session
 //   - headTreeCache   — keyed by HEAD hash, hash-validated before use, LRU-4
-//   - remotesCache    — 60s TTL (refresh remotes / addRemote invalidate)
+//   - remotesCache    — 10 min TTL (addRemote/removeRemote/renameRemote invalidate)
 //   - pollCache       — 60s TTL
 //   - readCoalesce    — 1s TTL + global write-detector invalidation
 //   - diffCache       — own TTL + mutation invalidation, capped at 64
@@ -725,9 +725,14 @@ export function __repoCacheSizesForTests(repoPath?: string): {
 const gitDirCache = new Map<string, string>();
 
 // Cache for getRemotes — avoids 6+ spawns of 'git config --get-regexp remote.*'
-// on every page load. TTL 60s, invalidated on addRemote/removeRemote/renameRemote.
+// on every page load. TTL 10 min, invalidated on addRemote/removeRemote/renameRemote.
+// PERF: was 60s — shorter than the 120s baseline poll interval, so EVERY
+// background poll cycle re-spawned `git remote -v` for EVERY repo (user
+// report: constant "Команда: git remote -v" entries in the log). The
+// remote set changes only through the app itself (add/remove/rename all
+// invalidate this cache), so a long TTL is staleness-safe.
 const remotesCache = new Map<string, { value: unknown; ts: number }>();
-const REMOTES_CACHE_TTL_MS = 60_000;
+const REMOTES_CACHE_TTL_MS = 600_000;
 
 async function getCachedRemotes(repoPath: string, withRefs: boolean): Promise<Array<{ name: string; refs?: { fetch: string; push?: string } }>> {
   const key = repoPath + '|' + (withRefs ? '1' : '0');
@@ -2819,6 +2824,26 @@ export async function checkout(
       try {
         await git.raw(args);
       } catch (e) {
+        // ── BUGFIX: `git checkout --track origin/main` dies with
+        //    "fatal: a branch named 'main' already exists" when a local
+        //    branch of the same short name is already there (user report:
+        //    "При переключении на Remote ветку словил сообщение...").
+        //    Switching to the existing local branch is what the user meant —
+        //    fall back to a plain checkout of the stripped name.
+        //    (Renderers also pre-check, this is the defense-in-depth layer
+        //    for every other caller of git:checkout.)
+        if (options.track) {
+          const msg = (e as { stderr?: string; message?: string })?.stderr
+            || (e as { message?: string })?.message || String(e);
+          const m = msg.match(/a branch named '([^']+)' already exists/);
+          if (m) {
+            const localName = branch.replace(/^[^/]+\//, '');
+            if (localName === m[1]) {
+              await git.raw(['checkout', ...(options.force ? ['--force'] : []), localName]);
+              return result;
+            }
+          }
+        }
         // ── Auto-recover from "untracked working tree files would be
         //    overwritten by checkout" — same as pull.
         if (isUntrackedOverwriteError(e)) {

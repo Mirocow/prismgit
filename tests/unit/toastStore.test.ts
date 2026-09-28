@@ -98,4 +98,47 @@ describe('toastStore', () => {
       expect(useToastStore.getState().toasts[0].type).toBe('warning');
     });
   });
+
+  // ── Flood protection (user report: >10 identical "Merge in progress"
+  //    toasts on one screen after switching Diff → Branches mid-merge). ──
+  describe('flood protection', () => {
+    it('replaces an identical toast shown within the dedupe window (no stacking)', () => {
+      for (let i = 0; i < 10; i++) {
+        useToastStore.getState().error('Merge in progress', 'Finish it first on the Changes page');
+      }
+      const state = useToastStore.getState();
+      expect(state.toasts).toHaveLength(1);
+      expect(state.toasts[0].message).toBe('Merge in progress');
+    });
+
+    it('keeps DIFFERENT messages (dedupe is content-based, not a global mute)', () => {
+      useToastStore.getState().error('Merge in progress', 'hint A');
+      useToastStore.getState().error('Merge in progress', 'hint B');
+      useToastStore.getState().warning('Merge in progress', 'hint A'); // different type
+      const state = useToastStore.getState();
+      expect(state.toasts).toHaveLength(3);
+    });
+
+    it('stacks again after the dedupe window has elapsed', () => {
+      useToastStore.getState().show('error', 'Merge in progress', undefined, 6000);
+      // Simulate the window passing: age the existing toast beyond 2s.
+      const aged = useToastStore.getState().toasts[0];
+      useToastStore.setState({
+        toasts: [{ ...aged, shownAt: aged.shownAt - 5_000 }],
+      });
+      useToastStore.getState().show('error', 'Merge in progress', undefined, 6000);
+      expect(useToastStore.getState().toasts).toHaveLength(2);
+    });
+
+    it('caps concurrent toasts at 5, dropping the OLDEST', () => {
+      for (let i = 0; i < 8; i++) {
+        useToastStore.getState().show('info', `Message ${i}`);
+      }
+      const state = useToastStore.getState();
+      expect(state.toasts).toHaveLength(5);
+      // The newest five survive; the oldest three are dropped.
+      expect(state.toasts[0].message).toBe('Message 3');
+      expect(state.toasts[4].message).toBe('Message 7');
+    });
+  });
 });

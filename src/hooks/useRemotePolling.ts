@@ -21,6 +21,36 @@ export function resumeRemotePolling(): void {
 }
 
 /**
+ * Scope of the PERIODIC remote check (Settings → Git → background-check
+ * scope). User report: "Опять приложение PrismGit стало неимоверно тупить...
+ * Давай сделаем что фетч в фоне выполняется только у избранных
+ * репозиториев/проектов (так и нагрузку снизим)". Default: favorites only —
+ * the periodic poll (each cycle, per repo: `git remote -v` + a fetch of
+ * opted-in remotes + 2 rev-list walks + `status --porcelain`) runs for
+ * starred repos + the currently open repo. Non-favorite repos in the
+ * sidebar are never touched by the background loop; their badges update
+ * on manual refresh / repo open only. 'all' restores the legacy behavior.
+ *
+ * Exported for tests.
+ */
+export function scopeRemoteCheckPaths(paths: string[]): string[] {
+  const scope = useSettingsStore.getState().settings.repoRemoteCheckScope ?? 'favorites';
+  if (scope !== 'favorites') return paths;
+  const store = useRepositoryStore.getState();
+  // The current repo is always checked — its ↓/↑/dirty badges are on screen.
+  const current = store.currentRepo?.path;
+  // If metadata hasn't loaded yet we can't know what's a favorite — check
+  // NOTHING rather than hammering EVERY repo (the exact load this setting
+  // exists to prevent). The next tick after metadata lands covers it, and
+  // window focus / manual refresh bypass this filter via explicit paths.
+  const metadata = store.metadata;
+  if (!current && Object.keys(metadata).length === 0) return [];
+  return paths.filter(
+    (p) => p === current || metadata[p]?.favorite === true,
+  );
+}
+
+/**
  * Periodically checks every repository in the sidebar list against its
  * remotes: `git fetch --all`, then computes incoming/outgoing/dirty counters
  * (see pollRemoteSummary in the main process). The sidebar shows ↓N / ↑N
@@ -52,6 +82,20 @@ export function useRemotePolling(): void {
   const repoListKey = useRepositoryStore((s) => s.repos.map((r) => r.path).join('\n'));
   const repoListKeyRef = useRef(repoListKey);
   repoListKeyRef.current = repoListKey;
+
+  // Favorites-scope reactivity: when metadata lands (async, after the first
+  // render) or the user stars/unstars a repo, the effective poll scope
+  // changes — re-run the effect (and its initial-check gate) so badges for
+  // favorites appear without waiting a whole interval.
+  const favKey = useRepositoryStore((s) =>
+    Object.entries(s.metadata)
+      .filter(([, m]) => m?.favorite)
+      .map(([p]) => p)
+      .sort()
+      .join('\n'));
+  // The currently-open repo is always in scope — react to it too (opening
+  // a repo immediately refreshes its ↓/↑ badge).
+  const currentPath = useRepositoryStore((s) => s.currentRepo?.path ?? '');
 
   // NOTE (v3.2): there is NO gitStore.lastRefresh subscription here anymore.
   // It bumped the boost on EVERY status refresh — including the refreshes the
@@ -96,7 +140,7 @@ export function useRemotePolling(): void {
     const checkNow = () => {
       const paths = repoListKeyRef.current.split('\n').filter(Boolean);
       if (paths.length > 0) {
-        void useRepositoryStore.getState().checkRemotes(paths).catch(() => {});
+        void useRepositoryStore.getState().checkRemotes(scopeRemoteCheckPaths(paths)).catch(() => {});
       }
     };
 
@@ -132,11 +176,13 @@ export function useRemotePolling(): void {
     window.addEventListener('focus', onWindowFocus);
 
     // Initial check as soon as there is something to check — only with
-    // Auto refresh enabled, and only once per (autoRefresh, repoList) state —
-    // the StrictMode remount replays the same state and must not re-check.
+    // Auto refresh enabled, and only once per (autoRefresh, repoList,
+    // favorites, currentRepo) state — the StrictMode remount replays the
+    // same state and must not re-check.
     // Re-run when the list grows so a freshly added repo is checked without
-    // waiting a tick.
-    const gateKey = `${autoRefreshRef.current ? 'on' : 'off'}|${repoListKeyRef.current}`;
+    // waiting a tick; when metadata lands (favorites become known); and when
+    // the current repo changes (it is always in the poll scope).
+    const gateKey = `${autoRefreshRef.current ? 'on' : 'off'}|${repoListKeyRef.current}|${favKey}|${currentPath}`;
     if (autoRefreshRef.current && lastInitialGateRef.current !== gateKey) {
       lastInitialGateRef.current = gateKey;
       checkNow();
@@ -149,5 +195,5 @@ export function useRemotePolling(): void {
       window.removeEventListener('blur', onWindowBlur);
       window.removeEventListener('focus', onWindowFocus);
     };
-  }, [repoListKey, autoRefresh]);
+  }, [repoListKey, autoRefresh, favKey, currentPath]);
 }

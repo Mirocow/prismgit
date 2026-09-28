@@ -67,6 +67,15 @@ interface RepositoryState {
  */
 let openRepoInFlight: { path: string; promise: Promise<void> } | null = null;
 
+/**
+ * Queued remote check — a check requested while another one is in flight
+ * (was silently DROPPED before: "статистика в репозиториях не обновляется
+ * даже если принудительно её запустить" — a forced refresh landing during
+ * a background poll cycle did nothing). Runs immediately after the current
+ * check completes, deduped by path.
+ */
+let queuedRemoteCheck: string[] | null = null;
+
 export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   repos: [],
   groups: [],
@@ -109,9 +118,11 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
         ...g,
         expanded: prevExpanded.has(g.id) ? prevExpanded.get(g.id) : g.expanded,
       }));
-      // Sort: favorites first (Task 29: the legacy "pinned" secondary sort
-      // was removed together with the pin button — favorites already do
-      // the job and the pinned flag never had a working UI path).
+      // Sort: favorites first (Task 29 + perf round: the legacy "pinned"
+      // secondary sort was removed together with the pin button — favorites
+      // already do the job and the pinned flag never had a working UI path;
+      // «Из дерева репозиторий удали не нужный функциона "Закрепить", к
+      // тому же он и не работает и есть ему замена фаворитес»).
       // DON'T re-sort by lastOpened.
       const sorted = [...repos].sort((a, b) => {
         const metaA = get().metadata[a.path];
@@ -410,8 +421,12 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
     const ordered = current && targets.includes(current)
       ? [current, ...targets.filter((p) => p !== current)]
       : targets;
-    // Only one background check at a time — a second click is coalesced.
-    if (get().checkingRemotes) return;
+    // Only one background check at a time — a second request is QUEUED
+    // (not dropped) and runs as soon as the current cycle finishes.
+    if (get().checkingRemotes) {
+      queuedRemoteCheck = [...new Set([...(queuedRemoteCheck ?? []), ...ordered])];
+      return;
+    }
     set({ checkingRemotes: true });
     try {
       const summaries = await api.git.pollRemoteSummaries(ordered);
@@ -422,6 +437,12 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       console.warn('[remote-check] failed:', e);
     } finally {
       set({ checkingRemotes: false });
+      // Run whatever was queued while this check was in flight.
+      const queued = queuedRemoteCheck;
+      queuedRemoteCheck = null;
+      if (queued && queued.length > 0) {
+        void get().checkRemotes(queued);
+      }
     }
   },
 

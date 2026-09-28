@@ -17,6 +17,7 @@ export const zh: Record<string, string> = {
   'common.refresh': '刷新',
   'common.search': '搜索',
   'common.clear': '清除',
+  'common.errorDetails': '详细信息',
   'common.close': '关闭',
   'common.dismiss': '忽略',
   'common.copy': '复制',

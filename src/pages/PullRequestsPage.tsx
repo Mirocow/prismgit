@@ -975,7 +975,7 @@ export function PullRequestsPage() {
 
       {/* Create PR dialog */}
       {showCreate && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in" onClick={() => setShowCreate(false)}>
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50 animate-fade-in" onClick={() => setShowCreate(false)}>
           <div className="panel w-[480px] flex flex-col shadow-lg" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
               <h3 className="text-base font-medium flex items-center gap-2">

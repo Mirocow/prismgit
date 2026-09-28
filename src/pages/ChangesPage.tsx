@@ -1019,7 +1019,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       }
       const hash = await commit(repo.path, finalMsg, amend);
       // Task 29: hash as a PROMINENT chip (copy button, 8s duration) — the
-      // old plain-text «Хеш: …» detail was easy to miss entirely.
+      // old plain-text «Хеш: …» detail was easy to miss entirely. (The
+      // parallel «hash in the title» approach from the perf round is
+      // superseded by this chip — with the commit() fix for slashed
+      // branches, the hash now carries the real HEAD.)
       toast.successCommit(t('status.commitCreated'), hash);
       // Save commit message to per-project history for reuse
       const prefs = loadProjectPrefs(repo.path);
@@ -1487,16 +1490,29 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // Changed files are ALWAYS shown. Flags ADD categories (union).
   const hasFlag = useCallback((flag: FileDisplayFlag) => fileDisplayFlags.has(flag), [fileDisplayFlags]);
 
+  // ── Conflict classification (BUGFIX: "статистика… ошибочно показывается
+  //    (особенно на конфликтах)") ──
+  // The old `idx === 'U' || wd === 'U'` filter misses the porcelain combos
+  // AA (both added) and DD (both deleted) — no 'U' character in either
+  // code. Those conflicted files vanished from the Conflicts section (and
+  // leaked into Staged/Unstaged), while the Toolbar counter (which uses
+  // status.conflicted — ALL 7 unmerged combos) disagreed with the section
+  // count. Use the same source of truth: status.conflicted (parsed by
+  // simple-git from `git status`), with the code-set check as a fallback
+  // for transports that don't populate `conflicted`.
+  const UNMERGED_CODES = new Set(['UU', 'AA', 'DD', 'AU', 'UA', 'DU', 'UD']);
+  const conflictedPaths = useMemo(() => new Set(status?.conflicted ?? []), [status]);
+  const isUnmergedFile = useCallback((f: FileStatus): boolean =>
+    conflictedPaths.has(f.path) || UNMERGED_CODES.has(`${f.index as string}${f.working_dir as string}`),
+    [conflictedPaths]);
+
   // Memoize file lists to avoid re-sorting on every render (e.g. when
   // hovering over rows causes a re-render but status hasn't changed).
   // Staged files go to their own section — NOT affected by display flags.
   const stagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
-    // Exclude conflicted files (UU/AU/UA/DD etc.) — they show in the
-    // Conflicts section, NOT in Staged. A conflicted file has index='U'
-    // or working_dir='U' in git porcelain status.
-    const idx = f.index as string;
-    const wd = f.working_dir as string;
-    if (idx === 'U' || wd === 'U') return false;
+    // Exclude conflicted files (all 7 unmerged combos — see
+    // isUnmergedFile): they show in the Conflicts section, NOT in Staged.
+    if (isUnmergedFile(f)) return false;
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) return false;
     const stagedIdx = staged.index as string;
@@ -1505,7 +1521,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
     .filter((f) => !hideEolOnly || !eolOnlyPaths.has(f.path))
-    ), [status, sortFiles, fileDisplayFlags, hideEolOnly, eolOnlyPaths]);
+    ), [status, sortFiles, fileDisplayFlags, hideEolOnly, eolOnlyPaths, isUnmergedFile]);
 
   // Detect unstaged renames by comparing content hashes of deleted tracked
   // files with untracked files. Delegates the heavy lifting to a single
@@ -1742,13 +1758,12 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     // a Renamed row instead of an Untracked row.
     if (renamedNewPaths.has(f.path)) return false;
     // Exclude conflicted files — they show in the Conflicts section only.
-    const idx = f.index as string;
-    const wd = f.working_dir as string;
-    if (idx === 'U' || wd === 'U') return false;
+    if (isUnmergedFile(f)) return false;
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) {
       // Exclude untracked ('??') from the unstaged list — they render in
       // their own Untracked section (if 'unversioned' flag is ON).
+      const wd = f.working_dir as string;
       return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');
     }
     const stagedWd = staged.working_dir as string;
@@ -1757,7 +1772,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
     .filter((f) => !hideEolOnly || !eolOnlyPaths.has(f.path))
-    ), [status, sortFiles, fileDisplayFlags, renamedOldPaths, renamedNewPaths, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs, hideEolOnly, eolOnlyPaths]);
+    ), [status, sortFiles, fileDisplayFlags, renamedOldPaths, renamedNewPaths, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs, hideEolOnly, eolOnlyPaths, isUnmergedFile]);
 
   // Detected rename entries — shown in the unstaged section as Renamed rows.
   // Each entry has the new path as the file path and old_path set.
@@ -1775,12 +1790,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
 
   // Conflicted files — shown in their OWN section (red accent) ABOVE staged.
   const conflictedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
-    const idx = f.index as string;
-    const wd = f.working_dir as string;
-    return idx === 'U' || wd === 'U';
+    return isUnmergedFile(f);
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-    .filter((f) => matchesDirScope(f.path))), [status, sortFiles, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs]);
+    .filter((f) => matchesDirScope(f.path))), [status, sortFiles, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs, isUnmergedFile]);
 
   // Untracked files — shown only when 'unversioned' flag is ON.
   // Exclude files that are the NEW path of a detected rename — they show
@@ -1957,7 +1970,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     const isSkipped = skippedFiles.includes(file.path);
     const isSubmodule = submoduleChanges.includes(file.path);
     const isUntracked = idx === '?' && wd === '?';
-    const isConflicted = idx === 'U' || wd === 'U';
+    const isConflicted = isUnmergedFile(file);
     const isIgnored = idx === 'ignored' || wd === 'ignored';
     const isUnmodified = idx === 'unmodified' || wd === 'unmodified';
 

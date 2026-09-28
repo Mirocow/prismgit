@@ -111,7 +111,7 @@ export default function AiChatPage() {
     const found = repos.find(r => r.path === sessionRepoPath);
     if (found) return found;
     const name = sessionRepoPath.split(/[/\\]/).pop() ?? sessionRepoPath;
-    return { name, path: sessionRepoPath, lastOpened: 0, pinned: false };
+    return { name, path: sessionRepoPath, lastOpened: 0 };
   }, [sessionRepoPath, repos]);
 
   const abortRef = useRef<AbortController | null>(null);

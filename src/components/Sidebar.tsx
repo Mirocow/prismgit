@@ -513,7 +513,11 @@ export function Sidebar() {
       } else if (clickId === 'ungroup') {
         void dropRepoIntoGroup(repoPath, null);
       } else if (clickId === 'check') {
-        void checkRemotes([repoPath]);
+        // Clear the 60s poll cache for THIS repo first — without it a
+        // per-row "Check remotes now" could return the ≤60s-cached ↓/↑
+        // summary (user report: "статистика в репозиториях не обновляется
+        // даже если принудительно её запустить").
+        void api.git.clearPollCache(repoPath).catch(() => {}).then(() => checkRemotes([repoPath]));
       } else if (clickId === 'refresh-stats') {
         // Force-refresh metadata (lastCommit, branchCount, commitCount,
         // provider) for this single repo. Falls back to the full refresh
@@ -689,6 +693,9 @@ export function Sidebar() {
               {meta.tags.length}
             </span>
           )}
+          {/* REMOVED (Task 29 + perf round): the «Закрепить»/pin button —
+              broken feature duplicating favorites (user request). Sorting
+              now only honors the star. */}
           <button
             className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 hover:!text-status-deleted transition-opacity"
             title={t('shell.removeFromList')}

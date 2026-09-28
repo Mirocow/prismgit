@@ -99,7 +99,7 @@ export function FindObjectDialog({ open, onClose, onSelect }: FindObjectDialogPr
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 flex items-start justify-center pt-24 z-50 animate-fade-in"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50 animate-fade-in"
       onClick={onClose}
     >
       <div

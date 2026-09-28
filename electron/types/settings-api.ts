@@ -2,7 +2,6 @@ export interface RepositoryEntry {
   path: string;
   name: string;
   lastOpened: number;
-  pinned?: boolean;
   /** Repository group (folder) this repo belongs to; null/undefined = root level. */
   groupId?: string | null;
 }
@@ -396,6 +395,18 @@ export interface AppSettings {
    * 0 disables the periodic check (manual "Check now" still works).
    */
   repoRemoteCheckIntervalSec?: number;
+  /**
+   * WHICH repositories the periodic remote check covers — the scope knob
+   * for the background load (user report: "приложение стало неимоверно
+   * тупить... нет возможности остановить постоянный фетч").
+   *   - 'favorites' (DEFAULT): only repos starred ★ in the sidebar (plus
+   *     the currently open repo) are polled — a sidebar of heavy repos on
+   *     slow volumes no longer spawns `git remote -v` + rev-list walks +
+   *     `status --porcelain` for every repo every cycle.
+   *   - 'all': legacy behavior — every repo in the list.
+   * Manual "Check now" in the sidebar always covers ALL repos.
+   */
+  repoRemoteCheckScope?: 'all' | 'favorites';
   /**
    * Periodic auto-push to origin: while the app is open and a repository is
    * the active one, the local branch's outgoing commits are pushed to its

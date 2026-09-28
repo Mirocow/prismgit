@@ -50,8 +50,8 @@ function compareGroups(a: RepoGroup, b: RepoGroup): number {
 
 /**
  * The same stable repo ordering as the flat list uses: favorites first,
- * otherwise the array's insertion order. (Task 29: the legacy "pinned"
- * tier was removed with the pin button — it duplicated favorites.)
+ * otherwise the array's insertion order. (Task 29 + perf round: the legacy
+ * "pinned" tier was removed with the pin button — it duplicated favorites.)
  */
 function compareRepos(a: RepositoryEntry, b: RepositoryEntry, favorites: Set<string>): number {
   const fa = favorites.has(a.path) ? 1 : 0;

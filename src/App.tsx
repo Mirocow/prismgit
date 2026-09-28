@@ -52,6 +52,7 @@ const RepoSettingsDialog = lazy(() => import('./components/RepoSettingsDialog').
 // Remote-conflict reaction surface — opened from ANY push catch site via
 // offerPushRejection() (pushRejectionStore). Mounted once, self-gating on ctx.
 const PushRejectionDialog = lazy(() => import('./components/PushRejectionDialog').then(m => ({ default: m.PushRejectionDialog })));
+const ErrorDialogHost = lazy(() => import('./components/ErrorDialogHost').then(m => ({ default: m.ErrorDialogHost })));
 // Rarely-used overlays — lazy-load to keep the initial bundle small.
 // These are triggered by keyboard shortcuts / toolbar buttons, so a
 // ~50ms chunk fetch on first open is invisible to the user.
@@ -1771,6 +1772,7 @@ export default function App() {
       />
       <ToastContainer />
       <ConfirmDialogHost />
+      <Suspense fallback={null}><ErrorDialogHost /></Suspense>
       <DragDropHandler />
       <DeepLinkHandler />
       <Suspense fallback={null}><CloneModal open={showClone} onClose={() => setShowClone(false)} /></Suspense>

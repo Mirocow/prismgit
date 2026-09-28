@@ -1069,7 +1069,7 @@ export const gitAbortOpTool: AITool = {
 
 /** List all repositories that the app has opened before.
  *
- *  DEFAULT mode returns name + path + last-opened + pinned status.
+ *  DEFAULT mode returns name + path + last-opened.
  *  Pass include_status=true to ALSO fetch git status (branch, ahead/behind,
  *  file change counts) for every repo in parallel. This lets the user ask
  *  "show me the status of all my repos" in a single tool call.
@@ -1099,8 +1099,7 @@ export const listReposTool: AITool = {
       // Fast mode — just name + path + timestamp.
       for (const r of sorted) {
         const ago = formatAgo(Date.now() - r.lastOpened);
-        const pin = r.pinned ? ' [pinned]' : '';
-        lines.push(`• ${r.name}${pin} — ${r.path} (last opened ${ago})`);
+        lines.push(`• ${r.name} — ${r.path} (last opened ${ago})`);
       }
       lines.push('');
       lines.push('Tip: call list_repos with include_status=true to see git status of all repos.');
@@ -1128,11 +1127,10 @@ export const listReposTool: AITool = {
     });
     const statuses = await Promise.all(statusPromises);
     for (const s of statuses) {
-      const pin = sorted.find(r => r.path === s.path)?.pinned ? ' [pinned]' : '';
       if (s.error) {
-        lines.push(`• ${s.name}${pin} — ${s.path} — ERROR: ${s.error}`);
+        lines.push(`• ${s.name} — ${s.path} — ERROR: ${s.error}`);
       } else {
-        lines.push(`• ${s.name}${pin} — ${s.status} — ${s.path}`);
+        lines.push(`• ${s.name} — ${s.status} — ${s.path}`);
       }
     }
     return lines.join('\n');

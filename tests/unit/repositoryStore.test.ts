@@ -62,15 +62,16 @@ describe('repositoryStore', () => {
   describe('loadRepos', () => {
     it('loads repositories sorted by favorites (stable order, NOT by lastOpened)', async () => {
       const mockRepos = [
-        { path: '/a', name: 'a', lastOpened: 100, pinned: false },
-        { path: '/b', name: 'b', lastOpened: 200, pinned: false },
-        { path: '/c', name: 'c', lastOpened: 300, pinned: false },
+        { path: '/a', name: 'a', lastOpened: 100 },
+        { path: '/b', name: 'b', lastOpened: 200 },
+        { path: '/c', name: 'c', lastOpened: 300 },
       ];
       vi.mocked(api.settings.getRepos).mockResolvedValue(mockRepos);
-      // /b is a FAVORITE → must float to the top. (Task 29: the separate
-      // "pinned" tier was removed with the pin button — favorites sort alone.)
+      // /b is a FAVORITE → must float to the top. (Task 29 + perf round: the
+      // separate "pinned" tier was removed with the pin button — favorites
+      // sort alone; «Закрепить» duplicated favorites and never worked.)
       useRepositoryStore.setState({
-        metadata: { '/b': { path: '/b', favorite: true } as never },
+        metadata: { '/b': { path: '/b', name: 'b', favorite: true } as never },
       });
 
       await useRepositoryStore.getState().loadRepos();
@@ -451,6 +452,37 @@ describe('repositoryStore', () => {
 
       expect(api.git.pollRemoteSummaries).not.toHaveBeenCalled();
       useRepositoryStore.setState({ checkingRemotes: false });
+    });
+
+    it('queues a forced check while one is in flight (was silently DROPPED)', async () => {
+      // User report: "статистика в репозиториях не обновляется даже если
+      // принудительно её запустить" — a manual refresh landing during a
+      // background poll cycle used to be dropped. Now it is queued and
+      // runs as soon as the in-flight cycle finishes.
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      vi.mocked(api.git.pollRemoteSummaries)
+        .mockImplementationOnce(async () => { await gate; return {}; })
+        .mockResolvedValue({});
+      useRepositoryStore.setState({
+        repos: [{ path: '/a', name: 'a', lastOpened: 0 }],
+        remoteChecks: {},
+        checkingRemotes: false,
+      });
+
+      const first = useRepositoryStore.getState().checkRemotes();      // in flight (gated)
+      const second = useRepositoryStore.getState().checkRemotes(['/b']); // queued
+
+      // While the first is running, no second poll starts...
+      expect(api.git.pollRemoteSummaries).toHaveBeenCalledTimes(1);
+
+      release();
+      await first;
+      await second;
+      // ...and the queued request runs right after with its own paths.
+      expect(api.git.pollRemoteSummaries).toHaveBeenCalledTimes(2);
+      expect(api.git.pollRemoteSummaries).toHaveBeenLastCalledWith(['/b']);
+      expect(useRepositoryStore.getState().checkingRemotes).toBe(false);
     });
 
     it('does not throw when the api call rejects', async () => {

@@ -218,16 +218,16 @@ export function addRepo(repo: { path: string; name: string }): void {
   const repos = (store.get('repositories') || []) as RepositoryEntry[];
   const existingIdx = repos.findIndex((r) => r.path === repo.path);
   const existing = existingIdx >= 0 ? repos[existingIdx] : null;
-  // PRESERVE existing fields (pinned, groupId) when re-adding a repo.
+  // PRESERVE existing fields (groupId) when re-adding a repo.
   // Previously, clicking a repo in the sidebar called addRepo() which
   // overwrote the entry with a fresh object — losing groupId and dropping
-  // the repo out of its folder. Now we merge: keep pinned + groupId from
-  // the existing entry, only bump lastOpened.
+  // the repo out of its folder. Now we merge: keep groupId from the
+  // existing entry, only bump lastOpened. (The legacy `pinned` flag was
+  // removed from the schema — stale JSON fields are simply ignored.)
   const entry: RepositoryEntry = {
     path: repo.path,
     name: repo.name,
     lastOpened: Date.now(),
-    pinned: existing?.pinned,
     groupId: existing?.groupId,
   };
   if (existingIdx >= 0) {

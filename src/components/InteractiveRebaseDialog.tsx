@@ -285,7 +285,7 @@ export function InteractiveRebaseDialog({
 
   return (
     <div
-      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fade-in"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50 animate-fade-in"
       onClick={onClose}
     >
       <div

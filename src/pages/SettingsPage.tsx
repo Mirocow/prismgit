@@ -780,6 +780,28 @@ export function SettingsPage() {
                   <span className="text-xs text-text-tertiary">{t('settings.secUnit')}</span>
                 </div>
               </div>
+              {/* Background-check scope — favorites-only by default (user
+                  report: background poll of EVERY sidebar repo made the app
+                  "неимоверно тупить"; the periodic cycle now touches only
+                  starred repos + the open repo). 'all' restores the legacy
+                  full-list behavior. */}
+              <div className="flex items-center justify-between mt-3" data-testid="remote-check-scope-setting">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.remoteCheckScope')}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.remoteCheckScopeHint')}
+                  </div>
+                </div>
+                <select
+                  className="text-sm shrink-0"
+                  value={settings.repoRemoteCheckScope ?? 'favorites'}
+                  onChange={(e) => setSetting('repoRemoteCheckScope', e.target.value as 'all' | 'favorites')}
+                  data-testid="remote-check-scope-select"
+                >
+                  <option value="favorites">{t('settings.remoteCheckScopeFavorites')}</option>
+                  <option value="all">{t('settings.remoteCheckScopeAll')}</option>
+                </select>
+              </div>
               {/* History page auto-refresh — was previously unconfigurable.
                   The History page re-ran `git log -100` on EVERY
                   lastRefresh bump (every commit / fetch / push / file

@@ -16,6 +16,8 @@ interface Toast {
    * «Коммит создан» toast (Task 29).
    */
   hash?: string;
+  /** Wall-clock ms when the toast entered the queue — dedupe window key. */
+  shownAt: number;
 }
 
 interface ToastState {
@@ -31,6 +33,24 @@ interface ToastState {
 }
 
 let nextId = 1;
+
+/**
+ * MAX_TOASTS — hard cap on concurrently visible toasts. Beyond this the
+ * OLDEST toast is dropped (the newest is the one the user just acted on).
+ * Without a cap, a render-loop bug (e.g. a toast fired from a component's
+ * render body — BranchesPage's disabled={fnThatToasts()} used to do exactly
+ * that) could stack 10+ identical boxes in seconds: "выдало более 10
+ * сообщений на 1 экране".
+ */
+const MAX_TOASTS = 5;
+
+/**
+ * Identical (type+message+detail) toasts shown within this window REPLACE
+ * the previous one instead of stacking a duplicate copy. Guards the same
+ * render-loop class of bugs even after the render-time emission sites are
+ * fixed — a repeating background warning shows ONE toast, not N.
+ */
+const TOAST_DEDUPE_MS = 2_000;
 
 /**
  * Humanize error details before showing them.
@@ -63,8 +83,31 @@ export const useToastStore = create<ToastState>((set, get) => ({
 
   show: (type, message, detail, duration = 4000, hash) => {
     const id = nextId++;
-    const toast: Toast = { id, type, message, detail: humanizeDetail(detail), duration, hash };
-    set({ toasts: [...get().toasts, toast] });
+    const toast: Toast = { id, type, message, detail: humanizeDetail(detail), duration, hash, shownAt: Date.now() };
+
+    let nextToasts = get().toasts;
+
+    // ── Dedupe: identical toast(s) (same type+message+detail) shown within
+    //    TOAST_DEDUPE_MS are replaced by this one instead of stacking. The
+    //    replacement gets a fresh timer, so a repeating warning stays alive
+    //    while it keeps firing and disappears `duration` after the LAST
+    //    occurrence. (User report: >10 identical "Merge in progress" boxes
+    //    on one screen after switching Diff → Branches mid-merge.)
+    const isRecentDup = (t: Toast): boolean =>
+      t.type === type &&
+      t.message === message &&
+      t.detail === toast.detail &&
+      Date.now() - t.shownAt < TOAST_DEDUPE_MS;
+    if (nextToasts.some(isRecentDup)) {
+      nextToasts = nextToasts.filter((t) => !isRecentDup(t));
+    }
+
+    // ── Cap: at most MAX_TOASTS visible at once; drop the OLDEST.
+    if (nextToasts.length >= MAX_TOASTS) {
+      nextToasts = nextToasts.slice(nextToasts.length - (MAX_TOASTS - 1));
+    }
+
+    set({ toasts: [...nextToasts, toast] });
     if (duration > 0) {
       setTimeout(() => get().dismiss(id), duration);
     }
