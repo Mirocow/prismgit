@@ -8,6 +8,7 @@ import { runStatsJob } from './gitStatsCore.js';
 import type { StatsJobRequest, StatsJobResult } from './gitStatsCore.js';
 import { runRawJob } from './gitRawCore.js';
 import type { RawJobRequest } from './gitRawCore.js';
+import { recordExternalSpawn } from './commandLog.js';
 
 /**
  * GIT POLL PROCESS — main-side manager of the DEDICATED utilityProcess that
@@ -283,6 +284,22 @@ async function ensureWorker(): Promise<WorkerState> {
       knownWorkerChildPids = new Set(
         (msg.pids as unknown[]).filter((p): p is number => typeof p === 'number' && p > 0),
       );
+      return;
+    }
+    if (msg.kind === 'spawn-log' && Array.isArray((msg as { args?: unknown }).args)) {
+      // v3.8: a git child the WORKER spawned (the coalescedRaw read router
+      // executes read/meta commands in the worker since the "тупит на всех
+      // инструментах" report). Recorded into the SAME command log the
+      // main-process spawn interceptor fills, so the Operations console
+      // shows ALL git activity with durations — the honest instrument for
+      // load analysis.
+      const s = msg as { args: unknown[]; cwd?: unknown; exitCode?: unknown; durationMs?: unknown };
+      recordExternalSpawn({
+        args: s.args.map((a) => String(a)),
+        cwd: typeof s.cwd === 'string' ? s.cwd : process.cwd(),
+        exitCode: typeof s.exitCode === 'number' ? s.exitCode : null,
+        durationMs: typeof s.durationMs === 'number' ? s.durationMs : 0,
+      });
       return;
     }
 

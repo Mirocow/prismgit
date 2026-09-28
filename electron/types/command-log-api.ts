@@ -26,6 +26,10 @@ export interface CommandLogEntry {
   stdout: string;
   /** Captured stderr (truncated). Git writes ref status lines here even on success. */
   stderr: string;
+  /** Where the git child ran: main process (default/undefined) or the
+   * dedicated git worker (read commands routed there since v3.8 — the
+   * console shows both realms with durations). */
+  origin?: 'worker';
 }
 
 export interface CommandLogApi {

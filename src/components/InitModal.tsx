@@ -70,7 +70,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
           </button>
         </div>
 
-        <div className="p-4 space-y-3">
+        <div className="p-4 space-y-4">
           <div>
             <label className="text-xs text-text-tertiary block mb-1">
               {t('dialogs.directoryLabel')}

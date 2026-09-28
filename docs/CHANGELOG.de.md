@@ -7,6 +7,31 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.1] - 2026-09-29
+
+### Behoben — der Bericht «App hängt in jedem Werkzeug» (gemessen, dann behoben)
+- **Alle schreibgeschützten git-Befehle laufen jetzt im dedizierten git-worker-Prozess** statt im Electron-Main-Loop. Der Main-Prozess ist der IPC-Broker jedes Renderer-Aufrufs — während er git-Ausgaben pumpte, warteten Klicks und Refreshes aller Werkzeuge. Gemessen an einem 20k-Commit/31-Branch-Fixture: History-Öffnen blockierte den Main-Loop 119ms (auf macOS ×3-5 teurer); nach dem Router blockiert kein Werkzeug länger als 2.4ms. In-Flight-Coalescing und 1s-Meta-TTL unverändert; vitest läuft weiter in-process — alle 2017 Tests beobachten identisches Verhalten
+- **Worker-seitige git-Spawns werden an die Operations-Konsole gemeldet** — das Befehlsprotokoll zeigt ALLE git-Aktivitäten mit Dauer (39 von 47 Befehlen liefen im Worker)
+- `git remote -v` (langsamster Befehl im History-Öffnungs-Burst, 384ms) ist jetzt 60s gecacht
+- **GitLab-projectId-Heal-Watchdog (PR/Reviews)** mit Backoff: abgelehnter Token oder unerreichbares GitLab wiederholte zuvor alle 1,5s (~40 Anfragen/Minute); Ausfälle verdoppeln die Verzögerung bis 30s
+- **Bisect-3s-Polling** läuft nur während einer aktiven Bisect-Sitzung
+
+### Hinzugefügt — von der Suche zum Commit, der die Änderung einbrachte
+- Jede Trefferzeile (git grep) erhielt Aktionen: **Blame an dieser Zeile** (scrollt + blinkt, zeigt wer es einbrachte), **History der Datei** (bereits darauf gefiltert), **Diff**; der Dateigruppen-Kopf bietet Changes/Diff/Blame/History komplett
+- Der History-Sprung aus der Suche filtert den Graphen nach der Datei (Pfad-Filter-Chip) und kann den Commit vorauswählen
+- Einmaliges `blameFocusLine` im Selection-Store treibt den fokussierten Sprung
+
+### Hinzugefügt — der KI-Assistent beherrscht Search und Blame
+- Neue Tools `search_code` (git grep — die Inhalts-Engine des Search-Werkzeugs) und `blame_file` (zeilenannotierter Blame, gruppiert in Commit-Blöcke) mit Auswahlhinweisen
+
+### Behoben — History-Filter vs. Suche
+- Aktivierung eines Chip/Autor/Datum-Filters bei aktiver Textsuche **löscht jetzt die Suche** — der Filter wirkt auf ALLE Commits
+- Jedes Filterfeld (History, Branches, Changes) hat einen **✕-Löschen-Button** + Esc
+
+### Geändert — Luft in Dialogen und Einstellungen
+- Dialog-Formulargruppen und Einstellungs-/Listenzeilen mit größerem Abstand
+
+
 ## [2.3.0] - 2026-09-29
 
 ### Hinzugefügt — Browser-artige Zurück/Vorwärts-Navigation

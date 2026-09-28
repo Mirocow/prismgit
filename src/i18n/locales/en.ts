@@ -288,6 +288,7 @@ export const en: Record<string, string> = {
   'vscode.toolNotConfigured': 'Not configured',
   // MED-4 — line-context menu extras
   'common.copied': 'Copied',
+  'common.clearFilter': 'Clear filter',
   'common.copyFailed': 'Copy failed',
   'common.copyHash': 'Copy commit hash',
   'common.copyLineNumber': 'Copy line number ({n})',

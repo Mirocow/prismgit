@@ -489,7 +489,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
 
         <div className="flex-1 overflow-y-auto p-4">
           {tab === 'url' ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
                 <label className="text-xs text-text-tertiary block mb-1">
                   {t('clone.url')}
@@ -693,7 +693,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
               </label>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <input
                 type="text"
                 placeholder={t('dialogs.searchRepos')}
@@ -738,7 +738,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
             </div>
           )}
           {tab === 'gitlab' && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {/* GitLab auth form — shown when not authenticated. Mirrors
                   the GitHub PAT form in SettingsPage but inline so the
                   user can auth without leaving the Clone modal. */}

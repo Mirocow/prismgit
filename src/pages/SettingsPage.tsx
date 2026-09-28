@@ -468,7 +468,7 @@ export function SettingsPage() {
         {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.appearance')}</div>
-          <div className="p-5 space-y-5">
+          <div className="p-5 space-y-6">
             {/* Language selector */}
             <div className="flex items-center justify-between">
               <div>
@@ -617,28 +617,28 @@ export function SettingsPage() {
             <div className="border-t border-border-subtle pt-4 mt-4">
               <div className="text-2xs uppercase text-text-tertiary mb-3 font-bold tracking-wider">{t('settings.perAreaFontSizes')}</div>
               <div className="grid grid-cols-2 gap-4">
-                <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded hover:bg-bg-hover transition-colors">
                   <span className="text-xs">{t('settings.fontAreaTree')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeTree ?? 12}
                     onChange={(e) => setSetting('fontSizeTree', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
-                <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded hover:bg-bg-hover transition-colors">
                   <span className="text-xs">{t('settings.fontAreaLists')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeList ?? 12}
                     onChange={(e) => setSetting('fontSizeList', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
-                <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded hover:bg-bg-hover transition-colors">
                   <span className="text-xs">{t('settings.fontAreaDiff')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeDiff ?? 11}
                     onChange={(e) => setSetting('fontSizeDiff', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
-                <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded hover:bg-bg-hover transition-colors">
                   <span className="text-xs">{t('settings.fontAreaMonospace')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeMonospace ?? 11}
                     onChange={(e) => setSetting('fontSizeMonospace', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
                 {/* Left bar (Sidebar) — the only per-area size wired to the sidebar */}
-                <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded hover:bg-bg-hover transition-colors">
                   <span className="text-xs">{t('settings.fontAreaSidebar')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeSidebar ?? 12}
                     onChange={(e) => setSetting('fontSizeSidebar', Number(e.target.value))} className="w-16 text-xs" />
@@ -668,7 +668,7 @@ export function SettingsPage() {
         {showGit && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.git')}</div>
-          <div className="p-5 space-y-5">
+          <div className="p-5 space-y-6">
             {/* Default commit author — written to new repos on init/clone,
                 used as a commit-time fallback. Fixes "Please tell me who
                 you are" on repositories created via PrismGit. */}
@@ -1015,7 +1015,7 @@ export function SettingsPage() {
         {showAdvanced && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.advancedTitle', { defaultValue: 'Advanced Properties' })}</div>
-          <div className="p-5 space-y-5">
+          <div className="p-5 space-y-6">
             <div className="text-xs text-text-tertiary p-3 bg-bg-tertiary rounded">
               {t('settings.advancedWarning', { defaultValue: 'These properties affect low-level behavior. Changes apply immediately.' })}
             </div>
@@ -1425,7 +1425,7 @@ export function SettingsPage() {
                   configEntries
                     .filter((e) => !configFilter || e.key.toLowerCase().includes(configFilter.toLowerCase()))
                     .map((entry, i) => (
-                      <div key={`${entry.key}-${i}`} className="group flex items-center gap-2 px-3 py-1.5 border-b border-border-subtle last:border-b-0 text-xs">
+                      <div key={`${entry.key}-${i}`} className="group flex items-center gap-2 px-3 py-2 border-b border-border-subtle last:border-b-0 text-xs">
                         <code className="font-mono text-text-secondary shrink-0 w-56 truncate" title={entry.key}>
                           {entry.key}
                         </code>
@@ -1793,7 +1793,7 @@ export function SettingsPage() {
                 );
                 const optionSet = new Set<string>(['None', current, ...freeSlots]);
                 return (
-                  <div key={item.path} className="flex items-center gap-2 py-1 px-2 rounded hover:bg-bg-hover">
+                  <div key={item.path} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-bg-hover">
                     <span className="flex items-center gap-0.5 shrink-0">
                       <button
                         className="icon-btn !w-5 !h-5"

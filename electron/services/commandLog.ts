@@ -227,6 +227,46 @@ export function listEntries(): CommandLogEntry[] {
   return entries.slice();
 }
 
+/**
+ * Record a git spawn that happened OUTSIDE this process (v3.8): the coalesced
+ * read router now executes read/meta commands in the dedicated git worker,
+ * whose children the main-process spawn interceptor cannot observe. The
+ * worker reports them back (args + cwd + exit + duration) and main records
+ * them here — one console, ALL git activity. Output text is not shipped
+ * across the process boundary (size); duration + exit code + argv are what
+ * load analysis needs.
+ */
+export function recordExternalSpawn(e: {
+  args: string[];
+  cwd: string;
+  exitCode: number | null;
+  durationMs: number;
+}): void {
+  try {
+    const entry: CommandLogEntry = {
+      id: nextId++,
+      timestamp: Date.now(),
+      repo: e.cwd || process.cwd(),
+      args: e.args.map(sanitizeArg),
+      exitCode: e.exitCode,
+      signal: null,
+      durationMs: e.durationMs,
+      stdout: '',
+      stderr: '',
+      origin: 'worker',
+    };
+    entries.unshift(entry); // newest first, same as recordSpawn
+    if (entries.length > MAX_ENTRIES) entries.length = MAX_ENTRIES;
+    try {
+      onEntryCb?.(entry);
+    } catch {
+      /* listener errors must not break recording */
+    }
+  } catch {
+    /* never let logging break anything */
+  }
+}
+
 export function clearEntries(): void {
   entries.length = 0;
 }

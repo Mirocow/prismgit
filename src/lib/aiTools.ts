@@ -1331,6 +1331,108 @@ export const openRepoTool: AITool = {
 // ── Persistent memory tools ──────────────────────────────────────────────
 // Declared BEFORE AI_TOOLS so the array can reference them.
 
+// ── Search / Blame tools (v3.8) ───────────────────────────────────────────
+// The user's report: «AI Assistant не пользуется инструментами приложения
+// PrismGit, совсем не знает про инструмент Search и Blame». These two tools
+// give the chat the SAME powers the Search and Blame UI tools have — content
+// search (git grep) and line-annotated blame — so "кто внёс эту строку?" and
+// "где используется X?" are answerable with real repo data instead of
+// guessing from the log.
+
+/** Search file CONTENTS (git grep) — the Search tool's «Содержимое» tab. */
+export const searchCodeTool: AITool = {
+  name: 'search_code',
+  description: 'Search file CONTENTS across the whole working tree (git grep — the same engine as the Search tool\'s "Content" tab). Returns matching lines as file:line:text, capped at 50 matches. Supports regex by default (git grep syntax), optional case-insensitivity and pathspec narrowing (e.g. "src/**"). Use this to find where a function/constant/string is used before editing it.',
+  parameters: {
+    type: 'object',
+    properties: {
+      pattern: { type: 'string', description: 'Search pattern (git grep regex, e.g. "handleFetch\\(" or a plain substring)' },
+      ignore_case: { type: 'boolean', description: 'Case-insensitive match (-i). Default false.', default: false },
+      pathspec: { type: 'string', description: 'Optional pathspec to narrow the search, e.g. "src/lib" or "*.ts". Default: whole tree.' },
+    },
+    required: ['pattern'],
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    const p = params as { pattern?: string; ignore_case?: boolean; pathspec?: string };
+    const pattern = (p.pattern ?? '').trim();
+    if (!pattern) return 'Error: pattern is required.';
+    const opts = ['--line-number'];
+    if (p.ignore_case) opts.push('-i');
+    try {
+      const raw = await api.git.grep(repoPath, pattern, opts, p.pathspec?.trim() || undefined);
+      const lines = raw.split('\n').filter(Boolean);
+      if (lines.length === 0) return `No matches for ${JSON.stringify(pattern)}${p.pathspec ? ` in ${p.pathspec}` : ''}.`;
+      const capped = lines.slice(0, 50);
+      const out = capped.map((l) => '  ' + l.trim()).join('\n');
+      const note = lines.length > 50 ? `\n(${lines.length} matches total — showing first 50; narrow with pathspec)` : '';
+      return `git grep ${JSON.stringify(pattern)}${p.pathspec ? ` -- ${p.pathspec}` : ''} → ${lines.length} match(es):\n${out}${note}`;
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes('exit code 1')) return `No matches for ${JSON.stringify(pattern)}.`;
+      return `Search failed: ${msg}`;
+    }
+  },
+};
+
+/** Blame a file (line-annotated) — the Blame tool's engine. */
+export const blameFileTool: AITool = {
+  name: 'blame_file',
+  description: 'Run git blame on a file: shows, per line range, WHICH COMMIT and WHICH AUTHOR last changed it. Returns grouped blocks (commit hash, author, date, subject, line range). Optional ref (default HEAD). Use this to answer "who introduced this code / when was this line changed" — the same data the Blame tool shows.',
+  parameters: {
+    type: 'object',
+    properties: {
+      file: { type: 'string', description: 'Repository-relative file path, e.g. "src/lib/api.ts"' },
+      ref: { type: 'string', description: 'Commit/branch/tag to blame at (default HEAD). Use "<hash>^" to blame BEFORE a commit.' },
+      start_line: { type: 'number', description: 'Optional first line of the range to report (default 1).' },
+      end_line: { type: 'number', description: 'Optional last line of the range to report (default: whole file).' },
+    },
+    required: ['file'],
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    const p = params as { file?: string; ref?: string; start_line?: number; end_line?: number };
+    const file = (p.file ?? '').trim();
+    if (!file) return 'Error: file is required.';
+    try {
+      const result = await api.git.blame(repoPath, file, p.ref?.trim() || undefined);
+      if (!result.lines.length) return `No blame data for ${file} (binary or empty file?).`;
+      const start = Math.max(1, p.start_line ?? 1);
+      const end = Math.min(result.totalLines, p.end_line ?? result.totalLines);
+      // Group consecutive lines by commit — a compact "who changed what"
+      // summary instead of one row per line.
+      const blocks: { hash: string; author: string; date: string; subject: string; from: number; to: number }[] = [];
+      for (const line of result.lines) {
+        const n = line.finalLineNumber;
+        if (n < start || n > end) continue;
+        const last = blocks[blocks.length - 1];
+        if (last && last.hash === line.hash && last.to === n - 1) {
+          last.to = n;
+        } else {
+          blocks.push({
+            hash: line.hashAbbrev || line.hash.slice(0, 7),
+            author: line.author,
+            date: line.authorTime,
+            subject: line.summary,
+            from: n,
+            to: n,
+          });
+        }
+      }
+      const head = `git blame ${p.ref ? p.ref + ' -- ' : ''}${file} (lines ${start}–${end} of ${result.totalLines}):`;
+      const body = blocks.slice(0, 40).map((b) =>
+        `  ${b.from}${b.to > b.from ? `-${b.to}` : ''}  ${b.hash}  ${b.author}  ${b.date}  ${b.subject}`
+      ).join('\n');
+      const note = blocks.length > 40 ? `\n(${blocks.length} blocks total — showing first 40)` : '';
+      return `${head}\n${body}${note}`;
+    } catch (e) {
+      return `Blame failed: ${String(e)}`;
+    }
+  },
+};
+
 /** Save a fact about the project to persistent memory. */
 export const saveMemoryTool: AITool = {
   name: 'save_memory',
@@ -1389,6 +1491,9 @@ export const AI_TOOLS: AITool[] = [
   gitBranchesTool,
   gitStashesTool,
   gitTagsTool,
+  // Search / Blame (v3.8 — the Search & Blame tool engines)
+  searchCodeTool,
+  blameFileTool,
   // File operations (read-only)
   readFileTool,
   listFilesTool,

@@ -51,6 +51,33 @@ type ChildrenListener = (pids: number[]) => void;
 let childrenListener: ChildrenListener | null = null;
 let notifyQueued = false;
 
+// ── Spawn-event listener (observability, v3.8) ────────────────────────
+// Since the coalescedRaw read router moved the app's read commands into THIS
+// worker process, main's command log (child_process.spawn interceptor) can no
+// longer see them — the Operations console would silently go empty for reads.
+// The worker therefore reports every git child it spawns (args + cwd + exit
+// + duration) so main can record it with the same commandLog entry shape.
+// Output text is NOT shipped back (multi-KB per command; duration + exit code
+// are what the console needs for load analysis).
+export interface TrackedSpawnEvent {
+  args: string[];
+  cwd: string;
+  exitCode: number | null;
+  durationMs: number;
+}
+let spawnEventListener: ((e: TrackedSpawnEvent) => void) | null = null;
+
+/** Register (or clear, with null) the git-spawn event listener. Only git
+ * binaries are reported (same basename check as commandLog). */
+export function setSpawnEventListener(listener: ((e: TrackedSpawnEvent) => void) | null): void {
+  spawnEventListener = listener;
+}
+
+function isGitBinary(command: string): boolean {
+  const base = command.replace(/\\/g, '/').split('/').pop() || command;
+  return base === 'git' || base === 'git.exe' || base === 'git.cmd' || base === 'git.bat';
+}
+
 /** Coalesce add/remove bursts into ONE listener callback per event-loop turn
  *  (a repo-open burst spawns a dozen children in a few ms — the protocol
  *  must not carry a message per spawn). */
@@ -130,6 +157,28 @@ export function installChildTracker(): void {
       child.once('close', drop);
       child.once('error', drop);
       scheduleChildrenNotify();
+      // Observability: report git spawns with duration + exit code so the
+      // main process's command log stays complete now that reads run here.
+      if (spawnEventListener && isGitBinary(command)) {
+        const started = Date.now();
+        let reported = false;
+        const report = (exitCode: number | null) => {
+          if (reported) return; // 'error' may follow 'close' — record once
+          reported = true;
+          try {
+            spawnEventListener?.({
+              args: (args as unknown[]).map((a) => String(a)),
+              cwd: (mergedOpts.cwd && typeof mergedOpts.cwd === 'string') ? mergedOpts.cwd : process.cwd(),
+              exitCode,
+              durationMs: Date.now() - started,
+            });
+          } catch {
+            /* listener must never break spawning */
+          }
+        };
+        child.once('close', (code) => report(code ?? null));
+        child.once('error', () => report(null));
+      }
       if (process.env.PRISMGIT_QUIT_LOG && child.pid != null) {
         console.log(`[worker pid=${process.pid}] spawn pid=${child.pid} group=${mergedOpts.detached ? 'yes' : 'no'}: ${command} ${(args as string[]).slice(0, 3).join(' ')}`);
       }
@@ -210,5 +259,6 @@ export function __resetChildTrackerForTests(): void {
   origSpawn = null;
   liveChildren.clear();
   childrenListener = null;
+  spawnEventListener = null;
   notifyQueued = false;
 }

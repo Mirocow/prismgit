@@ -236,7 +236,7 @@ export function ErrorReportDialog({ error, onClose, onReload }: ErrorReportDialo
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Meta info */}
           <div className="text-2xs text-text-tertiary grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono">
             <span>Timestamp:</span>

@@ -162,7 +162,7 @@ export function RemoteConfigDialog({
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         {mode === 'add' && (
           <div>
             <label className="text-xs text-text-tertiary block mb-1">{t('dialogs.nameLabelShort')}</label>

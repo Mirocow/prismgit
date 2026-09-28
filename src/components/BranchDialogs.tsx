@@ -351,7 +351,7 @@ export function PushToDialog({
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div>
           <label htmlFor="push-to-remote" className="text-xs text-text-tertiary block mb-1">{t('branches.remoteRepoLabel')}</label>
           {remotes.length > 0 ? (
@@ -498,7 +498,7 @@ export function AddTagDialog({
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div>
           <label className="text-xs text-text-tertiary block mb-1">{t('tags.nameLabel')}</label>
           <input

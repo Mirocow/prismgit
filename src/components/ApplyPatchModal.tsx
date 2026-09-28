@@ -149,7 +149,7 @@ export function ApplyPatchModal({ open, onClose }: ApplyPatchModalProps) {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Mode switch */}
           <div className="flex bg-bg-tertiary rounded overflow-hidden border border-border-default w-fit">
             <button

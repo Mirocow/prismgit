@@ -7,6 +7,31 @@ PrismGit 的所有显著变更都记录在此文件中。
 
 **其他语言：** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [Deutsch](CHANGELOG.de.md)
 
+## [2.3.1] - 2026-09-29
+
+### 修复 — «所有工具都卡顿」（先测量，后修复）
+- **所有只读 git 命令改为在专用 git worker 进程执行**，不再占用 Electron 主进程事件循环。主进程是渲染进程全部 IPC 的中介——它忙于搬运 git 输出时，所有工具的点击与刷新都在排队。在 20k 提交 / 31 分支的测试仓库上实测：打开 History 阻塞主循环 119ms（macOS 进程开销再乘 3-5）；路由改造后没有任何工具超过 2.4ms。in-flight 合并与 1s meta TTL 不变；vitest 仍走进程内路径——全部 2017 个测试行为不变
+- **worker 的 git 子进程回报到操作控制台**——命令日志显示所有 git 活动及其耗时（测试中 47 条命令有 39 条在 worker 执行）
+- `git remote -v`（History 打开风暴中最慢的命令，384ms）缓存 60 秒
+- **PR/评审页 GitLab projectId 看门狗退避**：令牌被拒或 GitLab 不可达时不再每 1.5s 重试网络（每分钟约 40 次请求）；失败后延迟翻倍至 30s，成功即复位
+- **Bisect 页 3 秒轮询**仅在进行中的 bisect 时运行
+
+### 新增 — 从搜索结果直达引入更改的提交
+- 每条内容命中（git grep）行新增：**定位到该行的 Blame**（滚动并高亮，显示谁引入）、**该文件的 History**（已按文件过滤）、**Diff**；文件组头部提供 Changes/Diff/Blame/History 全套
+- 从搜索进入 History 时按文件过滤图（路径过滤 chip），并可预选提交
+- selection store 的一次性 `blameFocusLine` 驱动聚焦跳转
+
+### 新增 — AI 助手学会了 Search 与 Blame 工具
+- 新工具 `search_code`（git grep——Search 工具内容引擎）与 `blame_file`（按提交分组的逐行 blame）已注册进聊天工具集，并附选择指南
+
+### 修复 — History 过滤与搜索的交互
+- 文本搜索激活时点击 chip/作者/日期过滤现在会**清空搜索**——过滤器作用于全部提交而非与搜索结果的交集
+- 每个过滤输入框（History、Branches、Changes）都有 **✕ 清除按钮** + Esc 清除
+
+### 变更 — 对话框与设置的行距
+- 对话框表单组与设置/列表行使用更宽松的间距
+
+
 ## [2.3.0] - 2026-09-29
 
 ### 新增 — 浏览器式前进/后退导航

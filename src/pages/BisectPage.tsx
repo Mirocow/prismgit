@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { GitBranch, Loader, Check, X, SkipForward, RotateCcw, FileText, AlertTriangle, Search, RefreshCw } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
@@ -36,8 +36,6 @@ export function BisectPage() {
   useEscapeKey(showLog, () => setShowLog(false));
   const [logText, setLogText] = useState('');
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   const load = useCallback(async () => {
     try {
       const result = await api.git.bisectStatus(repo.path);
@@ -55,12 +53,18 @@ export function BisectPage() {
 
   useEffect(() => {
     load();
-    // Poll while on the page: bisect steps change HEAD asynchronously
-    pollRef.current = setInterval(load, 3000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
   }, [load]);
+  // v3.8: the 3s poll interval is GATED to an ACTIVE bisect — `git bisect
+  // log` spawning every 3s while the tool is merely open (no bisect running)
+  // was pure background churn on the "что-то работает в фоне" report.
+  // state 'none'/'finished' stops the timer; each bisect step re-renders with
+  // state 'bisecting' and restarts it.
+  const bisectActive = bisect.state === 'bisecting';
+  useEffect(() => {
+    if (!bisectActive) return;
+    const id = setInterval(load, 3000);
+    return () => clearInterval(id);
+  }, [bisectActive, load]);
 
   const run = async (name: string, fn: () => Promise<void>) => {
     setBusy(name);

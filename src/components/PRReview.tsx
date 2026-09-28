@@ -365,26 +365,40 @@ export function PRReview({
   // null FOREVER: pre-fix the action buttons silently no-op'ed (false-
   // success toasts on MR !6), a plain effect-based heal missed the window
   // (it fired once while loadingRef was true and its deps froze at null).
-  // A 1.5 s watchdog re-checks and re-resolves whenever the prop is null
-  // and nothing else is in flight — self-healing, no dep-freeze race.
+  // A watchdog re-checks and re-resolves whenever the prop is null and
+  // nothing else is in flight — self-healing, no dep-freeze race.
+  //
+  // v3.8 BACKOFF: with a rejected token (401) or an unreachable GitLab the
+  // old fixed 1.5s cadence retried the NETWORK ~40×/minute for as long as
+  // the page was open — constant background work while the user reads a
+  // review. Failures now double the delay up to 30s; a success resets to
+  // the fast 1.5s path.
   useEffect(() => {
     if (provider !== 'gitlab') return;
+    let delayMs = 1_500;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const heal = async () => {
-      if (gitlabProjectIdRef.current != null || loadingRef.current || healingRef.current) return;
+      if (gitlabProjectIdRef.current != null || loadingRef.current || healingRef.current) {
+        timer = setTimeout(() => { void heal(); }, 1_500);
+        return;
+      }
       healingRef.current = true;
       try {
         const project = await api.gitlab.getProjectByPath(`${owner}/${repo}`);
         onGitlabProjectIdResolvedRef.current?.(project.id);
+        delayMs = 1_500; // resolved — back to the fast path
       } catch {
         // Heal-only path: load() surfaces resolution errors; a failure
-        // here just leaves the buttons disabled (safe default) and the
-        // next tick retries.
+        // here just leaves the buttons disabled (safe default). Back off
+        // so a dead token/remote stops hammering the network.
+        delayMs = Math.min(30_000, delayMs * 2);
       } finally {
         healingRef.current = false;
       }
+      timer = setTimeout(() => { void heal(); }, delayMs);
     };
-    const timer = setInterval(() => { void heal(); }, 1500);
-    return () => clearInterval(timer);
+    void heal();
+    return () => { if (timer) clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, owner, repo]);
 

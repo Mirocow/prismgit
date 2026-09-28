@@ -613,6 +613,18 @@ export function HistoryPage() {
     hash: e.hash.toLowerCase(),
   })), [searchPool]);
 
+  // v3.8 — «Поиск должен сбрасываться когда ищешь в фильтрах»: activating a
+  // chip/author/date filter while a text search is active clears the SEARCH,
+  // so the filter operates over ALL commits instead of intersecting with the
+  // search's found subset (which made filters feel broken — "нельзя
+  // отфильтровать за все коммиты, только по выведенному").
+  const clearSearchIfActive = useCallback(() => {
+    if (search || debouncedSearch) {
+      setSearch('');
+      setDebouncedSearch('');
+    }
+  }, [search, debouncedSearch]);
+
   const filtered = useMemo(() => {
     let result = searchPool;
     // Text search (subject, author, hash) — supports regex.
@@ -1837,6 +1849,7 @@ export function HistoryPage() {
             isRegex={useRegex}
             onToggleRegex={() => setUseRegex(!useRegex)}
             regexTitle="Toggle regex"
+            clearTitle={t('common.clearFilter', { defaultValue: 'Сбросить фильтр' })}
           />
           <button className={cn('icon-btn !w-5 !h-5', showFilters && 'active')}
             title="More filters" onClick={() => setShowFilters(!showFilters)}>
@@ -1847,7 +1860,7 @@ export function HistoryPage() {
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
                 authorFilter === myAuthorName && myAuthorName ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
-              onClick={() => setAuthorFilter(authorFilter ? '' : myAuthorName)}
+              onClick={() => { clearSearchIfActive(); setAuthorFilter(authorFilter ? '' : myAuthorName); }}
               title={t('history.ttShowMyCommits')}
             >
               {t('history.chipMine')}
@@ -1867,7 +1880,7 @@ export function HistoryPage() {
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1',
                 taggedActive ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
-              onClick={() => setTaggedActive(!taggedActive)}
+              onClick={() => { clearSearchIfActive(); setTaggedActive(!taggedActive); }}
               title={taggedActive
                 ? t('history.taggedChipOn')
                 : t('history.taggedChipOff', { inView: taggedInView, total: allTags.length })}
@@ -2060,19 +2073,19 @@ export function HistoryPage() {
           <label className="flex items-center gap-1">
             <span className="text-text-tertiary">Author:</span>
             <input type="text" value={authorFilter} placeholder={t('history.authorPlaceholder')}
-              onChange={(e) => setAuthorFilter(e.target.value)}
+              onChange={(e) => { if (e.target.value.trim()) clearSearchIfActive(); setAuthorFilter(e.target.value); }}
               className="text-xs w-32 px-1 py-0.5 bg-bg-tertiary border border-border-default rounded" />
           </label>
           <label className="flex items-center gap-1">
             <span className="text-text-tertiary">From:</span>
             <input type="date" value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
+              onChange={(e) => { if (e.target.value) clearSearchIfActive(); setDateFrom(e.target.value); }}
               className="text-xs px-1 py-0.5 bg-bg-tertiary border border-border-default rounded" />
           </label>
           <label className="flex items-center gap-1">
             <span className="text-text-tertiary">To:</span>
             <input type="date" value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
+              onChange={(e) => { if (e.target.value) clearSearchIfActive(); setDateTo(e.target.value); }}
               className="text-xs px-1 py-0.5 bg-bg-tertiary border border-border-default rounded" />
           </label>
           <label className="flex items-center gap-1">

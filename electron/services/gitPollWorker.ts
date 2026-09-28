@@ -6,7 +6,7 @@ import { runStatsJob } from './gitStatsCore.js';
 import type { StatsJobRequest } from './gitStatsCore.js';
 import { runRawJob } from './gitRawCore.js';
 import type { RawJobRequest } from './gitRawCore.js';
-import { installChildTracker, killAllChildren, setChildrenListener, __trackedChildPidsForLog } from './childTracker.js';
+import { installChildTracker, killAllChildren, setChildrenListener, setSpawnEventListener, __trackedChildPidsForLog } from './childTracker.js';
 import { WORKTREE_IGNORED } from './watcherIgnore.js';
 import chokidar, { type FSWatcher } from 'chokidar';
 
@@ -246,6 +246,21 @@ installChildTracker();
 if (port) {
   setChildrenListener((pids) => {
     try { port.postMessage({ kind: 'children', pids }); } catch { /* main gone — quitting */ }
+  });
+  // v3.8 observability: the coalescedRaw read router executes the app's read
+  // commands HERE, so main's spawn interceptor cannot see them anymore. Report
+  // every git spawn back so the Operations console (command log) stays the
+  // single honest place to see ALL git activity, main-loop or worker.
+  setSpawnEventListener((e) => {
+    try {
+      port.postMessage({
+        kind: 'spawn-log',
+        args: e.args,
+        cwd: e.cwd,
+        exitCode: e.exitCode,
+        durationMs: e.durationMs,
+      });
+    } catch { /* main gone — quitting */ }
   });
 }
 

@@ -5,6 +5,31 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] - 2026-09-29
+
+### Fixed — the «app lags on every tool» report (measured, then fixed)
+- **All read-only git commands now execute in the dedicated git worker process** instead of the Electron main loop. The main process is the IPC broker for every renderer call — while it streamed git output, every tool's clicks and refreshes queued behind it. Measured on a 20k-commit/31-branch fixture: opening History blocked the main loop for 119ms on Linux (multiplied ×3-5 on macOS process spawns); after the router, no tool blocks it longer than 2.4ms. In-flight coalescing and the 1s meta TTL are unchanged; vitest keeps the in-process path, so all 2017 tests observe identical behaviour
+- **Worker-origin git spawns are reported back to the Operations console** — the command log shows ALL git activity with durations regardless of which process ran it (39 of 47 commands on the fixture ran in the worker)
+- `git remote -v` (the slowest command in the History-open burst, 384ms) is now 60s-cached — the remote set only changes through observed git writes
+- **PR/Reviews GitLab projectId heal watchdog** backed off: a rejected token or unreachable GitLab used to retry the network every 1.5s for as long as the page was open (~40 requests/minute); failures now double the delay up to 30s, success resets it
+- **Bisect page 3s polling** runs only while a bisect is actually in progress (was: every 3s whenever the tool was open)
+
+### Added — Search results navigate to the commit that made the change
+- Every content hit (git grep) row gained per-line actions: **Blame at that line** (scrolls to and flash-highlights the found line, shows who introduced it), **History of the file** (pre-filtered to it — «фильтровать сразу по файлу»), and **Diff**; the file-group header carries the full Changes/Diff/Blame/History set
+- History-from-Search now filters the graph by the file (path-filter chip) and can pre-select the commit
+- One-shot `blameFocusLine` in the selection store powers the focused blame jump (consumed once, cleared on repo switch)
+
+### Added — AI assistant learned the Search and Blame tools
+- New `search_code` tool (git grep — the Search tool's content engine) and `blame_file` tool (line-annotated blame grouped into commit blocks) — registered in the chat toolset with selection guidance («кто внёс эту строку?» → blame_file; «где используется X?» → search_code → read_file)
+
+### Fixed — History filters vs. search interplay
+- Activating a chip/author/date filter while a text search is active now **clears the search** — the filter operates over ALL commits instead of intersecting with the found subset («нет возможности отфильтровать за все коммиты»)
+- Every filter input (History, Branches, Changes) gained a **✕ clear button** + Esc-to-clear — the search no longer feels stuck
+
+### Changed — breathing room in dialogs and settings
+- Dialog form groups and settings rows/list rows use wider spacing (space-y-4, taller list rows)
+
+
 ## [2.3.0] - 2026-09-29
 
 ### Added — Browser-style Back/Forward navigation

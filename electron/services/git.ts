@@ -24,6 +24,7 @@ import { getSetting } from './storage.js';
 import { DEFAULT_REMOTE_FETCH_TIMEOUT_MS } from './gitPollCore.js';
 import type { PollJobRequest } from './gitPollCore.js';
 import { runPollJobExternal, runStatusJobExternal, runRawJobExternal } from './gitPollProcess.js';
+import { rawJobIsAllowed } from './gitRawCore.js';
 import { runStatusJob, type StatusJobRequest, detectRepoStateFromGitDir } from './gitStatusCore.js';
 
 /**
@@ -238,8 +239,11 @@ const READ_COMMANDS = new Set([
   'diff-index', 'diff-tree', 'diff-files', 'hash-object', 'mktree',
 ]);
 
-/** Global git options that consume the NEXT argv slot as a value. */
-const GLOBAL_OPTS_WITH_VALUE = new Set(['-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env']);
+/** Global git options that consume the NEXT argv slot as a value. '-C'
+ * (change directory) included — the notes/stash helpers call
+ * raw(['-C', repoPath, 'notes', …]) and the classifier must see the real
+ * subcommand, not the path. */
+const GLOBAL_OPTS_WITH_VALUE = new Set(['-c', '-C', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env']);
 
 /** subcommands of `git config` that READ (anything else writes). */
 const CONFIG_GETTER_FLAGS = new Set(['--get', '--get-all', '--get-regexp', '--get-url', '--get-color', '--get-colorbool', '-l', '--list', '--show-origin', '--show-scope', '--get-native-worktree']);
@@ -279,6 +283,14 @@ export function classifyGitCommand(argv: string[]): GitCommandKind {
   const positionals = rest.filter((a) => typeof a === 'string' && !a.startsWith('-'));
 
   switch (cmd) {
+    case 'notes':
+      // `notes show <sha>` / `notes list` read; add/append/copy/edit/
+      // remove/prune mutate refs/notes/* — write (also invalidates the
+      // coalescing caches, which is what keeps a just-added note visible
+      // to the next read).
+      return positionals[0] === 'show' || positionals[0] === 'list' || positionals[0] === 'get-ref'
+        ? 'read'
+        : 'write';
     case 'config':
       // Config getters are READS but NEVER TTL-cacheable: .git/config is
       // a global file other processes (terminals, other tools, tests) write
@@ -324,6 +336,9 @@ export function classifyGitCommand(argv: string[]): GitCommandKind {
 /** TTL for metadata reads. 1s: coalesces the repo-open burst without
  * ever showing stale data for more than a second after an external write. */
 export const READ_TTL_MS = 1_000;
+/** Longer TTL for metadata whose value can only change through git WRITES the
+ * app observes (remote set via getRemotes). See CONVENIENCE_READS. */
+export const META_LONG_TTL_MS = 60_000;
 
 /** Cap on cached metadata entries per repo (pruned by insert). */
 const META_CACHE_MAX = 64;
@@ -429,7 +444,30 @@ function installReadCoalescing(repoPath: string, git: SimpleGit): SimpleGit {
     let p = state.inflight.get(key) as Promise<string> | undefined;
     if (!p) {
       state.stats.subprocesses++;
-      const base = realRaw(args);
+      // v3.8 READ ROUTER — the "тупит на всех инструментах, как будто что-то
+      // работает в фоне и мешает основному процессу" fix. Read/meta .raw()
+      // commands now EXECUTE in the dedicated git worker process (same
+      // one the background poll already uses): the child spawn, stdout
+      // streaming and string assembly never touch the main event loop,
+      // which is also the IPC broker for every renderer call — while it
+      // was busy pumping git output, every tool's clicks and refreshes
+      // queued behind it (measured: a History open = a ~20-spawn burst;
+      // for-each-ref re-ran 6×/90s; `remote -v` 384ms each time).
+      //
+      // Gating:
+      //  - ONLY in the Electron main process (process.type === 'browser');
+      //    vitest / plain-node hosts keep the in-process path so every
+      //    existing test observes byte-identical behaviour.
+      //  - ONLY allow-listed read commands (rawJobIsAllowed — shared with
+      //    the worker, so the two sides can never disagree);
+      //  - worker failure (crash/timeout/job error) falls back to the
+      //    in-process realRaw — same command, same result, same error.
+      //  - in-flight coalescing + meta TTL above are UNCHANGED: one unique
+      //    command still executes once, shared by every concurrent caller.
+      const routeExternal = (process as { type?: string }).type === 'browser' && rawJobIsAllowed(args);
+      const base: Promise<string> = routeExternal
+        ? runRawJobExternal({ repoPath, args }).catch(() => realRaw(args))
+        : realRaw(args);
       // The shared promise: cleans up in-flight bookkeeping on settle and
       // seeds the TTL cache for metadata reads. Cache the BASE promise —
       // it resolves to the same value the derived one forwards.
@@ -473,9 +511,20 @@ function installReadCoalescing(repoPath: string, git: SimpleGit): SimpleGit {
   // Convenience methods that READ — coalesced like raw, TTL only for the
   // metadata-ish ones (getRemotes/stashList). status/log/diff are content-
   // sensitive: in-flight only.
-  const CONVENIENCE_READS: Record<string, 'read' | 'meta'> = {
-    status: 'read', log: 'read', diff: 'read', getRemotes: 'meta',
+  //
+  // v3.8: getRemotes is 'meta-long' — a 60s TTL instead of 1s. `remote -v`
+  // output only changes when the remote SET changes, and every such change
+  // runs through addRemote/removeRemote/renameRemote (CONVENIENCE_WRITES →
+  // invalidates this cache) or a git write the global detector sees. The
+  // 1s TTL re-spawned `git remote -v` (384ms on the probe repo — the single
+  // slowest command in the History-open burst) on every tool re-open.
+  const CONVENIENCE_READS: Record<string, 'read' | 'meta' | 'meta-long'> = {
+    status: 'read', log: 'read', diff: 'read', getRemotes: 'meta-long',
     stashList: 'meta', checkIsRepo: 'read',
+  };
+  const CONVENIENCE_TTL_MS: Record<'meta' | 'meta-long', number> = {
+    meta: READ_TTL_MS,
+    'meta-long': META_LONG_TTL_MS,
   };
   // Convenience methods that WRITE — always execute, always invalidate.
   // NOTE: checkIsRepo is NOT here — it only reads (rev-parse) and runs on
@@ -498,9 +547,10 @@ function installReadCoalescing(repoPath: string, git: SimpleGit): SimpleGit {
         return (...callArgs: unknown[]): Promise<unknown> => {
           state.stats.convenienceCalls++;
           const key = 'conv|' + prop + '|' + JSON.stringify(callArgs);
-          if (kind === 'meta') {
+          const ttlMs = kind === 'read' ? 0 : CONVENIENCE_TTL_MS[kind];
+          if (kind !== 'read') {
             const hit = state.meta.get(key);
-            if (hit && Date.now() - hit.ts < READ_TTL_MS) {
+            if (hit && Date.now() - hit.ts < ttlMs) {
               state.stats.ttlHits++;
               return hit.value as Promise<unknown>;
             }
@@ -513,7 +563,7 @@ function installReadCoalescing(repoPath: string, git: SimpleGit): SimpleGit {
             const cleanup = () => state.inflight.delete(key);
             p.then(
               (value) => {
-                if (kind === 'meta') state.meta.set(key, { value: p, ts: Date.now() });
+                if (kind !== 'read') state.meta.set(key, { value: p, ts: Date.now() });
                 cleanup();
                 return value;
               },

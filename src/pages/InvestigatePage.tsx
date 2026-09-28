@@ -184,13 +184,24 @@ export function InvestigatePage() {
     navigate('/diff');
   }, [navigate]);
 
-  const openFileHistory = useCallback((path: string) => {
-    useSelectionStore.getState().selectFile(path);
+  const openFileHistory = useCallback((path: string, hash?: string) => {
+    // v3.8 — «фильтровать сразу по файлу»: jump to History ALREADY filtered
+    // to this file (git log -- <path>), optionally selecting the commit that
+    // introduced the match so it's right there in the short filtered list.
+    const sel = useSelectionStore.getState();
+    sel.selectFile(path);
+    sel.setPathFilter(path);
+    if (hash) sel.selectCommit(hash);
     navigate('/history');
   }, [navigate]);
 
-  const openInBlame = useCallback((path: string) => {
-    useSelectionStore.getState().selectFile(path);
+  const openInBlame = useCallback((path: string, line?: number) => {
+    // v3.8 — Blame focused on the FOUND line: shows which commit introduced
+    // the match («кто внёс это изменение»). BlamePage consumes the one-shot
+    // blameFocusLine after loading (scroll + flash-highlight).
+    const sel = useSelectionStore.getState();
+    sel.selectFile(path);
+    sel.setBlameFocusLine(line ?? null);
     navigate('/blame');
   }, [navigate]);
 
@@ -598,6 +609,30 @@ export function InvestigatePage() {
                       <FileText size={11} className="text-text-tertiary shrink-0" />
                       <code className="font-mono text-xs text-text-primary truncate flex-1 min-w-0">{file}</code>
                       <span className="text-2xs text-text-tertiary shrink-0">{matches.length}</span>
+                      {/* v3.8 — the found file's full tool set (was History-only):
+                          the user asked to jump from a find to Diff / Blame /
+                          the file's commit history in one click. */}
+                      <button
+                        className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        title={t('pages.openInChanges')}
+                        onClick={() => openFileInChanges(file)}
+                      >
+                        <FolderOpen size={11} />
+                      </button>
+                      <button
+                        className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        title={t('pages.openInDiff', { defaultValue: 'Open in Diff tool' })}
+                        onClick={() => openFileInDiff(file)}
+                      >
+                        <FileText size={11} />
+                      </button>
+                      <button
+                        className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        title={t('pages.openInBlame', { defaultValue: 'Open in Blame tool' })}
+                        onClick={() => openInBlame(file, matches[0]?.line)}
+                      >
+                        <GitBranch size={11} />
+                      </button>
                       <button
                         className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.fileHistory')}
@@ -613,6 +648,29 @@ export function InvestigatePage() {
                         title={t('pages.invMatchRowHint', { file: m.file, line: m.line })}
                         onClick={() => openFileInChanges(m.file)}
                       >
+                        {/* v3.8 — per-line tool jumps: Blame AT the found line
+                            (who introduced it), History of the file, Diff. */}
+                        <button
+                          className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
+                          title={t('pages.invBlameAtLine', { line: m.line, defaultValue: 'Blame — строка {line}' })}
+                          onClick={(e) => { e.stopPropagation(); openInBlame(m.file, m.line); }}
+                        >
+                          <GitBranch size={10} />
+                        </button>
+                        <button
+                          className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
+                          title={t('pages.fileHistory')}
+                          onClick={(e) => { e.stopPropagation(); openFileHistory(m.file); }}
+                        >
+                          <History size={10} />
+                        </button>
+                        <button
+                          className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
+                          title={t('pages.openInDiff', { defaultValue: 'Open in Diff tool' })}
+                          onClick={(e) => { e.stopPropagation(); openFileInDiff(m.file); }}
+                        >
+                          <FileText size={10} />
+                        </button>
                         <button
                           className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
                           title={t('pages.copyRef')}

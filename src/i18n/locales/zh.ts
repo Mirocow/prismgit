@@ -288,6 +288,7 @@ export const zh: Record<string, string> = {
   'vscode.toolNotConfigured': '未配置',
   // MED-4 — line-context menu extras
   'common.copied': '已复制',
+  'common.clearFilter': '清除筛选',
   'common.copyFailed': '复制失败',
   'common.copyHash': '复制提交哈希',
   'common.copyLineNumber': '复制行号 ({n})',

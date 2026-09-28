@@ -138,6 +138,21 @@ export function BlamePage() {
       .then((result) => {
         setBlame(result);
         if (path.trim()) useSelectionStore.getState().selectFile(path.trim());
+        // One-shot focus line (Search → Blame «открыть строку с находкой»):
+        // scroll the row into view and flash-highlight it once rendering
+        // settles, then consume the request so manual re-blames don't re-jump.
+        const focusLine = useSelectionStore.getState().blameFocusLine;
+        if (focusLine != null) {
+          useSelectionStore.getState().setBlameFocusLine(null);
+          setTimeout(() => {
+            const row = document.querySelector(`[data-blame-line="${focusLine}"]`);
+            if (row) {
+              row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              row.classList.add('blame-focus-flash');
+              setTimeout(() => row.classList.remove('blame-focus-flash'), 2400);
+            }
+          }, 60);
+        }
       })
       .catch((e) => { toast.error(t('pages.blameFailed'), String(e)); setBlame(null); })
       .finally(() => setLoading(false));
@@ -358,6 +373,7 @@ export function BlamePage() {
               return (
                 <div
                   key={idx}
+                  data-blame-line={line.finalLineNumber}
                   className="flex items-start hover:bg-bg-hover border-b border-border-subtle group"
                   style={{ backgroundColor: colorMap.get(line.hash) || 'transparent' }}
                   onContextMenu={(e) => showLineContextMenu(e, line)}
