@@ -680,7 +680,9 @@ export function DiffPage() {
                   setSelectedFileInList(next);
                   setFilePath(next);
                 } else {
-                  toast.success('All conflicts resolved', 'You can now Continue/Commit to finish.');
+                  // Task 29: was a hardcoded ENGLISH string in a fully
+                  // localized RU/ZH/DE app — now a proper i18n key.
+                  toast.success(t('diff.conflictsAllResolved'), t('diff.conflictsAllResolvedHint'));
                 }
               }}
             />

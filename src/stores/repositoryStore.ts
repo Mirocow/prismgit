@@ -30,7 +30,6 @@ interface RepositoryState {
   removeRepo: (path: string) => Promise<void>;
   cloneRepository: (url: string, targetPath: string, options?: { depth?: number; branch?: string; groupId?: string | null }) => Promise<string>;
   initRepository: (targetPath: string) => Promise<void>;
-  pinRepo: (path: string, pinned: boolean) => Promise<void>;
 
   // Repository groups (tree in the sidebar)
   createGroup: (name: string, parentId?: string | null) => Promise<RepoGroup>;
@@ -110,14 +109,15 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
         ...g,
         expanded: prevExpanded.has(g.id) ? prevExpanded.get(g.id) : g.expanded,
       }));
-      // Sort: favorites first, then pinned — but DON'T re-sort by lastOpened.
+      // Sort: favorites first (Task 29: the legacy "pinned" secondary sort
+      // was removed together with the pin button — favorites already do
+      // the job and the pinned flag never had a working UI path).
+      // DON'T re-sort by lastOpened.
       const sorted = [...repos].sort((a, b) => {
         const metaA = get().metadata[a.path];
         const metaB = get().metadata[b.path];
         if (metaA?.favorite && !metaB?.favorite) return -1;
         if (!metaA?.favorite && metaB?.favorite) return 1;
-        if (a.pinned && !b.pinned) return -1;
-        if (!a.pinned && b.pinned) return 1;
         return 0;
       });
       set({ repos: sorted, groups: mergedGroups, loading: false });
@@ -354,11 +354,6 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
       set({ error: String(e), loading: false });
       throw e;
     }
-  },
-
-  pinRepo: async (path, pinned) => {
-    await api.settings.updateRepo(path, { pinned });
-    await get().loadRepos();
   },
 
   // ============= Repository groups (tree in the sidebar) =============

@@ -480,6 +480,31 @@ export function BranchesPage() {
     }
   };
 
+  // Task 29 (Remotes tool → Branches): the Remotes page's "Fetch All"
+  // (git fetch --all --prune) action lives here now — the Branches page is
+  // the single home for everything remote.
+  const handleFetchAllRemotes = async () => {
+    setRemoteBusy('fetch-all');
+    try {
+      await api.git.fetchAll(repo.path, true);
+      toast.success(t('branches.fetchedAllRemotes'));
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error(t('branches.fetchAllRemotesFailed'), String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
+  };
+
+  // Task 29: the native menu's Remote → Add… entry navigates here and pops
+  // the Add-Remote dialog directly (App.tsx dispatches after navigating).
+  useEffect(() => {
+    const onAddRemote = () => setConfigRemote({ mode: 'add' });
+    window.addEventListener('prismgit:branches-add-remote', onAddRemote);
+    return () => window.removeEventListener('prismgit:branches-add-remote', onAddRemote);
+  }, []);
+
   const handleRemoveRemote = async (name: string) => {
     if (!(await confirmDialog({
       title: t('branches.removeRemoteTitle', { name }),
@@ -1797,7 +1822,6 @@ export function BranchesPage() {
         { type: 'separator' },
         { label: t('branches.configureRemote'), clickId: 'configure' },
         { label: t('branches.addNewRemote'), clickId: 'add-remote' },
-        { label: t('branches.manageRemotes'), clickId: 'manage' },
       ] },
     ], (action) => {
       if (action === 'remote-push-to') {
@@ -1824,7 +1848,6 @@ export function BranchesPage() {
       else if (action === 'copy-url') handleCopyRemoteUrl(remoteName);
       else if (action === 'set-depth') setDepthRemote(remoteName);
       else if (action === 'properties') handleShowProperties(remoteName);
-      else if (action === 'manage') window.location.hash = '#/remotes';
     });
   };
 
@@ -2100,6 +2123,23 @@ export function BranchesPage() {
             placeholder={t('branches.filterPlaceholder')}
             ariaLabel={t('branches.filterPlaceholder')}
           />
+          {/* Task 29: Fetch All (prune) — inherited from the removed Remotes tool. */}
+          <button
+            className="icon-btn !w-6 !h-6"
+            title={t('branches.fetchAllRemotesTooltip')}
+            onClick={handleFetchAllRemotes}
+            disabled={Object.keys(remotesMap).length === 0 || remoteBusy === 'fetch-all'}
+          >
+            {remoteBusy === 'fetch-all' ? <Loader size={12} className="animate-spin" /> : <CloudDownload size={12} />}
+          </button>
+          {/* Task 29: Add Remote — inherited from the removed Remotes tool. */}
+          <button
+            className="icon-btn !w-6 !h-6"
+            title={t('branches.addRemoteTooltip')}
+            onClick={() => setConfigRemote({ mode: 'add' })}
+          >
+            <Cog size={12} />
+          </button>
           <button className="icon-btn !w-6 !h-6" title={t('common.refresh')} onClick={() => load()}>
             <RefreshCw size={12} />
           </button>

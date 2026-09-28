@@ -46,8 +46,6 @@ export const en: Record<string, string> = {
   'shell.repoSettingsMenu': 'Repository Settings...',
 
   // Sidebar — repo rows / group rows
-  'shell.pin': 'Pin',
-  'shell.unpin': 'Unpin',
   'shell.favorite': 'Add to favorites',
   'shell.unfavorite': 'Remove from favorites',
   'shell.removeFromList': 'Remove from list',
@@ -359,8 +357,6 @@ export const ru: Record<string, string> = {
   'shell.repoSettingsMenu': 'Настройки репозитория...',
 
   // Sidebar — repo rows / group rows
-  'shell.pin': 'Закрепить',
-  'shell.unpin': 'Открепить',
   'shell.favorite': 'В избранное',
   'shell.unfavorite': 'Убрать из избранного',
   'shell.removeFromList': 'Убрать из списка',
@@ -672,8 +668,6 @@ export const zh: Record<string, string> = {
   'shell.repoSettingsMenu': '仓库设置...',
 
   // Sidebar — repo rows / group rows
-  'shell.pin': '置顶',
-  'shell.unpin': '取消置顶',
   'shell.favorite': '添加到收藏',
   'shell.unfavorite': '从收藏中移除',
   'shell.removeFromList': '从列表中移除',
@@ -985,8 +979,6 @@ export const de: Record<string, string> = {
   'shell.repoSettingsMenu': 'Repository-Einstellungen...',
 
   // Sidebar — repo rows / group rows
-  'shell.pin': 'Anheften',
-  'shell.unpin': 'Lösen',
   'shell.favorite': 'Zu Favoriten hinzufügen',
   'shell.unfavorite': 'Aus Favoriten entfernen',
   'shell.removeFromList': 'Aus Liste entfernen',

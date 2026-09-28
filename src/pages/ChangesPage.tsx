@@ -1018,7 +1018,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         await stageAll(repo.path);
       }
       const hash = await commit(repo.path, finalMsg, amend);
-      toast.success(t('status.commitCreated'), t('changes.hashDetail', { hash: hash.substring(0, 7) }));
+      // Task 29: hash as a PROMINENT chip (copy button, 8s duration) — the
+      // old plain-text «Хеш: …» detail was easy to miss entirely.
+      toast.successCommit(t('status.commitCreated'), hash);
       // Save commit message to per-project history for reuse
       const prefs = loadProjectPrefs(repo.path);
       const history = prefs.commitMessageHistory || [];

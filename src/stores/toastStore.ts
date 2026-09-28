@@ -9,13 +9,22 @@ interface Toast {
   message: string;
   detail?: string;
   duration?: number;
+  /**
+   * Optional object hash (commit/tag). Rendered by ToastContainer as a
+   * monospace chip with a copy button instead of burying it in the detail
+   * text — the user asked for the commit hash to be VISIBLE in the
+   * «Коммит создан» toast (Task 29).
+   */
+  hash?: string;
 }
 
 interface ToastState {
   toasts: Toast[];
-  show: (type: ToastType, message: string, detail?: string, duration?: number) => void;
+  show: (type: ToastType, message: string, detail?: string, duration?: number, hash?: string) => void;
   dismiss: (id: number) => void;
   success: (message: string, detail?: string) => void;
+  /** Success toast with a hash chip (copies the FULL hash on click). */
+  successCommit: (message: string, hash: string, detail?: string) => void;
   error: (message: string, detail?: string) => void;
   info: (message: string, detail?: string) => void;
   warning: (message: string, detail?: string) => void;
@@ -52,9 +61,9 @@ function humanizeDetail(detail?: string): string | undefined {
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
 
-  show: (type, message, detail, duration = 4000) => {
+  show: (type, message, detail, duration = 4000, hash) => {
     const id = nextId++;
-    const toast: Toast = { id, type, message, detail: humanizeDetail(detail), duration };
+    const toast: Toast = { id, type, message, detail: humanizeDetail(detail), duration, hash };
     set({ toasts: [...get().toasts, toast] });
     if (duration > 0) {
       setTimeout(() => get().dismiss(id), duration);
@@ -66,6 +75,10 @@ export const useToastStore = create<ToastState>((set, get) => ({
   },
 
   success: (m, d) => get().show('success', m, d),
+  // 8s instead of the default 4s: the hash is the one thing the user may
+  // still be typing into a terminal or a PR description — give them time
+  // to click-copy it.
+  successCommit: (m, hash, d) => get().show('success', m, d, 8000, hash),
   error: (m, d) => get().show('error', m, d, 6000),
   info: (m, d) => get().show('info', m, d),
   warning: (m, d) => get().show('warning', m, d, 5000),
@@ -87,6 +100,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
 export function useToastActions() {
   return useToastStore(useShallow((s) => ({
     success: s.success,
+    successCommit: s.successCommit,
     error: s.error,
     info: s.info,
     warning: s.warning,

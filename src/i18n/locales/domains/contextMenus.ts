@@ -103,17 +103,6 @@ export const en: Record<string, string> = {
   'ctx.commit.copyFullRef': 'Copy Full Ref',
 
   // ── Remote context menu ────────────────────────────────────────────────
-  'ctx.remote.fetchWithPrune': 'Fetch \'{name}\' (with prune)',
-  'ctx.remote.hideRemoteRefs': 'Hide remote refs',
-  'ctx.remote.previewRemoteRefs': 'Preview remote refs (ls-remote)',
-  'ctx.remote.copyFetchUrl': 'Copy fetch URL',
-  'ctx.remote.copyPushUrl': 'Copy push URL',
-  'ctx.remote.browseBranches': 'Browse branches',
-  'ctx.remote.edit': 'Edit \'{name}\'...',
-  'ctx.remote.rename': 'Rename \'{name}\'...',
-  'ctx.remote.backgroundPollOrFetch': 'Perform background Poll or Fetch',
-  'ctx.remote.repositorySettings': 'Repository Settings...',
-  'ctx.remote.removeRemote': 'Remove remote \'{name}\'...',
 };
 
 export const ru: Record<string, string> = {
@@ -204,17 +193,6 @@ export const ru: Record<string, string> = {
   'ctx.commit.copyFullRef': 'Копировать полный Ref',
 
   // ── Remote context menu ────────────────────────────────────────────────
-  'ctx.remote.fetchWithPrune': 'Получить \'{name}\' (с очисткой)',
-  'ctx.remote.hideRemoteRefs': 'Скрыть refs удалённого репо',
-  'ctx.remote.previewRemoteRefs': 'Предпросмотр refs удалённого репо (ls-remote)',
-  'ctx.remote.copyFetchUrl': 'Копировать fetch URL',
-  'ctx.remote.copyPushUrl': 'Копировать push URL',
-  'ctx.remote.browseBranches': 'Просмотреть ветки',
-  'ctx.remote.edit': 'Редактировать \'{name}\'...',
-  'ctx.remote.rename': 'Переименовать \'{name}\'...',
-  'ctx.remote.backgroundPollOrFetch': 'Выполнить фоновый Poll или Fetch',
-  'ctx.remote.repositorySettings': 'Настройки репозитория...',
-  'ctx.remote.removeRemote': 'Удалить remote \'{name}\'...',
 };
 
 export const zh: Record<string, string> = {
@@ -303,17 +281,6 @@ export const zh: Record<string, string> = {
   'ctx.commit.copyFullRef': '复制完整引用',
 
   // ── Remote context menu ────────────────────────────────────────────────
-  'ctx.remote.fetchWithPrune': '获取 \'{name}\'（带清理）',
-  'ctx.remote.hideRemoteRefs': '隐藏远程引用',
-  'ctx.remote.previewRemoteRefs': '预览远程引用（ls-remote）',
-  'ctx.remote.copyFetchUrl': '复制 fetch URL',
-  'ctx.remote.copyPushUrl': '复制 push URL',
-  'ctx.remote.browseBranches': '浏览分支',
-  'ctx.remote.edit': '编辑 \'{name}\'...',
-  'ctx.remote.rename': '重命名 \'{name}\'...',
-  'ctx.remote.backgroundPollOrFetch': '执行后台轮询或获取',
-  'ctx.remote.repositorySettings': '仓库设置...',
-  'ctx.remote.removeRemote': '移除远程 \'{name}\'...',
 };
 
 export const de: Record<string, string> = {
@@ -403,15 +370,4 @@ export const de: Record<string, string> = {
   'ctx.commit.copyFullRef': 'Vollständige Ref kopieren',
 
   // ── Remote context menu ────────────────────────────────────────────────
-  'ctx.remote.fetchWithPrune': '\'{name}\' abrufen (mit prune)',
-  'ctx.remote.hideRemoteRefs': 'Remote-Refs ausblenden',
-  'ctx.remote.previewRemoteRefs': 'Remote-Refs vorschauen (ls-remote)',
-  'ctx.remote.copyFetchUrl': 'Fetch-URL kopieren',
-  'ctx.remote.copyPushUrl': 'Push-URL kopieren',
-  'ctx.remote.browseBranches': 'Branches durchsuchen',
-  'ctx.remote.edit': '\'{name}\' bearbeiten...',
-  'ctx.remote.rename': '\'{name}\' umbenennen...',
-  'ctx.remote.backgroundPollOrFetch': 'Hintergrund-Poll oder Fetch ausführen',
-  'ctx.remote.repositorySettings': 'Repository-Einstellungen...',
-  'ctx.remote.removeRemote': 'Remote \'{name}\' entfernen...',
 };

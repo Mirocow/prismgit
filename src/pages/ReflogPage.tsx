@@ -19,7 +19,7 @@ const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
  * Reflog — master-detail redesign (user-requested based on screenshot).
  *
  * Left panel (~40% width): chronological list of reflog entries.
- * Each row: [checkbox] [hashAbbrev] [operation/message] [relative time].
+ * Each row: [hashAbbrev] [operation/message] [relative time].
  * Selected row has accent background.
  *
  * Right panel (~60% width): commit detail for the selected entry.
@@ -29,9 +29,10 @@ const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
  *     <hash>` after confirmation)
  *   - File changes section: list of files with +N/-M additions/deletions
  *
- * The checkbox column lets the user multi-select reflog entries for
- * bulk operations (cherry-pick multiple, diff range, etc.) — left for
- * follow-up.
+ * Task 29: the per-row CHECKBOX column was removed — it was a dead
+ * "future multi-select" placeholder (onChange did nothing) that only
+ * confused users («не понятно зачем нужны чекбоксы»). Bulk operations
+ * can return together with a real batch action bar when needed.
  */
 export function ReflogPage() {
   const { t } = useI18n();
@@ -257,13 +258,6 @@ export function ReflogPage() {
                     });
                   }}
                 >
-                  {/* Checkbox (for future multi-select / batch operations) */}
-                  <input
-                    type="checkbox"
-                    className="shrink-0 cursor-pointer"
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => { /* future: add to multi-set */ }}
-                  />
                   {/* Hash */}
                   <code className="font-mono text-text-tertiary shrink-0 w-16 text-xs">
                     {entry.hashAbbrev || shortHash(entry.hash)}

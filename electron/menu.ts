@@ -291,7 +291,9 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
             { label: m('menu.remote.subtree.openPage'), click: () => send('menu:navigate', '/subtrees') },
           ],
         },
-        { label: m('menu.remote.managePage'), click: () => send('menu:navigate', '/remotes') },
+        // The standalone Remotes page was merged into Branches (Task 29):
+        // remote groups live on the Branches page, so "manage" opens it.
+        { label: m('menu.remote.managePage'), click: () => send('menu:navigate', '/branches') },
       ],
     },
     {

@@ -2946,10 +2946,16 @@ export async function abortMerge(repoPath: string): Promise<void> {
   await git.merge(['--abort']);
 }
 
-export async function continueMerge(repoPath: string): Promise<void> {
+/**
+ * Continue merge by committing the resolved conflicts.
+ * Returns the FULL hash of the created merge commit — the UI shows it as
+ * a copyable chip in the «Merge-коммит создан» toast (Task 29: the user
+ * reported commit hashes missing from toasts).
+ */
+export async function continueMerge(repoPath: string): Promise<string> {
   const git = getGit(repoPath);
-  // Continue merge by committing the resolved conflicts
   await git.raw(['commit', '--no-edit']);
+  return (await git.raw(['rev-parse', 'HEAD'])).trim();
 }
 
 /**

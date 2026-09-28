@@ -77,17 +77,16 @@ describe('repoTree.buildRepoTree', () => {
     expect(ids).toEqual(['a', 'c', 'b']); // order 1 (Alpha, Zeta alphabetical), then order 2
   });
 
-  it('floats favorites and pinned repos to the top of their group', () => {
+  it('floats favorite repos to the top of their group (pinned tier removed — Task 29)', () => {
     const groups = [group('g', 'G', null)];
     const repos = [
       repo('/plain', 'plain', 'g'),
       repo('/fav', 'fav', 'g'),
-      repo('/pin', 'pin', 'g', true),
     ];
     const { nodes } = buildRepoTree(groups, repos, { favoritePaths: new Set(['/fav']) });
     const g = nodes[0] as Extract<typeof nodes[0], { type: 'group' }>;
     const order = (g.children as Array<Extract<RepoTreeNode, { type: 'repo' }>>).map((n) => n.repo.path);
-    expect(order).toEqual(['/fav', '/pin', '/plain']);
+    expect(order).toEqual(['/fav', '/plain']);
   });
 
   it('hides children of collapsed groups but keeps repoCount', () => {

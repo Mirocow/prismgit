@@ -183,6 +183,14 @@ export const en: Record<string, string> = {
   'pages.blameLines': 'lines',
   'pages.blameUniqueCommits': 'unique commits',
   'pages.blameFileLabel': 'file:',
+  'pages.blameFilePlaceholder': 'File in the repository — start typing to search',
+  'pages.blameFilesLoading': 'Loading file list…',
+  'pages.blameNoFilesMatch': 'No tracked files match',
+  'pages.blameBlameBefore': 'Blame before this commit',
+  'pages.blameAtRef': 'Blaming an older version: {ref}',
+  'pages.blameBackToHead': 'Back to HEAD',
+  'pages.blameRefLabel': 'Revision to blame (ref)',
+  'pages.blameGroupHint': 'grouped by commit',
 
   // ===== Annotate =====
   'pages.annotateTitle': 'Annotate',
@@ -986,6 +994,14 @@ export const ru: Record<string, string> = {
   'pages.blameLines': 'строк',
   'pages.blameUniqueCommits': 'уникальных коммитов',
   'pages.blameFileLabel': 'файл:',
+  'pages.blameFilePlaceholder': 'Файл в репозитории — начните вводить для поиска',
+  'pages.blameFilesLoading': 'Загрузка списка файлов…',
+  'pages.blameNoFilesMatch': 'Нет подходящих отслеживаемых файлов',
+  'pages.blameBlameBefore': 'Blame до этого коммита',
+  'pages.blameAtRef': 'Показана более старая версия: {ref}',
+  'pages.blameBackToHead': 'Вернуться к HEAD',
+  'pages.blameRefLabel': 'Версия для blame (ref)',
+  'pages.blameGroupHint': 'сгруппировано по коммитам',
 
   // ===== Annotate =====
   'pages.annotateTitle': 'Аннотации',
@@ -1789,6 +1805,14 @@ export const zh: Record<string, string> = {
   'pages.blameLines': '行',
   'pages.blameUniqueCommits': '个不同提交',
   'pages.blameFileLabel': '文件：',
+  'pages.blameFilePlaceholder': '仓库中的文件 — 输入以搜索',
+  'pages.blameFilesLoading': '正在加载文件列表…',
+  'pages.blameNoFilesMatch': '没有匹配的跟踪文件',
+  'pages.blameBlameBefore': '追溯此提交之前',
+  'pages.blameAtRef': '正在查看旧版本：{ref}',
+  'pages.blameBackToHead': '返回 HEAD',
+  'pages.blameRefLabel': '要追溯的版本（ref）',
+  'pages.blameGroupHint': '按提交分组',
 
   // ===== Annotate =====
   'pages.annotateTitle': '注释',
@@ -2592,6 +2616,14 @@ export const de: Record<string, string> = {
   'pages.blameLines': 'Zeilen',
   'pages.blameUniqueCommits': 'eindeutige Commits',
   'pages.blameFileLabel': 'Datei:',
+  'pages.blameFilePlaceholder': 'Datei im Repository — tippen zum Suchen',
+  'pages.blameFilesLoading': 'Dateiliste wird geladen…',
+  'pages.blameNoFilesMatch': 'Keine passenden versionierten Dateien',
+  'pages.blameBlameBefore': 'Blame vor diesem Commit',
+  'pages.blameAtRef': 'Ältere Version wird angezeigt: {ref}',
+  'pages.blameBackToHead': 'Zurück zu HEAD',
+  'pages.blameRefLabel': 'Zu blame-ende Version (ref)',
+  'pages.blameGroupHint': 'nach Commits gruppiert',
 
   // ===== Annotate =====
   'pages.annotateTitle': 'Annotation',

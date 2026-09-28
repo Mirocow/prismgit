@@ -1,4 +1,4 @@
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, RotateCcw, FileText, Search, CloudDownload, Filter, Recycle, Sparkles } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, RotateCcw, FileText, Search, Filter, Recycle, Sparkles } from './icons';
 import { t } from '../lib/i18n';
 
 /**
@@ -22,6 +22,14 @@ import { t } from '../lib/i18n';
  *   - Notes → removed entirely (git notes are obscure; distributed
  *     reviews in /reviews already cover the 'metadata on a commit'
  *     use case with a richer UI).
+ *
+ * Task 29 — REMOVED:
+ *   - Remotes → merged into Branches. The Branches page already had the
+ *     per-remote groups with fetch/configure/rename/remove/properties
+ *     context menus; it now also owns "Fetch All (prune)" and the
+ *     Add-Remote entry point (header button + menu:remoteAdd event).
+ *     A separate Remotes tool duplicated that surface with a second
+ *     mental model — one ref view is enough.
  *
  * NOTE: labels and descriptions are translated via the standalone `t()`
  * function from `../lib/i18n`. They are evaluated on EVERY navItems() call
@@ -84,8 +92,6 @@ export function navItems(): NavItem[] {
     description: t('nav.desc.branches') },
   { path: '/tags', label: t('nav.label.tags'), icon: Tag, group: GROUP_REFS(),
     description: t('nav.desc.tags') },
-  { path: '/remotes', label: t('nav.label.remotes'), icon: CloudDownload, group: GROUP_REFS(),
-    description: t('nav.desc.remotes') },
   { path: '/reflog', label: t('nav.label.reflog'), icon: RotateCcw, group: GROUP_REFS(),
     description: t('nav.desc.reflog') },
   { path: '/recyclable', label: t('nav.label.recyclable'), icon: Recycle, group: GROUP_REFS(),
@@ -110,7 +116,6 @@ export const NAV_SHORTCUTS: Record<string, string> = {
   '/branches': 'Ctrl+4',
   '/tags': 'Ctrl+5',
   '/stashes': 'Ctrl+6',
-  '/remotes': 'Ctrl+7',
   '/reflog': 'Ctrl+8',
   '/search': 'Ctrl+9',
 };

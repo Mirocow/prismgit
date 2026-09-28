@@ -60,20 +60,25 @@ describe('repositoryStore', () => {
   });
 
   describe('loadRepos', () => {
-    it('loads repositories sorted by pinned (stable order, NOT by lastOpened)', async () => {
+    it('loads repositories sorted by favorites (stable order, NOT by lastOpened)', async () => {
       const mockRepos = [
         { path: '/a', name: 'a', lastOpened: 100, pinned: false },
-        { path: '/b', name: 'b', lastOpened: 200, pinned: true },
+        { path: '/b', name: 'b', lastOpened: 200, pinned: false },
         { path: '/c', name: 'c', lastOpened: 300, pinned: false },
       ];
       vi.mocked(api.settings.getRepos).mockResolvedValue(mockRepos);
+      // /b is a FAVORITE → must float to the top. (Task 29: the separate
+      // "pinned" tier was removed with the pin button — favorites sort alone.)
+      useRepositoryStore.setState({
+        metadata: { '/b': { path: '/b', favorite: true } as never },
+      });
 
       await useRepositoryStore.getState().loadRepos();
 
       const state = useRepositoryStore.getState();
       expect(state.repos).toHaveLength(3);
-      // Pinned first, then STABLE insertion order (not by lastOpened)
-      expect(state.repos[0].path).toBe('/b'); // pinned
+      // Favorite first, then STABLE insertion order (not by lastOpened)
+      expect(state.repos[0].path).toBe('/b'); // favorite
       expect(state.repos[1].path).toBe('/a'); // /a was first in array → stays before /c
       expect(state.repos[2].path).toBe('/c');
       expect(state.loading).toBe(false);

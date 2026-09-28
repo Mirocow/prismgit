@@ -439,7 +439,8 @@ export interface GitApi {
   renameBranch: (repoPath: string, oldName: string, newName: string) => Promise<void>;
   merge: (repoPath: string, branch: string, options?: { noFf?: boolean; squash?: boolean; ffOnly?: boolean; strategy?: string }) => Promise<{ conflicts: string[]; fastForward: boolean; alreadyUpToDate: boolean }>;
   abortMerge: (repoPath: string) => Promise<void>;
-  continueMerge: (repoPath: string) => Promise<void>;
+  /** Resolves a conflicted merge by committing it; returns the merge commit's full hash. */
+  continueMerge: (repoPath: string) => Promise<string>;
   /** Pre-merge preview: returns the list of files that would conflict if we merged `theirs` into `ours`. */
   mergeTree: (repoPath: string, ours: string, theirs: string) => Promise<{ conflicts: string[]; clean: boolean }>;
   /** Returns ahead/behind counts between two refs without touching the working tree. */

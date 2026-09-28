@@ -47,7 +47,6 @@ const PAGE_CHUNKS = [
   () => import('../pages/WorktreesPage'),
   () => import('../pages/ReflogPage'),
   () => import('../pages/RecyclablePage'),
-  () => import('../pages/RemotesPage'),
   () => import('../pages/BisectPage'),
   () => import('../pages/NotesPage'),
   () => import('../pages/SettingsPage'),

@@ -46,8 +46,11 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
   const handleContinue = async () => {
     setBusy('continue');
     try {
-      await api.git.continueMerge(repoPath);
-      toast.success(t('toast.merge.committed'));
+      // Task 29: continueMerge returns the NEW HEAD hash so the success
+      // toast can show the merge commit's hash chip (was: bare «Merge-коммит
+      // создан» with no hash at all).
+      const hash = await api.git.continueMerge(repoPath);
+      toast.successCommit(t('toast.merge.committed'), hash);
       await refreshStatus(repoPath);
       onClose?.();
     } catch (e) {

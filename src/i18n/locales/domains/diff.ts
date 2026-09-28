@@ -31,6 +31,8 @@ export const en: Record<string, string> = {
   'diff.noFilesMatch': "No files match '{filter}'",
   'diff.fileRowTooltip': 'Click to load diff · Right-click for more actions',
   'diff.selectRefs': 'Select base and compare refs to see diff',
+  'diff.conflictsAllResolved': 'All conflicts resolved',
+  'diff.conflictsAllResolvedHint': 'You can now Continue/Commit to finish.',
   // DiffViewer
   'diff.unstagedLine': 'Unstaged {count} line',
   'diff.unstagedLines': 'Unstaged {count} lines',
@@ -112,6 +114,8 @@ export const ru: Record<string, string> = {
   'diff.noFilesMatch': "Нет файлов по фильтру '{filter}'",
   'diff.fileRowTooltip': 'Клик — загрузить diff · Правый клик — другие действия',
   'diff.selectRefs': 'Выберите базу и ссылку сравнения, чтобы увидеть diff',
+  'diff.conflictsAllResolved': 'Все конфликты разрешены',
+  'diff.conflictsAllResolvedHint': 'Теперь можно продолжить или закоммитить, чтобы завершить операцию.',
   // DiffViewer
   'diff.unstagedLine': 'Убрано из индекса: {count} строка',
   'diff.unstagedLines': 'Убрано из индекса: {count} строк',
@@ -193,6 +197,8 @@ export const zh: Record<string, string> = {
   'diff.noFilesMatch': "没有文件匹配“{filter}”",
   'diff.fileRowTooltip': '点击加载差异 · 右键查看更多操作',
   'diff.selectRefs': '请选择基准与比较引用以查看差异',
+  'diff.conflictsAllResolved': '所有冲突已解决',
+  'diff.conflictsAllResolvedHint': '现在可以继续/提交以完成操作。',
   // DiffViewer
   'diff.unstagedLine': '已取消暂存 {count} 行',
   'diff.unstagedLines': '已取消暂存 {count} 行',
@@ -274,6 +280,8 @@ export const de: Record<string, string> = {
   'diff.noFilesMatch': "Keine Dateien passen zu '{filter}'",
   'diff.fileRowTooltip': 'Klick: Diff laden · Rechtsklick: weitere Aktionen',
   'diff.selectRefs': 'Basis- und Vergleichsreferenz wählen, um den Diff zu sehen',
+  'diff.conflictsAllResolved': 'Alle Konflikte gelöst',
+  'diff.conflictsAllResolvedHint': 'Sie können jetzt Fortsetzen/Committen, um den Vorgang abzuschließen.',
   // DiffViewer
   'diff.unstagedLine': '{count} Zeile ungestaget',
   'diff.unstagedLines': '{count} Zeilen ungestaget',

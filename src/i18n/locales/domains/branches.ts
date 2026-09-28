@@ -161,6 +161,10 @@ export const en: Record<string, string> = {
   'branches.fetchAllBranchesDone': 'Fetched all branches of {name}',
   'branches.noBranchesFetched': 'No branches fetched yet — hover the header and press',
   'branches.noRemotesConfigured': 'No remotes configured.',
+  'branches.fetchedAllRemotes': 'Fetched all remotes (with prune)',
+  'branches.fetchAllRemotesFailed': 'Fetch all remotes failed',
+  'branches.fetchAllRemotesTooltip': 'Fetch all remotes (git fetch --all --prune)',
+  'branches.addRemoteTooltip': 'Add remote…',
   'branches.addRemoteLink': 'Add remote...',
   'branches.tip': 'Tip: Drag a branch onto another to merge · Right-click for more actions',
   // New branch dialog
@@ -178,7 +182,6 @@ export const en: Record<string, string> = {
   'branches.propertiesMenu': 'Properties...',
   'branches.configureRemote': 'Configure remote...',
   'branches.addNewRemote': 'Add new remote...',
-  'branches.manageRemotes': 'Manage all remotes (Remotes page)',
   'branches.addBranchMenu': 'Add Branch...',
   // Compare branches dialog
   'branches.compareTitle': 'Compare Branches',
@@ -413,6 +416,10 @@ export const ru: Record<string, string> = {
   'branches.fetchAllBranchesDone': 'Получены все ветки {name}',
   'branches.noBranchesFetched': 'Ветки ещё не забраны — наведите на заголовок и нажмите',
   'branches.noRemotesConfigured': 'Репозитории не настроены.',
+  'branches.fetchedAllRemotes': 'Изменения получены со всех remote (с очисткой)',
+  'branches.fetchAllRemotesFailed': 'Не удалось получить изменения со всех remote',
+  'branches.fetchAllRemotesTooltip': 'Получить изменения со всех remote (git fetch --all --prune)',
+  'branches.addRemoteTooltip': 'Добавить remote…',
   'branches.addRemoteLink': 'Добавить репозиторий...',
   'branches.tip': 'Совет: перетащите ветку на другую для слияния · Правый клик — другие действия',
   // New branch dialog
@@ -430,7 +437,6 @@ export const ru: Record<string, string> = {
   'branches.propertiesMenu': 'Свойства...',
   'branches.configureRemote': 'Настроить репозиторий...',
   'branches.addNewRemote': 'Добавить новый репозиторий...',
-  'branches.manageRemotes': 'Управление всеми репозиториями (страница Remotes)',
   'branches.addBranchMenu': 'Добавить ветку...',
   // Compare branches dialog
   'branches.compareTitle': 'Сравнение веток',
@@ -664,6 +670,10 @@ export const zh: Record<string, string> = {
   'branches.fetchAllBranchesDone': '已拉取 {name} 的所有分支',
   'branches.noBranchesFetched': '尚未抓取分支 — 悬停在标题上并点击',
   'branches.noRemotesConfigured': '未配置远程。',
+  'branches.fetchedAllRemotes': '已拉取所有远程（含清理）',
+  'branches.fetchAllRemotesFailed': '拉取所有远程失败',
+  'branches.fetchAllRemotesTooltip': '从所有远程拉取（git fetch --all --prune）',
+  'branches.addRemoteTooltip': '添加远程…',
   'branches.addRemoteLink': '添加远程...',
   'branches.tip': '提示：将一个分支拖到另一个上即可合并 · 右键查看更多操作',
   // New branch dialog
@@ -681,7 +691,6 @@ export const zh: Record<string, string> = {
   'branches.propertiesMenu': '属性...',
   'branches.configureRemote': '配置远程...',
   'branches.addNewRemote': '添加新远程...',
-  'branches.manageRemotes': '管理所有远程（Remotes 页面）',
   'branches.addBranchMenu': '新建分支...',
   // Compare branches dialog
   'branches.compareTitle': '比较分支',
@@ -915,6 +924,10 @@ export const de: Record<string, string> = {
   'branches.fetchAllBranchesDone': 'Alle Branches von {name} geholt',
   'branches.noBranchesFetched': 'Noch keine Branches geholt — mit der Maus über den Titel fahren und',
   'branches.noRemotesConfigured': 'Keine Remotes konfiguriert.',
+  'branches.fetchedAllRemotes': 'Alle Remotes abgerufen (mit Prune)',
+  'branches.fetchAllRemotesFailed': 'Abruf aller Remotes fehlgeschlagen',
+  'branches.fetchAllRemotesTooltip': 'Alle Remotes abrufen (git fetch --all --prune)',
+  'branches.addRemoteTooltip': 'Remote hinzufügen…',
   'branches.addRemoteLink': 'Remote hinzufügen...',
   'branches.tip': 'Tipp: Branch auf einen anderen ziehen, um zu mergen · Rechtsklick für mehr Aktionen',
   // New branch dialog
@@ -932,7 +945,6 @@ export const de: Record<string, string> = {
   'branches.propertiesMenu': 'Eigenschaften...',
   'branches.configureRemote': 'Remote konfigurieren...',
   'branches.addNewRemote': 'Neuen Remote hinzufügen...',
-  'branches.manageRemotes': 'Alle Remotes verwalten (Remotes-Seite)',
   'branches.addBranchMenu': 'Branch hinzufügen...',
   // Compare branches dialog
   'branches.compareTitle': 'Branches vergleichen',

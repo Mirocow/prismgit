@@ -25,7 +25,6 @@ import {
   FolderPlus,
   GitBranch,
   Moon,
-  Pin, PinOff,
   Plus,
   RefreshCw,
   Settings as SettingsIcon,
@@ -106,9 +105,11 @@ export function Sidebar() {
   // calls doesn't cause re-renders on state changes.
   const openRepository = useRepositoryStore((s) => s.openRepository);
   const removeRepo = useRepositoryStore((s) => s.removeRepo);
-  const pinRepo = useRepositoryStore((s) => s.pinRepo);
   // Repo-level favorite (star) — persists to settings.metadata, moves the
   // repo to the top of its group on toggle (sorted by repoTree.compareRepos).
+  // Task 29: the separate "pinned" flag + pin button was REMOVED from the
+  // repo tree — it duplicated favorites (and its sorting was masked by the
+  // favorites sort), so "Закрепить" looked broken and useless.
   const toggleFavoriteRepo = useRepositoryStore((s) => s.toggleFavorite);
   const checkRemotes = useRepositoryStore((s) => s.checkRemotes);
   const loadRepos = useRepositoryStore((s) => s.loadRepos);
@@ -470,7 +471,7 @@ export function Sidebar() {
     const repoMeta = metadata[repoPath];
     const isFav = !!repoMeta?.favorite;
     const items = [
-      // Pin/Favorite at the top — most-used actions.
+      // Favorite at the top — most-used action.
       { label: isFav ? t('shell.unfavorite') : t('shell.favorite'), clickId: isFav ? 'unfavorite' : 'favorite' },
       ...(repoGroupId
         ? [{ label: t('shell.removeFromGroup'), clickId: 'ungroup' }]
@@ -688,13 +689,6 @@ export function Sidebar() {
               {meta.tags.length}
             </span>
           )}
-          <button
-            className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 transition-opacity"
-            title={repo.pinned ? t('shell.unpin') : t('shell.pin')}
-            onClick={(e) => { e.stopPropagation(); pinRepo(repo.path, !repo.pinned); }}
-          >
-            {repo.pinned ? <PinOff size={10} /> : <Pin size={10} />}
-          </button>
           <button
             className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 hover:!text-status-deleted transition-opacity"
             title={t('shell.removeFromList')}

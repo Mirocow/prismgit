@@ -86,7 +86,6 @@ const TagsPage = lazy(() => import('./pages/TagsPage').then(m => ({ default: m.T
 const SubmodulesPage = lazy(() => import('./pages/SubmodulesPage').then(m => ({ default: m.SubmodulesPage })));
 const ReflogPage = lazy(() => import('./pages/ReflogPage').then(m => ({ default: m.ReflogPage })));
 const RecyclablePage = lazy(() => import('./pages/RecyclablePage').then(m => ({ default: m.RecyclablePage })));
-const RemotesPage = lazy(() => import('./pages/RemotesPage').then(m => ({ default: m.RemotesPage })));
 const BisectPage = lazy(() => import('./pages/BisectPage').then(m => ({ default: m.BisectPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const AiChatPage = lazy(() => import('./pages/AiChatPage'));
@@ -872,8 +871,12 @@ export default function App() {
       });
       if (!ok) return;
       try {
+        // Capture the commit being undone FIRST — the toast then shows its
+        // hash chip so the user can still reference/copy it after the reset
+        // (Task 29: commit hashes must be visible in commit toasts).
+        const undoneHash = (await api.git.raw(repo.path, ['rev-parse', 'HEAD'])).trim();
         await api.git.reset(repo.path, 'soft', 'HEAD~1');
-        toast.success(i18nT('toast.app.undoCommitSuccess'));
+        toast.successCommit(i18nT('toast.app.undoCommitSuccess'), undoneHash);
         useGitStore.getState().refreshStatus(repo.path);
       } catch (e) { toast.error(i18nT('toast.app.undoCommitFailed'), String(e)); }
     };
@@ -1215,15 +1218,21 @@ export default function App() {
       window.smartgit.events.on('menu:lfsTrack', handleLfsTrack),
       window.smartgit.events.on('menu:lfsLock', () => lfsOp('lock')),
       window.smartgit.events.on('menu:lfsUnlock', () => lfsOp('unlock')),
-      // Remote menu
+      // Remote menu — the Remotes TOOL is gone (merged into Branches):
+      // remote management opens the Branches page, the natural home for
+      // remotes now; remoteAdd additionally pops the Add-Remote dialog
+      // via a window event BranchesPage listens for.
       window.smartgit.events.on('menu:pushTo', handlePushTo),
       window.smartgit.events.on('menu:pullOptions', handlePullOptions),
       window.smartgit.events.on('menu:fetchAll', handleFetchAll),
       window.smartgit.events.on('menu:fetchMore', handleFetchMore),
-      window.smartgit.events.on('menu:remoteAdd', () => handleNavigate('/remotes')),
-      window.smartgit.events.on('menu:remoteRename', () => handleNavigate('/remotes')),
-      window.smartgit.events.on('menu:remoteDelete', () => handleNavigate('/remotes')),
-      window.smartgit.events.on('menu:remoteProperties', () => handleNavigate('/remotes')),
+      window.smartgit.events.on('menu:remoteAdd', () => {
+        handleNavigate('/branches');
+        window.dispatchEvent(new CustomEvent('prismgit:branches-add-remote'));
+      }),
+      window.smartgit.events.on('menu:remoteRename', () => handleNavigate('/branches')),
+      window.smartgit.events.on('menu:remoteDelete', () => handleNavigate('/branches')),
+      window.smartgit.events.on('menu:remoteProperties', () => handleNavigate('/branches')),
       window.smartgit.events.on('menu:setDepth', handleFetchMore),
       // Repository menu
       window.smartgit.events.on('menu:repoSettings', () => setShowRepoSettings(true)),
@@ -1730,7 +1739,6 @@ export default function App() {
               <Route path="/submodules" element={<SubmodulesPage />} />
               <Route path="/reflog" element={<ReflogPage />} />
               <Route path="/recyclable" element={<RecyclablePage />} />
-              <Route path="/remotes" element={<RemotesPage />} />
               <Route path="/bisect" element={<BisectPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/ai-chat" element={<AiChatPage />} />
