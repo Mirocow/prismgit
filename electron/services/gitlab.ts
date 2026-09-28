@@ -184,14 +184,28 @@ function apiJsonRequest<T>(
               reject(new Error(`GitLab API ${status}: invalid redirect "${location}"`));
               return;
             }
-            const nextOpts: { method?: string; body?: string; token?: string } = { token: options.token };
+            // TOKEN: pass the RESOLVED token (options.token is usually
+            // undefined — calls rely on getAuthState()). Passing it
+            // explicitly makes the cross-host drop below REAL: the
+            // recursive call would otherwise re-resolve it from the auth
+            // state and leak the PAT to the redirect target.
+            const nextOpts: { method?: string; body?: string; token?: string } = { token };
             const nextMethod = (options.method || 'GET').toUpperCase();
             if (status === 307 || status === 308) {
               nextOpts.method = nextMethod;
               if (options.body) nextOpts.body = options.body;
             } else if (nextMethod !== 'GET') {
-              // 301/302/303: rewrite non-GET to GET and drop the body.
-              nextOpts.method = 'GET';
+              // 301/302/303 on a MUTATION: downgrading POST/PUT to GET
+              // would silently turn the mutation into a read that can
+              // resolve 2xx → false success toast (e.g. addMRComment →
+              // GET notes returns 200, «comment added», nothing posted).
+              // Refuse loudly instead — same doctrine as the conflict
+              // reaction matrix: never report success without an action.
+              finishApiCall(handle, { status, error: `GitLab API ${status}: mutating ${nextMethod} redirected (${location}) — refusing downgrade to GET` });
+              reject(new Error(
+                `GitLab API ${status}: ${nextMethod} request was redirected to "${location}". A redirect on a mutating call would silently turn it into a read — refusing. Re-resolve the project (numeric ID) and retry.`
+              ));
+              return;
             }
             if (next.host !== u.host) delete nextOpts.token;
             resolve(apiJsonRequest<T>(next.toString(), nextOpts, redirects + 1));
@@ -417,12 +431,22 @@ export async function listMRCommits(
   projectId: number,
   mrIid: number
 ): Promise<GitLabMRCommit[]> {
-  const commits = await apiJson<Array<Omit<GitLabMRCommit, 'sha' | 'commit' | 'author' | 'committer'>>>(
-    `/projects/${projectId}/merge_requests/${mrIid}/commits?per_page=100`
-  );
+  // PAGINATION: GitLab caps this endpoint at 100 per page. MR !6 (v2.2.0)
+  // has 244 commits and the Commits tab badge showed a wrong "100" with no
+  // indication of truncation. Walk pages until a short page (cap: 500 to
+  // bound the payload for gigantic MRs).
+  const PER_PAGE = 100;
+  const raw: Array<Omit<GitLabMRCommit, 'sha' | 'commit' | 'author' | 'committer'>> = [];
+  for (let page = 1; page <= 5; page++) {
+    const batch = await apiJson<Array<Omit<GitLabMRCommit, 'sha' | 'commit' | 'author' | 'committer'>>>(
+      `/projects/${projectId}/merge_requests/${mrIid}/commits?per_page=${PER_PAGE}&page=${page}`
+    );
+    raw.push(...batch);
+    if (batch.length < PER_PAGE) break;
+  }
   // Normalize to match the GithubPRCommit shape so the renderer can use
   // the same PRReview component.
-  return commits.map((c) => ({
+  return raw.map((c) => ({
     ...c,
     sha: c.id,
     commit: {

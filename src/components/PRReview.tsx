@@ -116,7 +116,14 @@ export function PRReview({
   // The result was 4x duplicate API calls per MR open (visible in the
   // Output panel as 4 identical 'api gitlab GET .../merge_requests/5/...' rows).
   const loadingRef = useRef(false);
+  const healingRef = useRef(false);
   const lastLoadKeyRef = useRef<string>('');
+  // Mirror the prop for interval closures — the heal watchdog must see the
+  // CURRENT projectId, not the mount-time one (stale-closure bug: the
+  // watchdog froze at 2042 and bailed on `!= null` forever while the store
+  // had already reset to null).
+  const gitlabProjectIdRef = useRef(gitlabProjectId);
+  gitlabProjectIdRef.current = gitlabProjectId;
   const onGitlabProjectIdResolvedRef = useRef(onGitlabProjectIdResolved);
   onGitlabProjectIdResolvedRef.current = onGitlabProjectIdResolved;
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -343,6 +350,36 @@ export function PRReview({
     void load();
   }, [load]);
 
+  // ── GitLab projectId HEAL watchdog ───────────────────────────────────
+  // The provider store resets gitlabProjectId on re-detections; the load()
+  // anti-spam guard ignores projectId transitions, so a reset that lands
+  // DURING an in-flight load (or after a completed one) leaves the prop
+  // null FOREVER: pre-fix the action buttons silently no-op'ed (false-
+  // success toasts on MR !6), a plain effect-based heal missed the window
+  // (it fired once while loadingRef was true and its deps froze at null).
+  // A 1.5 s watchdog re-checks and re-resolves whenever the prop is null
+  // and nothing else is in flight — self-healing, no dep-freeze race.
+  useEffect(() => {
+    if (provider !== 'gitlab') return;
+    const heal = async () => {
+      if (gitlabProjectIdRef.current != null || loadingRef.current || healingRef.current) return;
+      healingRef.current = true;
+      try {
+        const project = await api.gitlab.getProjectByPath(`${owner}/${repo}`);
+        onGitlabProjectIdResolvedRef.current?.(project.id);
+      } catch {
+        // Heal-only path: load() surfaces resolution errors; a failure
+        // here just leaves the buttons disabled (safe default) and the
+        // next tick retries.
+      } finally {
+        healingRef.current = false;
+      }
+    };
+    const timer = setInterval(() => { void heal(); }, 1500);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, owner, repo]);
+
   // Load files changed in a specific commit (for the Commits tab diff view).
   // Uses GitHub's compare API: GET /repos/:owner/:repo/compare/:base...:head
   // which returns the files changed between two commits.
@@ -528,13 +565,25 @@ export function PRReview({
     author: (fullPR?.user ?? pr.author) as { login: string; avatar_url?: string },
   };
 
+  // Guard: GitLab actions need the resolved numeric project ID. It is
+  // resolved on demand (getProjectByPath) and briefly null after mount/
+  // repo switches — clicking an action in that window used to show a
+  // FALSE success toast without any API call (silent no-op). Checked live
+  // against MR !6: «PR #6 одобрен» toast, zero IPC traffic, server state
+  // unchanged. Now every action refuses loudly until the ID resolves.
+  const gitlabUnresolved = provider === 'gitlab' && gitlabProjectId == null;
+
   const handleApprove = async () => {
+    if (gitlabUnresolved) {
+      toast.error(t('pages.prApproved'), t('pages.prProjectNotResolved'));
+      return;
+    }
     setActionInProgress('approve');
     try {
       if (provider === 'github') {
         await api.github.submitPRReview(owner, repo, pr.number, 'APPROVE', '');
-      } else if (provider === 'gitlab' && gitlabProjectId != null) {
-        await api.gitlab.approveMergeRequest(gitlabProjectId, pr.number);
+      } else if (provider === 'gitlab') {
+        await api.gitlab.approveMergeRequest(gitlabProjectId!, pr.number);
       }
       toast.success(t('pages.prApproved', { n: pr.number }));
       onActionComplete();
@@ -547,6 +596,10 @@ export function PRReview({
   };
 
   const handleMerge = async () => {
+    if (gitlabUnresolved) {
+      toast.error(t('pages.prMerge'), t('pages.prProjectNotResolved'));
+      return;
+    }
     if (!(await confirmDialog({
       title: t('pages.prMergeConfirmTitle', { n: pr.number }),
       message: t('pages.prMergeConfirmMessage'),
@@ -556,8 +609,8 @@ export function PRReview({
     try {
       if (provider === 'github') {
         await api.github.mergePR(owner, repo, pr.number, { merge_method: 'merge' });
-      } else if (provider === 'gitlab' && gitlabProjectId != null) {
-        await api.gitlab.mergeMergeRequest(gitlabProjectId, pr.number, { should_remove_source_branch: true });
+      } else if (provider === 'gitlab') {
+        await api.gitlab.mergeMergeRequest(gitlabProjectId!, pr.number, { should_remove_source_branch: true });
       }
       toast.success(t('pages.prMerged', { n: pr.number }));
       onActionComplete();
@@ -589,6 +642,10 @@ export function PRReview({
 
   const handlePostComment = async () => {
     if (!commentText.trim()) return;
+    if (gitlabUnresolved) {
+      toast.error(t('pages.commentAddFailed'), t('pages.prProjectNotResolved'));
+      return;
+    }
     setPostingComment(true);
     try {
       if (provider === 'github') {
@@ -596,8 +653,8 @@ export function PRReview({
         toast.success(t('pages.commentAdded'));
         setCommentText('');
         forceReload();
-      } else if (provider === 'gitlab' && gitlabProjectId != null) {
-        await api.gitlab.addMRComment(gitlabProjectId, pr.number, commentText);
+      } else if (provider === 'gitlab') {
+        await api.gitlab.addMRComment(gitlabProjectId!, pr.number, commentText);
         toast.success(t('pages.commentAdded'));
         setCommentText('');
       }
@@ -608,9 +665,14 @@ export function PRReview({
     }
   };
 
+  // GitLab's MR detail has no additions/deletions totals (GitHub-only
+  // fields) — the header showed a misleading "+0 −0". The changes endpoint
+  // already parses per-file +/- counts, so fall back to summing those.
+  const filesAdditions = files.reduce((s, f) => s + (f.additions ?? 0), 0);
+  const filesDeletions = files.reduce((s, f) => s + (f.deletions ?? 0), 0);
   const stats = fullPR ? {
-    additions: fullPR.additions ?? 0,
-    deletions: fullPR.deletions ?? 0,
+    additions: fullPR.additions ?? filesAdditions,
+    deletions: fullPR.deletions ?? filesDeletions,
     changedFiles: fullPR.changed_files ?? files.length,
     commits: fullPR.commits ?? commits.length,
     comments: fullPR.comments ?? 0,
@@ -765,7 +827,8 @@ Please review this PR — identify potential issues, suggest improvements, and s
           <button
             className="btn btn-secondary text-xs flex items-center gap-1"
             onClick={handleApprove}
-            disabled={actionInProgress !== null}
+            disabled={actionInProgress !== null || gitlabUnresolved}
+            title={gitlabUnresolved ? t('pages.prProjectNotResolved') : undefined}
           >
             {actionInProgress === 'approve' ? <Loader size={11} className="animate-spin" /> : <Check size={11} />}
             {t('pages.prApprove')}
@@ -773,13 +836,15 @@ Please review this PR — identify potential issues, suggest improvements, and s
           <button
             className="btn btn-primary text-xs flex items-center gap-1"
             onClick={handleMerge}
-            disabled={actionInProgress !== null || displayPR.draft === true || displayPR.mergeable === false}
+            disabled={actionInProgress !== null || displayPR.draft === true || displayPR.mergeable === false || gitlabUnresolved}
             title={
-              displayPR.draft
-                ? t('pages.prMergeDraftBlocked', { defaultValue: 'Draft PRs cannot be merged' })
-                : displayPR.mergeable === false
-                  ? t('pages.prMergeConflictBlocked')
-                  : t('pages.prMergeTooltip')
+              gitlabUnresolved
+                ? t('pages.prProjectNotResolved')
+                : displayPR.draft
+                  ? t('pages.prMergeDraftBlocked', { defaultValue: 'Draft PRs cannot be merged' })
+                  : displayPR.mergeable === false
+                    ? t('pages.prMergeConflictBlocked')
+                    : t('pages.prMergeTooltip')
             }
           >
             {actionInProgress === 'merge' ? <Loader size={11} className="animate-spin" /> : <GitPullRequest size={11} />}
