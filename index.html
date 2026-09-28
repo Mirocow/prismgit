@@ -144,37 +144,41 @@
         // React mounts and globals.css applies the full theme.
         var THEMES = {
           'light':            { bg: '#f7f8fa', text: '#2c3138', dim: '#5c6166', accent: '#399ee6' },
-          'dark':             { bg: '#0b0e14', text: '#bfbdb6', dim: '#8a8f98', accent: '#39bae6' },
-          'github-light':    { bg: '#ffffff', text: '#1f2328', dim: '#59636e', accent: '#0969da' },
-          'github-dark':     { bg: '#0d1117', text: '#e6edf3', dim: '#8b949e', accent: '#2f81f7' },
-          'dracula':         { bg: '#282a36', text: '#f8f8f2', dim: '#bcbcbc', accent: '#bd93f9' },
-          'monokai':         { bg: '#272822', text: '#f8f8f2', dim: '#a8a8a0', accent: '#a6e22e' },
-          'solarized-light': { bg: '#fdf6e3', text: '#586e75', dim: '#93a1a1', accent: '#268bd2' },
-          'solarized-dark':  { bg: '#002b36', text: '#93a1a1', dim: '#657b83', accent: '#268bd2' },
-          'nord':            { bg: '#2e3440', text: '#d8dee9', dim: '#81a1c1', accent: '#88c0d0' },
-          'tokyo-night':     { bg: '#1a1b26', text: '#c0caf5', dim: '#a9b1d6', accent: '#7aa2f7' },
-          'catppuccin-mocha':{ bg: '#1e1e2e', text: '#cdd6f4', dim: '#a6adc8', accent: '#89b4fa' },
-          'one-dark':        { bg: '#282c34', text: '#abb2bf', dim: '#7f8c98', accent: '#61afef' },
-          'gruvbox-dark':    { bg: '#282828', text: '#ebdbb2', dim: '#a89984', accent: '#fabd2f' },
-          'slack-dark':      { bg: '#1a1d21', text: '#f0f0f0', dim: '#c8c8c8', accent: '#611f69' },
-          'discord':         { bg: '#36393f', text: '#dcddde', dim: '#b9bbbe', accent: '#5865f2' },
+          'one-dark':         { bg: '#282c34', text: '#abb2bf', dim: '#7f8c98', accent: '#61afef' },
+          'simple-light':     { bg: '#ffffff', text: '#000000', dim: '#666666', accent: '#0066ff' },
+          'material':         { bg: '#FAFAFA', text: '#212121', dim: '#616161', accent: '#3F51B5' },
+          'discord':          { bg: '#36393f', text: '#dcddde', dim: '#b9bbbe', accent: '#5865f2' },
           'light-dim-sidebar': { bg: '#f7f8fa', text: '#2c3138', dim: '#5c6166', accent: '#399ee6' },
-          'github-light-dim': { bg: '#ffffff', text: '#1f2328', dim: '#57606a', accent: '#0969da' },
-          'designer-light': { bg: '#ffffff', text: '#1e1e1e', dim: '#5e5e5e', accent: '#F24E1E' },
-          'purple': { bg: '#1a1b2e', text: '#c8c9e8', dim: '#9c9dc8', accent: '#9b6dff' },
-          'simple-light': { bg: '#ffffff', text: '#000000', dim: '#666666', accent: '#0066ff' },
-          'material': { bg: '#FAFAFA', text: '#212121', dim: '#616161', accent: '#3F51B5' },
-          'midnight':        { bg: '#050608', text: '#e6e8f0', dim: '#a0a3b2', accent: '#6ea8fe' },
-          'kanagawa':        { bg: '#1f1f28', text: '#dcd7ba', dim: '#a6a1b8', accent: '#7e9cd8' },
-          'rose-pine':       { bg: '#191724', text: '#e0def4', dim: '#908caa', accent: '#eb6f92' },
-          'everforest':      { bg: '#2d353b', text: '#d3c6aa', dim: '#9da9a0', accent: '#a7c080' },
-          'vercel-dark':     { bg: '#09090b', text: '#fafafa', dim: '#a1a1aa', accent: '#3291ff' },
-          'nord-light':      { bg: '#eceff4', text: '#2e3440', dim: '#4c566a', accent: '#5e81ac' },
         };
         // Read saved theme from localStorage and apply matching boot colors.
         try {
           var saved = localStorage.getItem('prismgit-theme') || 'light';
-          var t = THEMES[saved] || THEMES['dark'];
+          // Curation: legacy ids (pre-curation picks) map to their curated
+          // replacement; custom-<id> themes use their mirrored bg/text.
+          var LEGACY = {
+            'dark': 'one-dark', 'github-light': 'light', 'github-dark': 'one-dark',
+            'dracula': 'one-dark', 'monokai': 'one-dark', 'solarized-light': 'light',
+            'solarized-dark': 'one-dark', 'nord': 'one-dark', 'tokyo-night': 'one-dark',
+            'catppuccin-mocha': 'one-dark', 'gruvbox-dark': 'one-dark', 'slack-dark': 'one-dark',
+            'purple': 'one-dark', 'github-light-dim': 'light-dim-sidebar',
+            'designer-light': 'simple-light', 'midnight': 'one-dark', 'kanagawa': 'one-dark',
+            'rose-pine': 'one-dark', 'everforest': 'one-dark', 'vercel-dark': 'one-dark',
+            'nord-light': 'light'
+          };
+          var t = THEMES[saved] || THEMES[LEGACY[saved]] || THEMES['light'];
+          if (saved.indexOf('custom-') === 0) {
+            try {
+              var ct = JSON.parse(localStorage.getItem('prismgit-custom-active') || 'null');
+              if (ct && ct.colors) {
+                t = {
+                  bg: ct.colors.bgPrimary || t.bg,
+                  text: ct.colors.textPrimary || t.text,
+                  dim: ct.colors.textSecondary || t.dim,
+                  accent: ct.colors.accent || t.accent
+                };
+              }
+            } catch (e2) { /* custom mirror unreadable */ }
+          }
           var root = document.documentElement;
           root.style.setProperty('--boot-bg', t.bg);
           root.style.setProperty('--boot-text', t.text);
@@ -184,7 +188,13 @@
           // BUGFIX "тёмные темы не адаптированы": the list used to miss the
           // 5 newer light themes — their boot screen got DARK borders
           // (rgba white) on a LIGHT background.
-          var isLight = ['light', 'github-light', 'solarized-light', 'light-dim-sidebar', 'github-light-dim', 'designer-light', 'simple-light', 'material', 'nord-light'].indexOf(saved) >= 0;
+          var isLight = ['light', 'simple-light', 'material', 'light-dim-sidebar'].indexOf(saved) >= 0;
+          if (saved.indexOf('custom-') === 0) {
+            try {
+              var ctd = JSON.parse(localStorage.getItem('prismgit-custom-active') || 'null');
+              if (ctd && ctd.isDark === false) isLight = true;
+            } catch (e3) { /* ignore */ }
+          }
           if (isLight) {
             root.style.setProperty('--boot-border', 'rgba(0, 0, 0, 0.08)');
             root.style.setProperty('--boot-tip-bg', 'rgba(0, 0, 0, 0.04)');

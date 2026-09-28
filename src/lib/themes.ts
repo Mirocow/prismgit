@@ -1,52 +1,56 @@
+import type { CustomThemeColors, CustomThemeEntry } from '../../electron/types/settings-api';
+
+// Re-exported so renderer code can import everything theme-related from one
+// place (the shape itself is owned by the shared settings contract).
+export type { CustomThemeColors, CustomThemeEntry };
+
 /**
- * Theme registry — all available UI themes for PrismGit.
+ * Theme registry — PrismGit's curated theme set + user-created custom themes.
  *
- * Each theme is a complete color system applied via a `data-theme="..."` attribute
- * on <html>. The `data-theme` selector in globals.css overrides the default CSS
- * variables (:root = light, .dark = dark) with theme-specific colors.
+ * CURATION (user request): the picker used to list 27 themes, which made
+ * choosing harder, not easier. The registry now ships SIX curated themes —
+ * the ones the user actually uses plus the dark-sidebar/light-main combo —
+ * and anything else can be built in the visual Custom Theme editor
+ * (Settings → Appearance → Themes → «Создать тему…»).
  *
- * The `isDark` flag controls two things:
- *   1. Whether to add the legacy `.dark` class (preserves backward-compat with
- *      components that check `theme === 'dark'` or `classList.contains('dark')`)
- *   2. The contrast-blend target (black for light themes, white for dark themes)
+ *   light              Ayu Light (default light)
+ *   one-dark           One Dark (default dark)
+ *   simple-light       Simple (minimal black/white/grey)
+ *   material           Material Design light (Indigo)
+ *   discord            Discord (Blurple + grey)
+ *   light-dim-sidebar  Light main window + DARK left sidebar (VS Code style)
+ *   custom-<id>        User-created (colors stored in settings.customThemes)
  *
- * The `preview` colors power the Settings → Themes pseudo-window preview. Each
- * color is a representative swatch from the theme — enough to give the user a
- * feel for the palette without rendering the entire app.
+ * Each built-in theme is a complete color system applied via a
+ * `data-theme="..."` attribute on <html>; the matching selector in
+ * globals.css overrides the default CSS variables (:root = light,
+ * .dark = dark). Custom themes get their variables injected as a
+ * <style> tag (see lib/customThemeCss.ts) scoped to their own
+ * `data-theme="custom-<id>"` attribute.
+ *
+ * The `isDark` flag controls:
+ *   1. Whether to add the legacy `.dark` class (backward-compat with
+ *      components that check `classList.contains('dark')`)
+ *   2. The contrast-blend target (black for light themes, white for dark)
+ *   3. The native window background at boot (electron/services/themeDark.ts)
+ *
+ * OLD theme ids still found in a user's saved settings are migrated via
+ * LEGACY_THEME_FALLBACK — see normalizeThemeId().
  */
 
 export type ThemeId =
   | 'light'              // Ayu Light (default)
-  | 'dark'               // Ayu Dark (default)
-  | 'github-light'
-  | 'github-dark'
-  | 'dracula'
-  | 'monokai'
-  | 'solarized-light'
-  | 'solarized-dark'
-  | 'nord'
-  | 'tokyo-night'
-  | 'catppuccin-mocha'
-  | 'one-dark'
-  | 'gruvbox-dark'
-  | 'slack-dark'         // Task 5 — Slack-inspired dark theme (aubergine + 4 accent colors)
-  | 'discord'            // Task 5 — Discord-inspired (Blurple + grey-3 / channel-sidebar)
-  | 'light-dim-sidebar'  // Light main + dimmed dark sidebar (VS Code style)
-  | 'github-light-dim'  // GitHub Light main + dimmed dark sidebar
-  | 'designer-light'    // Figma-inspired light theme with coral accent
-  | 'purple'            // Purple accent on dark navy background
+  | 'one-dark'           // One Dark (default dark)
   | 'simple-light'      // Minimal light theme (black/white/grey)
   | 'material'          // Material Design light (Indigo + grey)
-  | 'midnight'          // OLED true-black dark theme (calm blue accent)
-  | 'kanagawa'          // Kanagawa Wave — Japanese ink-blue dark theme
-  | 'rose-pine'         // Rosé Pine — muted warm dark theme (rose accent)
-  | 'everforest'        // Everforest — calm green-tinged dark theme
-  | 'vercel-dark'       // Vercel/Geist — neutral dark theme (blue accent)
-  | 'nord-light';       // Nord Light — frost-blue on snow-white light theme
+  | 'discord'            // Discord (Blurple + grey-3)
+  | 'light-dim-sidebar'  // Light main + dimmed dark sidebar (VS Code style)
+  | (string & {});       // legacy ids (migrated on load) + custom-<id>
 
 export interface ThemeMeta {
   id: ThemeId;
-  /** i18n key for the theme's display name. */
+  /** i18n key for the theme's display name — OR a literal name for custom
+   *  themes (labelKey starting with '@' is rendered verbatim). */
   labelKey: string;
   /** Whether this theme is dark (controls .dark class + contrast blend). */
   isDark: boolean;
@@ -78,116 +82,6 @@ export const THEMES: ThemeMeta[] = [
     },
   },
   {
-    id: 'dark',
-    labelKey: 'settings.themeDark',
-    isDark: true,
-    preview: {
-      bgPrimary: '#0b0e14', bgSecondary: '#0f1218', bgTertiary: '#131721',
-      textPrimary: '#bfbdb6', textSecondary: '#8a8f98',
-      accent: '#39BAE6', border: '#1f2530',
-      statusAdded: '#AAD94C', statusModified: '#FFD700', statusDeleted: '#F26D78',
-    },
-  },
-  {
-    id: 'github-light',
-    labelKey: 'settings.themeGithubLight',
-    isDark: false,
-    preview: {
-      bgPrimary: '#ffffff', bgSecondary: '#f6f8fa', bgTertiary: '#eaeef2',
-      textPrimary: '#1f2328', textSecondary: '#59636e',
-      accent: '#0969da', border: '#d0d7de',
-      statusAdded: '#1a7f37', statusModified: '#9a6700', statusDeleted: '#cf222e',
-    },
-  },
-  {
-    id: 'github-dark',
-    labelKey: 'settings.themeGithubDark',
-    isDark: true,
-    preview: {
-      bgPrimary: '#0d1117', bgSecondary: '#161b22', bgTertiary: '#21262d',
-      textPrimary: '#e6edf3', textSecondary: '#8b949e',
-      accent: '#2f81f7', border: '#30363d',
-      statusAdded: '#3fb950', statusModified: '#d29922', statusDeleted: '#f85149',
-    },
-  },
-  {
-    id: 'dracula',
-    labelKey: 'settings.themeDracula',
-    isDark: true,
-    preview: {
-      bgPrimary: '#282a36', bgSecondary: '#21222c', bgTertiary: '#343746',
-      textPrimary: '#f8f8f2', textSecondary: '#bcbcbc',
-      accent: '#bd93f9', border: '#44475a',
-      statusAdded: '#50fa7b', statusModified: '#f1fa8c', statusDeleted: '#ff5555',
-    },
-  },
-  {
-    id: 'monokai',
-    labelKey: 'settings.themeMonokai',
-    isDark: true,
-    preview: {
-      bgPrimary: '#272822', bgSecondary: '#1e1f1c', bgTertiary: '#3e3d32',
-      textPrimary: '#f8f8f2', textSecondary: '#a8a8a0',
-      accent: '#a6e22e', border: '#49483e',
-      statusAdded: '#a6e22e', statusModified: '#fd971f', statusDeleted: '#f92672',
-    },
-  },
-  {
-    id: 'solarized-light',
-    labelKey: 'settings.themeSolarizedLight',
-    isDark: false,
-    preview: {
-      bgPrimary: '#fdf6e3', bgSecondary: '#eee8d5', bgTertiary: '#eee8d5',
-      textPrimary: '#586e75', textSecondary: '#93a1a1',
-      accent: '#268bd2', border: '#eee8d5',
-      statusAdded: '#859900', statusModified: '#b58900', statusDeleted: '#dc322f',
-    },
-  },
-  {
-    id: 'solarized-dark',
-    labelKey: 'settings.themeSolarizedDark',
-    isDark: true,
-    preview: {
-      bgPrimary: '#002b36', bgSecondary: '#073642', bgTertiary: '#073642',
-      textPrimary: '#93a1a1', textSecondary: '#657b83',
-      accent: '#268bd2', border: '#073642',
-      statusAdded: '#859900', statusModified: '#b58900', statusDeleted: '#dc322f',
-    },
-  },
-  {
-    id: 'nord',
-    labelKey: 'settings.themeNord',
-    isDark: true,
-    preview: {
-      bgPrimary: '#2e3440', bgSecondary: '#3b4252', bgTertiary: '#434c5e',
-      textPrimary: '#d8dee9', textSecondary: '#81a1c1',
-      accent: '#88c0d0', border: '#4c566a',
-      statusAdded: '#a3be8c', statusModified: '#ebcb8b', statusDeleted: '#bf616a',
-    },
-  },
-  {
-    id: 'tokyo-night',
-    labelKey: 'settings.themeTokyoNight',
-    isDark: true,
-    preview: {
-      bgPrimary: '#1a1b26', bgSecondary: '#16161e', bgTertiary: '#1f2335',
-      textPrimary: '#c0caf5', textSecondary: '#a9b1d6',
-      accent: '#7aa2f7', border: '#2a2e44',
-      statusAdded: '#9ece6a', statusModified: '#e0af68', statusDeleted: '#f7768e',
-    },
-  },
-  {
-    id: 'catppuccin-mocha',
-    labelKey: 'settings.themeCatppuccinMocha',
-    isDark: true,
-    preview: {
-      bgPrimary: '#1e1e2e', bgSecondary: '#181825', bgTertiary: '#313244',
-      textPrimary: '#cdd6f4', textSecondary: '#a6adc8',
-      accent: '#89b4fa', border: '#45475a',
-      statusAdded: '#a6e3a1', statusModified: '#f9e2af', statusDeleted: '#f38ba8',
-    },
-  },
-  {
     id: 'one-dark',
     labelKey: 'settings.themeOneDark',
     isDark: true,
@@ -199,102 +93,6 @@ export const THEMES: ThemeMeta[] = [
     },
   },
   {
-    id: 'gruvbox-dark',
-    labelKey: 'settings.themeGruvboxDark',
-    isDark: true,
-    preview: {
-      bgPrimary: '#282828', bgSecondary: '#1d2021', bgTertiary: '#3c3836',
-      textPrimary: '#ebdbb2', textSecondary: '#a89984',
-      accent: '#fabd2f', border: '#504945',
-      statusAdded: '#b8bb26', statusModified: '#fabd2f', statusDeleted: '#fb4934',
-    },
-  },
-  // Task 5 — Slack-inspired dark theme. Slack's signature palette: dark
-  // aubergine/charcoal backgrounds, four accent colors (red/orange/green/blue)
-  // for status indicators. Designed for high message density — high contrast
-  // secondary text so commits/files stand out.
-  {
-    id: 'slack-dark',
-    labelKey: 'settings.themeSlackDark',
-    isDark: true,
-    preview: {
-      bgPrimary: '#1a1d21', bgSecondary: '#1a1d21', bgTertiary: '#2c2f33',
-      textPrimary: '#f0f0f0', textSecondary: '#cfc3f8',
-      accent: '#611f69', border: '#3a3d41',
-      statusAdded: '#2eb886', statusModified: '#f2c744', statusDeleted: '#e01e5a',
-    },
-  },
-  // Task 5 — Discord-inspired theme. Discord uses 'Blurple' (#5865F2) accent
-  // on a series of neutral greys (grey-3 / grey-2 / grey-1). Light secondary
-  // text for readability. Designed for long-form reading.
-  {
-    id: 'discord',
-    labelKey: 'settings.themeDiscord',
-    isDark: true,
-    preview: {
-      bgPrimary: '#36393f', bgSecondary: '#2f3136', bgTertiary: '#292b30',
-      textPrimary: '#dcddde', textSecondary: '#b9bbbe',
-      accent: '#5865f2', border: '#202225',
-      statusAdded: '#3ba55c', statusModified: '#faa61a', statusDeleted: '#ed4245',
-    },
-  },
-  // Light main window + dimmed dark sidebar — VS Code "Light+" with dark activity bar.
-  // The sidebar uses dark colors while the main editor area stays light.
-  // Achieved via CSS: [data-theme="light-dim-sidebar"] overrides sidebar vars.
-  {
-    id: 'light-dim-sidebar',
-    labelKey: 'settings.themeLightDimSidebar',
-    isDark: false,
-    preview: {
-      bgPrimary: '#f7f8fa', bgSecondary: '#1e1e1e', bgTertiary: '#252526',
-      textPrimary: '#2c3138', textSecondary: '#5c6166',
-      accent: '#399ee6', border: '#d8dade',
-      statusAdded: '#86b300', statusModified: '#f2ae49', statusDeleted: '#f07171',
-    },
-  },
-  // GitHub Light main + dimmed dark sidebar — matches GitHub.com's new UI where
-  // the left sidebar is dark and the content area is light.
-  {
-    id: 'github-light-dim',
-    labelKey: 'settings.themeGithubLightDim',
-    isDark: false,
-    preview: {
-      bgPrimary: '#ffffff', bgSecondary: '#0d1117', bgTertiary: '#161b22',
-      textPrimary: '#1f2328', textSecondary: '#59636e',
-      accent: '#0969da', border: '#d0d7de',
-      statusAdded: '#1a7f37', statusModified: '#bf8700', statusDeleted: '#cf222e',
-    },
-  },
-  // Figma Designer Light — clean white with coral/orange accent.
-  // Inspired by Figma's UI: pure white background, very light grey panels,
-  // coral accent (#F24E1E) for selection and buttons.
-  {
-    id: 'designer-light',
-    labelKey: 'settings.themeDesignerLight',
-    isDark: false,
-    preview: {
-      bgPrimary: '#ffffff', bgSecondary: '#f5f5f5', bgTertiary: '#e8e8e8',
-      textPrimary: '#1e1e1e', textSecondary: '#757575',
-      accent: '#F24E1E', border: '#d4d4d4',
-      statusAdded: '#0D9966', statusModified: '#F24E1E', statusDeleted: '#F24E1E',
-    },
-  },
-  // Purple — deep navy background with vibrant purple accent.
-  // Inspired by Twitch/Phillips Hue aesthetic: dark navy + electric purple.
-  {
-    id: 'purple',
-    labelKey: 'settings.themePurple',
-    isDark: true,
-    preview: {
-      bgPrimary: '#1a1b2e', bgSecondary: '#15162a', bgTertiary: '#25264a',
-      textPrimary: '#c8c9e8', textSecondary: '#7d7ea8',
-      accent: '#9b6dff', border: '#2e2f5a',
-      statusAdded: '#5eff8e', statusModified: '#ffd55e', statusDeleted: '#ff5e7a',
-    },
-  },
-  // Simple Light — minimal black/white/grey with blue accent.
-  // High-contrast, no decorative colors — pure functional design.
-  {
     id: 'simple-light',
     labelKey: 'settings.themeSimpleLight',
     isDark: false,
@@ -305,9 +103,6 @@ export const THEMES: ThemeMeta[] = [
       statusAdded: '#009900', statusModified: '#ff9900', statusDeleted: '#cc0000',
     },
   },
-  // Material Design Light — Google Material Design palette.
-  // Indigo 500 (#3F51B5) accent on light grey (#FAFAFA) background.
-  // Follows Material Design color system with proper elevation tiers.
   {
     id: 'material',
     labelKey: 'settings.themeMaterial',
@@ -319,93 +114,113 @@ export const THEMES: ThemeMeta[] = [
       statusAdded: '#4CAF50', statusModified: '#FF9800', statusDeleted: '#F44336',
     },
   },
-  // ─── New themes (2026-09) ──────────────────────────────────────────────
-  // Midnight — OLED/true-black dark theme. Near-black surfaces, calm blue
-  // accent; ideal for OLED panels and low-light environments.
   {
-    id: 'midnight',
-    labelKey: 'settings.themeMidnight',
+    id: 'discord',
+    labelKey: 'settings.themeDiscord',
     isDark: true,
     preview: {
-      bgPrimary: '#050608', bgSecondary: '#0a0b10', bgTertiary: '#101218',
-      textPrimary: '#e6e8f0', textSecondary: '#a0a3b2',
-      accent: '#6ea8fe', border: '#1a1c26',
-      statusAdded: '#5dd397', statusModified: '#e5c07b', statusDeleted: '#f07178',
+      bgPrimary: '#36393f', bgSecondary: '#2f3136', bgTertiary: '#292b30',
+      textPrimary: '#dcddde', textSecondary: '#b9bbbe',
+      accent: '#5865f2', border: '#202225',
+      statusAdded: '#3ba55c', statusModified: '#faa61a', statusDeleted: '#ed4245',
     },
   },
-  // Kanagawa Wave — Japanese ukiyo-e inspired dark theme. Ink-blue
-  // backgrounds, warm paper text, crystal-blue accent.
+  // Light main window + dimmed dark sidebar — VS Code "Light+" with dark
+  // activity bar. The sidebar uses dark colors while the main editor area
+  // stays light (CSS: [data-theme="light-dim-sidebar"] overrides aside vars).
   {
-    id: 'kanagawa',
-    labelKey: 'settings.themeKanagawa',
-    isDark: true,
-    preview: {
-      bgPrimary: '#1f1f28', bgSecondary: '#16161d', bgTertiary: '#24242e',
-      textPrimary: '#dcd7ba', textSecondary: '#a6a1b8',
-      accent: '#7e9cd8', border: '#2c2c3a',
-      statusAdded: '#98bb6c', statusModified: '#e6c384', statusDeleted: '#ff5d62',
-    },
-  },
-  // Rosé Pine — muted warm dark theme. Deep ink-violet backgrounds, soft
-  // cream text, muted rose accent.
-  {
-    id: 'rose-pine',
-    labelKey: 'settings.themeRosePine',
-    isDark: true,
-    preview: {
-      bgPrimary: '#191724', bgSecondary: '#1f1d2e', bgTertiary: '#26233a',
-      textPrimary: '#e0def4', textSecondary: '#908caa',
-      accent: '#eb6f92', border: '#2b2844',
-      statusAdded: '#74c69d', statusModified: '#f6c177', statusDeleted: '#eb6f92',
-    },
-  },
-  // Everforest — calm green-tinged dark theme. Soothing forest tones, warm
-  // paper text, sage-green accent.
-  {
-    id: 'everforest',
-    labelKey: 'settings.themeEverforest',
-    isDark: true,
-    preview: {
-      bgPrimary: '#2d353b', bgSecondary: '#262d33', bgTertiary: '#3a454c',
-      textPrimary: '#d3c6aa', textSecondary: '#9da9a0',
-      accent: '#a7c080', border: '#3f4a52',
-      statusAdded: '#a7c080', statusModified: '#dbbc7f', statusDeleted: '#e67e80',
-    },
-  },
-  // Vercel Dark — neutral cool-gray dark theme (Geist palette). Minimal
-  // monochrome surfaces with Vercel blue accent.
-  {
-    id: 'vercel-dark',
-    labelKey: 'settings.themeVercelDark',
-    isDark: true,
-    preview: {
-      bgPrimary: '#09090b', bgSecondary: '#111113', bgTertiary: '#18181d',
-      textPrimary: '#fafafa', textSecondary: '#a1a1aa',
-      accent: '#3291ff', border: '#24242c',
-      statusAdded: '#42d392', statusModified: '#f5a623', statusDeleted: '#ff5c5c',
-    },
-  },
-  // Nord Light — the light sibling of Nord (Snow Storm). Frost-blue accent
-  // on snow-white surfaces.
-  {
-    id: 'nord-light',
-    labelKey: 'settings.themeNordLight',
+    id: 'light-dim-sidebar',
+    labelKey: 'settings.themeLightDimSidebar',
     isDark: false,
     preview: {
-      bgPrimary: '#eceff4', bgSecondary: '#e5e9f0', bgTertiary: '#dfe4ec',
-      textPrimary: '#2e3440', textSecondary: '#4c566a',
-      accent: '#5e81ac', border: '#d3dae4',
-      statusAdded: '#3d7d4f', statusModified: '#a3721c', statusDeleted: '#bf616a',
+      bgPrimary: '#f7f8fa', bgSecondary: '#1e1e1e', bgTertiary: '#252526',
+      textPrimary: '#2c3138', textSecondary: '#5c6166',
+      accent: '#399ee6', border: '#d8dade',
+      statusAdded: '#86b300', statusModified: '#f2ae49', statusDeleted: '#f07171',
     },
   },
 ];
 
 export const DEFAULT_THEME: ThemeId = 'light';
 
-export function getThemeMeta(id: ThemeId): ThemeMeta | undefined {
+/** Pre-curation theme ids → curated replacement. Applied when a saved
+ *  settings/localStorage value references a removed theme. */
+export const LEGACY_THEME_FALLBACK: Record<string, ThemeId> = {
+  'dark': 'one-dark',
+  'github-light': 'light',
+  'github-dark': 'one-dark',
+  'dracula': 'one-dark',
+  'monokai': 'one-dark',
+  'solarized-light': 'light',
+  'solarized-dark': 'one-dark',
+  'nord': 'one-dark',
+  'tokyo-night': 'one-dark',
+  'catppuccin-mocha': 'one-dark',
+  'gruvbox-dark': 'one-dark',
+  'slack-dark': 'one-dark',
+  'purple': 'one-dark',
+  'github-light-dim': 'light-dim-sidebar',
+  'designer-light': 'simple-light',
+  'midnight': 'one-dark',
+  'kanagawa': 'one-dark',
+  'rose-pine': 'one-dark',
+  'everforest': 'one-dark',
+  'vercel-dark': 'one-dark',
+  'nord-light': 'light',
+};
+
+export function isCustomThemeId(id: string | undefined | null): boolean {
+  return typeof id === 'string' && id.startsWith('custom-');
+}
+
+/** Build a pseudo ThemeMeta for a user-created theme (picker card). */
+export function customThemeMeta(entry: CustomThemeEntry): ThemeMeta {
+  const c = entry.colors;
+  return {
+    id: entry.id,
+    // '@' prefix = literal name (see SettingsPage picker rendering).
+    labelKey: `@${entry.name}`,
+    isDark: entry.isDark,
+    preview: {
+      bgPrimary: c.bgPrimary ?? (entry.isDark ? '#282c34' : '#f7f8fa'),
+      bgSecondary: c.bgSidebar ?? c.bgSecondary ?? (entry.isDark ? '#21252b' : '#ffffff'),
+      bgTertiary: c.bgTertiary ?? (entry.isDark ? '#2c313a' : '#eef0f3'),
+      textPrimary: c.textPrimary ?? (entry.isDark ? '#abb2bf' : '#2c3138'),
+      textSecondary: c.textSecondary ?? (entry.isDark ? '#7f8c98' : '#5c6166'),
+      accent: c.accent ?? '#399ee6',
+      border: c.border ?? (entry.isDark ? '#3b4048' : '#d8dade'),
+      statusAdded: c.statusAdded ?? '#86b300',
+      statusModified: c.statusModified ?? '#f2ae49',
+      statusDeleted: c.statusDeleted ?? '#f07171',
+    },
+  };
+}
+
+/** Resolve ANY persisted theme value to a valid current one:
+ *  custom-<id> → kept as-is (validated against the custom list by callers
+ *  that have it), curated id → kept, legacy id → migrated, unknown → default. */
+export function normalizeThemeId(id: string | undefined | null): ThemeId {
+  if (!id) return DEFAULT_THEME;
+  if (isCustomThemeId(id)) return id;
+  if (THEMES.some((t) => t.id === id)) return id as ThemeId;
+  return LEGACY_THEME_FALLBACK[id] ?? DEFAULT_THEME;
+}
+
+export function getThemeMeta(id: string | undefined | null): ThemeMeta | undefined {
+  if (!id) return undefined;
   return THEMES.find((t) => t.id === id);
 }
 
-export function isThemeDark(id: ThemeId): boolean {
+export function isThemeDark(id: string | undefined | null): boolean {
+  if (id && isCustomThemeId(id)) return false; // resolved by callers with the entry
   return getThemeMeta(id)?.isDark ?? false;
+}
+
+/** Auto light/dark pair used by themeMode 'auto' and toggleTheme's family
+ *  flip: the two DEFAULT poles (Ayu Light ↔ One Dark). */
+export function resolveAutoTheme(saved: string, systemDark: boolean): ThemeId {
+  if (isCustomThemeId(saved)) return saved; // custom themes follow the system only when they match
+  const meta = getThemeMeta(saved);
+  if (meta && meta.isDark === systemDark) return saved as ThemeId;
+  return systemDark ? 'one-dark' : 'light';
 }

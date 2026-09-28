@@ -39,9 +39,21 @@ export function registerGithubIpc(): void {
     (_e, owner: string, repo: string, data: { title: string; head: string; base: string; body?: string }) =>
       github.createPullRequest(owner, repo, data)
   );
-  ipcMain.handle('github:listPullRequests', (_e, owner: string, repo: string, state?: 'open' | 'closed' | 'all') =>
-    github.listPullRequests(owner, repo, state)
-  );
+  // listPullRequests — convert a 401 "Bad credentials" rejection into a
+  // typed 'Not authenticated' rejection. The renderer treats it as an auth
+  // problem (shows the sign-in gate, no error toasts), and the main console
+  // stays readable instead of dumping GitHub's raw JSON error per call.
+  ipcMain.handle('github:listPullRequests', async (_e, owner: string, repo: string, state?: 'open' | 'closed' | 'all') => {
+    try {
+      return await github.listPullRequests(owner, repo, state);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes('401') || msg.includes('Bad credentials')) {
+        throw new Error('Not authenticated: GitHub rejected the saved token (401)');
+      }
+      throw e;
+    }
+  });
   // PR detail — fetches single PR with full body + stats (additions/deletions/
   // changed_files/mergeable/draft/labels). Used by the PR detail view.
   ipcMain.handle('github:getPullRequest', (_e, owner: string, repo: string, prNumber: number) =>

@@ -519,6 +519,7 @@ export function registerGitIpc(): void {
   // underlying gitService.* functions are kept (covered by integration tests).
   // Is commit pushed
   ipcMain.handle('git:isCommitPushed', (_e, p: string, h: string) => wrap(gitService.isCommitPushed)(p, h));
+  ipcMain.handle('git:branchesContaining', (_e, p: string, h: string) => wrap(gitService.branchesContaining)(p, h));
   // NOTE: git:squashCommits, git:coalesceCommits IPC handlers were removed
   // as dead code — no renderer callers. The underlying gitService.*
   // functions are kept (covered by integration tests).

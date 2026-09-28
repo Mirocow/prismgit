@@ -148,6 +148,40 @@ export const ChevronLeft = (p: IconProps) => (
   </Icon>
 );
 
+// VS Code-style sidebar panel icons: collapse (panel with the left half
+// folded) / expand (panel with the left half shown).
+export const PanelLeftClose = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="9" y1="4" x2="9" y2="20" />
+    <polyline points="16 15 13 12 16 9" />
+  </Icon>
+);
+
+export const PanelLeftOpen = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="9" y1="4" x2="9" y2="20" />
+    <polyline points="13 9 16 12 13 15" />
+  </Icon>
+);
+
+export const PanelRightClose = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="15" y1="4" x2="15" y2="20" />
+    <polyline points="8 9 11 12 8 15" />
+  </Icon>
+);
+
+export const PanelRightOpen = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="15" y1="4" x2="15" y2="20" />
+    <polyline points="11 15 8 12 11 9" />
+  </Icon>
+);
+
 export const ChevronUp = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="18 15 12 9 6 15" />

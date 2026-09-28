@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { api, type AppSettings } from '../lib/api';
-import { type ThemeId, THEMES, getThemeMeta, DEFAULT_THEME, isThemeDark } from '../lib/themes';
+import { type ThemeId, THEMES, getThemeMeta, DEFAULT_THEME, isThemeDark, normalizeThemeId, isCustomThemeId, resolveAutoTheme, type CustomThemeEntry } from '../lib/themes';
+import {
+  applyCustomThemeStyleTag, removeCustomThemeStyleTag,
+  persistActiveCustomTheme, clearActiveCustomTheme, loadActiveCustomTheme,
+} from '../lib/customThemeCss';
 import { computeContrastOverrides, cssVarName, CONTRAST_TOKENS, type ContrastToken } from '../lib/contrast';
 
 export type Theme = ThemeId;
@@ -33,20 +37,11 @@ export function systemPrefersDark(): boolean {
 }
 
 /**
- * 4.2 — resolve the theme to use in auto mode: stay on `saved` when its
- * darkness already matches the system preference, otherwise switch to the
- * light/dark PAIR of the same family (github-light ↔ github-dark). Families
- * without a pair fall back to DEFAULT_THEME (light) / 'dark' — mirroring
- * toggleTheme's pairing rules.
+ * 4.2 — resolve the theme to use in auto mode. Re-exported from the theme
+ * registry so the pairing rules live in ONE place (curated poles:
+ * light ↔ one-dark; custom themes are kept as-is).
  */
-export function resolveAutoTheme(saved: string, systemDark: boolean): Theme {
-  const meta = getThemeMeta(saved as Theme);
-  if (!meta) return systemDark ? ('dark' as Theme) : DEFAULT_THEME;
-  if (meta.isDark === systemDark) return saved as Theme;
-  const family = saved.split('-')[0];
-  const pair = THEMES.find((t) => t.isDark === systemDark && t.id.startsWith(family));
-  return pair ? pair.id : (systemDark ? ('dark' as Theme) : DEFAULT_THEME);
-}
+export { resolveAutoTheme } from '../lib/themes';
 
 // Module-level matchMedia listener — one per app, (re)started when auto
 // mode turns on and removed when it turns off.
@@ -84,8 +79,30 @@ function stopSystemThemeSync(): void {
   systemThemeHandler = null;
 }
 
-function applyThemeToDOM(theme: Theme) {
+function applyThemeToDOM(theme: Theme, customThemes?: CustomThemeEntry[]) {
   const html = document.documentElement;
+  // ── Custom themes: inject their variables + mirror to localStorage for
+  // the pre-React boot (theme-init.ts reads the same mirror).
+  if (isCustomThemeId(theme)) {
+    const entry = customThemes?.find((e) => e.id === theme);
+    if (entry) {
+      applyCustomThemeStyleTag(entry);
+      if (entry.isDark) html.classList.add('dark');
+      else html.classList.remove('dark');
+      html.setAttribute('data-theme', entry.id);
+      try {
+        const w = window as unknown as { smartgit?: { window?: { setBackgroundColor?: (c: string) => void } } };
+        if (entry.colors.bgPrimary) w.smartgit?.window?.setBackgroundColor?.(entry.colors.bgPrimary);
+      } catch { /* non-Electron — ignore */ }
+      persistActiveCustomTheme(entry);
+      try { localStorage.setItem('prismgit-theme', entry.id); } catch { /* ignore */ }
+      return;
+    }
+    // Unknown custom id (deleted theme, foreign settings) → fall back.
+    theme = DEFAULT_THEME;
+  }
+  removeCustomThemeStyleTag();
+  clearActiveCustomTheme();
   const meta = getThemeMeta(theme);
   const dark = meta?.isDark ?? false;
   // Legacy .dark class — preserved for backward compat with components that
@@ -208,12 +225,22 @@ function applyContrastToDOM(contrast: number) {
 
 // Apply theme immediately on module load (prevents FOUC)
 try {
-  const saved = localStorage.getItem('prismgit-theme') as Theme | null;
-  // Accept any registered theme; fall back to default for unknown values
-  // (handles old installs that had only 'light' / 'dark').
-  const validIds = THEMES.map((t) => t.id);
-  const theme = saved && validIds.includes(saved) ? saved : DEFAULT_THEME;
-  applyThemeToDOM(theme);
+  const saved = localStorage.getItem('prismgit-theme');
+  // Custom themes boot from their localStorage mirror (colors included) —
+  // theme-init.ts already applied the class/attribute pre-React; this only
+  // re-asserts + injects the style tag.
+  if (saved && isCustomThemeId(saved)) {
+    const entry = loadActiveCustomTheme();
+    if (entry) {
+      applyThemeToDOM(saved, [entry]);
+    } else {
+      applyThemeToDOM(DEFAULT_THEME);
+    }
+  } else {
+    // Accept any registered theme; MIGRATE legacy ids (pre-curation picks
+    // like dracula/monokai) to their curated replacement.
+    applyThemeToDOM(normalizeThemeId(saved));
+  }
 } catch {
   applyThemeToDOM(DEFAULT_THEME);
 }
@@ -229,10 +256,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const settings = await api.settings.getAll();
       // Validate stored theme — old installs may have 'light'/'dark' only,
-      // newer may have any of the registered themes.
+      // newer may have any of the registered themes. LEGACY ids (pre-
+      // curation picks like dracula) migrate to their curated replacement;
+      // custom-<id> values are validated against the stored custom list.
       const stored = settings.theme as string | undefined;
-      const validIds = THEMES.map((t) => t.id);
-      const theme: Theme = stored && validIds.includes(stored as Theme) ? (stored as Theme) : DEFAULT_THEME;
+      const customThemes = (settings as { customThemes?: CustomThemeEntry[] }).customThemes ?? [];
+      let theme: Theme = normalizeThemeId(stored);
+      if (isCustomThemeId(theme) && !customThemes.some((e) => e.id === theme)) {
+        theme = DEFAULT_THEME;
+      }
       // 4.2 — resolve the effective theme under auto mode and (re)arm the
       // system listener. The manual base stays in settings.theme.
       const themeMode = settings.themeMode ?? 'manual';
@@ -279,6 +311,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const t = value as Theme;
       set({ theme: t });
       get().applyTheme();
+    }
+    // Custom theme list changed (created / edited / deleted in the theme
+    // editor) — re-apply when the ACTIVE theme is custom so the change is
+    // visible immediately (live preview writes go through here).
+    if (key === 'customThemes') {
+      if (isCustomThemeId(get().theme)) get().applyTheme();
     }
     // Apply font sizes immediately to CSS variables
     if (key === 'fontSize') {
@@ -348,26 +386,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   toggleTheme: async () => {
-    // Toggle between light and dark variants — flips isDark but keeps the
-    // palette family when possible (e.g. github-light ↔ github-dark).
-    // For themes without a paired opposite, falls back to DEFAULT_THEME.
+    // Flip light ↔ dark across the curated poles (Ayu Light ↔ One Dark).
+    // Custom themes flip by their own isDark flag. The old per-family
+    // pairing (github-light ↔ github-dark, …) died with the theme curation.
     const current = get().theme;
-    const currentMeta = getThemeMeta(current);
-    if (!currentMeta) {
-      await get().setTheme(DEFAULT_THEME);
-      return;
+    let curDark: boolean;
+    if (isCustomThemeId(current)) {
+      const entry = (get().settings as { customThemes?: CustomThemeEntry[] }).customThemes?.find((e) => e.id === current);
+      curDark = entry?.isDark ?? false;
+    } else {
+      curDark = getThemeMeta(current)?.isDark ?? false;
     }
-    // Try to find a paired opposite (same family, opposite darkness)
-    const opposite = THEMES.find((t) => t.isDark !== currentMeta.isDark && t.id.startsWith(current.split('-')[0]));
-    const next: Theme = opposite
-      ? opposite.id
-      : (currentMeta.isDark ? DEFAULT_THEME : 'dark');
-    await get().setTheme(next);
+    await get().setTheme(curDark ? 'light' : 'one-dark');
   },
 
   applyTheme: () => {
     const { theme, settings } = get();
-    applyThemeToDOM(theme);
+    applyThemeToDOM(theme, (settings as { customThemes?: CustomThemeEntry[] }).customThemes);
     // Re-derive the contrast overrides from the NEW theme's tokens. Without
     // this, inline --text-*/--border-* values blended from the PREVIOUS
     // theme survive the switch and override the new [data-theme] block

@@ -106,19 +106,67 @@ export function navItems(): NavItem[] {
 }
 
 /**
- * Quick-navigation shortcuts (Ctrl+1..9). Pages not listed here are still
- * reachable via the sidebar or the Command Palette.
+ * Default hotkeys for EVERY tool (user request: «снабди весь левый сайдбар
+ * в списке инструментов горячими клавишами»). Ctrl+1..9 cover the 9 most-used
+ * tools; Alt+1..8 cover the rest. User overrides (settings.navHotkeys) are
+ * merged on top — see effectiveNavHotkeys().
  */
-export const NAV_SHORTCUTS: Record<string, string> = {
+export const DEFAULT_NAV_HOTKEYS: Record<string, string> = {
+  // Ctrl+N — daily drivers
   '/changes': 'Ctrl+1',
   '/history': 'Ctrl+2',
   '/diff': 'Ctrl+3',
   '/branches': 'Ctrl+4',
   '/tags': 'Ctrl+5',
   '/stashes': 'Ctrl+6',
-  '/reflog': 'Ctrl+8',
-  '/search': 'Ctrl+9',
+  '/search': 'Ctrl+7',
+  '/blame': 'Ctrl+8',
+  '/pulls': 'Ctrl+9',
+  // Alt+N — the rest (previously Alt+1..6 duplicated Ctrl+1..6 — wasted)
+  '/gitflow': 'Alt+1',
+  '/bisect': 'Alt+2',
+  '/reviews': 'Alt+3',
+  '/ai-chat': 'Alt+4',
+  '/reflog': 'Alt+5',
+  '/recyclable': 'Alt+6',
+  '/submodules': 'Alt+7',
+  '/lfs': 'Alt+8',
 };
+
+/** Back-compat alias for the old partial map (Command Palette hints). */
+export const NAV_SHORTCUTS: Record<string, string> = DEFAULT_NAV_HOTKEYS;
+
+/** All assignable combos for the Settings hotkey pickers. */
+export const NAV_HOTKEY_SLOTS: string[] = [
+  ...Array.from({ length: 9 }, (_, i) => `Ctrl+${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `Alt+${i + 1}`),
+];
+
+/** Merge user hotkey overrides (settings.navHotkeys) over the defaults.
+ *  'None' (empty string) unbinds a tool. */
+export function effectiveNavHotkeys(overrides?: Record<string, string>): Record<string, string> {
+  if (!overrides || Object.keys(overrides).length === 0) return DEFAULT_NAV_HOTKEYS;
+  const merged: Record<string, string> = { ...DEFAULT_NAV_HOTKEYS };
+  for (const [path, combo] of Object.entries(overrides)) {
+    if (combo === 'None' || combo === '') delete merged[path];
+    else if (NAV_HOTKEY_SLOTS.includes(combo)) merged[path] = combo;
+  }
+  return merged;
+}
+
+/** Sort nav items by the user's order (settings.navOrder). Paths missing
+ *  from the order keep their default relative order after the listed ones. */
+export function navItemsOrdered(order?: string[]): NavItem[] {
+  const items = navItems();
+  if (!order || order.length === 0) return items;
+  const rank = new Map(order.map((p, i) => [p, i]));
+  return [...items].sort((a, b) => {
+    const ra = rank.has(a.path) ? rank.get(a.path)! : order.length + items.length;
+    const rb = rank.has(b.path) ? rank.get(b.path)! : order.length + items.length;
+    // Preserve default order for unranked items (stable sort in V8).
+    return ra - rb;
+  });
+}
 
 /** Map path → description (current locale) for pages that have one. */
 export function navDescriptions(): Record<string, string> {

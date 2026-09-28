@@ -7,6 +7,47 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.0] - 2026-09-29
+
+### Hinzugefügt — Browser-artige Zurück/Vorwärts-Navigation
+- **Zurück/Vorwärts-Knöpfe in der Werkzeugleiste** + Alt+← / Alt+→. Ein eigener Verlaufs-Stack notiert nur die Spur des Nutzers; ein neuer Sprung kürzt den Vorwärts-Schwanz wie im Browser
+- In der Tastenkürzel-Übersicht eingetragen (Gruppe „Navigation“)
+
+### Hinzugefügt — einklappbare Panels im VS-Code-Stil
+- **Linke Seitenleiste** klappt zu einer 48px-Symbolleiste zusammen (Tool-Icons + Live-Änderungszähler + Theme/Einstellungen unten); ein Klick auf den Pfeil stellt die alte Breite wieder her. Persistiert
+- **Commit-Detailpanel in History** (rechte Leiste) klappt zu einem 24px-Streifen zusammen — der Graph nutzt die volle Breite
+
+### Hinzugefügt — eigene Themes + kuratierte Auswahl
+- **Theme-Auswahl auf 6 kuratiert** (Ayu Light, One Dark, Simple, Material, Discord, Hell+Fenster-dunkle-Seitenleiste); gespeicherte Alt-Auswahlen wandern automatisch zum kuratierten Ersatz
+- **Visueller Theme-Editor** («Theme erstellen…»): 15 Farbeingaben (Flächen, TEXTFARBEN, Akzent, Rahmen, Statusfarben, Seitenleisten-Hintergrund) + Hell/Dunkel-Schalter + Live-Vorschau. Eigene Themes greifen über ihren eigenen `data-theme="custom-*"`-Selektor mit abgeleiteten Schattierungen — Textfarben ändern sich in jedem Tool
+- Das Feld „Seitenleiste“ baut den Look „dunkle Leiste + helles Fenster“ (VS-Code-Stil); lesbare Leisten-Schrift wird automatisch berechnet
+- Ersetzt die JSON-Textbox „Theme-Overrides“ (nur für Power-User)
+
+### Hinzugefügt — Hotkeys für jedes Tool + konfigurierbare Reihenfolge
+- Jedes Tool hat genau eine Taste: Ctrl+1..9 (Alltags-Tools) + Alt+1..9 (die übrigen — früher duplizierten Alt+1..6 bloß Ctrl+1..6)
+- **Einstellungen → Oberfläche → „Seitenleiste & Navigation“**: Tools umsortieren (↑/↓, persistiert), jede Taste aus freien Slots neu zuweisen („—“ löst die Bindung; eine gestohlene Kombination rückt beim Vorbesitzer raus), Reset
+- Tool-Hotkeys funktionieren jetzt auch aus Eingabefeldern (browser-artig)
+
+### Hinzugefügt — Commit-Kontext in History
+- **„Branches mit diesem Commit“** — Branch-Plaketten in der Commit-Karte (`git branch --contains` + `-r`, pro SHA gecacht); Klick auf einen lokalen Branch zeigt dessen Verlauf
+- **Autor-Filter mit einem Klick** — Klick auf den Autorennamen filtert den Graphen; die Kopier-Schaltfläche liefert „Name <E-Mail>“ auf einen Streich
+
+### Behoben — Zähler, zweite Runde
+- **Branches-Übersicht** zeigt repo-weite Totale (unter aktiver Suche schrumpften die Zahlen und widersprachen Tags/Stashes)
+- **History „Markiert (N)“-Chip** wird über die gefilterte Menge berechnet — bei aktivem Text-/Autor-/Datumsfilter entspricht die Zahl exakt den Zeilen, die der Filter zeigt
+- **Repo-Info-Dialog** listet lokale UND Remote-Branches getrennt; der Statistik-Job zählt jetzt auch `git branch -r`
+- Tote Loader aus History entfernt (Stash/Reflog luden bei jedem Refresh für längst entfernte Sektionen)
+
+### Behoben — 401-Toast-Bombardement von toten Integrationen
+- Ein abgewiesener GitHub-Token (401 Bad credentials) auf der Pull-Requests-Seite ist jetzt ein AUTorisierungs-Problem, kein Ladefehler: null Fehler-Toasts, stattdessen das In-Page-Anmelde-Gate; weitere Aufrufe schicken keine Requests mehr (einer statt 3+)
+- In-flight/last-key-Wächter auf loadPRs — das zweimalige Umkippen von `loading` bei der Provider-Erkennung feuert die Abfrage nicht erneut; der Refresh-Knopf ist der explizite Wiederholungsweg
+
+### Geändert — Einstellungen entdupliziert und erklärt
+- **Zwei „Externe Tools“-Panels zu einem vereint** (diff.tool/merge.tool-Namensfelder stehen jetzt neben den Befehlen, die sie konfigurieren)
+- **Zeilen-Guides**: tote numerische Felder entfernt — der Selektor in „Befehle“ ist der alleinige Eigentümer
+- **„!“-Hinweisboxen** (Hover-Erklärungen) bei den wirklich verwirrenden Einstellungen: Intervall + Umfang der Hintergrundprüfung, Reflog-Limit, Kontrast, Seitenleiste & Navigation
+- Hartkodierte englische Zwischenüberschriften im KI-Panel lokalisiert
+
 ## [2.2.0] - 2026-09-28
 
 ### Hinzugefügt — jede konfliktbehaftete Operation REAGIERT jetzt

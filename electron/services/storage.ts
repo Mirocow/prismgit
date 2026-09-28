@@ -25,7 +25,9 @@ const store = new SimpleStore({
   name: 'prismgit-settings',
   defaults: {
     settings: {
-      theme: 'dark',
+      // Curated default (registry DEFAULT_THEME). Legacy 'dark' values in
+      // existing installs migrate to 'one-dark' on load.
+      theme: 'light',
       fontSize: 14,
       sidebarWidth: 280,
       defaultCloneDir: '',
@@ -379,6 +381,7 @@ export async function refreshRepoStats(repoPath: string): Promise<Partial<Reposi
       lastCommitDate: stats.lastCommitDate,
       lastCommitMessage: stats.lastCommitMessage,
       branchCount: stats.branchCount,
+      remoteBranchCount: stats.remoteBranchCount,
       commitCount: stats.commitCount,
       remoteUrl: stats.remoteUrl,
       provider: stats.provider,

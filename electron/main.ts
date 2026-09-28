@@ -186,7 +186,10 @@ function createWindow(): BrowserWindow {
     // dark theme doesn't flash a white native window before the renderer
     // paints (the renderer keeps it in sync afterwards via
     // window:setBackgroundColor whenever the theme changes).
-    backgroundColor: windowBackgroundForTheme(getSetting('theme') as string | undefined),
+    backgroundColor: windowBackgroundForTheme(
+      getSetting('theme') as string | undefined,
+      (getSetting('customThemes') as import('./types/settings-api.js').CustomThemeEntry[] | undefined) ?? undefined,
+    ),
     frame: false,
     title: 'PrismGit',
     icon: resolveResourceIcon('icon-512.png'),

@@ -1,60 +1,71 @@
 // Theme initialization — loaded before React to prevent FOUC.
 // This file is loaded as a regular module, not inline script.
 //
-// Two things applied early:
+// Three things applied early:
 //   1. Theme class (.dark) + data-theme attribute on <html>
-//   2. UI contrast (text/border color overrides) applied to <html> CSS vars.
-//      The contrast is read from localStorage; settingsStore re-applies once
-//      React mounts. We can't apply it here because the CSS variables aren't
-//      defined yet (they're in globals.css which loads after this module).
-//      The settingsStore.loadSettings() call will apply it.
+//   2. Custom-theme CSS variables (style tag) when the saved theme is a
+//      user-created one — the entry is mirrored in localStorage
+//      ('prismgit-custom-active') by settingsStore so this pre-React code
+//      can rebuild the exact palette without waiting for the settings IPC.
+//   3. UI contrast marker (data-contrast) for settingsStore to pick up.
 //
-// BUGFIX "тёмные темы не адаптированы": the dark-theme list below used to be
-// a hard-coded subset that drifted from src/lib/themes.ts — slack-dark,
-// discord and purple were missing, so at boot those themes ran WITHOUT the
-// .dark class and every token their [data-theme] block doesn't define
-// (diff/tag/warning/graph colors, shadows, …) resolved to the :root LIGHT
-// values. Deriving the list from the registry keeps it in sync forever.
-import { THEMES } from './lib/themes';
+// BUGFIX history: the dark-theme list here used to be a hard-coded subset
+// that drifted from src/lib/themes.ts. It is derived from the registry now,
+// and LEGACY ids (pre-curation picks like dracula) migrate to their curated
+// replacement so an old localStorage value never boots a theme whose CSS
+// block no longer exists.
+import { THEMES, normalizeThemeId, isCustomThemeId } from './lib/themes';
+import { applyCustomThemeStyleTag, loadActiveCustomTheme } from './lib/customThemeCss';
 
 const registryDarkThemes: string[] = THEMES.filter((t) => t.isDark).map((t) => t.id);
 const registryLightThemes: string[] = THEMES.filter((t) => !t.isDark).map((t) => t.id);
 // Fallback if reading the registry ever throws (defensive — same content).
-const fallbackDarkThemes = [
-  'dark', 'github-dark', 'dracula', 'monokai', 'solarized-dark', 'nord',
-  'tokyo-night', 'catppuccin-mocha', 'one-dark', 'gruvbox-dark',
-  'slack-dark', 'discord', 'purple',
-];
+const fallbackDarkThemes = ['one-dark', 'discord'];
 
 try {
-  var theme = localStorage.getItem('prismgit-theme') || 'light';
+  var themeRaw = localStorage.getItem('prismgit-theme') || 'light';
+  var theme = normalizeThemeId(themeRaw);
   var knownDarkThemes = registryDarkThemes.length > 0 ? registryDarkThemes : fallbackDarkThemes;
   var knownLightThemes = registryLightThemes;
   // 4.2 — "Automatically select light/dark": before React mounts we can't
   // compute the exact theme pair, but we can avoid a light flash when the
   // OS is dark. If the saved theme is light and the system prefers dark,
-  // fall back to the generic dark theme; settingsStore resolves the proper
-  // family pair once it loads.
+  // fall back to the default dark pole; settingsStore resolves the proper
+  // pair once it loads.
   try {
     if (
       localStorage.getItem('prismgit-theme-mode') === 'auto' &&
       window.matchMedia &&
       window.matchMedia('(prefers-color-scheme: dark)').matches
     ) {
-      var isKnownDark = knownDarkThemes.indexOf(theme) >= 0;
-      if (!isKnownDark && knownLightThemes.indexOf(theme) >= 0) {
-        theme = 'dark';
+      var isKnownDark = knownDarkThemes.indexOf(theme) >= 0 || (isCustomThemeId(theme) && loadActiveCustomTheme()?.isDark);
+      if (!isKnownDark && (knownLightThemes.indexOf(theme) >= 0 || isCustomThemeId(theme))) {
+        theme = 'one-dark';
       }
     }
   } catch (e2) { /* ignore */
   }
-  // Apply both the legacy .dark class (for backward compat with code that
-  // checks classList.contains('dark')) AND the data-theme attribute (the
-  // actual theme selector used by globals.css to override CSS variables).
-  if (knownDarkThemes.indexOf(theme) >= 0) {
-    document.documentElement.classList.add('dark');
+  // Custom theme: rebuild its palette before anything paints.
+  if (isCustomThemeId(theme)) {
+    const entry = loadActiveCustomTheme();
+    if (entry && entry.id === theme) {
+      applyCustomThemeStyleTag(entry);
+      if (entry.isDark) document.documentElement.classList.add('dark');
+      document.documentElement.setAttribute('data-theme', theme);
+    } else {
+      // Custom id without a mirror (first boot on a new machine) — the
+      // settingsStore load will resolve it; boot on the light default.
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  } else {
+    // Apply both the legacy .dark class (for backward compat with code that
+    // checks classList.contains('dark')) AND the data-theme attribute (the
+    // actual theme selector used by globals.css to override CSS variables).
+    if (knownDarkThemes.indexOf(theme) >= 0) {
+      document.documentElement.classList.add('dark');
+    }
+    document.documentElement.setAttribute('data-theme', theme);
   }
-  document.documentElement.setAttribute('data-theme', theme);
 } catch (e) {
   // Default to light
 }

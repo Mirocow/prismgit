@@ -345,6 +345,7 @@ const api = {
     // NOTE: blameBidirectional, pickaxeSearch, detectRenames IPCs were
     // removed (dead renderer-side code).
     isCommitPushed: (repoPath: string, hash: string) => ipcRenderer.invoke('git:isCommitPushed', repoPath, hash),
+    branchesContaining: (repoPath: string, hash: string) => ipcRenderer.invoke('git:branchesContaining', repoPath, hash),
     // NOTE: squashCommits, coalesceCommits IPCs were removed (dead
     // renderer-side code).
     // Squash-transfer: History multi-select → "Send to branch as one commit".

@@ -7816,6 +7816,28 @@ export async function isCommitPushed(repoPath: string, hash: string): Promise<bo
   }
 }
 
+/** Branches a commit belongs to — answers «какой ветке принадлежит коммит?»
+ *  in the History detail card. `git branch --contains` for local branches
+ *  and `-r` for remote-tracking ones (symbolic `origin/HEAD -> …` rows are
+ *  not branches and are skipped). Results are immutable per SHA — the
+ *  renderer caches them like tagsAt. */
+export interface BranchesContaining {
+  local: string[];
+  remote: string[];
+}
+
+export async function branchesContaining(repoPath: string, hash: string): Promise<BranchesContaining> {
+  const git = getGit(repoPath);
+  const parse = (raw: string): string[] => raw.split('\n')
+    .map((l) => l.replace(/^\*/, '').trim())
+    .filter((l) => l && !l.includes('-> '));
+  const [localRaw, remoteRaw] = await Promise.all([
+    git.raw(['branch', '--contains', hash]).catch(() => ''),
+    git.raw(['branch', '-r', '--contains', hash]).catch(() => ''),
+  ]);
+  return { local: parse(localRaw), remote: parse(remoteRaw) };
+}
+
 /**
  * Squash multiple commits into one (interactive rebase automation).
  * Uses git rebase --interactive with autosquash, by writing fixup! messages.

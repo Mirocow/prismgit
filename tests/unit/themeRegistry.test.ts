@@ -105,7 +105,7 @@ describe('dark themes: separators are muted (not "слишком яркие")', 
   const darkIds = THEMES.filter((t) => t.isDark).map((t) => t.id);
 
   it('there are dark themes to guard', () => {
-    expect(darkIds.length).toBeGreaterThanOrEqual(13);
+    expect(darkIds.length).toBeGreaterThanOrEqual(2);
   });
 
   for (const id of darkIds) {
@@ -196,8 +196,13 @@ describe('electron/services/themeDark.ts (native window background)', () => {
     for (const id of registryLight) {
       expect(!DARK_THEMES.has(id), `DARK_THEMES wrongly contains light theme "${id}"`).toBe(true);
     }
-    expect(windowBackgroundForTheme('dracula')).not.toBe('#f7f8fa');
+    expect(windowBackgroundForTheme('one-dark')).not.toBe('#f7f8fa');
+    expect(windowBackgroundForTheme('discord')).not.toBe('#f7f8fa');
     expect(windowBackgroundForTheme('light')).toBe('#f7f8fa');
     expect(windowBackgroundForTheme(undefined)).toBe('#f7f8fa');
+    // Custom themes resolve darkness (and bg) from the customThemes list.
+    expect(windowBackgroundForTheme('custom-x', [{ id: 'custom-x', name: 'X', isDark: true, colors: {} }])).not.toBe('#f7f8fa');
+    expect(windowBackgroundForTheme('custom-x', [{ id: 'custom-x', name: 'X', isDark: false, colors: {} }])).toBe('#f7f8fa');
+    expect(windowBackgroundForTheme('custom-x', [{ id: 'custom-x', name: 'X', isDark: true, colors: { bgPrimary: '#123456' } }])).toBe('#123456');
   });
 });

@@ -15,6 +15,7 @@ import {
   GitBranch,
   GitMerge,
   GitPullRequest,
+  PanelRightClose, PanelRightOpen,
   Pencil,
   Plus,
   RefreshCw,
@@ -31,7 +32,7 @@ import { SquashToBranchDialog } from '../components/SquashToBranchDialog';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
-import { api, type BranchInfo, type CommitFile, type LogEntry, type RecyclableCommit, type StashEntry } from '../lib/api';
+import { api, type BranchInfo, type CommitFile, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
 // NOTE: getInitials/getAuthorColor are still used by the detail panel below;
 // the per-row usages moved into components/history/HistoryCommitRow.tsx.
@@ -49,7 +50,6 @@ import { useLazyList } from '../lib/useLazyList';
 import { cn, copyToClipboard, shortHash } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
-import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -118,6 +118,11 @@ export function HistoryPage() {
   const [loadingNested, setLoadingNested] = useState(false);
   const [showNested, setShowNested] = useState(true);
   const [tagsHere, setTagsHere] = useState<{ name: string; annotated: boolean; tagger?: string; date?: string; message?: string }[]>([]);
+  // Branches containing the selected commit («какой ветке принадлежит
+  // коммит»): `git branch --contains` + `-r --contains`. Cached per SHA like
+  // tagsHere — the answer is immutable for a given hash.
+  const [branchesHere, setBranchesHere] = useState<{ local: string[]; remote: string[] }>({ local: [], remote: [] });
+  const branchesHereCache = useRef<Map<string, { local: string[]; remote: string[] }>>(new Map());
   // PERFORMANCE: per-hash caches for the four IPC calls fired on commit
   // selection (commitFiles, mergeNestedCommits, tagsAt, notesShow). These
   // results are IMMUTABLE for a given commit SHA, so caching them avoids
@@ -136,6 +141,7 @@ export function HistoryPage() {
     commitFilesCache.current.clear();
     nestedCommitsCache.current.clear();
     tagsHereCache.current.clear();
+    branchesHereCache.current.clear();
   }, [repo.path]);
 
   const [showFiles, setShowFiles] = useState(true);
@@ -192,16 +198,26 @@ export function HistoryPage() {
   // Hash lookup: when the search query looks like a commit hash prefix and no loaded
   // commit matches, resolve it via git (works for commits outside the loaded window).
   const [hashHit, setHashHit] = useState<LogEntry | null>(null);
-  // SmartGit Log groups: besides the commit graph the Log window shows
-  // Local/Remote commits (the graph itself), Stashes and Recyclable Commits.
-  // Stashes are shown by default; Recyclable commits are opt-in (SmartGit
-  // manual: "Recyclable Commits checkbox").
-  const [stashes, setStashes] = useState<StashEntry[]>([]);
-  const [recyclable, setRecyclable] = useState<RecyclableCommit[]>([]);
-  const [showStashes, setShowStashes] = useState(true);
-  const [showRecyclable, setShowRecyclable] = useState(false);
+  // NOTE: the old SmartGit-Log "groups" (stashes rows + recyclable rows
+  // rendered inside the graph) were removed in 1b48f6f, but their state +
+  // loaders survived and kept running `git stash list` on EVERY history
+  // load — dead weight (and one more spawn per refresh). Stashes live in
+  // the Stashes tool; recyclable commits in the Recyclable tool.
   const [cpBusyHash, setCpBusyHash] = useState<string | null>(null);
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
+  // Right detail pane collapse (VS Code-style): the commit-details sidebar
+  // folds away to a 24px strip so the graph takes the full width (the user's
+  // «кнопок сворачивания сайдбаров … правого»). Persisted.
+  const [detailCollapsed, setDetailCollapsed] = useState(
+    () => localStorage.getItem('prismgit-history-detail-collapsed') === '1'
+  );
+  const toggleDetailCollapsed = useCallback(() => {
+    setDetailCollapsed((v) => {
+      const next = !v;
+      localStorage.setItem('prismgit-history-detail-collapsed', next ? '1' : '0');
+      return next;
+    });
+  }, []);
   const showContextMenu = useContextMenu();
 
   // ===== SmartGit integrations =====
@@ -316,6 +332,7 @@ export function HistoryPage() {
       // showing DELETED tags / missing NEW ones until the user switched
       // commits or repos (stale-cache bug).
       tagsHereCache.current.clear();
+      branchesHereCache.current.clear();
       void api.git.tags(repo.path).then((tags) => setAllTags(tags.map((tg) => ({ name: tg.name, hash: tg.hash })))).catch(() => {});
       // If we got fewer than PAGE_SIZE commits, there are no more to load.
       // Otherwise assume more exist (we'll discover the end on the next fetch).
@@ -380,15 +397,6 @@ export function HistoryPage() {
       })();
       // Load branches for the filter dropdown — also non-blocking.
       void api.git.branches(repo.path).then(setBranches).catch(() => {});
-      // SmartGit Log groups — stashes and (opt-in) recyclable commits load
-      // alongside the graph; failures degrade to empty sections.
-      // Stashes are shown by default — load eagerly.
-      api.git.stashList(repo.path).then((s) => setStashes(s)).catch(() => setStashes([]));
-      // Recyclable commits are opt-in (showRecyclable=false by default) —
-      // defer the expensive `git reflog --all` + `git rev-list --all` calls
-      // until the user actually expands that section.
-      // (Previously fired on every History page open, blocking UI for seconds
-      //  on large repos for data the user wasn't viewing.)
       setSelectedIdx(0);
       // Preserve an existing global selection when it is still visible in the
       // (re)loaded log — clobbering it with the first commit broke other tools
@@ -512,21 +520,6 @@ export function HistoryPage() {
       setLoadingMore(false);
     }
   }, [loadingMore, hasMore, loading, entries.length, repo.path, branchFilter, selectedBranches, globalPathFilter, toast, status?.current, status?.tracking]);
-
-  // Recyclable commits are opt-in — only load `git reflog --all` + `git rev-list --all`
-  // when the user expands the section. Previously this fired on every History
-  // page open and could block the UI for seconds on large repos.
-  useEffect(() => {
-    if (!showRecyclable) {
-      setRecyclable([]);
-      return;
-    }
-    let cancelled = false;
-    api.git.recyclableCommits(repo.path)
-      .then((r) => { if (!cancelled) setRecyclable(r); })
-      .catch(() => { if (!cancelled) setRecyclable([]); });
-    return () => { cancelled = true; };
-  }, [showRecyclable, repo.path]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -677,16 +670,16 @@ export function HistoryPage() {
     return result;
   }, [searchPool, debouncedSearch, authorFilter, pathFilter, dateFrom, dateTo, useRegex, taggedActive]);
 
-  // Tagged-commits-in-view — EXACTLY the row count the Tagged filter shows
-  // for the current branch selection and loaded window. The chip used to show
-  // allTags.length (ALL tag refs in the repo): a tag on a branch outside the
-  // view (feature/b while on head+upstream) made «Tagged (6)» disagree with
-  // the 4 rows the filter actually produced. The tooltip now carries BOTH
-  // numbers; the visible count always matches what the click will show.
+  // Tagged-commits-in-view — EXACTLY the row count the Tagged filter will
+  // show right now. Computed over `filtered` (not the raw pool): with a
+  // text/author/date filter active, the tagged rows THAT SURVIVE the filter
+  // are what the click produces — the chip used to count the whole pool and
+  // disagreed with the rows ("chip says 4, filter shows 2"). The tooltip
+  // still carries BOTH numbers: in-view + repo-wide total.
   const taggedInView = useMemo(
-    () => searchPool.reduce(
+    () => filtered.reduce(
       (n, e) => n + (e.refs.some(r => r.startsWith('tag:') || r.includes('refs/tags/')) ? 1 : 0), 0),
-    [searchPool],
+    [filtered],
   );
 
   // Auto-scroll to the globally selected commit (set here or from another tool —
@@ -904,9 +897,11 @@ export function HistoryPage() {
     const cachedFiles = commitFilesCache.current.get(hash);
     const cachedNested = nestedCommitsCache.current.get(hash);
     const cachedTags = tagsHereCache.current.get(hash);
+    const cachedBranches = branchesHereCache.current.get(hash);
     if (cachedFiles) setCommitFiles(cachedFiles);
     if (cachedNested) setNestedCommits(cachedNested);
     if (cachedTags) setTagsHere(cachedTags);
+    if (cachedBranches) setBranchesHere(cachedBranches);
 
     // 2) Debounce the IPC batch 100 ms — when the user holds `j` or uses
     //    arrow navigation, each keystroke otherwise fires 4 IPC calls that
@@ -951,6 +946,15 @@ export function HistoryPage() {
           if (filtered[selectedIdx]?.hash === hash) setTagsHere(tags);
         } catch {
           if (filtered[selectedIdx]?.hash === hash) setTagsHere([]);
+        }
+      }
+      if (!cachedBranches) {
+        try {
+          const bc = await api.git.branchesContaining(repo.path, hash);
+          branchesHereCache.current.set(hash, bc);
+          if (filtered[selectedIdx]?.hash === hash) setBranchesHere(bc);
+        } catch {
+          if (filtered[selectedIdx]?.hash === hash) setBranchesHere({ local: [], remote: [] });
         }
       }
     }, 100);
@@ -1731,56 +1735,6 @@ export function HistoryPage() {
     } catch (e) { toast.error(t('history.branchCreateFailed'), String(e)); }
   };
 
-  // ===== SmartGit Log groups: Stashes + Recyclable Commits — row actions =====
-  const handleStashApply = async (s: StashEntry) => {
-    try {
-      await useOperationLogStore.getState().logOperation(
-        `Apply Stash {${s.index}}`, repo.path, `git stash apply stash@{${s.index}}`,
-        () => api.git.stashApply(repo.path, s.index)
-      );
-      toast.success(t('toast.stash.applied'));
-      await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error(t('toast.stash.applyFailed'), String(e)); }
-  };
-  const handleStashPop = async (s: StashEntry) => {
-    try {
-      await useOperationLogStore.getState().logOperation(
-        `Pop Stash {${s.index}}`, repo.path, `git stash pop stash@{${s.index}}`,
-        () => api.git.stashPop(repo.path, s.index)
-      );
-      toast.success(t('toast.stash.popped'));
-      await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error(t('toast.stash.popFailed'), String(e)); }
-  };
-  const handleStashDrop = async (s: StashEntry) => {
-    if (!(await confirmDialog({
-      title: t('history.dropStashTitle', { index: s.index }),
-      message: t('history.dropStashMessage', { message: s.message }),
-      confirmLabel: t('history.dropAction'),
-      danger: true,
-    }))) return;
-    try {
-      await useOperationLogStore.getState().logOperation(
-        `Drop Stash {${s.index}}`, repo.path, `git stash drop stash@{${s.index}}`,
-        () => api.git.stashDrop(repo.path, s.index)
-      );
-      toast.success(t('toast.stash.dropped'));
-      await loadHistory();
-    } catch (e) { toast.error(t('toast.stash.dropFailed'), String(e)); }
-  };
-  const handleRecyclableBranch = async (c: RecyclableCommit) => {
-    const name = await promptDialog({
-      title: t('history.recyclableBranchTitle'),
-      message: t('history.recyclableBranchMessage', { hash: shortHash(c.hash) }),
-      input: { initialValue: `recover/${c.hash.substring(0, 8)}` },
-    });
-    if (!name) return;
-    try {
-      await api.git.createBranch(repo.path, name, c.hash);
-      toast.success(t('history.branchCreatedToast', { name }), t('history.branchFrom', { hash: shortHash(c.hash) }));
-      await loadHistory();
-    } catch (e) { toast.error(t('history.branchCreateFailed'), String(e)); }
-  };
   const handleShowCommit = (hash: string) => {
     // Highlight the commit in the graph (when reachable from a loaded ref)
     useSelectionStore.getState().selectCommit(hash);
@@ -2368,9 +2322,28 @@ export function HistoryPage() {
           )}
         </div>
 
-        {/* Detail panel */}
+        {/* Detail panel — collapsible right sidebar (VS Code-style) */}
+        {detailCollapsed ? (
+          <button
+            className="w-6 shrink-0 bg-bg-secondary border-l border-border-default flex items-center justify-center hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
+            title={t('history.expandDetailPanel', { defaultValue: 'Развернуть панель коммита' })}
+            aria-label={t('history.expandDetailPanel', { defaultValue: 'Развернуть панель коммита' })}
+            onClick={toggleDetailCollapsed}
+          >
+            <PanelRightOpen size={14} />
+          </button>
+        ) : (
+          <>
         <ResizableSplitter direction="horizontal" onResize={(d) => handleDetailResize(-d)} />
-        <div className="bg-bg-secondary overflow-y-auto shrink-0" style={{ width: detailWidth }}>
+        <div className="bg-bg-secondary overflow-y-auto shrink-0 relative" style={{ width: detailWidth }}>
+          <button
+            className="absolute top-1 right-1 z-10 icon-btn !w-6 !h-6"
+            title={t('history.collapseDetailPanel', { defaultValue: 'Свернуть панель коммита' })}
+            aria-label={t('history.collapseDetailPanel', { defaultValue: 'Свернуть панель коммита' })}
+            onClick={toggleDetailCollapsed}
+          >
+            <PanelRightClose size={13} />
+          </button>
           {selected ? (
             <div className="p-3">
               <div className="flex items-start gap-2 mb-2">
@@ -2397,6 +2370,61 @@ export function HistoryPage() {
               )}
               {/* Tags and branch refs on this commit (shared badge renderer) */}
               <RefBadges refs={selected.refs} className="mb-3" hash={selected.hash} onChanged={loadHistory} />
+              {/* BRANCHES CONTAINING this commit — the user's «в описании
+                  коммита не хватает названия ветки, к которой он относится».
+                  RefBadges above shows only refs POINTING AT the commit;
+                  `git branch --contains` answers the actual question (a
+                  commit "belongs" to every branch that contains it). Local
+                  badges are clickable → walks that branch; remote ones are
+                  informational. Collapsed to 5 + "+N" for wide branch sets. */}
+              {(branchesHere.local.length > 0 || branchesHere.remote.length > 0) && (
+                <div className="mb-3">
+                  <div className="text-2xs uppercase text-text-tertiary mb-1 flex items-center gap-1">
+                    <GitBranch size={10} />
+                    {t('history.branchesHereTitle')}
+                    <span className="text-text-tertiary/70">
+                      ({branchesHere.local.length + branchesHere.remote.length})
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {branchesHere.local.slice(0, 5).map((b) => (
+                      <button
+                        key={`l-${b}`}
+                        className="px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary text-2xs text-text-primary hover:bg-bg-hover max-w-40 truncate"
+                        title={t('history.branchesHereClick', { defaultValue: 'Показать историю ветки {branch}', branch: b })}
+                        onClick={() => { useSelectionStore.getState().clearBranches(); setBranchFilter(b); }}
+                      >
+                        {b}
+                      </button>
+                    ))}
+                    {branchesHere.local.length > 5 && (
+                      <span
+                        className="px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary text-2xs text-text-tertiary"
+                        title={branchesHere.local.join(', ')}
+                      >
+                        +{branchesHere.local.length - 5}
+                      </span>
+                    )}
+                    {branchesHere.remote.slice(0, 3).map((b) => (
+                      <span
+                        key={`r-${b}`}
+                        className="px-1.5 py-0.5 rounded border border-border-default/60 text-2xs text-text-tertiary max-w-40 truncate"
+                        title={t('history.branchesHereRemote', { defaultValue: 'Удалённая ветка, содержащая этот коммит', })}
+                      >
+                        {b}
+                      </span>
+                    ))}
+                    {branchesHere.remote.length > 3 && (
+                      <span
+                        className="px-1.5 py-0.5 rounded border border-border-default/60 text-2xs text-text-tertiary"
+                        title={branchesHere.remote.join(', ')}
+                      >
+                        +{branchesHere.remote.length - 3}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
               {/* TAGS ON THIS COMMIT — visible inline management: create (+),
                   edit (pencil) and delete (trash) without hunting for the
                   right-click menu. The context menu keeps the same actions;
@@ -2472,9 +2500,31 @@ export function HistoryPage() {
                   {getInitials(selected.author.name)}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs text-text-primary">{selected.author.name}</div>
+                  {/* Click the author name → filter the graph by this author
+                      (the user's «не получается его скопировать и вставить в
+                      фильтр» — one click instead of copy+paste). */}
+                  <button
+                    className="text-xs text-text-primary hover:text-accent text-left truncate max-w-full"
+                    title={t('history.authorFilterClick', { defaultValue: 'Показать коммиты этого автора' })}
+                    onClick={() => {
+                      setAuthorFilter(selected.author.name);
+                      setShowFilters(true);
+                    }}
+                  >
+                    {selected.author.name}
+                  </button>
                   <div className="text-2xs text-text-tertiary">{formatTime(selected.author.date)}</div>
                 </div>
+                <button
+                  className="icon-btn !w-5 !h-5 shrink-0"
+                  title={t('history.authorCopy', { defaultValue: 'Скопировать «Имя <email>»' })}
+                  onClick={() => {
+                    copyToClipboard(`${selected.author.name} <${selected.author.email}>`);
+                    toast.success(t('history.copied'));
+                  }}
+                >
+                  <Copy size={10} />
+                </button>
               </div>
               {selected.parents.length > 0 && (
                 <div className="mb-3">
@@ -2704,6 +2754,8 @@ export function HistoryPage() {
             <div className="p-4 text-center text-text-tertiary text-sm">{t('history.ttSelectCommit')}</div>
           )}
         </div>
+          </>
+        )}
       </div>
 
       {/* Create / Edit Tag dialog */}

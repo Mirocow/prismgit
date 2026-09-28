@@ -42,7 +42,12 @@ export interface StatsJobResult {
   lastCommitHash?: string;
   lastCommitDate?: string;
   lastCommitMessage?: string;
+  /** LOCAL branches only (git branch). Remote ones are remoteBranchCount —
+   *  the repo-info dialog shows both; conflating them was the "Ветки: N is
+   *  wrong" complaint (user counts local + remote when checking). */
   branchCount: number;
+  /** Remote-tracking branches (git branch -r, symbolic HEAD rows excluded). */
+  remoteBranchCount: number;
   commitCount: number;
   remoteUrl?: string;
   provider: 'github' | 'gitlab' | 'unknown';
@@ -62,6 +67,7 @@ export async function runStatsJob(req: StatsJobRequest): Promise<StatsJobResult>
   const result: StatsJobResult = {
     isRepo: false,
     branchCount: 0,
+    remoteBranchCount: 0,
     commitCount: 0,
     provider: 'unknown',
   };
@@ -84,10 +90,13 @@ export async function runStatsJob(req: StatsJobRequest): Promise<StatsJobResult>
     })
   );
 
-  const [logRaw, branchResult, remotes, commitCountStr] = await Promise.all([
+  const [logRaw, branchResult, remoteBranchRaw, remotes, commitCountStr] = await Promise.all([
     // PERF: git.raw instead of git.log — avoids simple-git's full LogEntry parsing
     git.raw(['log', '-1', '--format=%H%x1f%s%x1f%cI']).catch(() => ''),
     git.branchLocal().catch(() => ({ all: [] as string[] })),
+    // Remote-tracking branch count: skip the symbolic `origin/HEAD -> …`
+    // row git prints first — it is not a branch.
+    git.raw(['branch', '-r']).catch(() => ''),
     git.getRemotes(true).catch(() => [] as Array<{ name: string; refs: { fetch: string } }>),
     git.raw(['rev-list', '--count', 'HEAD']).catch(() => '0'),
   ]);
@@ -130,6 +139,10 @@ export async function runStatsJob(req: StatsJobRequest): Promise<StatsJobResult>
   result.lastCommitDate = latest?.date;
   result.lastCommitMessage = latest?.message;
   result.branchCount = (branchResult as { all: string[] }).all.length;
+  result.remoteBranchCount = remoteBranchRaw
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !l.includes('-> ')).length;
   result.commitCount = commitCount;
   result.remoteUrl = url;
   result.provider = provider;

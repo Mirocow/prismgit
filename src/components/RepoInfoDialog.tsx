@@ -512,6 +512,11 @@ export function RepoInfoDialog({ open, onClose }: RepoInfoDialogProps) {
                 <span className="text-text-primary font-medium">{meta.branchCount || 0}</span>
               </div>
               <div className="flex items-center gap-2">
+                <GitBranch size={12} className="text-text-tertiary" />
+                <span className="text-text-tertiary">{t('dialogs.remoteBranchesLabel')}</span>
+                <span className="text-text-primary font-medium">{meta.remoteBranchCount || 0}</span>
+              </div>
+              <div className="flex items-center gap-2">
                 <FileText size={12} className="text-text-tertiary" />
                 <span className="text-text-tertiary">{t('dialogs.lastCommitLabel')}</span>
                 {meta.lastCommitHash ? (

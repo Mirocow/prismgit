@@ -38,7 +38,9 @@ export interface RepositoryMetadata {
   lastCommitHash?: string;
   lastCommitDate?: string;
   lastCommitMessage?: string;
+  /** Local branches only; remote-tracking branches are remoteBranchCount. */
   branchCount?: number;
+  remoteBranchCount?: number;
   commitCount?: number;
   remoteUrl?: string;
   provider?: 'github' | 'gitlab' | 'unknown';
@@ -78,24 +80,64 @@ export interface AiProviderEntry {
   createdAt?: number;
 }
 
+/** Color tokens a user-created theme can set — the editor's input set.
+ *  Shared between the renderer registry (src/lib/themes.ts re-exports)
+ *  and the settings JSON so both sides agree on the shape. */
+export interface CustomThemeColors {
+  bgPrimary?: string;
+  bgSecondary?: string;
+  bgTertiary?: string;
+  bgElevated?: string;
+  /** Sidebar background — scoped to `aside` in the generated CSS, which is
+   *  how a dark-sidebar + light-main theme is built. */
+  bgSidebar?: string;
+  textPrimary?: string;
+  textSecondary?: string;
+  textTertiary?: string;
+  accent?: string;
+  border?: string;
+  statusAdded?: string;
+  statusModified?: string;
+  statusDeleted?: string;
+  statusConflict?: string;
+  statusUntracked?: string;
+}
+
+/** One user-created theme (Settings → Appearance → Themes → editor). */
+export interface CustomThemeEntry {
+  /** Stable id — always starts with `custom-`. */
+  id: string;
+  /** User-chosen display name. */
+  name: string;
+  isDark: boolean;
+  colors: CustomThemeColors;
+}
+
 export interface AppSettings {
   /**
-   * UI theme id. Stored as a string; validated at runtime against the registry
-   * in src/lib/themes.ts. Old installs may have 'light' / 'dark' / 'system'
-   * — these are still accepted (light/dark map to default Ayu themes).
-   * New values: 'github-light', 'github-dark', 'dracula', 'monokai',
-   * 'solarized-light', 'solarized-dark', 'nord', 'tokyo-night',
-   * 'catppuccin-mocha', 'one-dark', 'gruvbox-dark'.
+   * UI theme id. CURATED set (see src/lib/themes.ts): 'light' (Ayu Light),
+   * 'one-dark', 'simple-light', 'material', 'discord',
+   * 'light-dim-sidebar' — plus 'custom-<id>' for user-created themes.
+   * Legacy ids (pre-curation: dracula, monokai, github-dark, …) are
+   * migrated on load via LEGACY_THEME_FALLBACK.
    */
   theme: string;
   /**
    * 4.2 — SmartGit "Automatically select light/dark". When 'auto', the
-   * effective theme follows the OS `prefers-color-scheme`: the light/dark
-   * PAIR of the saved `theme` family is picked on system changes (fallback
-   * DEFAULT_THEME / 'dark' for families without a pair). 'manual' keeps
-   * the explicit `theme`. Default: 'manual'.
+   * effective theme follows the OS `prefers-color-scheme` across the
+   * curated poles (light ↔ one-dark); custom themes are kept as-is.
+   * 'manual' keeps the explicit `theme`. Default: 'manual'.
    */
   themeMode?: 'manual' | 'auto';
+  /** User-created themes — the Custom Theme editor's persisted output.
+   *  The active theme id references an entry here (`custom-<id>`). */
+  customThemes?: CustomThemeEntry[];
+  /** Left-sidebar tool order (paths, user-defined via Settings → Interface →
+   *  Sidebar & Navigation). Unlisted tools keep their default order. */
+  navOrder?: string[];
+  /** Per-tool hotkey overrides: nav path → 'Ctrl+1'..'Ctrl+9'/'Alt+1'..'Alt+9'
+   *  or 'None' to unbind. Merged over DEFAULT_NAV_HOTKEYS. */
+  navHotkeys?: Record<string, string>;
   fontSize: number;          // Global base font size
   fontSizeTree: number;      // File tree / directory tree font size
   fontSizeList: number;      // Commit lists, branch lists, tag lists
@@ -484,11 +526,9 @@ export interface AppSettings {
   diffShowLineNumbers?: boolean;
   /** Word-level diff highlighting in the diff viewer. Default: true. */
   diffWordHighlight?: boolean;
-  /** Custom CSS variables to override the active theme (power-user theme
-   *  customization). JSON object of CSS variable → color value pairs,
-   *  e.g. { "--accent": "#ff6b35", "--bg-primary": "#1a1a2e" }.
-   *  Applied via a <style> tag injected into the document root. */
-  customThemeOverrides?: Record<string, string>;
+  // NOTE: customThemeOverrides (raw JSON CSS-var overrides textarea) was
+  // REPLACED by the visual Custom Theme editor (customThemes). The key is
+  // no longer read; old values are ignored harmlessly in stored JSON.
   // === Per-remote authorization (Repository Settings → Remotes) ===
   /**
    * HTTP(S) credentials used for push/pull/fetch per remote.

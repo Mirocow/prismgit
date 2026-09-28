@@ -1,12 +1,12 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { ConfirmDialogHost, confirmDialog, promptDialog } from './components/ConfirmDialog';
 import { DeepLinkHandler } from './components/DeepLinkHandler';
 import { DragDropHandler } from './components/DragDropHandler';
 import { ErrorReportDialog, type CapturedError, formatErrorStack, collectEnvironment, persistError, loadPersistedError, clearPersistedError } from './components/ErrorReportDialog';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { HelpBanner } from './components/HelpBanner';
-import { NAV_SHORTCUTS } from './components/navItems';
+import { effectiveNavHotkeys } from './components/navItems';
 import { ResizableSplitter } from './components/ResizableSplitter';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
@@ -31,6 +31,7 @@ import { clearProjectPrefs, loadProjectPrefs, saveProjectPrefs } from './lib/pro
 import { useAuthStore } from './stores/authStore';
 import { useCommandLogStore } from './stores/commandLogStore';
 import { initOperationLogIpcListener } from './stores/operationLogStore';
+import { useNavHistoryStore } from './stores/navHistoryStore';
 import { useGitStore, surfaceConflictedState } from './stores/gitStore';
 import { useRepositoryStore } from './stores/repositoryStore';
 import { useSelectionStore } from './stores/selectionStore';
@@ -116,29 +117,9 @@ export default function App() {
   const loadRepos = useRepositoryStore((s) => s.loadRepos);
   const loadMetadata = useRepositoryStore((s) => s.loadMetadata);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
-  // Custom theme overrides — CSS variables injected live via a <style> tag.
-  // When the user edits the JSON textarea in Settings → Advanced → Custom
-  // Theme Overrides, this effect re-runs and updates the injected CSS.
-  const customThemeOverrides = useSettingsStore((s) => s.settings.customThemeOverrides);
-  useEffect(() => {
-    const id = 'prismgit-custom-theme-overrides';
-    let style = document.getElementById(id) as HTMLStyleElement | null;
-    if (!customThemeOverrides || Object.keys(customThemeOverrides).length === 0) {
-      // No overrides — remove the injected style tag if it exists.
-      style?.remove();
-      return;
-    }
-    if (!style) {
-      style = document.createElement('style');
-      style.id = id;
-      document.head.appendChild(style);
-    }
-    // Build CSS: :root { --var1: val1; --var2: val2; ... }
-    const cssVars = Object.entries(customThemeOverrides)
-      .map(([k, v]) => `  ${k}: ${v};`)
-      .join('\n');
-    style.textContent = `:root {\n${cssVars}\n}`;
-  }, [customThemeOverrides]);
+  // NOTE: the old customThemeOverrides JSON-textarea injection lived here; it
+  // was replaced by the visual Custom Theme editor (settings.customThemes,
+  // applied by settingsStore.applyThemeToDOM → lib/customThemeCss.ts).
   const loadAuth = useAuthStore((s) => s.loadAuthState);
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   // RENDER-PERF: do NOT subscribe to `s.status` here. The App component is
@@ -153,6 +134,25 @@ export default function App() {
   const windowStyle = useWindowStyleStore((s) => s.style);
   const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
   const navigate = useNavigate();
+  // ── Back/Forward navigation (browser-style, user trail only) ──
+  // Every location change is recorded in navHistoryStore UNLESS it came
+  // from the store's own back()/forward() (one-shot suppression). Automatic
+  // app navigations (repo open → /changes etc.) DO get recorded — they are
+  // part of what the user wants to undo with Back.
+  const location = useLocation();
+  useEffect(() => {
+    const store = useNavHistoryStore.getState();
+    if (store.consumeSuppressed()) return;
+    store.push(location.pathname + location.search);
+  }, [location]);
+  const goBack = useCallback(() => {
+    const target = useNavHistoryStore.getState().back();
+    if (target != null) navigate(target);
+  }, [navigate]);
+  const goForward = useCallback(() => {
+    const target = useNavHistoryStore.getState().forward();
+    if (target != null) navigate(target);
+  }, [navigate]);
   const [showClone, setShowClone] = useState(false);
 
   // ─── Global error reporting ─────────────────────────────────────────────
@@ -1262,6 +1262,19 @@ export default function App() {
     const handleKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      // Back/Forward — Alt+Left / Alt+Right (the browser convention; works
+      // from inputs too, like in a real browser).
+      if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        if (e.key === 'ArrowLeft') {
+          const t = useNavHistoryStore.getState().back();
+          if (t != null) navigate(t);
+        } else {
+          const t = useNavHistoryStore.getState().forward();
+          if (t != null) navigate(t);
+        }
+        return;
+      }
       // Settings redesign — Zoom shortcuts (Ctrl+= / Ctrl+- / Ctrl+0).
       // Applies even from inputs (matches VS Code behavior).
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === '=' || e.key === '+')) {
@@ -1340,25 +1353,34 @@ export default function App() {
         e.preventDefault();
         setShowShortcuts(true);
       }
-      // Alt+number navigation: Alt+1=Changes, Alt+2=History, Alt+3=Diff,
-      // Alt+4=Branches, Alt+5=Tags, Alt+6=Stashes, Alt+, =Settings
-      // (read the repo from the store — a closure here would be stale since
+      // Alt+, = Settings (kept as-is — not a tool slot)
+      if (e.altKey && !isInInput && e.key === ',') {
+        e.preventDefault();
+        navigate('/settings');
+        return;
+      }
+      // Tool hotkeys — Ctrl+N / Alt+N over the EFFECTIVE map (defaults +
+      // user overrides from Settings → Interface → Sidebar & Navigation).
+      // Every sidebar tool has exactly one combo: Ctrl+1..9 daily drivers,
+      // Alt+1..8 the rest (the old Alt+1..6 duplicated Ctrl+1..6 — wasted).
+      // Work FROM INPUTS too (browser-like: Ctrl+number never types a digit
+      // — the e2e proved the guard dead-ended navigation after landing on a
+      // page that auto-focuses its filter, e.g. Search).
+      // (read the stores from getState — a closure here would be stale since
       // this effect has stable deps and runs once)
-      if (e.altKey && !isInInput) {
-        const altMap: Record<string, string> = {
-          '1': '/changes',
-          '2': '/history',
-          '3': '/diff',
-          '4': '/branches',
-          '5': '/tags',
-          '6': '/stashes',
-          ',': '/settings',
-        };
-        const target = altMap[e.key];
-        if (target && useRepositoryStore.getState().currentRepo) {
+      if (
+        !e.shiftKey && e.key >= '1' && e.key <= '9' &&
+        ((e.ctrlKey || e.metaKey) !== e.altKey) // exactly one of ctrl/alt
+      ) {
+        const combo = e.altKey ? `Alt+${e.key}` : `Ctrl+${e.key}`;
+        const overrides = (useSettingsStore.getState().settings as { navHotkeys?: Record<string, string> }).navHotkeys;
+        const hotkeys = effectiveNavHotkeys(overrides);
+        const path = Object.entries(hotkeys).find(([, sc]) => sc === combo)?.[0];
+        if (path && useRepositoryStore.getState().currentRepo) {
           e.preventDefault();
-          navigate(target);
+          navigate(path);
         }
+        return;
       }
       // NOTE — git-operation shortcuts (Ctrl+Shift+P/L/F/A), window style
       // (Ctrl+Shift+1/2/3), Clone (Ctrl+Shift+O) and the Output panel
@@ -1368,14 +1390,6 @@ export default function App() {
       // menu accelerator fires, so both handlers ran — e.g. Fetch downloaded
       // everything TWICE per keystroke (user-reported bug). The menu is the
       // single owner of these shortcuts.
-      // Ctrl+1..9 — quick page navigation (only with an open repository)
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9' && !isInInput) {
-        const path = Object.entries(NAV_SHORTCUTS).find(([, sc]) => sc === `Ctrl+${e.key}`)?.[0];
-        if (path && useRepositoryStore.getState().currentRepo) {
-          e.preventDefault();
-          navigate(path);
-        }
-      }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);

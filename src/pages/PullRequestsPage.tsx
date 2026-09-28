@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Avatar } from '../components/Avatar';
 import { ArrowDown, CloudDownload, ExternalLink, GitBranch, GitPullRequest, Layers, Loader, Plus, RefreshCw, Search, X } from '../components/icons';
@@ -183,11 +183,26 @@ export function PullRequestsPage() {
     setPRStacks(rec);
   }, [setPRStacks]);
 
-  const loadPRs = useCallback(async () => {
+  // Anti-spam guard (same pattern as PRReview.load): provider detection
+  // flips `loading` twice per mount, which re-created this callback 3x and
+  // fired 3 identical load attempts — with a stale GitHub PAT that meant 3
+  // «Не удалось загрузить pull requests / GitHub API 401: Bad credentials»
+  // toasts on EVERY tool switch. The key is coarse (provider + repo +
+  // state + auth) so unrelated providerInfo identity changes can't cause a
+  // re-fetch; pass force=true (refresh button, after actions, after fetch)
+  // to re-load.
+  const loadInFlightRef = useRef(false);
+  const lastLoadKeyRef = useRef('');
+
+  const loadPRs = useCallback(async (force = false) => {
     // Guard: don't even try if not authenticated or not a known-provider repo.
     if (!isAuthed) return;
     if (!repoInfo.owner || !repoInfo.repo) return;
     if (repoInfo.provider !== 'github' && repoInfo.provider !== 'gitlab') return;
+    const loadKey = `${repoInfo.provider}|${repoInfo.owner}/${repoInfo.repo}|${state}|${isAuthed}`;
+    if (loadInFlightRef.current) return;
+    if (!force && lastLoadKeyRef.current === loadKey) return;
+    loadInFlightRef.current = true;
     setLoading(true);
     try {
       if (repoInfo.provider === 'github') {
@@ -234,11 +249,26 @@ export function PullRequestsPage() {
       }
     } catch (e) {
       const msg = String(e);
+      // 401 = the SAVED token was rejected (expired/revoked) — this is an
+      // auth problem, not a load failure. Flip the auth flag so the in-page
+      // auth gate renders (no toast barrage) and clear the stale list;
+      // subsequent mounts early-return on !isAuthed → zero further
+      // requests for this provider until the user re-logins.
+      if (msg.includes('401') || msg.toLowerCase().includes('bad credentials')) {
+        applyPRs([]);
+        if (repoInfo.provider === 'github') {
+          useAuthStore.setState({ authenticated: false });
+        } else {
+          useProviderStore.setState({ gitlabAuthed: false });
+        }
+        return;
+      }
       // GitHub/GitLab return 404 when the owner/repo doesn't exist OR the
       // token lacks access. Show a specific message so the user knows what
       // to fix — and clear the PR list so they don't see stale data.
       if (msg.includes('Not authenticated')) {
         // Silent — auth gate state is shown in the UI.
+        applyPRs([]);
       } else if (msg.includes('404') || msg.toLowerCase().includes('not found')) {
         applyPRs([]);
         toast.error(
@@ -249,12 +279,20 @@ export function PullRequestsPage() {
           })
         );
       } else {
-        toast.error(t('pages.prLoadFailed'), msg);
+        toast.error(
+          t('pages.prLoadFailed'),
+          msg
+        );
       }
     } finally {
+      // Mark the attempt as done for this key regardless of outcome: a
+      // failing integration must not re-request on every re-render/mount —
+      // the Refresh button (force=true) is the explicit retry path.
+      lastLoadKeyRef.current = loadKey;
+      loadInFlightRef.current = false;
       setLoading(false);
     }
-  }, [isAuthed, repoInfo, state, toast, gitlabProjectId, applyPRs]);
+  }, [isAuthed, repoInfo, state, toast, gitlabProjectId, applyPRs, setGitlabProjectId]);
 
   useEffect(() => {
     if (repoInfo.owner && repoInfo.repo) {
@@ -273,7 +311,7 @@ export function PullRequestsPage() {
         await api.gitlab.approveMergeRequest(gitlabProjectId, prNumber);
       }
       toast.success(t('pages.prApproved', { n: prNumber }));
-      await loadPRs();
+      await loadPRs(true);
     } catch (e) { toast.error(t('pages.prApproveFailed'), String(e)); }
   };
   const handleRequestChanges = async (prNumber: number) => {
@@ -288,7 +326,7 @@ export function PullRequestsPage() {
         await api.gitlab.addMRComment(gitlabProjectId, prNumber, `:warning: Changes requested: ${body}`);
       }
       toast.success(t('pages.prRequestedChanges', { n: prNumber }));
-      await loadPRs();
+      await loadPRs(true);
     } catch (e) { toast.error(t('pages.prRequestChangesFailed'), String(e)); }
   };
   const handleMerge = async (prNumber: number) => {
@@ -305,7 +343,7 @@ export function PullRequestsPage() {
         await api.gitlab.mergeMergeRequest(gitlabProjectId, prNumber, { should_remove_source_branch: true });
       }
       toast.success(t('pages.prMerged', { n: prNumber }));
-      await loadPRs();
+      await loadPRs(true);
       await refreshStatus(repo.path);
     } catch (e) { toast.error(t('pages.prMergeFailed'), String(e)); }
   };
@@ -322,7 +360,7 @@ export function PullRequestsPage() {
         return;
       }
       toast.success(t('pages.prClosed', { n: prNumber }));
-      await loadPRs();
+      await loadPRs(true);
     } catch (e) { toast.error(t('pages.prCloseFailed'), String(e)); }
   };
   const handleReopen = async (prNumber: number) => {
@@ -330,7 +368,7 @@ export function PullRequestsPage() {
     try {
       await api.github.reopenPR(repoInfo.owner, repoInfo.repo, prNumber);
       toast.success(t('pages.prReopened', { n: prNumber }));
-      await loadPRs();
+      await loadPRs(true);
     } catch (e) { toast.error(t('pages.prReopenFailed'), String(e)); }
   };
   // Helper: prompt for review comment via native prompt dialog.
@@ -518,7 +556,7 @@ export function PullRequestsPage() {
       setPrTitle('');
       setPrHead('');
       setPrBody('');
-      await loadPRs();
+      await loadPRs(true);
     } catch (e) {
       toast.error(t('pages.prCreateFailed'), String(e));
     } finally {
@@ -571,7 +609,7 @@ export function PullRequestsPage() {
       // Refresh the PR list too — fetch updated the refs, but the PR list
       // comes from the GitHub/GitLab API, which has nothing to do with the
       // git fetch. Without this, the user sees stale PRs after a fetch.
-      void loadPRs();
+      void loadPRs(true);
     } catch (e) {
       toast.error(t('pages.fetchFailed'), String(e));
     } finally {
@@ -770,7 +808,7 @@ export function PullRequestsPage() {
               </button>
             ))}
           </div>
-          <button className="icon-btn" title={t('common.refresh')} onClick={loadPRs}>
+          <button className="icon-btn" title={t('common.refresh')} onClick={() => void loadPRs(true)}>
             <RefreshCw size={13} />
           </button>
           <button

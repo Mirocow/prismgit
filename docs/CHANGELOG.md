@@ -5,6 +5,47 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-09-29
+
+### Added — Browser-style Back/Forward navigation
+- **Back/Forward buttons in the toolbar** + Alt+Left / Alt+Right keyboard navigation. A dedicated nav-history stack records the user's trail only (app-internal auto-jumps like repo-open are recorded too — they are part of what Back should undo), with forward-tail truncation like a real browser
+- Listed in the Keyboard Shortcuts overlay (Navigation group)
+
+### Added — VS Code-style panel collapse
+- **Left sidebar** folds into a 48px icon rail (tool icons + live Changes count bubble + theme/settings pinned to the bottom); one click on the expand arrow restores the previous width. Persisted across restarts
+- **History commit-details pane** (right sidebar) collapses to a 24px strip so the commit graph takes the full width
+
+### Added — Custom themes + curated theme set
+- **Theme picker curated to 6** (Ayu Light, One Dark, Simple, Material, Discord, Light+dark-sidebar) — the 21 other themes are gone; saved picks migrate automatically to their curated replacement
+- **Visual Custom Theme editor** («Создать тему…»): 15 color inputs (surfaces, TEXT colors, accent, borders, status colors, sidebar background) + light/dark flag + live pseudo-window preview. Custom themes apply via their own `data-theme="custom-*"` CSS with derived hover/inverse/border shades — text colors change in every tool
+- The sidebar-background token is how the «dark sidebar + light main window» look is built (VS Code-style), readable sidebar text computed automatically
+- Replaces the raw-JSON «Custom Theme Overrides» textarea (power-user only) — the old settings key is ignored harmlessly
+
+### Added — Hotkeys for every sidebar tool + configurable order
+- Every tool now has exactly one hotkey: Ctrl+1..9 (daily drivers) + Alt+1..9 (the rest — previously Alt+1..6 just duplicated Ctrl+1..6)
+- **Settings → Interface → «Sidebar & Navigation»**: reorder tools (↑/↓, persisted), reassign any hotkey from a dropdown of free slots ('—' unbinds; a stolen combo bumps its previous owner), reset to defaults
+- Hotkeys work from text inputs now (browser-like — Ctrl+number never types a digit)
+
+### Added — Commit context in History
+- **«Ветки, содержащие коммит»** — branch badges in the commit detail card (`git branch --contains` + `-r`, cached per SHA); clicking a local badge walks that branch
+- **Author click-to-filter** — click the author name in the detail card to filter the graph by that author; a copy button gives «Name <email>» in one click
+
+### Fixed — Counters, take two
+- **Branches summary** now shows repo-wide totals (search-filtered counts disagreed with the Tags/Stashes tools while a filter was active)
+- **History «С тегами (N)» chip** is computed over the filtered set — with an active text/author/date filter the chip equals exactly what the Tagged filter will show (was: whole-pool count)
+- **Repo info dialog** lists local AND remote branch counts separately («Локальные ветки: N / Удалённые: M») — `git branch -r` count added to the stats job
+- Dead loaders removed from History (stashes/reflog state loaded on every history refresh for sections that no longer exist — one wasted `git stash list` spawn per refresh)
+
+### Fixed — 401 toast barrage from stale integrations
+- A rejected GitHub token (401 Bad credentials) on the Pull Requests page is now an AUTH problem, not a load failure: zero error toasts, the in-page sign-in gate renders, and subsequent mounts early-return (one request per session instead of 3+)
+- In-flight/last-key guard on loadPRs — provider detection flipping `loading` twice no longer re-fires the fetch; the Refresh button is the explicit retry (force)
+
+### Changed — Settings de-duplicated and explained
+- **Two «External Tools» panels merged into one** (the diff.tool/merge.tool name inputs moved next to the commands they configure)
+- **Commit line guides**: the dead numeric inputs (commitLineLimit1/2) removed — the Commands select is the single owner
+- **«!» info hitboxes** (hover tooltips) on the settings users actually get confused by: background-check interval + scope, reflog limit, contrast, sidebar & navigation
+- Hardcoded EN sub-headers in the AI panel localized (Context size / Tool limits / AI guard)
+
 ## [2.2.0] - 2026-09-28
 
 ### Added — Every conflicted operation now REACTS

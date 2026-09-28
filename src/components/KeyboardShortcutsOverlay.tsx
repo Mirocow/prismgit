@@ -48,16 +48,14 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     titleKey: 'shell.shortcutGroupNavigation',
     shortcuts: [
-      { descKey: 'shell.scGoChanges', keys: ['Alt', '1'] },
-      { descKey: 'shell.scGoHistory', keys: ['Alt', '2'] },
-      { descKey: 'shell.scGoDiff', keys: ['Alt', '3'] },
-      { descKey: 'shell.scGoBranches', keys: ['Alt', '4'] },
-      { descKey: 'shell.scGoTags', keys: ['Alt', '5'] },
-      { descKey: 'shell.scGoStashes', keys: ['Alt', '6'] },
+      { descKey: 'shell.scNavBack', keys: ['Alt', '←'] },
+      { descKey: 'shell.scNavForward', keys: ['Alt', '→'] },
       { descKey: 'shell.scGoSettings', keys: ['Alt', ','] },
       { descKey: 'shell.scQuickNavChanges', keys: ['Ctrl', '1–3'] },
       { descKey: 'shell.scQuickNavRefs', keys: ['Ctrl', '4–6'] },
-      { descKey: 'shell.scQuickNavRemotes', keys: ['Ctrl', '7–9'] },
+      { descKey: 'shell.scQuickNavTools', keys: ['Ctrl', '7–9'] },
+      { descKey: 'shell.scAltNavWorkflows', keys: ['Alt', '1–4'] },
+      { descKey: 'shell.scAltNavRefs', keys: ['Alt', '5–8'] },
     ],
   },
   {

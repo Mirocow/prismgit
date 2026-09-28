@@ -25,6 +25,7 @@ import {
   FolderPlus,
   GitBranch,
   Moon,
+  PanelLeftClose, PanelLeftOpen,
   Plus,
   RefreshCw,
   Settings as SettingsIcon,
@@ -32,7 +33,7 @@ import {
   Sun,
   X,
 } from './icons';
-import { navDescriptions, navItems, NAV_SHORTCUTS, type NavItem } from './navItems';
+import { navDescriptions, navItemsOrdered, navItems, effectiveNavHotkeys, type NavItem } from './navItems';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from './ResizableSplitter';
 
 /**
@@ -126,6 +127,19 @@ export function Sidebar() {
     [metadata]
   );
   const [showRepoList, setShowRepoList] = useState(true);
+  // VS Code-style sidebar collapse: the full sidebar folds into a 48px icon
+  // rail (expand button + tool icons + theme/settings). Persisted so the
+  // choice survives restarts. The splitter is hidden while collapsed.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem('prismgit-sidebar-collapsed') === '1'
+  );
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((v) => {
+      const next = !v;
+      localStorage.setItem('prismgit-sidebar-collapsed', next ? '1' : '0');
+      return next;
+    });
+  }, []);
   const { width: sidebarWidth, handleResize: handleSidebarResize } = useResizableWidth(240, 180, 400);
   // SmartGit-style: vertical splitter between Repositories list and Navigation
   // panel in the sidebar — user can drag to give more space to either side.
@@ -210,7 +224,15 @@ export function Sidebar() {
     }
   }, [currentRepo]);
 
-  const groups_ = navItems().reduce<Record<string, NavItem[]>>((acc, item) => {
+  // User-configurable tool order + hotkeys (Settings → Interface →
+  // Sidebar & Navigation). Computed inline (NOT memoized): navItems() is
+  // locale-reactive and must re-evaluate per render; 17 items is cheap.
+  const navOrder = useSettingsStore((s) => (s.settings as { navOrder?: string[] }).navOrder);
+  const navHotkeys = useSettingsStore((s) => (s.settings as { navHotkeys?: Record<string, string> }).navHotkeys);
+  const orderedNavItems = navItemsOrdered(navOrder);
+  const navHotkeyMap = effectiveNavHotkeys(navHotkeys);
+
+  const groups_ = orderedNavItems.reduce<Record<string, NavItem[]>>((acc, item) => {
     const g = item.group || 'Other';
     if (!acc[g]) acc[g] = [];
     acc[g].push(item);
@@ -756,8 +778,95 @@ export function Sidebar() {
     );
   };
 
+  // Rail items for the collapsed sidebar: favorites first, then every tool
+  // in registry order (deduped). Icon-only buttons with label tooltips.
+  const railItems = useMemo(() => {
+    const seen = new Set<string>();
+    const out: NavItem[] = [];
+    for (const path of favoriteTools) {
+      const item = orderedNavItems.find(n => n.path === path);
+      if (item && !seen.has(path)) { seen.add(path); out.push(item); }
+    }
+    for (const item of orderedNavItems) {
+      if (!seen.has(item.path)) { seen.add(item.path); out.push(item); }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [favoriteTools, navOrder]);
+
   return (
     <>
+    {sidebarCollapsed ? (
+      /* ── Collapsed icon rail (VS Code activity-bar style): 48px wide,
+          tool icons with tooltips, Changes count bubble, theme + settings
+          pinned to the bottom. Clicking the expand arrow restores the full
+          sidebar at its previous width. */
+      <aside
+        className="sidebar-root flex flex-col items-center bg-bg-secondary shrink-0 no-drag py-2"
+        style={{ width: 48 }}
+        data-testid="sidebar-rail"
+      >
+        <button
+          className="icon-btn !w-8 !h-8 shrink-0"
+          title={t('shell.expandSidebar')}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSidebarCollapsed(); }}
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+        <div className="w-6 h-px bg-border-subtle my-1 shrink-0" />
+        <div className="flex-1 overflow-y-auto scrollbar-thin flex flex-col items-center gap-0.5 py-1">
+          {currentRepo ? railItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = location.pathname === item.path;
+            const showBadge = item.path === '/changes' && changedCount > 0;
+            return (
+              <button
+                key={`rail-${item.path}`}
+                className={cn(
+                  'relative w-9 h-9 rounded-md flex items-center justify-center transition-colors',
+                  isActive
+                    ? 'bg-accent-muted text-accent'
+                    : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
+                )}
+                title={showBadge ? `${item.label} (${changedCount})` : item.label}
+                aria-label={item.label}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate(item.path); }}
+              >
+                <Icon size={16} />
+                {showBadge && (
+                  <span
+                    className="absolute -top-0.5 -right-0.5 text-2xs font-semibold px-1 py-0.5 rounded-full min-w-[16px] text-center bg-accent text-text-inverse leading-none"
+                    title={t('shell.changesBadge', { count: unstagedCount })}
+                  >
+                    {changedCount > 99 ? '99+' : changedCount}
+                  </span>
+                )}
+              </button>
+            );
+          }) : (
+            <div className="text-2xs text-text-tertiary text-center px-1">{t('shell.openRepoForGit')}</div>
+          )}
+        </div>
+        <div className="w-6 h-px bg-border-subtle my-1 shrink-0" />
+        <button
+          className="icon-btn !w-8 !h-8 shrink-0"
+          title={t('shell.toggleTheme')}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleTheme(); }}
+        >
+          {(getThemeMeta(theme)?.isDark ?? false) ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+        <button
+          className={cn(
+            'icon-btn !w-8 !h-8 shrink-0',
+            location.pathname === '/settings' && 'bg-bg-active text-text-primary'
+          )}
+          title={t('nav.settings')}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavigate('/settings'); }}
+        >
+          <SettingsIcon size={16} />
+        </button>
+      </aside>
+    ) : (
     <aside
       className="sidebar-root flex flex-col bg-bg-secondary shrink-0 no-drag"
       style={{ width: sidebarWidth }}
@@ -792,6 +901,14 @@ export function Sidebar() {
             />
           </button>
           <div className="flex items-center gap-0.5">
+            {/* Collapse the sidebar to the icon rail (VS Code-style). */}
+            <button
+              className="icon-btn no-drag shrink-0 !w-7 !h-7"
+              title={t('shell.collapseSidebar')}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSidebarCollapsed(); }}
+            >
+              <PanelLeftClose size={14} />
+            </button>
             {currentRepo && (
               <button
                 className="icon-btn no-drag shrink-0 hover:!text-status-deleted !w-7 !h-7"
@@ -929,12 +1046,12 @@ export function Sidebar() {
                 {t('nav.favorites')}
               </div>
               {favoriteTools.map(path => {
-                const item = navItems().find(n => n.path === path);
+                const item = orderedNavItems.find(n => n.path === path);
                 if (!item) return null;
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
                 const showBadge = item.path === '/changes' && changedCount > 0;
-                const shortcut = NAV_SHORTCUTS[item.path];
+                const shortcut = navHotkeyMap[item.path];
                 return (
                   <div
                     key={`fav-${item.path}`}
@@ -1047,7 +1164,7 @@ export function Sidebar() {
                 const isActive = location.pathname === item.path;
                 // Changes item gets a live badge; others show their quick-nav key
                 const showBadge = item.path === '/changes' && changedCount > 0;
-                const shortcut = NAV_SHORTCUTS[item.path];
+                const shortcut = navHotkeyMap[item.path];
                 const isFavorite = favoriteTools.includes(item.path);
                 return (
                   <div
@@ -1157,7 +1274,8 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
-    <ResizableSplitter direction="horizontal" onResize={handleSidebarResize} />
+    )}
+    {!sidebarCollapsed && <ResizableSplitter direction="horizontal" onResize={handleSidebarResize} />}
     </>
   );
 }

@@ -8,6 +8,7 @@ import { getRepoInProgressState } from '../lib/repoState';
 import { getThemeMeta } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
+import { navCanGoBack, navCanGoForward, useNavHistoryStore } from '../stores/navHistoryStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -17,7 +18,7 @@ import { offerPushRejection } from '../stores/pushRejectionStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
 import appLogo from '../assets/app-logo.png';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, StashPop, Sun, Terminal, Trash } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, StashPop, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -116,6 +117,9 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = location.pathname;
+  // Back/Forward button states (navHistoryStore selectors).
+  const canGoBack = useNavHistoryStore(navCanGoBack);
+  const canGoForward = useNavHistoryStore(navCanGoForward);
 
   // Color constants for icon colors (matching the screenshot style)
   const COLOR_BLUE = '#399ee6';
@@ -224,6 +228,27 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
         <div className="flex items-center gap-1.5">
           <img src={appLogo} alt="PrismGit" className="w-5 h-5 rounded-md" />
           <span className="text-xs font-bold text-text-primary tracking-tight">PrismGit</span>
+        </div>
+        {/* Back/Forward — browser-style navigation between tools and views
+            (the user's «кнопок назад, вперёд как в браузере»). Keyboard:
+            Alt+Left / Alt+Right (bound in App.tsx). */}
+        <div className="flex items-center gap-0.5 no-drag ml-1">
+          <button
+            className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+            onClick={() => { const t = useNavHistoryStore.getState().back(); if (t != null) navigate(t); }}
+            disabled={!canGoBack}
+            title={t('shell.navBack', { defaultValue: 'Назад (Alt+←)' })}
+          >
+            <ChevronLeft size={15} />
+          </button>
+          <button
+            className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+            onClick={() => { const t = useNavHistoryStore.getState().forward(); if (t != null) navigate(t); }}
+            disabled={!canGoForward}
+            title={t('shell.navForward', { defaultValue: 'Вперёд (Alt+→)' })}
+          >
+            <ChevronRight size={15} />
+          </button>
         </div>
         {currentRepo && (
           <>

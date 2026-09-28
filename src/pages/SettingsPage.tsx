@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AiProvidersGrid } from '../components/AiProvidersGrid';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { ExternalLink, Folder, GitBranch, Github, Loader, Lock, LogOut, Moon, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
+import { ExternalLink, Folder, GitBranch, Github, Loader, Lock, LogOut, Moon, Pencil, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash, ArrowUp, ArrowDown } from '../components/icons';
+import { ThemeEditorDialog } from '../components/ThemeEditorDialog';
+import { InfoHint } from '../components/InfoHint';
+import { effectiveNavHotkeys, navItemsOrdered, NAV_HOTKEY_SLOTS } from '../components/navItems';
 import { SecuritySettings } from '../components/settings/SecuritySettings';
 import { api, type GitConfigEntry } from '../lib/api';
 import { restoreAllConfirmations } from '../lib/confirmations';
 import { LOCALES, useI18n } from '../lib/i18n';
-import { getThemeMeta, THEMES } from '../lib/themes';
+import { getThemeMeta, THEMES, customThemeMeta, isCustomThemeId, type CustomThemeEntry } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
@@ -60,6 +63,20 @@ export function SettingsPage() {
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
   const setTheme = useSettingsStore((s) => s.setTheme);
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
+  // ── Custom themes (visual editor) ──
+  const customThemes = ((settings as { customThemes?: CustomThemeEntry[] }).customThemes ?? []) as CustomThemeEntry[];
+  const [themeEditorOpen, setThemeEditorOpen] = useState(false);
+  const [themeEditorTarget, setThemeEditorTarget] = useState<CustomThemeEntry | null>(null);
+  const saveCustomTheme = (entry: CustomThemeEntry) => {
+    const list = customThemes.filter((e) => e.id !== entry.id);
+    list.push(entry);
+    void setSetting('customThemes', list);
+  };
+  const deleteCustomTheme = (id: string) => {
+    void setSetting('customThemes', customThemes.filter((e) => e.id !== id));
+    // Deleting the ACTIVE custom theme → fall back to the light default.
+    if (theme === id) void setTheme('light');
+  };
   const { user, authenticated, loginWithPAT, logout, loadAuthState } = useAuthStore();
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastActions();
@@ -495,7 +512,10 @@ export function SettingsPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <div>
-                  <div className="text-sm font-medium">{t('settings.contrast')}</div>
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    {t('settings.contrast')}
+                    <InfoHint text={t('settings.contrastInfo', { defaultValue: 'Регулирует ТОЛЬКО читаемость текста и яркость границ — фон и цвета статусов не меняются. 100 — родные цвета темы; выше — текст контрастнее, ниже — мягче. Настраивается отдельно для каждой темы.' })} />
+                  </div>
                   <div className="text-xs text-text-tertiary">
                     {t('settings.contrastHint')}
                   </div>
@@ -713,7 +733,10 @@ export function SettingsPage() {
             </div>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">{t('settings.maxHistoryEntries')}</div>
+                <div className="text-sm font-medium flex items-center gap-1.5">
+                  {t('settings.maxHistoryEntries')}
+                  <InfoHint text={t('settings.maxHistoryInfo', { defaultValue: 'Лимит для ЖУРНАЛА ПЕРЕСЫЛКИ (Reflog-записей), а не для графа истории: граф в History грузится страницами по 50 коммитов с кнопкой «Ещё». Больше — дольше сканирование при открытии репозитория.' })} />
+                </div>
                 <div className="text-xs text-text-tertiary">
                   {t('settings.maxHistoryEntriesHint')}
                 </div>
@@ -761,7 +784,10 @@ export function SettingsPage() {
               </label>
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-medium">{t('settings.remoteCheckInterval')}</div>
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    {t('settings.remoteCheckInterval')}
+                    <InfoHint text={t('settings.remoteCheckIntervalInfo', { defaultValue: 'Как часто фоновая проверка обновляет ↓/↑ по репозиториям. 0 — выключить. Проверка идёт только для избранных (★) и открытого репозиториев, если область ниже — «Избранные».' })} />
+                  </div>
                   <div className="text-xs text-text-tertiary">
                     {t('settings.remoteCheckIntervalHint')}
                   </div>
@@ -787,7 +813,10 @@ export function SettingsPage() {
                   full-list behavior. */}
               <div className="flex items-center justify-between mt-3" data-testid="remote-check-scope-setting">
                 <div>
-                  <div className="text-sm font-medium">{t('settings.remoteCheckScope')}</div>
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    {t('settings.remoteCheckScope')}
+                    <InfoHint text={t('settings.remoteCheckScopeInfo', { defaultValue: 'Какие репозитории проверяет фоновый цикл. «Избранные» — только ★ и открытый (быстро, по умолчанию). «Все» — каждый репозиторий в сайдбаре: на большом списке это заметно нагружает машину и сеть.' })} />
+                  </div>
                   <div className="text-xs text-text-tertiary">
                     {t('settings.remoteCheckScopeHint')}
                   </div>
@@ -991,44 +1020,11 @@ export function SettingsPage() {
               {t('settings.advancedWarning', { defaultValue: 'These properties affect low-level behavior. Changes apply immediately.' })}
             </div>
 
-            {/* Commit message line length guides */}
-            <div className="border-t border-border-subtle pt-4">
-              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-3">
-                {t('settings.commitMessageGuides', { defaultValue: 'Commit Message Line Guides' })}
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.commitLineLimit1', { defaultValue: 'Subject line limit' })}</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={200}
-                      value={settings.commitLineLimit1 ?? 50}
-                      onChange={(e) => setSetting('commitLineLimit1', Math.max(0, Number(e.target.value)))}
-                      className="w-20 text-sm"
-                    />
-                    <span className="text-xs text-text-tertiary">{t('settings.charsUnit', { defaultValue: 'chars' })}</span>
-                    <span className="text-2xs text-text-tertiary ml-2">0 = {t('settings.disabled', { defaultValue: 'disabled' })}</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.commitLineLimit2', { defaultValue: 'Body wrap limit' })}</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={200}
-                      value={settings.commitLineLimit2 ?? 72}
-                      onChange={(e) => setSetting('commitLineLimit2', Math.max(0, Number(e.target.value)))}
-                      className="w-20 text-sm"
-                    />
-                    <span className="text-xs text-text-tertiary">{t('settings.charsUnit', { defaultValue: 'chars' })}</span>
-                    <span className="text-2xs text-text-tertiary ml-2">0 = {t('settings.disabled', { defaultValue: 'disabled' })}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            {/* DEDUP: the commit line guides (50/72) previously had TWO
+                settings surfaces — these numeric inputs AND the
+                commitLineGuides select in Interface → Commands. They
+                configured the same guides; the select is the single owner
+                now. */}
 
             {/* Diff settings */}
             <div className="border-t border-border-subtle pt-4">
@@ -1142,51 +1138,9 @@ export function SettingsPage() {
               </label>
             </div>
 
-            {/* Custom Theme Overrides */}
-            <div className="border-t border-border-subtle pt-4">
-              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-3">
-                {t('settings.customThemeOverrides', { defaultValue: 'Custom Theme Overrides' })}
-              </div>
-              <div className="text-xs text-text-tertiary mb-2">
-                {t('settings.customThemeOverridesHint', { defaultValue: 'Override CSS variables for the active theme. JSON format: { "--accent": "#ff6b35", "--bg-primary": "#1a1a2e" }. Changes apply live.' })}
-              </div>
-              <textarea
-                className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded p-2 resize-none"
-                rows={6}
-                placeholder='{\n  "--accent": "#ff6b35",\n  "--bg-primary": "#1a1a2e"\n}'
-                value={(() => {
-                  const overrides = settings.customThemeOverrides;
-                  if (!overrides || Object.keys(overrides).length === 0) return '';
-                  return JSON.stringify(overrides, null, 2);
-                })()}
-                onChange={(e) => {
-                  const text = e.target.value.trim();
-                  if (!text) {
-                    setSetting('customThemeOverrides', undefined);
-                    return;
-                  }
-                  try {
-                    const parsed = JSON.parse(text);
-                    if (typeof parsed === 'object' && parsed !== null) {
-                      setSetting('customThemeOverrides', parsed);
-                    }
-                  } catch {
-                    // Invalid JSON — don't update, let the user keep typing
-                  }
-                }}
-              />
-              <div className="flex items-center gap-2 mt-2">
-                <button
-                  className="btn btn-secondary text-xs"
-                  onClick={() => setSetting('customThemeOverrides', undefined)}
-                >
-                  {t('settings.resetThemeOverrides', { defaultValue: 'Reset' })}
-                </button>
-                <span className="text-2xs text-text-tertiary">
-                  {t('settings.themeOverridesNote', { defaultValue: 'Requires CSS variable knowledge. See theme.css for available variables.' })}
-                </span>
-              </div>
-            </div>
+            {/* NOTE: the Custom Theme Overrides JSON textarea used to live
+                here — replaced by the visual Custom Theme editor available
+                in Appearance → Themes («Создать тему…»). */}
           </div>
         </section>
         )}
@@ -1343,6 +1297,43 @@ export function SettingsPage() {
               />
               <div className="text-2xs text-text-tertiary mt-1">
                 {t('settings.variables')} <code className="mono">$LOCAL $BASE $REMOTE $MERGED</code>
+              </div>
+            </div>
+            {/* DEDUP: the tool NAME inputs (diff.tool / merge.tool) used to live
+                in a SECOND «External Tools» panel further down the Integrations
+                tab — two panels, same header, overlapping job. The names now
+                live next to the commands they configure. */}
+            <div className="border-t border-border-subtle pt-3">
+              <div className="text-2xs text-text-tertiary mb-2">
+                {t('settings.extToolsConfigure')} {t('settings.variables')} <code className="mono text-accent">{`{filePath}`}</code>,{' '}
+                <code className="mono text-accent">{`{repositoryRootPath}`}</code>,{' '}
+                <code className="mono text-accent">{`{commit}`}</code>,{' '}
+                <code className="mono text-accent">{`{leftFile}`}</code>,{' '}
+                <code className="mono text-accent">{`{rightFile}`}</code>,{' '}
+                <code className="mono text-accent">{`{baseFile}`}</code>.
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  className="flex-1 text-xs font-mono"
+                  placeholder="diff.tool name (e.g., vscode-diff)"
+                  defaultValue={settings.diffTool || ''}
+                  onBlur={(e) => setSetting('diffTool', e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="text"
+                  className="flex-1 text-xs font-mono"
+                  placeholder="merge.tool name (e.g., vscode-merge)"
+                  defaultValue={settings.mergeTool || ''}
+                  onBlur={(e) => setSetting('mergeTool', e.target.value)}
+                />
+              </div>
+              <div className="text-2xs text-text-tertiary mt-1">
+                {t('settings.extToolsWrite')} <code>diff.tool</code> {t('settings.and')} <code>merge.tool</code>.{' '}
+                {t('settings.extToolsCommandHint')} <code>[difftool "..."]</code> /{' '}
+                <code>[mergetool "..."]</code>{t('settings.extToolsSectionsSuffix')}
               </div>
             </div>
           </div>
@@ -1755,47 +1746,112 @@ export function SettingsPage() {
         </section>
         )}
 
-        {/* SmartGit Manual: External Tools system */}
-        {showIntegrations && (
+        {/* SmartGit Manual: Low-Level Properties editor */}
+        {/* ─── Sidebar & Navigation — tool order + hotkeys (user request:
+              «снабди весь левый сайдбар горячими клавишами» + «дай
+              возможность через Settings сортировать пункты меню») ─── */}
+        {showUserInterface && (
         <section className="panel mb-4">
-          <div className="panel-header">{t('settings.externalTools')}</div>
-          <div className="p-5 text-sm space-y-3">
-            <div className="text-2xs text-text-tertiary">
-              {t('settings.extToolsConfigure')} {t('settings.variables')} <code className="mono text-accent">{`{filePath}`}</code>,{' '}
-              <code className="mono text-accent">{`{repositoryRootPath}`}</code>,{' '}
-              <code className="mono text-accent">{`{commit}`}</code>,{' '}
-              <code className="mono text-accent">{`{leftFile}`}</code>,{' '}
-              <code className="mono text-accent">{`{rightFile}`}</code>,{' '}
-              <code className="mono text-accent">{`{baseFile}`}</code>.
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                className="flex-1 text-xs font-mono"
-                placeholder="diff.tool name (e.g., vscode-diff)"
-                defaultValue={settings.diffTool || ''}
-                onBlur={(e) => setSetting('diffTool', e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                className="flex-1 text-xs font-mono"
-                placeholder="merge.tool name (e.g., vscode-merge)"
-                defaultValue={settings.mergeTool || ''}
-                onBlur={(e) => setSetting('mergeTool', e.target.value)}
-              />
-            </div>
-            <div className="text-2xs text-text-tertiary">
-              {t('settings.extToolsWrite')} <code>diff.tool</code> {t('settings.and')} <code>merge.tool</code>.{' '}
-              {t('settings.extToolsCommandHint')} <code>[difftool "..."]</code> /{' '}
-              <code>[mergetool "..."]</code>{t('settings.extToolsSectionsSuffix')}
+          <div className="panel-header flex items-center gap-1.5">
+            {t('settings.sidebarNavTitle', { defaultValue: 'Сайдбар и навигация' })}
+            <InfoHint text={t('settings.sidebarNavHint', { defaultValue: 'Порядок пунктов левого сайдбара и горячие клавиши инструментов. Ctrl+1..9 — основные инструменты, Alt+1..9 — остальные; каждая комбинация может быть переназначена или снята (—). Изменения применяются сразу.' })} />
+          </div>
+          <div className="p-4 space-y-1">
+            {(() => {
+              const overrides = (settings as { navHotkeys?: Record<string, string> }).navHotkeys;
+              const order = (settings as { navOrder?: string[] }).navOrder;
+              const items = navItemsOrdered(order);
+              const hotkeys = effectiveNavHotkeys(overrides);
+              const takenBy = (combo: string, exceptPath: string) =>
+                Object.entries(hotkeys).find(([p, sc]) => p !== exceptPath && sc === combo)?.[0];
+              const currentOrder = items.map((i) => i.path);
+              const move = (idx: number, dir: -1 | 1) => {
+                const next = [...currentOrder];
+                const target = idx + dir;
+                if (target < 0 || target >= next.length) return;
+                [next[idx], next[target]] = [next[target], next[idx]];
+                void setSetting('navOrder', next);
+              };
+              const assign = (path: string, combo: string) => {
+                // Steal the combo from its current owner so two tools never
+                // share a key (last assignment wins, the loser falls back
+                // to unbound until the user reassigns it).
+                const next: Record<string, string> = { ...(overrides ?? {}) };
+                if (combo === 'None') {
+                  next[path] = 'None';
+                } else {
+                  const loser = takenBy(combo, path);
+                  if (loser) next[loser] = 'None';
+                  next[path] = combo;
+                }
+                void setSetting('navHotkeys', next);
+              };
+              return items.map((item, idx) => {
+                const current = hotkeys[item.path] ?? 'None';
+                const freeSlots = NAV_HOTKEY_SLOTS.filter(
+                  (slot) => !takenBy(slot, item.path)
+                );
+                const optionSet = new Set<string>(['None', current, ...freeSlots]);
+                return (
+                  <div key={item.path} className="flex items-center gap-2 py-1 px-2 rounded hover:bg-bg-hover">
+                    <span className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        className="icon-btn !w-5 !h-5"
+                        title={t('settings.sidebarNavMoveUp', { defaultValue: 'Переместить выше' })}
+                        disabled={idx === 0}
+                        onClick={() => move(idx, -1)}
+                      >
+                        <ArrowUp size={10} />
+                      </button>
+                      <button
+                        className="icon-btn !w-5 !h-5"
+                        title={t('settings.sidebarNavMoveDown', { defaultValue: 'Переместить ниже' })}
+                        disabled={idx === items.length - 1}
+                        onClick={() => move(idx, 1)}
+                      >
+                        <ArrowDown size={10} />
+                      </button>
+                    </span>
+                    <span className="flex items-center gap-1.5 text-sm text-text-primary min-w-0 flex-1">
+                      <item.icon size={13} className="text-text-tertiary shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                      <span className="text-2xs text-text-tertiary truncate hidden md:inline">{item.group}</span>
+                    </span>
+                    <select
+                      className="text-xs bg-bg-tertiary border border-border-default rounded px-1.5 py-1 shrink-0"
+                      value={current}
+                      onChange={(e) => assign(item.path, e.target.value)}
+                      title={t('settings.sidebarNavHotkeyLabel', { defaultValue: 'Горячая клавиша инструмента' })}
+                    >
+                      {Array.from(optionSet).map((slot) => (
+                        <option key={slot} value={slot}>
+                          {slot === 'None' ? t('settings.sidebarNavNone', { defaultValue: '—' }) : slot}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              });
+            })()}
+            <div className="flex items-center gap-2 pt-2 mt-1 border-t border-border-subtle">
+              <button
+                className="btn btn-secondary text-xs"
+                onClick={() => {
+                  void setSetting('navOrder', undefined);
+                  void setSetting('navHotkeys', undefined);
+                }}
+              >
+                <RefreshCw size={11} />
+                {t('settings.sidebarNavReset', { defaultValue: 'Сбросить порядок и клавиши' })}
+              </button>
+              <span className="text-2xs text-text-tertiary">
+                {t('settings.sidebarNavOrderHint', { defaultValue: 'Порядок действует внутри групп сайдбара; избранное всегда сверху.' })}
+              </span>
             </div>
           </div>
         </section>
         )}
 
-        {/* SmartGit Manual: Low-Level Properties editor */}
         {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.lowLevelProps')}</div>
@@ -1911,7 +1967,7 @@ smartgit.refresh.inspectEol=true
                 chat messages. */}
             <div className="pt-3 border-t border-border-subtle">
               <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                Context Size
+                {t('settings.aiContextSizeTitle', { defaultValue: 'Размер контекста' })}
               </div>
               <label className="flex items-center gap-2 text-xs">
                 <span className="text-text-tertiary">Max context (characters)</span>
@@ -1937,7 +1993,7 @@ smartgit.refresh.inspectEol=true
             {/* Tool Limits — control how much data AI tools return. */}
             <div className="pt-3 border-t border-border-subtle">
               <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                Tool Limits
+                {t('settings.aiToolLimitsTitle', { defaultValue: 'Лимиты инструментов' })}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <label className="flex items-center gap-2 text-xs">
@@ -1985,7 +2041,7 @@ smartgit.refresh.inspectEol=true
             {/* AI Guard — control which destructive actions the AI can perform. */}
             <div className="pt-3 border-t border-border-subtle">
               <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                AI Guard
+                {t('settings.aiGuardTitle', { defaultValue: 'AI-страж' })}
               </div>
               <div className="text-2xs text-text-tertiary mb-2">
                 Control which destructive git actions the AI Assistant is allowed to perform. "Deny" blocks the action entirely — the AI will tell the user to do it manually.
@@ -2159,9 +2215,9 @@ smartgit.refresh.inspectEol=true
                 </label>
               </div>
 
-              {/* Quick light/dark toggle button — kept for users who just
-                  want to flip between the two defaults without picking a
-                  specific palette. */}
+              {/* Quick light/dark toggle button — flips across the curated
+                  poles (Ayu Light ↔ One Dark); custom themes flip by their
+                  own isDark flag. */}
               <div className="flex items-center justify-between mb-4 pb-4 border-b border-border-subtle">
                 <div>
                   <div className="text-sm font-medium">{t('settings.quickToggle')}</div>
@@ -2170,23 +2226,33 @@ smartgit.refresh.inspectEol=true
                   </div>
                 </div>
                 <button className="btn btn-secondary" onClick={toggleTheme}>
-                  {theme === 'dark' || getThemeMeta(theme)?.isDark ? <Sun size={14} /> : <Moon size={14} />}
-                  {theme === 'dark' || getThemeMeta(theme)?.isDark ? t('settings.lightMode') : t('settings.darkMode')}
+                  {(isCustomThemeId(theme) ? customThemes.find((e) => e.id === theme)?.isDark : getThemeMeta(theme)?.isDark) ? <Sun size={14} /> : <Moon size={14} />}
+                  {(isCustomThemeId(theme) ? customThemes.find((e) => e.id === theme)?.isDark : getThemeMeta(theme)?.isDark) ? t('settings.lightMode') : t('settings.darkMode')}
                 </button>
               </div>
 
-              {/* Theme grid — each card shows a pseudo-window preview of the
-                  theme with its name. Click to apply. */}
+              {/* Theme grid — 6 curated themes + the user's custom themes.
+                  Each card shows a pseudo-window preview; custom cards carry
+                  edit/delete actions; the last card is «Create a theme…»
+                  which opens the visual Custom Theme editor. */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {THEMES.map((meta) => {
+                {[...THEMES, ...customThemes.map(customThemeMeta)].map((meta) => {
                   const isActive = theme === meta.id;
                   const p = meta.preview;
+                  const label = meta.labelKey.startsWith('@') ? meta.labelKey.slice(1) : t(meta.labelKey);
+                  const customEntry = isCustomThemeId(meta.id)
+                    ? customThemes.find((e) => e.id === meta.id)
+                    : undefined;
                   return (
-                    <button
+                    <div
                       key={meta.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setTheme(meta.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTheme(meta.id); } }}
+                      aria-label={label}
                       className={cn(
-                        'text-left rounded-md border-2 transition-all overflow-hidden',
+                        'text-left rounded-md border-2 transition-all overflow-hidden cursor-pointer relative',
                         isActive
                           ? 'border-accent shadow-md'
                           : 'border-border-default hover:border-border-strong hover:shadow-sm'
@@ -2220,7 +2286,7 @@ smartgit.refresh.inspectEol=true
                           className="ml-1 text-2xs font-medium truncate flex-1"
                           style={{ color: p.textPrimary }}
                         >
-                          {t(meta.labelKey)}
+                          {label}
                         </span>
                         {/* Active check-mark */}
                         {isActive && (
@@ -2306,7 +2372,8 @@ smartgit.refresh.inspectEol=true
                           </div>
                         </div>
                       </div>
-                      {/* Footer — theme name + dark/light indicator */}
+                      {/* Footer — theme name + dark/light indicator + custom
+                          theme actions (edit / delete). */}
                       <div
                         className="flex items-center justify-between px-2 py-1 border-t"
                         style={{
@@ -2315,24 +2382,71 @@ smartgit.refresh.inspectEol=true
                         }}
                       >
                         <span
-                          className="text-2xs font-medium"
+                          className="text-2xs font-medium min-w-0 truncate"
                           style={{ color: p.textPrimary }}
                         >
-                          {t(meta.labelKey)}
+                          {label}
                         </span>
-                        <span
-                          className="text-2xs px-1.5 py-0 rounded-sm"
-                          style={{
-                            color: meta.isDark ? p.textSecondary : p.textSecondary,
-                            border: `1px solid ${p.border}`,
-                          }}
-                        >
-                          {meta.isDark ? t('settings.themeDarkTag') : t('settings.themeLightTag')}
+                        <span className="flex items-center gap-1 shrink-0">
+                          <span
+                            className="text-2xs px-1.5 py-0 rounded-sm"
+                            style={{
+                              color: p.textSecondary,
+                              border: `1px solid ${p.border}`,
+                            }}
+                          >
+                            {meta.isDark ? t('settings.themeDarkTag') : t('settings.themeLightTag')}
+                          </span>
+                          {customEntry && (
+                            <>
+                              <button
+                                className="icon-btn !w-5 !h-5"
+                                title={t('settings.themeEditTooltip', { defaultValue: 'Редактировать тему' })}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setThemeEditorTarget(customEntry);
+                                  setThemeEditorOpen(true);
+                                }}
+                              >
+                                <Pencil size={10} style={{ color: p.textPrimary }} />
+                              </button>
+                              <button
+                                className="icon-btn !w-5 !h-5"
+                                title={t('settings.themeDeleteTooltip', { defaultValue: 'Удалить тему' })}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void confirmDialog({
+                                    title: t('settings.themeEditorDeleteTitle', { defaultValue: 'Удалить тему?' }),
+                                    message: t('settings.themeEditorDeleteMessage', { name: customEntry.name }),
+                                    confirmLabel: t('common.delete', { defaultValue: 'Удалить' }),
+                                    danger: true,
+                                  }).then((ok) => { if (ok) deleteCustomTheme(customEntry.id); });
+                                }}
+                              >
+                                <Trash size={10} style={{ color: p.statusDeleted }} />
+                              </button>
+                            </>
+                          )}
                         </span>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
+
+                {/* «Create a theme…» — opens the visual Custom Theme editor. */}
+                <button
+                  className="text-left rounded-md border-2 border-dashed border-border-default hover:border-accent transition-all flex items-center justify-center min-h-[120px] text-text-tertiary hover:text-accent"
+                  onClick={() => { setThemeEditorTarget(null); setThemeEditorOpen(true); }}
+                  title={t('settings.themeCreateHint', { defaultValue: 'Визуальный редактор: поверхности, текст, акцент, статусы и фон сайдбара' })}
+                >
+                  <span className="flex flex-col items-center gap-1.5">
+                    <Plus size={18} />
+                    <span className="text-xs font-medium">{t('settings.themeCreateButton', { defaultValue: 'Создать тему…' })}</span>
+                    <span className="text-2xs px-3 text-center leading-snug">
+                      {t('settings.themeCreateHint', { defaultValue: 'Визуальный редактор: поверхности, текст, акцент, статусы и фон сайдбара' })}
+                    </span>
+                  </span>
+                </button>
               </div>
 
               {/* Color swatches — shows the key accent + status colors of
@@ -2344,7 +2458,10 @@ smartgit.refresh.inspectEol=true
                 </div>
                 <div className="flex flex-wrap gap-3">
                   {(() => {
-                    const meta = getThemeMeta(theme);
+                    const customActive = isCustomThemeId(theme)
+                      ? customThemes.find((e) => e.id === theme)
+                      : undefined;
+                    const meta = getThemeMeta(theme) ?? (customActive ? customThemeMeta(customActive) : undefined);
                     if (!meta) return null;
                     const p = meta.preview;
                     const swatches: { name: string; color: string }[] = [
@@ -2699,6 +2816,16 @@ smartgit.refresh.inspectEol=true
       </div>
         </div>
       </div>
+
+      {/* Custom Theme editor (create / edit user themes). */}
+      <ThemeEditorDialog
+        open={themeEditorOpen}
+        editing={themeEditorTarget}
+        currentTheme={theme}
+        onClose={() => setThemeEditorOpen(false)}
+        onSave={saveCustomTheme}
+        onDelete={deleteCustomTheme}
+      />
     </div>
   );
 }

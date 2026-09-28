@@ -742,6 +742,10 @@ export interface GitApi {
   /** Check if commit has been pushed to any remote. */
   isCommitPushed: (repoPath: string, hash: string) => Promise<boolean>;
 
+  /** Branches (local + remote-tracking) that CONTAIN the commit — the
+   *  «какой ветке принадлежит коммит» info in the History detail card. */
+  branchesContaining: (repoPath: string, hash: string) => Promise<{ local: string[]; remote: string[] }>;
+
   // NOTE: squashCommits, coalesceCommits IPC types were removed (dead
   // renderer-side code). The underlying gitService.* functions are kept
   // for integration tests.

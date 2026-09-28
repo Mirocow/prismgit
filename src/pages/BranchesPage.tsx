@@ -2137,10 +2137,13 @@ export function BranchesPage() {
           <span className="text-xs font-semibold">{t('branches.title')}</span>
           <span className="text-2xs text-text-tertiary">
             {t('branches.countSummary', {
+              // Repo-wide totals, NOT the search-filtered counts: the summary
+              // line is a repository overview — shrinking it when a search is
+              // active made it disagree with the Tags/Stashes tools.
               local: localBranches.length,
               remote: Object.values(remoteGroups).reduce((a, b) => a + b.length, 0),
-              tags: filteredTags.length,
-              stashes: filteredStashes.length,
+              tags: tags.length,
+              stashes: stashes.length,
             })}
           </span>
         </div>

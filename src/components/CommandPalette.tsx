@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useI18n } from '../lib/i18n';
+import { isThemeDark } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
@@ -27,7 +28,7 @@ import {
   Upload,
   X,
 } from './icons';
-import { navItems, NAV_SHORTCUTS } from './navItems';
+import { effectiveNavHotkeys, navItemsOrdered } from './navItems';
 
 /** Minimal icon contract shared with ./icons */
 type IconType = typeof GitCommit;
@@ -158,14 +159,21 @@ export function CommandPalette({ open, onClose, triggers }: {
         action: () => useRepositoryStore.getState().openRepository(r.path).catch((e) => toast.error(t('shell.openRepoFailed'), String(e))),
       }));
 
+    // Effective tool hotkeys (defaults + user overrides from Settings).
+    const navHotkeys = effectiveNavHotkeys(
+      (useSettingsStore.getState().settings as { navHotkeys?: Record<string, string> }).navHotkeys
+    );
+
     return [
       // Navigation — only meaningful with an open repository
-      ...(repo ? navItems().map<Command>((n) => ({
+      ...(repo ? navItemsOrdered(
+        (useSettingsStore.getState().settings as { navOrder?: string[] }).navOrder
+      ).map<Command>((n) => ({
         id: `nav-${n.path}`,
         label: t('shell.goTo', { page: n.label }),
         group: 'Navigation',
         icon: n.icon,
-        hint: NAV_SHORTCUTS[n.path],
+        hint: navHotkeys[n.path],
         keywords: n.group,
         action: () => navigate(n.path),
       })) : []),
@@ -176,8 +184,9 @@ export function CommandPalette({ open, onClose, triggers }: {
       { id: 'repo-init', label: t('shell.initRepositoryMenu'), group: 'Repositories', icon: Plus, keywords: 'create new folder', action: triggers.onInit },
       // Always available
       {
-        id: 'ui-theme', label: theme === 'dark' ? t('shell.switchToLight') : t('shell.switchToDark'),
-        group: 'Interface', icon: theme === 'dark' ? Sun : Moon,
+        id: 'ui-theme',
+        label: isThemeDark(theme) ? t('shell.switchToLight') : t('shell.switchToDark'),
+        group: 'Interface', icon: isThemeDark(theme) ? Sun : Moon,
         keywords: 'appearance dark light mode', hint: 'Ctrl+Shift+T',
         action: () => useSettingsStore.getState().toggleTheme(),
       },
