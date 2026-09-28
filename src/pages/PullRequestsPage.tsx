@@ -447,12 +447,30 @@ export function PullRequestsPage() {
     }
     setCreating(true);
     try {
-      await api.github.createPullRequest(repoInfo.owner, repoInfo.repo, {
-        title: prTitle,
-        head: prHead,
-        base: prBase,
-        body: prBody || undefined,
-      });
+      // Provider split (mirrors handleMerge): GitHub PRs via the REST
+      // endpoint, GitLab MRs via the (long-existing but never wired)
+      // gitlab:createMergeRequest IPC. Before this, creating from a GitLab
+      // repo called the GitHub API with a GitLab owner — guaranteed failure
+      // while the README promised "list, create, merge, close" for both.
+      if (repoInfo.provider === 'gitlab') {
+        if (gitlabProjectId == null) {
+          toast.warning(t('pages.prGitlabProjectUnresolved'));
+          return;
+        }
+        await api.gitlab.createMergeRequest(gitlabProjectId, {
+          title: prTitle.trim(),
+          source_branch: prHead.trim(),
+          target_branch: prBase.trim(),
+          description: prBody || undefined,
+        });
+      } else {
+        await api.github.createPullRequest(repoInfo.owner, repoInfo.repo, {
+          title: prTitle,
+          head: prHead,
+          base: prBase,
+          body: prBody || undefined,
+        });
+      }
       toast.success(t('pages.prCreated'));
       setShowCreate(false);
       setPrTitle('');

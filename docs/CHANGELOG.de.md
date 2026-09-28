@@ -49,6 +49,7 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 - Der Signieren-Tab schreibt `gpg.program` nicht mehr bedingungslos: leere Felder werden aus `.git/config` ENTFERNT statt geschrieben (behebt auch den nicht löschbaren user.signingkey und den gefährlichen `user.name=""`-Write, der jeden Commit mit „empty ident name not allowed“ brechen würde)
 
 ### Behoben — GitLab / PR-Oberflächen
+- **MR aus einem GitLab-Repo erstellen funktioniert jetzt** — der Create-Dialog der Pull Requests rief selbst für GitLab-Repos die GitHub-REST-API auf (garantiertes Scheitern, während das README „Erstellen“ für beide Provider versprach); jetzt angebunden an den längst existierenden `gitlab:createMergeRequest`-IPC — live verifiziert durch das Anlegen des v2.2.0-Release-MRs in der App
 - **GitLab apiJson folgt 3xx-Redirects** — umbenannte/verschobene Projekte (gitclient → prismgit) brachen die MR-Liste mit stillen 404ern
 - **Pull-Requests-Zeilen-Aktionen sichtbar und verständlich** — Hover-aufgedeckte kryptische Icons → dauerhaft sichtbare beschriftete Buttons + Rechtsklick-Menü (In Reviews öffnen / Browser / Squash / Gruppe kopieren)
 

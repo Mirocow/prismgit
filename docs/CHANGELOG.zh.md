@@ -49,6 +49,7 @@ PrismGit 的所有显著变更都记录在此文件中。
 - 签名标签页不再无条件写入 `gpg.program`：空字段从 `.git/config` 中取消设置而非写入（同时修复了无法清除的 user.signingkey 和会导致每个提交报「empty ident name not allowed」的危险 `user.name=""` 写入）
 
 ### 修复 — GitLab / PR 界面
+- **现在可以从 GitLab 仓库创建 MR** — Pull Requests 创建对话框以前即使对 GitLab 仓库也调用 GitHub REST API（必然失败，而 README 却承诺两个提供商都支持「创建」）；现已接入早已存在的 `gitlab:createMergeRequest` IPC — 已通过在应用中创建 v2.2.0 发布 MR 实测验证
 - **GitLab apiJson 遵循 3xx 重定向** — 重命名/移动的项目（gitclient → prismgit）以前会以静默 404 破坏 MR 列表
 - **Pull Requests 行操作可见且可理解** — 悬停显示的加密图标 → 始终可见的带标签按钮 + 右键菜单（在评审中打开 / 浏览器 / 压缩 / 复制组）
 

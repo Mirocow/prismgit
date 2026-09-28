@@ -276,6 +276,7 @@ export const en: Record<string, string> = {
   // ===== Pull Requests =====
   'pages.prFieldsRequired': 'Title, head, and base are required',
   'pages.prCreated': 'Pull request created',
+  'pages.prGitlabProjectUnresolved': 'GitLab project is not resolved yet — reopen the page or check the remote URL',
   'pages.prCreateFailed': 'Failed to create PR',
   'pages.prLoadFailed': 'Failed to load pull requests',
   'pages.fetchedAllRemotes': 'Fetched from all remotes (with prune)',
@@ -1070,6 +1071,7 @@ export const ru: Record<string, string> = {
   // ===== Pull Requests =====
   'pages.prFieldsRequired': 'Требуются title, head и base',
   'pages.prCreated': 'Pull request создан',
+  'pages.prGitlabProjectUnresolved': 'Проект GitLab ещё не определён — переоткройте страницу или проверьте URL remote',
   'pages.prCreateFailed': 'Не удалось создать PR',
   'pages.prLoadFailed': 'Не удалось загрузить pull requests',
   'pages.fetchedAllRemotes': 'Получено со всех remotes (с prune)',
@@ -1864,6 +1866,7 @@ export const zh: Record<string, string> = {
   // ===== Pull Requests =====
   'pages.prFieldsRequired': '标题、head 和 base 均为必填',
   'pages.prCreated': 'Pull request 已创建',
+  'pages.prGitlabProjectUnresolved': 'GitLab 项目尚未解析 — 请重新打开页面或检查远程 URL',
   'pages.prCreateFailed': '创建 PR 失败',
   'pages.prLoadFailed': '加载 pull request 失败',
   'pages.fetchedAllRemotes': '已从所有远程获取（含 prune）',
@@ -2658,6 +2661,7 @@ export const de: Record<string, string> = {
   // ===== Pull Requests =====
   'pages.prFieldsRequired': 'Titel, Head und Base sind erforderlich',
   'pages.prCreated': 'Pull Request erstellt',
+  'pages.prGitlabProjectUnresolved': 'GitLab-Projekt noch nicht aufgelöst — Seite neu öffnen oder Remote-URL prüfen',
   'pages.prCreateFailed': 'PR konnte nicht erstellt werden',
   'pages.prLoadFailed': 'Pull Requests konnten nicht geladen werden',
   'pages.fetchedAllRemotes': 'Von allen Remotes geholt (mit Prune)',
