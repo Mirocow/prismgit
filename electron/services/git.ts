@@ -957,8 +957,19 @@ export async function commit(
   }
   // Bust the diff cache — HEAD has moved, every cached diff is now stale.
   invalidateDiffCache(repoPath);
-  // Extract commit hash from output: "[main abc1234] message"
-  const match = output.match(/\[([a-z0-9_-]+)(?:\s+\(root-commit\))?\s+([a-f0-9]{7,40})\]/);
+  // Task 29 (the REAL «hash not shown» root cause): the hash used to be
+  // parsed from the commit output "[branch hash] msg" with a branch-name
+  // charset of [a-z0-9_-] — NO '/'. Every branch like
+  // feature/smartgit-electron-v3 failed the match → commit() returned ''
+  // → the commit toast had NO hash at all (neither did the old «Хеш: …»
+  // detail line). Output-parsing is also fragile for detached HEAD
+  // ("[detached HEAD abc]...") and localized git output. rev-parse after
+  // a successful commit is authoritative — use it.
+  const head = (await git.raw(['rev-parse', 'HEAD'])).trim();
+  if (head) return head;
+  // Fallback (rev-parse should never fail right after a commit): the old
+  // output parse, now tolerant of '/' in branch names and detached HEAD.
+  const match = output.match(/\[([^\]\s]+)(?:\s+\(root-commit\))?\s+([a-f0-9]{7,40})\]/);
   return match ? match[2] : '';
 }
 

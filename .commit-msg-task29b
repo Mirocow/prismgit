@@ -1,0 +1,25 @@
+fix(commit): commit() returned '' on feature/* branches — the REAL «no hash» root cause
+
+The dogfood probe (committing PrismGit's own repo through the app)
+caught it: the toast hash chip appeared on a scratch repo (branch
+'main') but NOT on the real repo (branch
+'feature/smartgit-electron-v3').
+
+Root cause: electron/services/git.ts commit() parsed the hash from
+git's output "[branch hash] message" with a branch-name charset of
+[a-z0-9_-] — NO '/'. Every commit on a slashed branch (feature/x,
+bugfix/y — the most common naming!) failed the regex and returned
+'' → gitStore.commit resolved '' → the «Коммит создан» toast had NO
+hash (and neither did the old «Хеш: …» detail line). This is exactly
+the user's report: their working branch IS
+feature/smartgit-electron-v3, so the hash NEVER displayed.
+
+Fix: rev-parse HEAD after the successful commit (authoritative);
+output-parse kept only as a fallback, now tolerant of '/' and
+detached HEAD.
+
+Regression tests: gitService.workflows +2 (commit on feature/x
+branch returns the real 40-char HEAD; commit on main likewise).
+Probes kept in-repo with dirty-tree guards (probe-toast-timing /
+probe-toast-html — the Task-28 «git add -A on a dirty tree» lesson,
+now enforced in the scripts themselves).
