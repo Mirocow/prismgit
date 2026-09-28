@@ -27,7 +27,7 @@ import {
   Upload,
   X,
 } from './icons';
-import { NAV_ITEMS, NAV_SHORTCUTS } from './navItems';
+import { navItems, NAV_SHORTCUTS } from './navItems';
 
 /** Minimal icon contract shared with ./icons */
 type IconType = typeof GitCommit;
@@ -160,7 +160,7 @@ export function CommandPalette({ open, onClose, triggers }: {
 
     return [
       // Navigation — only meaningful with an open repository
-      ...(repo ? NAV_ITEMS.map<Command>((n) => ({
+      ...(repo ? navItems().map<Command>((n) => ({
         id: `nav-${n.path}`,
         label: t('shell.goTo', { page: n.label }),
         group: 'Navigation',

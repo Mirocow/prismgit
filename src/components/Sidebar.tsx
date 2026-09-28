@@ -33,7 +33,7 @@ import {
   Sun,
   X,
 } from './icons';
-import { NAV_DESCRIPTIONS, NAV_ITEMS, NAV_SHORTCUTS, type NavItem } from './navItems';
+import { navDescriptions, navItems, NAV_SHORTCUTS, type NavItem } from './navItems';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from './ResizableSplitter';
 
 /**
@@ -209,7 +209,7 @@ export function Sidebar() {
     }
   }, [currentRepo]);
 
-  const groups_ = NAV_ITEMS.reduce<Record<string, NavItem[]>>((acc, item) => {
+  const groups_ = navItems().reduce<Record<string, NavItem[]>>((acc, item) => {
     const g = item.group || 'Other';
     if (!acc[g]) acc[g] = [];
     acc[g].push(item);
@@ -928,7 +928,7 @@ export function Sidebar() {
                 {t('nav.favorites')}
               </div>
               {favoriteTools.map(path => {
-                const item = NAV_ITEMS.find(n => n.path === path);
+                const item = navItems().find(n => n.path === path);
                 if (!item) return null;
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
@@ -951,7 +951,7 @@ export function Sidebar() {
                         e.preventDefault(); e.stopPropagation(); handleNavigate(item.path);
                       }
                     }}
-                    title={NAV_DESCRIPTIONS[item.path] || item.label}
+                    title={navDescriptions()[item.path] || item.label}
                     // A11y parity with regular nav items (which already carry
                     // aria-label): favorite items are div[role=button] and
                     // relied on text content alone — a nested favorite-star
@@ -1074,7 +1074,7 @@ export function Sidebar() {
                         e.preventDefault(); e.stopPropagation(); handleNavigate(item.path);
                       }
                     }}
-                    title={NAV_DESCRIPTIONS[item.path] || item.label}
+                    title={navDescriptions()[item.path] || item.label}
                     aria-current={isActive ? 'page' : undefined}
                     aria-label={item.label}
                   >

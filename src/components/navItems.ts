@@ -24,10 +24,13 @@ import { t } from '../lib/i18n';
  *     use case with a richer UI).
  *
  * NOTE: labels and descriptions are translated via the standalone `t()`
- * function from `../lib/i18n`. They are evaluated at module-load time
- * using the locale selected on app startup (saved in localStorage or
- * detected from navigator.language). If the user switches locale at
- * runtime via Settings, a refresh is required to update the nav labels.
+ * function from `../lib/i18n`. They are evaluated on EVERY navItems() call
+ * (per render), so the sidebar / command palette / help banner follow the
+ * active locale immediately — including the async initLocaleFromSettings()
+ * restore at startup. Before this, the labels were frozen at module-load
+ * time and a RU-profile first launch showed an ENGLISH sidebar until a
+ * manual refresh (caught by the counters E2E — aria-label="Changes" while
+ * every page header was already «Изменения»).
  */
 export interface NavItem {
   path: string;
@@ -43,7 +46,13 @@ const GROUP_WORKFLOWS = () => t('nav.group.workflows');
 const GROUP_AI = () => t('nav.group.ai');
 const GROUP_REFS = () => t('nav.group.refs');
 
-export const NAV_ITEMS: NavItem[] = [
+/**
+ * Fresh nav model for the CURRENT locale — call inside render (consumers all
+ * subscribe via useI18n(), so a locale change re-renders and re-evaluates).
+ * Do NOT cache the result in a module-level variable: that re-freezes it.
+ */
+export function navItems(): NavItem[] {
+  return [
   // === Working Tree ===
   { path: '/changes', label: t('nav.label.changes'), icon: GitCommit, group: GROUP_WORKING_TREE(),
     description: t('nav.desc.changes') },
@@ -87,7 +96,8 @@ export const NAV_ITEMS: NavItem[] = [
     description: t('nav.desc.submodules') },
   { path: '/lfs', label: t('nav.label.lfs'), icon: Package, group: GROUP_REFS(),
     description: t('nav.desc.lfs') },
-];
+  ];
+}
 
 /**
  * Quick-navigation shortcuts (Ctrl+1..9). Pages not listed here are still
@@ -105,7 +115,10 @@ export const NAV_SHORTCUTS: Record<string, string> = {
   '/search': 'Ctrl+9',
 };
 
-/** Map path → description for pages that have one. */
-export const NAV_DESCRIPTIONS: Record<string, string> = Object.fromEntries(
-  NAV_ITEMS.filter((item) => item.description).map((item) => [item.path, item.description!])
-);
+/** Map path → description (current locale) for pages that have one. */
+export function navDescriptions(): Record<string, string> {
+  const items = navItems();
+  return Object.fromEntries(
+    items.filter((item) => item.description).map((item) => [item.path, item.description!])
+  );
+}

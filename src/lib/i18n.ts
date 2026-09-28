@@ -137,6 +137,47 @@ function syncDocumentLang(locale: Locale): void {
 }
 syncDocumentLang(useI18nStore.getState().locale);
 
+// --- Interpolation ---------------------------------------------------------
+
+/**
+ * Placeholder interpolation shared by useI18n().t and the standalone t().
+ *
+ * Plain placeholders work as before: `{name}` → the param value.
+ *
+ * PLURAL (opt-in, for counters): `{name|one|few|many}` picks a Russian-style
+ * CLDR plural form for the value and renders `«value form»` (e.g. params
+ * {local: 1} + `{local|локальная|локальные|локальных}` → «1 локальная»).
+ * Dictionaries that do not inflect (en/zh/de) simply keep the plain
+ * `{name}` syntax — their rendering is byte-identical to the old engine.
+ * This exists because Branches' summary showed «1 удалённых» / «2 тегов»
+ * (wrong RU grammar) with no way to fix it inside a flat string.
+ */
+function interpolate(str: string, params: Record<string, string | number>): string {
+  for (const [k, v] of Object.entries(params)) {
+    if (k === 'defaultValue') continue;
+    // Matches {k} AND {k|form1|form2|form3}; the pipe part is optional so
+    // strings without it keep the exact old behaviour. A longer placeholder
+    // ({tags} vs param {tag}) still cannot match — after the name the next
+    // char must be `}` or `|`.
+    str = str.replace(
+      new RegExp(`\\{${k}(\\|[^{}]*)?\\}`, 'g'),
+      (whole: string, pipe?: string) => {
+        if (pipe === undefined) return String(v);
+        const forms = pipe.slice(1).split('|');
+        const n = Math.abs(Number(v));
+        const m10 = n % 10;
+        const m100 = n % 100;
+        const idx = (m10 === 1 && m100 !== 11) ? 0
+          : (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) ? 1
+            : 2;
+        const form = forms[Math.min(idx, forms.length - 1)] ?? '';
+        return `${v} ${form}`.trimEnd();
+      },
+    );
+  }
+  return str;
+}
+
 // --- Hook (for React components) ---
 
 export function useI18n() {
@@ -156,10 +197,7 @@ export function useI18n() {
       str = (params as { defaultValue?: string } | undefined)?.defaultValue ?? key;
     }
     if (params) {
-      for (const [k, v] of Object.entries(params)) {
-        if (k === 'defaultValue') continue;
-        str = str.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
-      }
+      str = interpolate(str, params);
     }
     return str;
   };
@@ -176,10 +214,7 @@ export function t(key: string, params?: Record<string, string | number>): string
     str = (params as { defaultValue?: string } | undefined)?.defaultValue ?? key;
   }
   if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (k === 'defaultValue') continue;
-      str = str.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
-    }
+    str = interpolate(str, params);
   }
   return str;
 }

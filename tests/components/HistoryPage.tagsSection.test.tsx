@@ -35,6 +35,7 @@ const mockTagsAt = vi.fn();
 const mockTagShow = vi.fn();
 const mockCreateTag = vi.fn();
 const mockDeleteTag = vi.fn();
+const mockTags = vi.fn();
 
 vi.mock('../../src/lib/api', () => ({
   api: {
@@ -66,8 +67,8 @@ vi.mock('../../src/lib/api', () => ({
       checkout: vi.fn().mockResolvedValue(undefined),
       editCommitMessage: vi.fn().mockResolvedValue(undefined),
       editCommitAuthor: vi.fn().mockResolvedValue(undefined),
-      // Tags list for the "Tagged (N)" chip.
-      tags: vi.fn().mockResolvedValue([]),
+      // Tags list for the "Tagged (N)" chip (repo-wide total).
+      tags: (...args: unknown[]) => mockTags(...args),
       // stashList is called INSIDE loadHistory's try block BEFORE the
       // detail-panel selection is set — a missing mock aborts the flow and
       // the panel stays on "Select a commit".
@@ -229,10 +230,57 @@ beforeEach(() => {
   });
   mockCreateTag.mockResolvedValue(undefined);
   mockDeleteTag.mockResolvedValue(undefined);
+  mockTags.mockResolvedValue([]);
   confirmMock.mockResolvedValue(true);
 });
 
 // --- Tests -------------------------------------------------------------
+
+describe('HistoryPage — "Tagged (N)" quick-filter chip semantics', () => {
+  // The chip's count must be the TAGGED-COMMITS-IN-VIEW count — exactly the
+  // rows the filter shows for the loaded history. It used to show the
+  // repo-wide tag-refs total: with a tag on a branch outside the view
+  // (e.g. feature/b while on head+upstream) «Tagged (6)» disagreed with the
+  // 4 rows the filter produced — the user's «подсчет тегов неверен».
+  it('chip counts tagged commits IN VIEW, not all tag refs in the repo', async () => {
+    mockLog.mockResolvedValue([
+      { ...LOG_ENTRIES[0], subject: 'tagged commit', refs: ['HEAD -> main', 'tag: refs/tags/v1.0.0'] },
+      { ...LOG_ENTRIES[0], hash: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd', hashAbbrev: 'abcdefa', subject: 'untagged commit', refs: [] },
+    ]);
+    // Two tags in the REPO, but only one of them points at a commit that is
+    // loaded in this view (mark-f lives on feature/b — outside the walk).
+    mockTags.mockResolvedValue([
+      { name: 'v1.0.0', hash: COMMIT_HASH, hashAbbrev: '1234567' },
+      { name: 'mark-f', hash: 'ffffffffffffffffffffffffffffffffffffffff', hashAbbrev: 'fffffff' },
+    ]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText('untagged commit')).toBeInTheDocument(), { timeout: 8000 });
+    // In-view tagged commits = 1 (NOT 2 = repo tag total).
+    expect(screen.getByText(/history\.taggedChip \(1\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/history\.taggedChip \(2\)/)).not.toBeInTheDocument();
+  });
+
+  it('inactive chip title uses the taggedChipOff key (numbers pinned in i18nPlural.test.ts)', async () => {
+    mockLog.mockResolvedValue([
+      { ...LOG_ENTRIES[0], subject: 'tagged commit', refs: ['HEAD -> main', 'tag: refs/tags/v1.0.0'] },
+    ]);
+    mockTags.mockResolvedValue([
+      { name: 'v1.0.0', hash: COMMIT_HASH, hashAbbrev: '1234567' },
+      { name: 'mark-f', hash: 'ffffffffffffffffffffffffffffffffffffffff', hashAbbrev: 'fffffff' },
+    ]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText('tagged commit')).toBeInTheDocument(), { timeout: 8000 });
+    const chip = screen.getByText(/history\.taggedChip \(1\)/).closest('button');
+    expect(chip).toBeTruthy();
+    // The mocked t() returns the key — the real interpolation of {inView}/{total}
+    // (both numbers rendered) is pinned by tests/unit/i18nPlural.test.ts with
+    // the REAL dictionary. Here we pin the KEY choice: the inactive tooltip is
+    // the descriptive one, and clicking activates the filter.
+    expect(chip!.getAttribute('title')).toContain('history.taggedChipOff');
+    fireEvent.click(chip!);
+    await waitFor(() => expect(chip!.getAttribute('title')).toContain('history.taggedChipOn'));
+  });
+});
 
 describe('HistoryPage — "Tags on this commit" section', () => {
   it('renders ALL tags on the selected commit (annotated + lightweight with badge)', async () => {

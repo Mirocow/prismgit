@@ -395,7 +395,7 @@ export const ru: Record<string, string> = {
   'branches.worktreeCreateFailed': 'Не удалось создать worktree',
   'branches.clearSelectionTitle': 'Сбросить множественное выделение веток',
   // Page chrome
-  'branches.countSummary': '{local} локальных · {remote} удалённых · {tags} тегов · {stashes} stash',
+  'branches.countSummary': '{local|локальная|локальные|локальных} · {remote|удалённая|удалённые|удалённых} · {tags|тег|тега|тегов} · {stashes} stash',
   'branches.filterPlaceholder': 'Фильтр...',
   'branches.newButton': 'Новая',
   'branches.nothingMatches': 'Ничего не найдено по фильтру',

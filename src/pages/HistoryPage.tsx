@@ -677,6 +677,18 @@ export function HistoryPage() {
     return result;
   }, [searchPool, debouncedSearch, authorFilter, pathFilter, dateFrom, dateTo, useRegex, taggedActive]);
 
+  // Tagged-commits-in-view — EXACTLY the row count the Tagged filter shows
+  // for the current branch selection and loaded window. The chip used to show
+  // allTags.length (ALL tag refs in the repo): a tag on a branch outside the
+  // view (feature/b while on head+upstream) made «Tagged (6)» disagree with
+  // the 4 rows the filter actually produced. The tooltip now carries BOTH
+  // numbers; the visible count always matches what the click will show.
+  const taggedInView = useMemo(
+    () => searchPool.reduce(
+      (n, e) => n + (e.refs.some(r => r.startsWith('tag:') || r.includes('refs/tags/')) ? 1 : 0), 0),
+    [searchPool],
+  );
+
   // Auto-scroll to the globally selected commit (set here or from another tool —
   // e.g. a tag click in Tags page). See the index-space warning above.
   // prevSelectedRef guards the filter-reset: only a NEW external selection may
@@ -1884,7 +1896,7 @@ export function HistoryPage() {
               onClick={() => setAuthorFilter(authorFilter ? '' : myAuthorName)}
               title={t('history.ttShowMyCommits')}
             >
-              Mine
+              {t('history.chipMine')}
             </button>
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
@@ -1892,18 +1904,22 @@ export function HistoryPage() {
               onClick={() => setSearch(search.toLowerCase() === 'merge' ? '' : 'merge')}
               title={t('history.ttShowMerges')}
             >
-              Merges
+              {t('history.chipMerges')}
             </button>
             {/* Tagged-only filter — show only commits that have at least one tag
-                pointing at them (refs/tags/*). Useful for finding release points. */}
+                pointing at them (refs/tags/*). Useful for finding release points.
+                The count is the TAGGED-COMMITS-IN-VIEW count (matches what the
+                filter shows); the tooltip adds the repo-wide tag total. */}
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1',
                 taggedActive ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
               onClick={() => setTaggedActive(!taggedActive)}
-              title={taggedActive ? 'Showing only tagged commits — click to clear' : 'Show only commits with a tag (release points)'}
+              title={taggedActive
+                ? t('history.taggedChipOn')
+                : t('history.taggedChipOff', { inView: taggedInView, total: allTags.length })}
             >
               <TagIcon size={10} />
-              Tagged{allTags.length > 0 ? ` (${allTags.length})` : ''}
+              {t('history.taggedChip')} ({taggedInView})
             </button>
           </div>
 
