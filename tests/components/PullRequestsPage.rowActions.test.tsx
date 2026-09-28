@@ -108,6 +108,7 @@ const PROVIDER_STATE = {
   gitlabProjectId: null,
   gitlabAuthed: false,
   selectedPR: null,
+  prStacks: {},
   detect: mockDetect,
   selectPR: mockSelectPR,
   selectProvider: vi.fn(),

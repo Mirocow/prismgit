@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Avatar } from '../components/Avatar';
-import { ArrowDown, CloudDownload, ExternalLink, GitBranch, GitPullRequest, Loader, Plus, RefreshCw, Search, X } from '../components/icons';
+import { ArrowDown, CloudDownload, ExternalLink, GitBranch, GitPullRequest, Layers, Loader, Plus, RefreshCw, Search, X } from '../components/icons';
 import { ProviderChip } from '../components/ProviderChip';
 import { SquashToBranchDialog } from '../components/SquashToBranchDialog';
 import { api, type GithubPullRequest, type GitLabMergeRequest, type GitLabMRCommit, type GithubPRCommit, type LogEntry } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { resolveDefaultRemote } from '../lib/remotes';
 import { prHeadRefspec, prCommitsToLogEntries, ensureCommitsLocal } from '../lib/prSquash';
+import { computePRStacks, formatStackChain, type StackMember } from '../lib/prStacks';
 import { useContextMenu } from '../lib/useContextMenu';
 import { cn, copyToClipboard, formatDate, shortHash } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
@@ -83,6 +84,11 @@ export function PullRequestsPage() {
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastActions();
   const [prs, setPRs] = useState<UnifiedPR[]>([]);
+  // Stacked chains keyed by PR number (bottom→top = merge order). Computed
+  // on every list load; stored in providerStore so PRReview's header can
+  // show the stack while the user is on the Reviews page.
+  const [stacks, setStacks] = useState<Map<number, { members: StackMember[]; position: number }>>(new Map());
+  const setPRStacks = useProviderStore((s) => s.setPRStacks);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<'fetch' | 'pull' | null>(null);
   const [state, setState] = useState<'open' | 'closed' | 'all'>('open');
@@ -166,6 +172,17 @@ export function PullRequestsPage() {
       .catch(() => setPrBase('main'));
   }, [repo.path, repoInfo.provider]);
 
+  /** Set the loaded PR list + (re)compute stacked chains in one place. */
+  const applyPRs = useCallback((unified: UnifiedPR[]) => {
+    setPRs(unified);
+    const map = computePRStacks(unified);
+    setStacks(map);
+    // providerStore: plain Record keyed by number → members (bottom→top).
+    const rec: Record<number, StackMember[]> = {};
+    for (const [num, info] of map) rec[num] = info.members;
+    setPRStacks(rec);
+  }, [setPRStacks]);
+
   const loadPRs = useCallback(async () => {
     // Guard: don't even try if not authenticated or not a known-provider repo.
     if (!isAuthed) return;
@@ -175,7 +192,7 @@ export function PullRequestsPage() {
     try {
       if (repoInfo.provider === 'github') {
         const result = await api.github.listPullRequests(repoInfo.owner!, repoInfo.repo!, state);
-        setPRs(result.map(githubToUnified));
+        applyPRs(result.map(githubToUnified));
       } else if (repoInfo.provider === 'gitlab') {
         // Resolve the GitLab project ID by URL-encoded path_with_namespace.
         //
@@ -194,7 +211,7 @@ export function PullRequestsPage() {
             // Continue with the freshly-resolved project ID below.
             const glState0 = state === 'open' ? 'opened' : state === 'closed' ? 'closed' : 'all';
             const result0 = await api.gitlab.listMergeRequests(project.id, glState0 as 'opened' | 'closed' | 'merged' | 'all');
-            setPRs(result0.map(gitlabToUnified));
+            applyPRs(result0.map(gitlabToUnified));
             return;
           } catch (e) {
             const eMsg = String(e);
@@ -207,13 +224,13 @@ export function PullRequestsPage() {
             } else {
               toast.error(t('pages.prLoadFailed'), eMsg);
             }
-            setPRs([]);
+            applyPRs([]);
             return;
           }
         }
         const glState = state === 'open' ? 'opened' : state === 'closed' ? 'closed' : 'all';
         const result = await api.gitlab.listMergeRequests(gitlabProjectId ?? 0, glState as 'opened' | 'closed' | 'merged' | 'all');
-        setPRs(result.map(gitlabToUnified));
+        applyPRs(result.map(gitlabToUnified));
       }
     } catch (e) {
       const msg = String(e);
@@ -223,7 +240,7 @@ export function PullRequestsPage() {
       if (msg.includes('Not authenticated')) {
         // Silent — auth gate state is shown in the UI.
       } else if (msg.includes('404') || msg.toLowerCase().includes('not found')) {
-        setPRs([]);
+        applyPRs([]);
         toast.error(
           t('pages.prLoadFailed'),
           t('pages.prLoadNotFound', {
@@ -237,7 +254,7 @@ export function PullRequestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [isAuthed, repoInfo, state, toast, gitlabProjectId]);
+  }, [isAuthed, repoInfo, state, toast, gitlabProjectId, applyPRs]);
 
   useEffect(() => {
     if (repoInfo.owner && repoInfo.repo) {
@@ -408,9 +425,27 @@ export function PullRequestsPage() {
   const rowContextMenuHandler = useCallback((e: React.MouseEvent, pr: UnifiedPR) => {
     e.preventDefault();
     e.stopPropagation();
+    // Stacked-PR chain (GitHub/GitLab «Stacked PRs»): the row's chain
+    // members, bottom→top — jump straight to any of them in Reviews.
+    const stack = stacks.get(pr.number);
+    const numPrefix = repoInfo.provider === 'gitlab' ? '!' : '#';
+    const stackItems = stack
+      ? stack.members.map((m, i) => ({
+          label: `${t('pages.prStackMenuOpen', { n: `${numPrefix}${m.number}` })} · ${m.title}`,
+          clickId: `stack-${m.number}`,
+          title: i < stack.position
+            ? t('pages.prStackMergeFirst')
+            : undefined,
+        })).filter((it, i) => stack.members[i].number !== pr.number)
+      : [];
     showMenu([
       { label: t('pages.prOpenReview'), clickId: 'open-review' },
       { label: t('common.openExternal'), clickId: 'browser' },
+      ...(stackItems.length > 0 ? [
+        { type: 'separator' as const },
+        { label: t('pages.prStackMenuLabel', { total: stack!.members.length }), enabled: false, clickId: 'stack-label' },
+        ...stackItems,
+      ] : []),
       { type: 'separator' },
       { label: t('pages.prSquashToBranch'), clickId: 'squash', title: t('pages.prSquashToBranchTitle') },
       { type: 'separator' },
@@ -429,6 +464,13 @@ export function PullRequestsPage() {
       switch (clickId) {
         case 'open-review': openPRInReviews(pr); break;
         case 'browser': void api.app.openExternal(pr.html_url); break;
+        default:
+          if (clickId.startsWith('stack-')) {
+            const num = parseInt(clickId.slice(6), 10);
+            const member = stack?.members.find((m) => m.number === num);
+            if (member) openPRInReviews(member as UnifiedPR);
+          }
+          break;
         case 'squash': void handleSquashPR(pr); break;
         case 'copy-title': void copyToClipboard(pr.title); break;
         case 'copy-number': void copyToClipboard(`#${pr.number}`); break;
@@ -437,7 +479,7 @@ export function PullRequestsPage() {
         case 'copy-base': void copyToClipboard(pr.base.ref); break;
       }
     });
-  }, [t, showMenu, openPRInReviews, handleSquashPR]);
+  }, [t, showMenu, openPRInReviews, handleSquashPR, stacks]);
 
   const handleCreate = async () => {
     if (!repoInfo.owner || !repoInfo.repo) return;
@@ -802,6 +844,23 @@ export function PullRequestsPage() {
                       title={t('pages.prConflictsTooltip')}
                     >
                       {t('pages.prConflictsBadge')}
+                    </span>
+                  )}
+                  {/* Stacked PR chain (GitHub/GitLab «Stacked PRs»): position
+                      in the chain + the full merge-order chain in the tooltip.
+                      Click-through lives in the row's right-click menu and in
+                      the PRReview header strip. */}
+                  {stacks.get(pr.number) && (
+                    <span
+                      data-testid={`pr-stack-badge-${pr.number}`}
+                      className="text-2xs px-1.5 py-0.5 rounded font-medium shrink-0 bg-accent/15 text-accent flex items-center gap-0.5"
+                      title={t('pages.prStackTooltip', {
+                        total: stacks.get(pr.number)!.members.length,
+                        chain: formatStackChain(stacks.get(pr.number)!.members, repoInfo.provider as 'github' | 'gitlab'),
+                      })}
+                    >
+                      <Layers size={9} className="shrink-0" />
+                      {stacks.get(pr.number)!.position + 1}/{stacks.get(pr.number)!.members.length}
                     </span>
                   )}
                 </div>

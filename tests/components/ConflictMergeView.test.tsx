@@ -12,7 +12,7 @@
  * guard (test #1) is preserved — that's the most important assertion.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import * as React from 'react';
 
 // ===== Mocks =====
@@ -340,5 +340,125 @@ describe('ConflictMergeView (MergeEditor3Way)', () => {
     expect(editor.value).toContain('identical change');
     // The info banner co-exists with the editor.
     expect(screen.queryByTestId('merge-editor-noconflicts')).toBeTruthy();
+  }, 10000);
+
+  // ─── v3: «средняя панель недоступна для редактирования» ────────────────
+  // User report 2026-09-28: typing into the middle pane changed the hidden
+  // textarea value but the VISIBLE highlight layer (<pre>) stayed frozen
+  // (it only rebuilt on resolve/reset via initialResult) — editing looked
+  // impossible. The highlight now follows the live content (90ms debounce).
+
+  it('typing updates the VISIBLE highlight layer (live re-highlight)', async () => {
+    // A previous test in this file permanently overrode mockGitRaw with a
+    // same.ts implementation — restore the default file.ts one first.
+    mockGitRaw.mockImplementation(async (_p: string, args: string[]) => {
+      if (args[0] === 'ls-files' && args.includes('-u')) {
+        return '100644 abc123 1\tfile.ts\n100644 def456 2\tfile.ts\n100644 ghi789 3\tfile.ts\n';
+      }
+      const arg = args[args.length - 1];
+      if (arg === ':1:file.ts') return 'base line';
+      if (arg === ':2:file.ts') return 'ours line';
+      if (arg === ':3:file.ts') return 'theirs line';
+      return '';
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { ConflictMergeView } = await import('../../src/components/ConflictMergeView');
+      render(React.createElement(ConflictMergeView, { filePath: 'file.ts', onResolved: vi.fn() }));
+      await waitFor(() => {
+        expect(screen.queryByTestId('merge-result-textarea')).toBeTruthy();
+      }, { timeout: 5000 });
+
+      const ta = screen.getByTestId('merge-result-textarea') as HTMLTextAreaElement;
+      const preBefore = document.querySelector('pre[aria-hidden="true"]')?.textContent ?? '';
+      expect(preBefore).not.toContain('TYPED-TEXT');
+
+      // Type into the (uncontrolled) textarea. fireEvent.input uses the
+      // NATIVE value setter — a plain `ta.value = …` assignment goes
+      // through React's value-tracker and the change is swallowed.
+      await act(async () => {
+        fireEvent.input(ta, { target: { value: `${ta.value}\nTYPED-TEXT` } });
+        vi.advanceTimersByTime(150);
+      });
+
+      const preAfter = document.querySelector('pre[aria-hidden="true"]')?.textContent ?? '';
+      expect(preAfter).toContain('TYPED-TEXT');
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 10000);
+
+  it('result column height tracks the live line count (tall files scroll via the shared container)', async () => {
+    // 300-line conflicted file: the middle column must be a TALL element
+    // (lines × 20px) inside the shared scroller — v2 wrapped it in a
+    // fixed-height overflow-hidden box, so the scroller had nothing to
+    // scroll and the side panes were frozen at the top of the file.
+    const tallContent = Array.from({ length: 300 }, (_, i) => `line ${i + 1}`).join('\n');
+    mockGitRaw.mockImplementation(async (_p: string, args: string[]) => {
+      if (args[0] === 'ls-files' && args.includes('-u')) {
+        return '100644 abc123 1\ttall.ts\n100644 def456 2\ttall.ts\n100644 ghi789 3\ttall.ts\n';
+      }
+      const arg = args[args.length - 1];
+      if (arg === ':1:tall.ts') return tallContent;
+      if (arg === ':2:tall.ts') return `${tallContent}\nours tail`;
+      if (arg === ':3:tall.ts') return `${tallContent}\ntheirs tail`;
+      return '';
+    });
+
+    const { ConflictMergeView } = await import('../../src/components/ConflictMergeView');
+    render(React.createElement(ConflictMergeView, { filePath: 'tall.ts', onResolved: vi.fn() }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('merge-result-textarea')).toBeTruthy();
+    }, { timeout: 5000 });
+
+    const column = document.querySelector('[data-testid="merge-result-column"]') as HTMLDivElement;
+    expect(column).toBeTruthy();
+    // 300 lines + 7 conflict-marker lines + ours/theirs tails in the
+    // auto-merged result → the height is (result lines) × 20.
+    const ta = screen.getByTestId('merge-result-textarea') as HTMLTextAreaElement;
+    const expectedHeight = ta.value.split('\n').length * 20;
+    expect(parseInt(column.style.height, 10)).toBeGreaterThanOrEqual(300 * 20);
+    expect(column.style.height).toBe(`${expectedHeight}px`);
+    // The textarea itself has no internal vertical scrolling — the shared
+    // 3-pane container owns it.
+    expect(ta.style.overflowY).toBe('hidden');
+  }, 10000);
+
+  it('Ctrl+Z stays NATIVE while typing in the middle pane (app undo only outside)', async () => {
+    mockGitRaw.mockImplementation(async (_p: string, args: string[]) => {
+      if (args[0] === 'ls-files' && args.includes('-u')) {
+        return '100644 abc123 1\tfile.ts\n100644 def456 2\tfile.ts\n100644 ghi789 3\tfile.ts\n';
+      }
+      const arg = args[args.length - 1];
+      if (arg === ':1:file.ts') return 'base line';
+      if (arg === ':2:file.ts') return 'ours line';
+      if (arg === ':3:file.ts') return 'theirs line';
+      return '';
+    });
+    const { ConflictMergeView } = await import('../../src/components/ConflictMergeView');
+    render(React.createElement(ConflictMergeView, { filePath: 'file.ts', onResolved: vi.fn() }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('merge-result-textarea')).toBeTruthy();
+    }, { timeout: 5000 });
+
+    const ta = screen.getByTestId('merge-result-textarea') as HTMLTextAreaElement;
+    ta.focus();
+
+    // Ctrl+Z with the caret INSIDE the textarea → NOT intercepted (the
+    // browser's native typing-undo runs; the app-level resolution-undo
+    // must not hijack it).
+    const evIn = new KeyboardEvent('keydown', {
+      key: 'z', ctrlKey: true, bubbles: true, cancelable: true,
+    });
+    ta.dispatchEvent(evIn);
+    expect(evIn.defaultPrevented).toBe(false);
+
+    // Ctrl+Z with the caret OUTSIDE → intercepted by the app handler.
+    ta.blur();
+    const evOut = new KeyboardEvent('keydown', {
+      key: 'z', ctrlKey: true, bubbles: true, cancelable: true,
+    });
+    window.dispatchEvent(evOut);
+    expect(evOut.defaultPrevented).toBe(true);
   }, 10000);
 });

@@ -1,66 +1,80 @@
 /**
- * MergeResultEditor — the editable middle pane.
+ * MergeResultEditor — the editable middle pane (Result / Working Tree).
  *
- * Architecture: textarea overlay + syntax-highlighted <pre> behind it.
+ * Architecture v3 (overlay editor inside the SHARED scroll container):
  *
- *   ┌────────────────────────────┐
- *   │  <div style="position:relative">
- *   │    <pre class="highlight-layer" />  ← absolute, pointer-events:none,
- *   │                                       syntax-highlighted HTML
- *   │                                       + conflict region bg tints
- *   │                                       + word-level diff highlights
- *   │    <textarea class="input-layer" />  ← relative, color:transparent,
- *   │                                       caret-color:black, uncontrolled
- *   │  </div>
- *   └────────────────────────────┘
+ *   ┌──────────────────────────────────────────┐
+ *   │  column (position:relative, height:      │  ← one row per RESULT line
+ *   │            totalHeight = lines × 20px)   │     inside the 3-pane
+ *   │    <pre class="highlight-layer" />       │     scroller shared with
+ *   │      absolute inset-0, pointer-events:   │     Ours/Theirs panes.
+ *   │      none, windowed rows at top:i×20,    │
+ *   │      syntax-highlight + conflict tints   │
+ *   │    <textarea class="input-layer" />      │
+ *   │      absolute, FULL content height,      │
+ *   │      overflow-y:hidden (the ancestor     │
+ *   │      scroller scrolls), overflow-x:auto, │
+ *   │      color:transparent, uncontrolled     │
+ *   └──────────────────────────────────────────┘
  *
- * Why this pattern?
+ * Why the overlay (textarea + pre) pattern?
  *
- * The previous implementation used `contentEditable` + `dangerouslySetInnerHTML`.
- * React owns innerHTML — on every state update React reconciles this attribute
- * → the browser re-parses the HTML → DOM is fully recreated → the user's
- * cursor position is lost, undo history is wiped, and any in-progress typing
- * is discarded. This was the root cause of the "can't edit middle pane" bug.
+ *   The previous implementation used `contentEditable` +
+ *   `dangerouslySetInnerHTML`. React owns innerHTML — on every state update
+ *   React reconciles this attribute → the browser re-parses the HTML → DOM
+ *   is fully recreated → the user's cursor position is lost, undo history is
+ *   wiped, and any in-progress typing is discarded. This was the root cause
+ *   of the original "can't edit middle pane" bug.
  *
- * The textarea+pre pattern avoids this entirely:
- *   - textarea is UNCONTROLLED (we set defaultValue on mount, never value).
- *     React does NOT manage its text content, so re-renders leave the user's
- *     input alone. Cursor stays where the user put it. Undo works.
- *   - pre is a SEPARATE element that just displays the highlighted version.
- *     It's `pointer-events: none` so the textarea receives all input.
- *     React can update the pre as much as it wants — it doesn't affect
- *     the textarea's cursor.
- *   - scroll is synced: textarea.onScroll → pre.scrollTop = textarea.scrollTop.
+ *   The textarea+pre pattern avoids this entirely:
+ *   - textarea is UNCONTROLLED (defaultValue on mount; React never sets
+ *     value). Cursor stays where the user puts it. Native undo works.
+ *   - pre is a SEPARATE display layer, pointer-events:none.
  *
- * Font metrics MUST be identical between textarea and pre:
- *   font-family: ui-monospace, font-size: 12px, line-height: 20px,
- *   padding-left: 48px (line-number gutter), padding-right: 8px.
+ * v3 fixes (user report: «средняя панель недоступна для редактирования»):
+ *   1. LIVE re-highlight — the pre used to rebuild only when the
+ *      `initialContent` prop changed (resolve/reset actions), NEVER while
+ *      typing: the user typed into the transparent textarea, the value
+ *      changed, but the VISIBLE layer stayed frozen → editing looked
+ *      impossible. The highlight now follows the live content (90ms
+ *      debounce; per-line tokenization is cached, so only edited lines
+ *      re-tokenize).
+ *   2. Shared scrolling — the column is now a TALL element inside the 3-pane
+ *      scroller (height = lines×20). The textarea has NO internal vertical
+ *      scroll; wheel/caret movement scrolls the shared container, so
+ *      Ours/Theirs/Result stay aligned (previously only the middle pane
+ *      scrolled internally — the side panes were frozen at the top because
+ *      the shared container had no overflowing content).
+ *   3. Pixel alignment — the gutter spans total exactly 48px and the
+ *      textarea's padding-left is 48px (was 57 vs 48 — a 9px caret/text
+ *      offset); BOTH layers render nowrap (`white-space:pre`) so a wrapped
+ *      pre vs unwrapped textarea can never desync line positions.
  *
- * The textarea's text is transparent (so only the caret is visible).
- * The pre shows the syntax-highlighted version of the same text in full color.
- *
- * Highlighting in the <pre> layer (added v2):
- *   The pre now classifies each line by its position relative to conflict
- *   markers (ours-block / theirs-block / marker / context) and applies the
- *   matching background tint. Inside conflict regions, word-level diffs
- *   against the OPPOSITE side highlight which specific words differ — same
- *   visual language as the side panes (MergeRow.tsx).
- *
- *   For ours lines, diffAgainst = the corresponding theirs line (matched by
- *   index within the conflict block). For theirs lines, the mirror.
- *   Words unique to the current side get .word-diff-added (bold green).
+ * Horizontal scrolling (long lines): textarea overflow-x:auto drives a
+ * translateX on the pre's inner wrapper (synced in onScroll).
  */
 
-import { useEffect, useRef, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import { tokenizeLineCached, tokensToHtml, type SupportedLang } from '../../lib/syntaxHighlight';
-import { useI18n } from '../../lib/i18n';
 
 const ROW_HEIGHT = 20;
-const GUTTER_WIDTH = 48; // px — matches w-10 + pr-2 + border = ~48px
+/** Total advance of the line-number gutter in the <pre> rows — MUST equal
+ *  the textarea's padding-left so the caret sits exactly on its glyph. */
+const GUTTER_WIDTH = 48;
+/** Debounce for re-highlighting while typing (ms). Per-line tokenization is
+ *  cached; the debounce bounds full-document HTML rebuilds to ~11/s. */
+const HIGHLIGHT_DEBOUNCE_MS = 90;
 
 interface MergeResultEditorProps {
-  initialContent: string;
+  /** LIVE content of the Result pane (follows typing immediately — the
+   *  parent's currentResult). The highlight layer follows it debounced. */
+  content: string;
   lang: SupportedLang;
+  /** Total column height in px (result lines × 20). The textarea fills it. */
+  totalHeight: number;
+  /** [start, end) range of RESULT lines to render in the highlight layer
+   *  (windowing — derived from the shared scroller's scrollTop). */
+  visibleRange: { start: number; end: number };
   onChange?: (text: string) => void;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
@@ -72,11 +86,6 @@ interface ClassifiedLine {
   kind: ResultLineKind;
   /** Background CSS class — empty string for context lines. */
   bgClass: string;
-  /** Index into the ours-block (0-based) when kind === 'ours', else -1.
-   *  Used to pick the corresponding theirs line for word-diff. */
-  oursBlockIdx: number;
-  /** Index into the theirs-block (0-based) when kind === 'theirs', else -1. */
-  theirsBlockIdx: number;
 }
 
 // DIRECT COLOUR VALUES — inline styles, no CSS classes
@@ -90,31 +99,27 @@ const KIND_BG: Record<ResultLineKind, string> = {
 };
 
 /** Classify each line of the Result content by its position relative to
- *  conflict markers. Walks the lines once, tracking state. */
+ * conflict markers. Walks the lines once, tracking state. */
 function classifyResultLines(lines: string[]): ClassifiedLine[] {
   const out: ClassifiedLine[] = new Array(lines.length);
   let state: 'outside' | 'ours' | 'theirs' = 'outside';
-  let oursIdx = 0;
-  let theirsIdx = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
     if (line.startsWith('<<<<<<<')) {
-      out[i] = { kind: 'marker-start', bgClass: KIND_BG['marker-start'], oursBlockIdx: -1, theirsBlockIdx: -1 };
+      out[i] = { kind: 'marker-start', bgClass: KIND_BG['marker-start'] };
       state = 'ours';
-      oursIdx = 0;
-      theirsIdx = 0;
     } else if (line.startsWith('=======') && state === 'ours') {
-      out[i] = { kind: 'marker-sep', bgClass: KIND_BG['marker-sep'], oursBlockIdx: -1, theirsBlockIdx: -1 };
+      out[i] = { kind: 'marker-sep', bgClass: KIND_BG['marker-sep'] };
       state = 'theirs';
     } else if (line.startsWith('>>>>>>>') && state === 'theirs') {
-      out[i] = { kind: 'marker-end', bgClass: KIND_BG['marker-end'], oursBlockIdx: -1, theirsBlockIdx: -1 };
+      out[i] = { kind: 'marker-end', bgClass: KIND_BG['marker-end'] };
       state = 'outside';
     } else if (state === 'ours') {
-      out[i] = { kind: 'ours', bgClass: KIND_BG['ours'], oursBlockIdx: oursIdx++, theirsBlockIdx: -1 };
+      out[i] = { kind: 'ours', bgClass: KIND_BG['ours'] };
     } else if (state === 'theirs') {
-      out[i] = { kind: 'theirs', bgClass: KIND_BG['theirs'], oursBlockIdx: -1, theirsBlockIdx: theirsIdx++ };
+      out[i] = { kind: 'theirs', bgClass: KIND_BG['theirs'] };
     } else {
-      out[i] = { kind: 'context', bgClass: KIND_BG['context'], oursBlockIdx: -1, theirsBlockIdx: -1 };
+      out[i] = { kind: 'context', bgClass: KIND_BG['context'] };
     }
   }
   return out;
@@ -129,51 +134,64 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+const FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+
 export function MergeResultEditor({
-  initialContent,
+  content,
   lang,
+  totalHeight,
+  visibleRange,
   onChange,
   textareaRef,
 }: MergeResultEditorProps) {
-  const { t } = useI18n();
-  const preRef = useRef<HTMLPreElement>(null);
+  const preInnerRef = useRef<HTMLDivElement>(null);
   const innerTextareaRef = useRef<HTMLTextAreaElement>(null);
   // Use the provided textareaRef if any, else the internal one.
-  // Cast through unknown because React 18's RefObject<T> vs MutableRefObject<T>
+  // Cast through unknown because React's RefObject<T> vs MutableRefObject<T>
   // typing makes the union awkward — at runtime both forms work the same.
   const effectiveRef = (textareaRef ?? innerTextareaRef) as React.RefObject<HTMLTextAreaElement>;
 
-  // Build the syntax-highlighted HTML — block-level background tint only.
-  const highlightedHtml = useMemo(() => {
-    const safeContent = initialContent ?? '';
-    const lines = safeContent.split('\n');
+  // ── LIVE highlight content — debounced copy of `content` ────────────────
+  // THE v3 fix: the highlight layer used to be built from the static
+  // initialContent prop; typing changed the hidden value but the visible
+  // layer never re-rendered. Now every content change (typing, resolve,
+  // reset) flows into `content` and the highlight follows (debounced).
+  const [highlightContent, setHighlightContent] = useState(content);
+  useEffect(() => {
+    const t = setTimeout(() => setHighlightContent(content), HIGHLIGHT_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [content]);
+
+  // ── Windowed, highlighted rows ──────────────────────────────────────────
+  const rowsHtml = useMemo(() => {
+    const lines = (highlightContent ?? '').split('\n');
     const classified = classifyResultLines(lines);
+    const start = Math.max(0, visibleRange.start);
+    const end = Math.min(lines.length, visibleRange.end);
     let html = '';
-    for (let i = 0; i < lines.length; i++) {
+    for (let i = start; i < end; i++) {
       const line = lines[i] || '';
       const cls = classified[i];
-      const lineNum = `<span style="display:inline-block;width:40px;flex-shrink:0;text-align:right;padding-right:8px;color:var(--text-tertiary);user-select:none;border-right:1px solid var(--border-subtle);margin-right:8px;">${i + 1}</span>`;
-      // Only block-level background tint + syntax highlighting.
-      // No word-level diff.
+      const lineNum = `<span style="display:inline-block;width:${GUTTER_WIDTH}px;flex-shrink:0;box-sizing:border-box;text-align:right;padding-right:7px;border-right:1px solid var(--border-subtle);color:var(--text-tertiary);user-select:none;">${i + 1}</span>`;
       const contentHtml = (line.startsWith('<<<<<<<') || line.startsWith('=======') || line.startsWith('>>>>>>>'))
         ? escapeHtml(line) || '&nbsp;'
         : tokensToHtml(tokenizeLineCached(line, lang)) || '&nbsp;';
-      html += `<div style="height:${ROW_HEIGHT}px;min-height:${ROW_HEIGHT}px;background-color:${cls.bgClass};font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;font-size:12px;line-height:20px;padding:0 8px 0 0;display:flex;align-items:flex-start;white-space:pre-wrap;word-break:break-word;">${lineNum}<span style="flex:1;white-space:pre-wrap;">${contentHtml}</span></div>`;
+      html += `<div style="position:absolute;top:${i * ROW_HEIGHT}px;left:0;height:${ROW_HEIGHT}px;min-height:${ROW_HEIGHT}px;background-color:${cls.bgClass};font-family:${FONT_STACK};font-size:12px;line-height:20px;display:flex;align-items:flex-start;white-space:pre;padding-right:8px;">${lineNum}<span style="white-space:pre;">${contentHtml}</span></div>`;
     }
     return html;
-  }, [initialContent, lang]);
+  }, [highlightContent, lang, visibleRange.start, visibleRange.end]);
 
-  // Sync scroll: textarea → pre
+  // ── Horizontal scroll sync: textarea.scrollLeft → pre translateX ────────
   const handleScroll = useCallback(() => {
-    if (preRef.current && effectiveRef.current) {
-      preRef.current.scrollTop = effectiveRef.current.scrollTop;
-      preRef.current.scrollLeft = effectiveRef.current.scrollLeft;
+    const ta = effectiveRef.current;
+    const inner = preInnerRef.current;
+    if (ta && inner) {
+      inner.style.transform = `translateX(${-ta.scrollLeft}px)`;
     }
   }, [effectiveRef]);
 
-  // On mount, set the textarea's initial value (uncontrolled).
-  // We do this via defaultValue in JSX — no programmatic manipulation.
-  // Notify parent of changes for dirty-tracking.
+  // Notify parent of changes for dirty-tracking (fires on every input —
+  // the parent keeps its own immediate copy for height/conflict-markers).
   const handleInput = useCallback(() => {
     if (effectiveRef.current) {
       onChange?.(effectiveRef.current.value);
@@ -195,75 +213,71 @@ export function MergeResultEditor({
     }
   }, [effectiveRef, handleInput]);
 
-  useEffect(() => {
-    // Sync pre scroll position to match textarea on mount.
-    handleScroll();
-  }, [handleScroll]);
-
   return (
     <div
-      className="flex-1 flex flex-col min-w-0 overflow-hidden relative"
-      style={{ minHeight: 0 }}
+      className="flex-1 min-w-0 relative overflow-hidden"
+      style={{ height: totalHeight }}
+      data-testid="merge-result-column"
     >
-      {/* Header */}
-      <div className="px-3 py-1.5 bg-bg-tertiary border-b border-border-default text-xs font-medium flex items-center justify-between shrink-0 h-8">
-        <span className="text-text-primary truncate">{t('conflict.resultPaneTitle')}</span>
-      </div>
-      {/* Editor area — relative container with pre + textarea overlay */}
-      <div className="flex-1 relative overflow-hidden" style={{ minHeight: 0 }}>
-        {/* Highlight layer — absolute, pointer-events:none */}
-        <pre
-          ref={preRef}
-          aria-hidden="true"
-          className="absolute inset-0 m-0 overflow-auto pointer-events-none"
-          style={{
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            color: 'var(--text-primary)',
-            background: 'transparent',
-            padding: 0,
-            margin: 0,
-            border: 0,
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-            fontSize: '12px',
-            lineHeight: '20px',
-            zIndex: 0,
-          }}
-          dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-        />
-        {/* Input layer — transparent text, visible caret, on top */}
-        <textarea
-          ref={effectiveRef}
-          defaultValue={initialContent}
-          onInput={handleInput}
-          onKeyDown={handleKeyDown}
-          onScroll={handleScroll}
-          spellCheck={false}
-          wrap="off"
-          className="absolute inset-0 w-full h-full resize-none bg-transparent outline-none font-mono text-xs leading-5"
-          style={{
-            color: 'transparent',
-            caretColor: 'var(--text-primary)',
-            background: 'transparent',
-            border: 0,
-            padding: 0,
-            margin: 0,
-            whiteSpace: 'pre',
-            overflow: 'auto',
-            zIndex: 1,
-            // Match the pre's font metrics EXACTLY:
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-            fontSize: '12px',
-            lineHeight: '20px',
-            paddingLeft: `${GUTTER_WIDTH}px`,
-            paddingRight: '8px',
-            paddingTop: '0',
-            paddingBottom: '0',
-            tabSize: 2,
-          }}
-          data-testid="merge-result-textarea"
-        />
-      </div>
+      {/* Highlight layer — absolute, pointer-events:none, windowed rows.
+          The inner wrapper is translateX-synced with the textarea's
+          horizontal scroll so long lines stay caret-aligned. */}
+      <pre
+        aria-hidden="true"
+        className="absolute inset-0 m-0 overflow-hidden pointer-events-none"
+        style={{
+          color: 'var(--text-primary)',
+          background: 'transparent',
+          padding: 0,
+          margin: 0,
+          border: 0,
+          fontFamily: FONT_STACK,
+          fontSize: '12px',
+          lineHeight: '20px',
+          zIndex: 0,
+        }}
+      >
+        <div ref={preInnerRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
+          <div dangerouslySetInnerHTML={{ __html: rowsHtml }} />
+        </div>
+      </pre>
+      {/* Input layer — transparent text, visible caret, on top.
+          FULL content height (no internal vertical scrolling — the shared
+          3-pane scroller owns vertical scrolling, so the caret follows the
+          same scroll position as Ours/Theirs). */}
+      <textarea
+        ref={effectiveRef}
+        defaultValue={content}
+        onInput={handleInput}
+        onKeyDown={handleKeyDown}
+        onScroll={handleScroll}
+        spellCheck={false}
+        wrap="off"
+        className="absolute top-0 left-0 right-0 resize-none bg-transparent outline-none font-mono text-xs leading-5"
+        style={{
+          color: 'transparent',
+          caretColor: 'var(--text-primary)',
+          background: 'transparent',
+          border: 0,
+          padding: 0,
+          margin: 0,
+          height: totalHeight,
+          whiteSpace: 'pre',
+          overflowY: 'hidden',
+          overflowX: 'auto',
+          zIndex: 1,
+          // Match the pre layer's font metrics EXACTLY:
+          fontFamily: FONT_STACK,
+          fontSize: '12px',
+          lineHeight: '20px',
+          paddingLeft: `${GUTTER_WIDTH}px`,
+          paddingRight: '8px',
+          paddingTop: '0',
+          paddingBottom: '0',
+          tabSize: 2,
+        }}
+        data-testid="merge-result-textarea"
+      />
     </div>
   );
 }

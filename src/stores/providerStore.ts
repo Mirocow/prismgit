@@ -64,6 +64,13 @@ export interface SelectedPR {
   merged_at?: string | null;
 }
 
+/** Stacked-PR chain members (bottom → top = merge order) per PR number.
+ *  Computed by PullRequestsPage.loadPRs (computePRStacks) and read by the
+ *  PRReview header so the reviewer sees the whole stack + merge order —
+ *  the GitHub/GitLab «Stacked PRs» feature that plain git has no concept
+ *  of. Structurally identical to SelectedPR for click-through navigation. */
+export type PRStackMember = SelectedPR;
+
 interface ProviderState extends ProviderInfo {
   /** GitLab project ID — resolved from owner/repo via the GitLab API.
    *  Cached because the lookup is a round-trip. Reset on repo change. */
@@ -81,6 +88,11 @@ interface ProviderState extends ProviderInfo {
    *
    *  Set by PullRequestsPage's row onClick. Cleared by selecting null. */
   selectedPR: SelectedPR | null;
+
+  /** Stacked chains (bottom→top, merge order) keyed by PR number; set
+   *  whenever a PR list loads, cleared on reset. Read by the PR list rows
+   *  (badge) and the PRReview header (stack strip + navigation). */
+  prStacks: Record<number, PRStackMember[]>;
 
   /** Scan the given repo's remote URL and populate provider/owner/repo/url.
    *  Skips re-detection if the repo path is unchanged and a manual override
@@ -100,6 +112,8 @@ interface ProviderState extends ProviderInfo {
   refreshAuth: () => Promise<void>;
   /** Select a PR for code review (shared with Reviews page). Pass null to clear. */
   selectPR: (pr: SelectedPR | null) => void;
+  /** Replace the stacked-PR chains (after a PR list load). */
+  setPRStacks: (stacks: Record<number, PRStackMember[]>) => void;
   /** Clear everything (e.g. when the user closes the repo). */
   reset: () => void;
 }
@@ -166,6 +180,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   gitlabAuthed: false,
   loading: false,
   selectedPR: null,
+  prStacks: {},
 
   detect: async (repoPath, opts) => {
     const st = get();
@@ -247,6 +262,8 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   selectPR: (pr) => set({ selectedPR: pr }),
 
+  setPRStacks: (stacks) => set({ prStacks: stacks }),
+
   refreshAuth: async () => {
     // GitHub auth
     try {
@@ -276,5 +293,6 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     gitlabAuthed: false,
     loading: false,
     selectedPR: null,
+    prStacks: {},
   }),
 }));

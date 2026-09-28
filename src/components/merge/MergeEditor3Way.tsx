@@ -1,26 +1,38 @@
 /**
  * MergeEditor3Way — main 3-way merge view.
  *
- * Layout (Meld / KDiff3 / VS Code style):
+ * Layout v3 (Meld / KDiff3 style):
  *   ┌──────────────────────────────────────────────────────────────────┐
  *   │  MergeToolbar (top) — file, conflicts counter, actions            │  32px
  *   ├──────────────────┬──────────────────────────┬─────────────────────┤
- *   │  Ours (HEAD)     │  Working Tree (Result)   │  Theirs             │
- *   │  read-only       │  editable (textarea+pre) │  read-only          │
- *   │  (syntax highlight)│  (syntax highlight pre) │  (syntax highlight) │
- *   │  ghost rows pad  │                          │  ghost rows pad     │
- *   │  for alignment   │  ConflictRegionBar[]     │  for alignment      │
- *   │                  │  (floating per-hunk      │                     │
- *   │                  │   action buttons)         │                     │
+ *   │  Ours (HEAD)     │  Working Tree (Result)   │  Theirs             │ headers (fixed)
+ *   ├──────────────────┼──────────────────────────┼─────────────────────┤
+ *   │                  │                          │                     │
+ *   │   ONE shared vertical scroller (rows 20px)                        │
+ *   │   Ours column    │  Result column           │  Theirs column      │
+ *   │   read-only      │  EDITABLE textarea+pre   │  read-only          │
+ *   │   (windowed)     │  (windowed highlight)    │  (windowed)         │
+ *   │                  │  ConflictRegionBar[]     │                     │
  *   ├──────────────────┴──────────────────────────┴─────────────────────┤
  *   │  Status bar (bottom) — hints                                      │  24px
  *   └──────────────────────────────────────────────────────────────────┘
  *
+ * All 3 panes live inside ONE scroll container and are tall columns
+ * (height = rows × 20px). v2 kept the side panes in clipped wrappers whose
+ * content was translated by -scrollTop, while the shared container had NO
+ * overflowing content of its own — so the container could never scroll,
+ * the side panes were frozen at the top of the file, and only the middle
+ * pane scrolled (internally, alone). v3 makes every pane a real column in
+ * the scroller: one scrollbar moves all three panes together, and the
+ * middle textarea (full content height, no internal vertical scroll)
+ * participates — the browser scrolls the shared container to keep the
+ * caret visible, exactly like the read-only panes.
+ *
+ * The Result pane is EDITABLE (typing, native undo, Tab-inserts-spaces);
+ * its highlight layer re-renders live while typing (see MergeResultEditor).
+ *
  * Optionally: a "Base" peek pane appears below the toolbar when toggled
  * (collapsible — saves screen space on small displays).
- *
- * All 3 panes share ONE scroll container (useMergeViewport). Rows are
- * aligned via the AlignedRow[] model — ghost rows pad shorter sides.
  */
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
@@ -32,14 +44,14 @@ import { api } from '../../lib/api';
 import { useI18n } from '../../lib/i18n';
 import { detectLang, type SupportedLang } from '../../lib/syntaxHighlight';
 import { diff3 } from '../../lib/merge/diff3';
-import { alignRows, findConflictRowRange } from '../../lib/merge/alignRows';
+import { alignRows } from '../../lib/merge/alignRows';
 import {
   buildAutoMergeResult,
   resolveHunk,
   findConflictMarkers,
   isResultClean,
 } from '../../lib/merge/resolveConflicts';
-import { useMergeViewport } from '../../lib/merge/useMergeViewport';
+import { useMergeViewport, MERGE_ROW_HEIGHT, MERGE_OVERSCAN } from '../../lib/merge/useMergeViewport';
 import type { ConflictResolution, ConflictRegion } from '../../lib/merge/mergeTypes';
 import { MergeToolbar } from './MergeToolbar';
 import { MergePane } from './MergePane';
@@ -67,11 +79,10 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
   const [baseContent, setBaseContent] = useState('');
   const [oursContent, setOursContent] = useState('');
   const [theirsContent, setTheirsContent] = useState('');
-  // Initial Result content (auto-merged). Stored once; the textarea is
-  // uncontrolled so subsequent edits don't trigger React re-renders.
-  const [initialResult, setInitialResult] = useState('');
-  // Current Result content (updated by textarea onInput — used to track
-  // conflicts and dirty state, NOT fed back to the textarea as `value`).
+  // Result content: `currentResult` is the LIVE text (updated on every
+  // keystroke — drives the column height, conflict-marker positions and
+  // the highlight layer). The textarea is uncontrolled; its mount value is
+  // the initial `currentResult`.
   const [currentResult, setCurrentResult] = useState('');
   // Conflict state: array of ConflictRegion (resolved / pending).
   const [conflicts, setConflicts] = useState<ConflictRegion[]>([]);
@@ -131,7 +142,6 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
         const regions = diff3(headLines, headLines, wtLines);
         const autoResult = buildAutoMergeResult(headLines, headLines, wtLines, regions);
         const resultText = autoResult.join('\n');
-        setInitialResult(resultText);
         setCurrentResult(resultText);
         resultRef.current = resultText;
         setConflicts([]);
@@ -160,7 +170,6 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
       const regions = diff3(baseLines, oursLines, theirsLines);
       const autoResult = buildAutoMergeResult(baseLines, oursLines, theirsLines, regions);
       const resultText = autoResult.join('\n');
-      setInitialResult(resultText);
       setCurrentResult(resultText);
       resultRef.current = resultText;
       // Build conflict metadata.
@@ -216,9 +225,31 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
     return alignRows(baseLines, oursLines, theirsLines, regions);
   }, [baseContent, oursContent, theirsContent]);
 
+  // Stable line arrays for the memoized side panes (split identity must not
+  // change on every render — else memo(MergePane) re-renders all rows on
+  // every keystroke in the Result pane).
+  const baseLines = useMemo(() => baseContent.split('\n'), [baseContent]);
+  const oursLines = useMemo(() => oursContent.split('\n'), [oursContent]);
+  const theirsLines = useMemo(() => theirsContent.split('\n'), [theirsContent]);
+  // Result line count (live) — drives the Result column's height.
+  const resultLines = useMemo(() => currentResult.split('\n'), [currentResult]);
+
   // ============ Viewport (single scroll container) ============
 
-  const viewport = useMergeViewport({ totalRows: alignedRows.length });
+  const viewport = useMergeViewport({ totalRows: alignedRows.length, enabled: !loading });
+  // The middle pane's line space is the RESULT's (markers add rows vs the
+  // aligned side model) — compute its own visible window from the same
+  // scrollTop/viewportHeight the side panes use.
+  const midVisibleRange = useMemo(() => {
+    const start = Math.max(0, Math.floor(viewport.scrollTop / MERGE_ROW_HEIGHT) - MERGE_OVERSCAN);
+    const end = Math.min(
+      resultLines.length,
+      Math.ceil((viewport.scrollTop + viewport.viewportHeight) / MERGE_ROW_HEIGHT) + MERGE_OVERSCAN,
+    );
+    return { start, end: Math.max(start + 1, end) };
+  }, [viewport.scrollTop, viewport.viewportHeight, resultLines.length]);
+
+  const midTotalHeight = resultLines.length * MERGE_ROW_HEIGHT;
 
   // ============ Conflict marker positions in Result (for floating bars) ============
 
@@ -226,6 +257,20 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
     () => findConflictMarkers(currentResult.split('\n')),
     [currentResult],
   );
+
+  // Auto-scroll the shared scroller to the current conflict when it moves
+  // (toolbar prev/next, F7, auto-advance after a resolution). v2 never
+  // scrolled at all — navigating conflicts past the first screenful was
+  // impossible.
+  useEffect(() => {
+    if (conflictMarkersInResult.length === 0) return;
+    const idx = Math.min(currentConflictIdx, conflictMarkersInResult.length - 1);
+    const line = conflictMarkersInResult[idx];
+    const el = viewport.scrollRef.current;
+    if (line == null || !el) return;
+    el.scrollTop = Math.max(0, line * MERGE_ROW_HEIGHT - el.clientHeight / 2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentConflictIdx, filePath]);
 
   // ============ Resolution actions ============
 
@@ -271,7 +316,6 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
     }
     resultRef.current = newText;
     setCurrentResult(newText);
-    setInitialResult(newText); // re-render the <pre> highlight layer
     setDirty(true);
     // Mark conflict as resolved.
     setConflicts((prev) => prev.map((c, i) =>
@@ -300,7 +344,6 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
     }
     resultRef.current = newText;
     setCurrentResult(newText);
-    setInitialResult(newText);
     setDirty(true);
     setConflicts((prev) => prev.map((c, i) =>
       i === conflictIdx ? { ...c, resolved: false, resolution: undefined } : c
@@ -340,7 +383,6 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
     }
     resultRef.current = newText;
     setCurrentResult(newText);
-    setInitialResult(newText);
     setDirty(true);
     setConflicts((prev) => prev.map((c) => ({ ...c, resolved: false, resolution: undefined })));
     undoStackRef.current = [];
@@ -392,6 +434,15 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
         return;
       }
       if (!mod) return;
+      // While the user is TYPING in the Result editor, Ctrl+Z must stay
+      // NATIVE (undo the last keystroke — the expectation in any editor).
+      // The app-level resolution-undo hijacked it globally (capture phase),
+      // which made typing mistakes unrecoverable and reinforced the
+      // "middle pane is not editable" feel. Resolution-undo still works
+      // whenever the caret is NOT inside the textarea.
+      if ((e.key === 'z' || e.key === 'Z') && document.activeElement === textareaRef.current) {
+        return;
+      }
       if (e.key === 'z' || e.key === 'Z') {
         e.preventDefault();
         handleUndo();
@@ -491,27 +542,53 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
         </div>
       )}
 
-      {/* 3-pane layout — single scroll container */}
-      <div ref={viewport.scrollRef} className="flex-1 overflow-auto flex">
-        {/* Left: Ours */}
-        <div className="flex-1 min-w-0 flex flex-col">
-          <MergePane
-            title={t('conflict.oursPaneTitle')}
-            side="ours"
-            alignedRows={alignedRows}
-            visibleRange={viewport.visibleRange}
-            totalHeight={viewport.totalHeight}
-            scrollTop={viewport.scrollTop}
-            lang={langRef.current}
-            lines={oursContent.split('\n')}
-          />
+      {/* Fixed pane headers — OUTSIDE the scroller so they don't scroll away.
+          Widths mirror the 3 columns below (flex-1 + matching borders). */}
+      <div className="flex shrink-0 h-8 border-b border-border-default bg-bg-tertiary text-xs font-medium">
+        <div className="flex-1 min-w-0 flex items-center px-3 border-r border-border-default">
+          <span className="truncate text-status-added">{t('conflict.oursPaneTitle')}</span>
+          <span className="ml-2 text-2xs text-text-tertiary font-normal shrink-0">
+            ({oursLines.length} {t('common.lines')})
+          </span>
         </div>
+        <div className="flex-1 min-w-0 flex items-center px-3 border-x border-border-default">
+          <span className="truncate">{t('conflict.resultPaneTitle')}</span>
+          <span className="ml-2 text-2xs text-text-tertiary font-normal shrink-0">
+            ({resultLines.length} {t('common.lines')})
+          </span>
+        </div>
+        <div className="flex-1 min-w-0 flex items-center px-3 border-l border-border-default">
+          <span className="truncate text-status-info" style={{ color: 'var(--status-info)' }}>
+            {t('conflict.theirsPaneTitle')}
+          </span>
+          <span className="ml-2 text-2xs text-text-tertiary font-normal shrink-0">
+            ({theirsLines.length} {t('common.lines')})
+          </span>
+        </div>
+      </div>
 
-        {/* Middle: Result (editable) */}
-        <div className="flex-1 min-w-0 flex flex-col relative">
+      {/* The ONE shared vertical scroller — all 3 panes are tall columns
+          inside it; scrolling moves them together. The middle textarea is
+          full-height with no internal vertical scroll, so caret movement
+          (typing at the screen edge) scrolls THIS container. */}
+      <div ref={viewport.scrollRef} className="flex-1 overflow-auto flex" data-testid="merge-scroll-container">
+        {/* Left: Ours (read-only, windowed) */}
+        <MergePane
+          side="ours"
+          alignedRows={alignedRows}
+          visibleRange={viewport.visibleRange}
+          totalHeight={viewport.totalHeight}
+          lang={langRef.current}
+          lines={oursLines}
+        />
+
+        {/* Middle: Result (editable) + floating per-conflict action bars */}
+        <div className="flex-1 min-w-0 relative">
           <MergeResultEditor
-            initialContent={initialResult}
+            content={currentResult}
             lang={langRef.current}
+            totalHeight={midTotalHeight}
+            visibleRange={midVisibleRange}
             onChange={(text) => {
               resultRef.current = text;
               setCurrentResult(text);
@@ -519,7 +596,6 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
             }}
             textareaRef={textareaRef}
           />
-          {/* Floating per-conflict action bars */}
           {conflictMarkersInResult.map((startLine, i) => (
             <ConflictRegionBar
               key={i}
@@ -532,19 +608,15 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
           ))}
         </div>
 
-        {/* Right: Theirs */}
-        <div className="flex-1 min-w-0 flex flex-col">
-          <MergePane
-            title={t('conflict.theirsPaneTitle')}
-            side="theirs"
-            alignedRows={alignedRows}
-            visibleRange={viewport.visibleRange}
-            totalHeight={viewport.totalHeight}
-            scrollTop={viewport.scrollTop}
-            lang={langRef.current}
-            lines={theirsContent.split('\n')}
-          />
-        </div>
+        {/* Right: Theirs (read-only, windowed) */}
+        <MergePane
+          side="theirs"
+          alignedRows={alignedRows}
+          visibleRange={viewport.visibleRange}
+          totalHeight={viewport.totalHeight}
+          lang={langRef.current}
+          lines={theirsLines}
+        />
       </div>
 
       {/* Bottom status bar */}

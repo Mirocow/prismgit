@@ -29,7 +29,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   GitPullRequest, GitCommit, GitBranch, X, ExternalLink, Loader, Check, FileText,
-  MessageSquare, Plus, Minus, ArrowRight, RefreshCw, AlertCircle, Sparkles,
+  MessageSquare, Plus, Minus, ArrowRight, RefreshCw, AlertCircle, Sparkles, Layers,
 } from './icons';
 import { useI18n } from '../lib/i18n';
 import { useToastActions } from '../stores/toastStore';
@@ -43,6 +43,7 @@ import MarkdownRenderer from './MarkdownRenderer';
 import { cn, formatDate, shortHash } from '../lib/utils';
 import { confirmDialog } from './ConfirmDialog';
 import type { SelectedPR } from '../stores/providerStore';
+import { useProviderStore } from '../stores/providerStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { resolveDefaultRemote } from '../lib/remotes';
@@ -71,6 +72,13 @@ export function PRReview({
   pr, owner, repo, provider, gitlabProjectId, onActionComplete, onClose,
   onGitlabProjectIdResolved,
 }: PRReviewProps) {
+  // Stacked-PR chain for the selected PR (set by PullRequestsPage.loadPRs).
+  // members are bottom→top = merge ORDER — the reviewer sees the whole
+  // stack and can jump between its members without leaving the review.
+  const prStacks = useProviderStore((st) => st.prStacks);
+  const selectPRAction = useProviderStore((st) => st.selectPR);
+  const stack = prStacks[pr.number];
+  const stackPosition = stack ? stack.findIndex((m) => m.number === pr.number) : -1;
   const { t } = useI18n();
   const toast = useToastActions();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -758,6 +766,47 @@ export function PRReview({
               </>
             )}
           </div>
+          {/* Stacked PR/MR chain — GitHub/GitLab «Stacked PRs» visibility:
+              bottom→top (merge order), current member highlighted, click a
+              chip to review that member. Acceptance hint: merge bottom-up. */}
+          {stack && stack.length >= 2 && stackPosition >= 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap mt-1" data-testid="pr-stack-strip">
+              <Layers size={11} className="text-accent shrink-0" />
+              <span className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold">
+                {t('pages.prStackTitle')}
+              </span>
+              {stack.map((m, i) => (
+                <button
+                  key={m.number}
+                  data-testid={`pr-stack-chip-${m.number}`}
+                  className={cn(
+                    'text-2xs px-1.5 py-0.5 rounded font-medium font-mono flex items-center gap-1 border',
+                    m.number === pr.number
+                      ? 'bg-accent/15 text-accent border-accent/40'
+                      : 'bg-bg-tertiary text-text-secondary border-transparent hover:text-text-primary hover:border-border-default',
+                    m.state !== 'open' && m.number !== pr.number && 'opacity-60',
+                  )}
+                  title={m.title}
+                  onClick={() => {
+                    if (m.number === pr.number) return;
+                    // Same shape — navigate the review to this stack member.
+                    selectPRAction(m);
+                  }}
+                >
+                  {i > 0 && <span className="text-text-tertiary">←</span>}
+                  {provider === 'gitlab' ? '!' : '#'}{m.number}
+                  {m.state !== 'open' && (
+                    <span className="text-text-tertiary lowercase">{m.state === 'merged' ? '✓' : '×'}</span>
+                  )}
+                </button>
+              ))}
+              <span className="text-2xs text-text-tertiary ml-1" title={t('pages.prStackHintTitle')}>
+                {t('pages.prStackHint', {
+                  n: `${provider === 'gitlab' ? '!' : '#'}${stack[0].number}`,
+                })}
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {/* Group squash-to-branch — carry ALL commits of this PR to another

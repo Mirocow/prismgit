@@ -669,6 +669,7 @@ export function DiffPage() {
           )}
           {showMergeView ? (
             <ConflictMergeView
+              key={activeFile}
               filePath={activeFile}
               onResolved={async (resolvedFile) => {
                 await refreshStatus(repo.path);

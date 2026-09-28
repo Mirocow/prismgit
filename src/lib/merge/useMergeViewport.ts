@@ -26,6 +26,13 @@ interface MergeViewportOptions {
   /** Estimate used only for the initial render before measurement. */
   rowHeight?: number;
   overscan?: number;
+  /** Attach the scroll/resize listeners only when the scroll container is
+   *  actually rendered. MergeEditor3Way early-returns a loading placeholder
+   *  BEFORE the scroller exists — effects that ran during loading saw
+   *  scrollRef.current === null and attached NOTHING, and (deps being
+   *  stable) never retried: the panes stayed frozen at row 0 for the whole
+   *  session even though the element itself scrolled fine. */
+  enabled?: boolean;
 }
 
 interface MergeViewport {
@@ -47,6 +54,7 @@ export function useMergeViewport({
   totalRows,
   rowHeight = MERGE_ROW_HEIGHT,
   overscan = MERGE_OVERSCAN,
+  enabled = true,
 }: MergeViewportOptions): MergeViewport {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -54,6 +62,7 @@ export function useMergeViewport({
 
   // Track the scroll container's height via ResizeObserver.
   useEffect(() => {
+    if (!enabled) return;
     const el = scrollRef.current;
     if (!el) return;
     setViewportHeight(el.clientHeight);
@@ -64,25 +73,27 @@ export function useMergeViewport({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [enabled]);
 
-  // Track scrollTop — throttled via requestAnimationFrame for smoothness.
-  const rafRef = useRef<number | null>(null);
+  // Track scrollTop — set synchronously in the scroll listener.
+  // The v2 rAF-throttling stalled in compositor-quiet environments
+  // (Xvfb/offscreen: no new frame is scheduled → the rAF never fires →
+  // scrollTop state freezes at 0 → the windowed panes never re-render,
+  // even though the element itself scrolled). Chromium already coalesces
+  // scroll events to one per frame, and React 18+ batches the re-render —
+  // the synchronous set is both simpler and stall-proof.
   const handleScroll = useCallback(() => {
-    if (rafRef.current !== null) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null;
-      const el = scrollRef.current;
-      if (el) setScrollTop(el.scrollTop);
-    });
+    const el = scrollRef.current;
+    if (el) setScrollTop(el.scrollTop);
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     const el = scrollRef.current;
     if (!el) return;
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
-  }, [handleScroll]);
+  }, [enabled, handleScroll]);
 
   // Compute the visible range from scrollTop + viewportHeight.
   const visibleRange = useMemo(() => {
