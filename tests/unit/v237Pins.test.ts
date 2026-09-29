@@ -16,6 +16,11 @@ import { resolve } from 'node:path';
 
 const read = (p: string) => readFileSync(resolve(__dirname, '../../', p), 'utf8');
 
+// v2.3.10 — the ff9e761 refactor reformatted Toolbar.tsx (double quotes +
+// multi-line JSX). Strip whitespace and unify quotes so these pins assert
+// INTENT, not formatting.
+const flat = (s: string) => s.replace(/\s+/g, '').replace(/"/g, "'");
+
 // Exact path data of microsoft/vscode-codicons (16×16, fill-based).
 const PATHS: Record<string, string> = {
   'layout-sidebar-left': 'M12.5 1C13.881 1 15 2.119 15 3.5V12.5C15 13.881 13.881 15 12.5 15H3.5C2.119 15 1 13.881 1 12.5V3.5C1 2.119 2.119 1 3.5 1H12.5ZM12.5 14C13.328 14 14 13.328 14 12.5V3.5C14 2.672 13.328 2 12.5 2H7V14H12.5Z',
@@ -45,15 +50,17 @@ describe('v2.3.7 — sidebar collapse toggles look like the VS Code hero', () =>
   });
 
   it('VS Code state semantics: open panel → FILLED strip, collapsed → hollow off-variant', () => {
-    expect(toolbar).toContain('icon={sidebarCollapsed ? LayoutSidebarLeftOff : LayoutSidebarLeft}');
-    expect(toolbar).toContain('icon={detailCollapsed ? LayoutSidebarRightOff : LayoutSidebarRight}');
+    const tb = flat(toolbar);
+    expect(tb).toContain('icon={sidebarCollapsed?LayoutSidebarLeftOff:LayoutSidebarLeft}');
+    expect(tb).toContain('icon={detailCollapsed?LayoutSidebarRightOff:LayoutSidebarRight}');
   });
 
   it('toggles render at the VS Code codicon size (16px), still right of «Customize toolbar»', () => {
     expect(toolbar).toContain('iconSize={16}');
-    const customize = toolbar.indexOf('shell.customizeToolbar');
-    const left = toolbar.indexOf('LayoutSidebarLeftOff : LayoutSidebarLeft');
-    const right = toolbar.indexOf('LayoutSidebarRightOff : LayoutSidebarRight');
+    const tb = flat(toolbar);
+    const customize = tb.indexOf('shell.customizeToolbar');
+    const left = tb.indexOf('LayoutSidebarLeftOff:LayoutSidebarLeft');
+    const right = tb.indexOf('LayoutSidebarRightOff:LayoutSidebarRight');
     expect(customize).toBeGreaterThan(-1);
     expect(left).toBeGreaterThan(customize);
     expect(right).toBeGreaterThan(left);
@@ -62,7 +69,8 @@ describe('v2.3.7 — sidebar collapse toggles look like the VS Code hero', () =>
   it('the old arrow-fold panel icons are gone from the header toggles', () => {
     // PanelLeft*/PanelRight* stay available for the in-panel chevrons
     // (Sidebar rail, HistoryPage) — but the header must not use them.
-    expect(toolbar).not.toContain('icon={sidebarCollapsed ? PanelLeft');
-    expect(toolbar).not.toContain('icon={detailCollapsed ? PanelRight');
+    const tb = flat(toolbar);
+    expect(tb).not.toContain('icon={sidebarCollapsed?PanelLeft');
+    expect(tb).not.toContain('icon={detailCollapsed?PanelRight');
   });
 });

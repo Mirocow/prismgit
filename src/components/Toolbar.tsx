@@ -57,6 +57,7 @@ import {
     RefreshCw,
     RotateCcw,
     Search,
+    Settings,
     Sparkles,
     StashPop,
     Trash,
@@ -465,6 +466,14 @@ export function Toolbar({
                             ? t("aiAssistant.toggleTitle")
                             : t("aiAssistant.disabledHint")
                     }
+                />
+                {/* Customize toolbar button — RESTORED in v2.3.10: the
+            ff9e761 refactor dropped the gear entry-point, leaving the
+            {showCustomize && …} panel below unreachable. */}
+                <IconButton
+                    icon={Settings}
+                    onClick={() => setShowCustomize(!showCustomize)}
+                    title={t("shell.customizeToolbar")}
                 />
                 {/* v2.3.4 — layout collapse toggles in the header corner, to the
             RIGHT of the «Customize toolbar» button (user request).

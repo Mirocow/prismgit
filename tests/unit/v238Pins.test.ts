@@ -18,6 +18,10 @@ import { resolve } from 'node:path';
 
 const read = (p: string) => readFileSync(resolve(__dirname, '../../', p), 'utf8');
 
+// v2.3.10 — the ff9e761 refactor reformatted Toolbar.tsx/shell.ts (double
+// quotes + multi-line JSX). Normalize before structural matching.
+const flat = (s: string) => s.replace(/\s+/g, '').replace(/"/g, "'");
+
 // Exact path data of microsoft/vscode-codicons (16×16, fill-based).
 const PATHS: Record<string, string> = {
   'layout-panel': 'M15 12.5C15 13.881 13.881 15 12.5 15H3.5C2.119 15 1 13.881 1 12.5V3.5C1 2.119 2.119 1 3.5 1H12.5C13.881 1 15 2.119 15 3.5V12.5ZM2 10H14V3.5C14 2.672 13.328 2 12.5 2H3.5C2.672 2 2 2.672 2 3.5V10Z',
@@ -38,10 +42,11 @@ describe('v2.3.8 — the bottom-panel (Command Log) layout toggle', () => {
   });
 
   it('the panel toggle renders BETWEEN the sidebar toggles (hero order: left / panel / right)', () => {
-    const customize = toolbar.indexOf('shell.customizeToolbar');
-    const left = toolbar.indexOf('LayoutSidebarLeftOff : LayoutSidebarLeft');
-    const panel = toolbar.indexOf('commandLogOpen ? LayoutPanel : LayoutPanelOff');
-    const right = toolbar.indexOf('LayoutSidebarRightOff : LayoutSidebarRight');
+    const tb = flat(toolbar);
+    const customize = tb.indexOf('shell.customizeToolbar');
+    const left = tb.indexOf('LayoutSidebarLeftOff:LayoutSidebarLeft');
+    const panel = tb.indexOf('commandLogOpen?LayoutPanel:LayoutPanelOff');
+    const right = tb.indexOf('LayoutSidebarRightOff:LayoutSidebarRight');
     expect(customize).toBeGreaterThan(-1);
     expect(left).toBeGreaterThan(customize);
     expect(panel).toBeGreaterThan(left);
@@ -49,7 +54,8 @@ describe('v2.3.8 — the bottom-panel (Command Log) layout toggle', () => {
   });
 
   it('VS Code state semantics: panel open → FILLED bottom strip, hidden → hollow off-variant', () => {
-    expect(toolbar).toContain('icon={commandLogOpen ? LayoutPanel : LayoutPanelOff}');
+    const tb = flat(toolbar);
+    expect(tb).toContain('icon={commandLogOpen?LayoutPanel:LayoutPanelOff}');
     expect(toolbar).toContain('iconSize={16}');
   });
 
@@ -66,7 +72,8 @@ describe('v2.3.8 — the bottom-panel (Command Log) layout toggle', () => {
   it('i18n: the two titles exist in all four locales', () => {
     const i18n = read('src/i18n/locales/domains/shell.ts');
     for (const key of ['shell.showCommandLog', 'shell.hideCommandLog']) {
-      expect((i18n.match(new RegExp(`'${key}':`, 'g')) ?? []).length).toBe(4);
+      // v2.3.10: shell.ts was reformatted to double quotes — match either.
+      expect((i18n.match(new RegExp(`['"]${key}['"]:`, 'g')) ?? []).length).toBe(4);
     }
   });
 });
