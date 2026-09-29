@@ -113,7 +113,7 @@ export function AiFavoritesPanel({ onInsertToInput, onJumpToNote, className }: A
   return (
     <div className={cn('flex flex-col min-h-0', className)}>
       {/* Header */}
-      <div className="px-3 py-2 border-b border-border-default flex items-center gap-2 bg-bg-elevated">
+      <div className="px-3 py-2 border-b border-border-default flex items-center gap-2 bg-zone-popover">
         <Star size={12} className="text-accent shrink-0" />
         <span className="text-xs font-medium text-text-secondary">{t('aiFav.title')}</span>
         <span className="text-3xs text-text-tertiary ml-auto">

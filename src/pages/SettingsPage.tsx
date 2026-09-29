@@ -7,6 +7,7 @@ import { InfoHint } from '../components/InfoHint';
 import { effectiveNavHotkeys, navItemsOrdered, NAV_HOTKEY_SLOTS } from '../components/navItems';
 import { SecuritySettings } from '../components/settings/SecuritySettings';
 import { useFavoriteToolsStore } from '../stores/favoriteToolsStore';
+import { ThemeZoneEditor } from '../components/ThemeZoneEditor';
 import { api, type GitConfigEntry } from '../lib/api';
 import { restoreAllConfirmations } from '../lib/confirmations';
 import { LOCALES, useI18n } from '../lib/i18n';
@@ -2587,6 +2588,12 @@ smartgit.refresh.inspectEol=true
                   })()}
                 </div>
               </div>
+
+              {/* v2.3 — Zone color editor: each UI zone is recolored
+                  INDEPENDENTLY (fixes «настраиваешь одну зону — меняются
+                  другие области»). Writes --zone-* keys into the same
+                  customThemeOverrides storage that the JSON editor uses. */}
+              <ThemeZoneEditor />
             </div>
           </section>
         )}

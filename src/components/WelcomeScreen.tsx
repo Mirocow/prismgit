@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Folder, Plus, Github, BookOpen, Star, ChevronRight, GitBranch, FileText, History, Download, Search, X } from './icons';
+import { Folder, FolderPlus, Plus, Github, BookOpen, Star, ChevronRight, GitBranch, FileText, History, Download, Search, X } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useI18n } from '../lib/i18n';
+import { addFolderFromPickerFlow } from '../lib/folderScan';
 import appLogo from '../assets/app-logo.png';
 
 export function WelcomeScreen({
@@ -102,11 +103,22 @@ export function WelcomeScreen({
             {t('welcome.subtitle')}
           </p>
 
-          {/* Three primary actions: Open, Clone, New */}
-          <div className="flex flex-col sm:flex-row gap-3 max-w-lg mx-auto">
+          {/* Four primary actions: Open, Open Folder (recursive scan), Clone, New */}
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 max-w-lg mx-auto">
             <button className="btn btn-primary justify-center flex-1" onClick={openRepo}>
               <Folder size={16} />
               {t('welcome.openRepo')}
+            </button>
+            {/* v2.3 — recursive folder scan: every repo in the folder and
+                subfolders, grouped by folder name */}
+            <button
+              className="btn btn-secondary justify-center flex-1"
+              onClick={() => void addFolderFromPickerFlow()}
+              title={t('shell.addFolderHint')}
+              data-testid="welcome-add-folder"
+            >
+              <FolderPlus size={16} />
+              {t('shell.addFolder')}
             </button>
             <button
               className="btn btn-secondary justify-center flex-1"

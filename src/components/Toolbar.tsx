@@ -348,7 +348,7 @@ export function Toolbar({
     const Divider = () => <div className="w-px h-5 bg-border-subtle mx-2" />;
 
     return (
-        <header className="flex items-center h-10 bg-bg-tertiary border-b border-border-default shrink-0 select-none titlebar-drag">
+        <header className="flex items-center h-10 bg-zone-titlebar border-b border-border-default shrink-0 select-none titlebar-drag">
             {/* App name + repo management buttons (left) */}
             <div className="flex items-center gap-2 px-3 shrink-0">
                 <div className="flex items-center gap-1.5">
@@ -522,7 +522,7 @@ export function Toolbar({
                     }
                 />
                 {showCustomize && (
-                    <div className="absolute top-full right-2 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-72">
+                    <div className="absolute top-full right-2 mt-1 bg-zone-popover border border-border-default rounded shadow-lg z-50 min-w-72">
                         <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
                             {t("shell.toolbarEditorHint")}
                         </div>
@@ -915,7 +915,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
                         className="fixed inset-0 z-40"
                         onClick={() => setOpen(false)}
                     />
-                    <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded-md shadow-lg z-50 min-w-64">
+                    <div className="absolute top-full left-0 mt-1 bg-zone-popover border border-border-default rounded-md shadow-lg z-50 min-w-64">
                         <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">
                             {t("toolbar.push")}
                         </div>
@@ -1351,7 +1351,7 @@ function PullDropdown({
                         className="fixed inset-0 z-40"
                         onClick={() => setOpen(false)}
                     />
-                    <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded-md shadow-lg z-50 min-w-64">
+                    <div className="absolute top-full left-0 mt-1 bg-zone-popover border border-border-default rounded-md shadow-lg z-50 min-w-64">
                         {/* SmartGit: during an in-progress state Pull is blocked, but the
                 menu stays reachable — Fetch / Fetch All remain available. */}
                         {pullBlocked && (
@@ -1746,7 +1746,7 @@ export function GitToolbar({
     };
 
     return (
-        <div className="flex items-center h-9 bg-bg-secondary border-b border-border-default shrink-0 no-drag px-2 gap-0.5">
+        <div className="flex items-center h-9 bg-zone-gitbar border-b border-border-default shrink-0 no-drag px-2 gap-0.5">
             {/* Conflict resolution button — only shown when conflicts exist */}
             {hasConflicts && (
                 <>

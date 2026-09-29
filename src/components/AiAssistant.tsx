@@ -530,7 +530,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed bottom-4 right-4 bg-bg-elevated border border-border-default rounded-lg shadow-2xl flex flex-col z-50"
+      className="fixed bottom-4 right-4 bg-zone-popover border border-border-default rounded-lg shadow-2xl flex flex-col z-50"
       style={{ width: `${panelWidth}px`, height: `${panelHeight}px` }}
     >
       {/* Header */}
@@ -558,7 +558,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
             {showSessionMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowSessionMenu(false)} />
-                <div className="absolute top-full left-0 mt-1 w-72 bg-bg-elevated border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
+                <div className="absolute top-full left-0 mt-1 w-72 bg-zone-popover border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
                   <button
                     className={cn(
                       'w-full text-left px-3 py-2 text-xs hover:bg-bg-hover transition-colors border-b border-border-subtle',
@@ -636,7 +636,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
             {showProviderMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowProviderMenu(false)} />
-                <div className="absolute top-full right-0 mt-1 w-64 bg-bg-elevated border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
+                <div className="absolute top-full right-0 mt-1 w-64 bg-zone-popover border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
                   <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
                     {t('aiAssistant.switchProvider')}
                   </div>

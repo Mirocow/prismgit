@@ -321,7 +321,7 @@ export default function AiChatPage() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg-primary">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-bg-elevated shrink-0">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-zone-popover shrink-0">
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <Sparkles size={16} className="text-accent shrink-0" />
           <span className="text-sm font-medium shrink-0">{t('aiAssistant.title')}</span>
@@ -345,7 +345,7 @@ export default function AiChatPage() {
             {showSessionMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowSessionMenu(false)} />
-                <div className="absolute top-full left-0 mt-1 w-80 bg-bg-elevated border border-border-default rounded shadow-xl z-20 max-h-96 overflow-y-auto">
+                <div className="absolute top-full left-0 mt-1 w-80 bg-zone-popover border border-border-default rounded shadow-xl z-20 max-h-96 overflow-y-auto">
                   <button
                     className={cn(
                       'w-full text-left px-3 py-2 text-xs hover:bg-bg-hover transition-colors border-b border-border-subtle',
@@ -425,7 +425,7 @@ export default function AiChatPage() {
             {showProviderMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowProviderMenu(false)} />
-                <div className="absolute top-full left-0 mt-1 w-72 bg-bg-elevated border border-border-default rounded shadow-xl z-20 max-h-96 overflow-y-auto">
+                <div className="absolute top-full left-0 mt-1 w-72 bg-zone-popover border border-border-default rounded shadow-xl z-20 max-h-96 overflow-y-auto">
                   <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
                     {t('aiAssistant.switchProvider')}
                   </div>
@@ -607,7 +607,7 @@ export default function AiChatPage() {
             </div>
           )}
           {/* Input */}
-          <div className="border-t border-border-default p-3 flex items-end gap-2 shrink-0 bg-bg-elevated">
+          <div className="border-t border-border-default p-3 flex items-end gap-2 shrink-0 bg-zone-popover">
             <textarea
               className="flex-1 text-sm p-2.5 resize-none bg-bg-primary border border-border-default rounded outline-none focus:border-accent min-h-[44px] max-h-40"
               rows={2}
@@ -650,7 +650,7 @@ export default function AiChatPage() {
 
         {/* Right panel — Search / Favorites tabs (takes the remaining width) */}
         <div className="flex flex-col min-w-0 flex-1 bg-bg-secondary">
-          <div className="px-2 py-1.5 border-b border-border-default flex items-center gap-1 bg-bg-elevated">
+          <div className="px-2 py-1.5 border-b border-border-default flex items-center gap-1 bg-zone-popover">
             <button
               className={cn(
                 'flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors',

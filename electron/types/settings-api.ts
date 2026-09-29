@@ -530,7 +530,16 @@ export interface AppSettings {
   diffWordHighlight?: boolean;
   // NOTE: customThemeOverrides (raw JSON CSS-var overrides textarea) was
   // REPLACED by the visual Custom Theme editor (customThemes). The key is
-  // no longer read; old values are ignored harmlessly in stored JSON.
+  // BACK for the v2.3 Zone Colors editor: it stores ZONE-scoped overrides
+  // (--zone-sidebar-bg, --zone-titlebar-bg, …) written by
+  // Settings → Appearance → Zone Colors (lib/themeOverrideCss.ts applies
+  // them). Old raw-JSON values are ignored harmlessly: only --zone-* keys
+  // (and any legacy keys the zone editor preserved) are injected.
+  /**
+   * Zone color overrides on top of the ACTIVE theme (built-in or custom).
+   * Each key colors exactly one UI region — see globals.css zone map.
+   */
+  customThemeOverrides?: Record<string, string>;
   // === Per-remote authorization (Repository Settings → Remotes) ===
   /**
    * HTTP(S) credentials used for push/pull/fetch per remote.
@@ -599,4 +608,37 @@ export interface SettingsApi {
   setRepoGroupExpanded: (id: string, expanded: boolean) => Promise<void>;
   /** Assign a repository to a group (null = ungrouped / root level). */
   setRepoGroup: (repoPath: string, groupId: string | null) => Promise<void>;
+
+  // Folder repository scan (v2.3) — recursive scan of a folder and its
+  // subfolders; groups mirror the folder structure.
+  /**
+   * Dry-run scan: every Git repository found in `root` and its subfolders,
+   * each with its container-folder chain (groupPath).
+   */
+  scanFolderRepos: (root: string, opts?: { maxDepth?: number }) => Promise<ScannedRepository[]>;
+  /**
+   * Scan + add: creates the group tree mirroring the folders, adds new
+   * repos, moves known repos into their groups. Idempotent.
+   */
+  addFolderRepositories: (
+    root: string,
+    opts?: { maxDepth?: number },
+  ) => Promise<AddFolderRepositoriesResult>;
+}
+
+/** One repository found by a folder scan (see scanFolderRepos). */
+export interface ScannedRepository {
+  path: string;
+  name: string;
+  /** Container folder names from the scan root (exclusive) to the repo. */
+  groupPath: string[];
+}
+
+/** Result of addFolderRepositories. */
+export interface AddFolderRepositoriesResult {
+  scanned: ScannedRepository[];
+  added: number;
+  existing: number;
+  groupsCreated: number;
+  rootGroupName: string;
 }

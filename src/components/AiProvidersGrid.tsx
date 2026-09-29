@@ -252,7 +252,7 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border-subtle sticky top-0 bg-bg-elevated z-10">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border-subtle sticky top-0 bg-zone-popover z-10">
           <h3 className="text-base font-medium">
             {initial
               ? (t('settings.aiGridEditTitle') || 'Edit provider')
@@ -379,7 +379,7 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
 
             {/* Fetched models dropdown with search */}
             {modelsOpen && (
-              <div className="mt-2 border border-border-default rounded bg-bg-elevated max-h-72 overflow-hidden flex flex-col">
+              <div className="mt-2 border border-border-default rounded bg-zone-popover max-h-72 overflow-hidden flex flex-col">
                 {fetching && (
                   <div className="px-3 py-2 text-2xs text-text-tertiary flex items-center gap-2">
                     <Loader size={11} className="animate-spin" />
@@ -477,7 +477,7 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex flex-wrap justify-end gap-2 px-5 py-3 border-t border-border-subtle sticky bottom-0 bg-bg-elevated">
+        <div className="flex flex-wrap justify-end gap-2 px-5 py-3 border-t border-border-subtle sticky bottom-0 bg-zone-popover">
           <button className="btn btn-secondary text-xs" onClick={onClose}>
             {t('common.cancel') || 'Cancel'}
           </button>

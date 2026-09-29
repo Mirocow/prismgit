@@ -2808,7 +2808,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                   {t('nav.history')}
                 </button>
                 {showMsgHistory && commitMsgHistory.length > 0 && (
-                  <div className="absolute bottom-full left-0 mb-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-64 max-h-48 overflow-y-auto">
+                  <div className="absolute bottom-full left-0 mb-1 bg-zone-popover border border-border-default rounded shadow-lg z-50 min-w-64 max-h-48 overflow-y-auto">
                     {commitMsgHistory.map((msg, i) => (
                       <button
                         key={i}

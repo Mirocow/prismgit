@@ -518,6 +518,13 @@ const api = {
       ipcRenderer.invoke('settings:setRepoGroupExpanded', id, expanded),
     setRepoGroup: (path: string, groupId: string | null) =>
       ipcRenderer.invoke('settings:setRepoGroup', path, groupId),
+
+    // Folder repository scan (v2.3) — recursive scan of a folder and its
+    // subfolders; groups mirror the folder structure.
+    scanFolderRepos: (root: string, opts?: { maxDepth?: number }) =>
+      ipcRenderer.invoke('settings:scanFolderRepos', root, opts),
+    addFolderRepositories: (root: string, opts?: { maxDepth?: number }) =>
+      ipcRenderer.invoke('settings:addFolderRepositories', root, opts),
   } as SettingsApi,
 
   // SSH key management (Settings → Security → SSH keys)

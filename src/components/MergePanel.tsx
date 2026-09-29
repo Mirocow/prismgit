@@ -254,7 +254,7 @@ export function MergePanel({
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-bg-elevated border-t border-border-strong shadow-lg z-40 animate-slide-up">
+    <div className="fixed bottom-0 left-0 right-0 bg-zone-popover border-t border-border-strong shadow-lg z-40 animate-slide-up">
       <div className="flex items-center justify-between px-4 py-2 border-b border-border-default">
         <div className="flex items-center gap-2">
           <GitMerge size={14} className="text-accent" />

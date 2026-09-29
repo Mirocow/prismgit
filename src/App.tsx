@@ -57,6 +57,7 @@ import {
     loadProjectPrefs,
     saveProjectPrefs,
 } from "./lib/projectPrefs";
+import { buildThemeOverrideCss } from "./lib/themeOverrideCss";
 import { useAuthStore } from "./stores/authStore";
 import { useCommandLogStore } from "./stores/commandLogStore";
 import { surfaceConflictedState, useGitStore } from "./stores/gitStore";
@@ -268,9 +269,37 @@ export default function App() {
     const loadRepos = useRepositoryStore((s) => s.loadRepos);
     const loadMetadata = useRepositoryStore((s) => s.loadMetadata);
     const loadSettings = useSettingsStore((s) => s.loadSettings);
-    // NOTE: the old customThemeOverrides JSON-textarea injection lived here; it
+    // v2.3 ZONE OVERRIDES — the old raw-JSON customThemeOverrides injection
     // was replaced by the visual Custom Theme editor (settings.customThemes,
     // applied by settingsStore.applyThemeToDOM → lib/customThemeCss.ts).
+    // The KEY is back, but now it stores ZONE-scoped overrides written by
+    // the Zone Colors editor (Settings → Appearance): each --zone-* token
+    // colors exactly ONE UI region ("зоны не соответствуют — настраиваешь
+    // одно, а цвета меняются в других окнах/областях" — fixed). The pure
+    // selector strategy lives in lib/themeOverrideCss.ts (unit-tested):
+    //   1. `:root, html[data-theme]` — beats :root/.dark/[data-theme]
+    //      palette blocks (incl. custom-<id> themes) by specificity or
+    //      source order (injected style is the LAST sheet in <head>).
+    //   2. `html .sidebar-root` for --zone-sidebar-bg — ties the
+    //      `[data-theme='light-dim-sidebar'] aside` rule (0,1,1) and wins
+    //      by source order, so the sidebar zone override works even for
+    //      the dim-sidebar theme with its own dark sidebar.
+    const customThemeOverrides = useSettingsStore((s) => s.settings.customThemeOverrides);
+    useEffect(() => {
+        const id = "prismgit-custom-theme-overrides";
+        let style = document.getElementById(id) as HTMLStyleElement | null;
+        const css = buildThemeOverrideCss(customThemeOverrides);
+        if (!css) {
+            style?.remove();
+            return;
+        }
+        if (!style) {
+            style = document.createElement("style");
+            style.id = id;
+            document.head.appendChild(style);
+        }
+        style.textContent = css;
+    }, [customThemeOverrides]);
     const loadAuth = useAuthStore((s) => s.loadAuthState);
     const refreshStatus = useGitStore((s) => s.refreshStatus);
     // RENDER-PERF: do NOT subscribe to `s.status` here. The App component is

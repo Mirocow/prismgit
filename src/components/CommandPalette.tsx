@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useEscapeKey } from "../hooks/useEscapeKey";
+import { addFolderFromPickerFlow } from "../lib/folderScan";
 import { useI18n } from "../lib/i18n";
 import { isThemeDark } from "../lib/themes";
 import { cn } from "../lib/utils";
@@ -353,6 +354,16 @@ export function CommandPalette({
                 keywords: "folder add directory",
                 action: () =>
                     useRepositoryStore.getState().openRepositoryPicker(),
+            },
+            {
+                // v2.3 — recursive folder scan: every repo in the folder and
+                // subfolders, grouped by folder name
+                id: "repo-add-folder",
+                label: t("shell.addFolder"),
+                group: "Repositories",
+                icon: FolderPlus,
+                keywords: "folder directory recursive scan group subfolders",
+                action: () => void addFolderFromPickerFlow(),
             },
             {
                 id: "repo-clone",

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { RemoteCheckSummary } from "../lib/api";
 import { api } from "../lib/api";
+import { addFolderFlow, addFolderFromPickerFlow } from "../lib/folderScan";
 import { useI18n } from "../lib/i18n";
 import {
     loadGlobalCollapsedGroups,
@@ -392,7 +393,18 @@ export function Sidebar() {
                                 .catch(() => {});
                             addedCount++;
                         } else {
-                            skippedCount++;
+                            // v2.3 — a dropped FOLDER that is not itself a
+                            // repository is a CONTAINER: scan it recursively
+                            // and add every repo found in it and its
+                            // subfolders, grouped by folder names (was a dead
+                            // end: "no git repositories found").
+                            const result = await addFolderFlow(filePath);
+                            if (result) {
+                                addedCount += result.added;
+                                skippedCount += result.existing;
+                            } else {
+                                skippedCount++;
+                            }
                         }
                     } catch {
                         skippedCount++;
@@ -1156,7 +1168,7 @@ export function Sidebar() {
           pinned to the bottom. Clicking the expand arrow restores the full
           sidebar at its previous width. */
                 <aside
-                    className="sidebar-root flex flex-col items-center bg-bg-secondary shrink-0 no-drag py-2"
+                    className="sidebar-root flex flex-col items-center bg-zone-sidebar shrink-0 no-drag py-2"
                     style={{ width: 48 }}
                     data-testid="sidebar-rail"
                 >
@@ -1258,7 +1270,7 @@ export function Sidebar() {
                 </aside>
             ) : (
                 <aside
-                    className="sidebar-root flex flex-col bg-bg-secondary shrink-0 no-drag"
+                    className="sidebar-root flex flex-col bg-zone-sidebar shrink-0 no-drag"
                     style={{ width: sidebarWidth }}
                 >
                     {/* Repository switcher */}
@@ -1332,6 +1344,19 @@ export function Sidebar() {
                                     }}
                                 >
                                     <PanelLeftClose size={14} />
+                                </button>
+                                {/* v2.3 — Add folder: recursive scan, groups by folder name. */}
+                                <button
+                                    className="icon-btn no-drag shrink-0 !w-7 !h-7"
+                                    title={t("shell.addFolderHint")}
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        void addFolderFromPickerFlow();
+                                    }}
+                                    data-testid="add-folder-button"
+                                >
+                                    <FolderPlus size={14} />
                                 </button>
                                 {currentRepo && (
                                     <button
@@ -1498,6 +1523,13 @@ export function Sidebar() {
                                                         clickId: "open-repo",
                                                     },
                                                     {
+                                                        // v2.3 — recursive folder scan
+                                                        label: t(
+                                                            "shell.addFolder",
+                                                        ),
+                                                        clickId: "add-folder",
+                                                    },
+                                                    {
                                                         label: t(
                                                             "shell.cloneRepositoryMenu",
                                                         ),
@@ -1515,6 +1547,10 @@ export function Sidebar() {
                                                 useRepositoryStore
                                                     .getState()
                                                     .openRepositoryPicker();
+                                            } else if (
+                                                clickId === "add-folder"
+                                            ) {
+                                                void addFolderFromPickerFlow();
                                             } else if (
                                                 clickId === "clone-repo"
                                             ) {

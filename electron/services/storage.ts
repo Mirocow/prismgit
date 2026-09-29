@@ -600,3 +600,193 @@ export function setRepoGroup(repoPath: string, groupId: string | null): void {
 export function flushSettings(): void {
   store.flush();
 }
+
+// ============= Folder repository scan (v2.3) =============
+//
+// «Репозитории из папок должны добавляться рекурсивно — все, что есть в
+// папке и подпапках, образуя группы по названию папок».
+//
+// A directory is a Git repository when it contains a `.git` entry (a real
+// directory for plain repos, a FILE for worktrees/submodules — both count).
+// The walk starts at the picked root and descends into every subfolder
+// EXCEPT: the found repos' own trees (their contents belong to them) and a
+// short skip-list of dependency/cache dirs that never contain user repos.
+
+export interface ScannedRepository {
+  path: string;
+  name: string;
+  /**
+   * CONTAINER folder chain from the scan ROOT (exclusive) to the repo's
+   * parent folder — e.g. scanning /home/dev with /home/dev/libs/ui/.git
+   * yields groupPath ['libs'] (the repo "ui" is the leaf, not a group).
+   * An empty chain means the repo sits directly in the picked folder.
+   */
+  groupPath: string[];
+}
+
+export interface AddFolderRepositoriesResult {
+  /** Everything the scan found (added + already known). */
+  scanned: ScannedRepository[];
+  /** Repos newly added to the sidebar list. */
+  added: number;
+  /** Repos that were already in the list (moved into their group). */
+  existing: number;
+  /** Groups created by this run (existing matching groups are reused). */
+  groupsCreated: number;
+  /** Name of the top-level group created for the picked folder. */
+  rootGroupName: string;
+}
+
+/** Directories never worth descending into while hunting for repos. */
+const SCAN_SKIP_DIRS = new Set([
+  '.git', 'node_modules', 'venv', '.venv', '__pycache__', '.cache',
+  '.npm', '.cargo', '.rustup', '.m2', '.gradle', '.idea', '.vscode',
+  'dist-electron', 'coverage', '.pytest_cache', '.tox', '.next',
+]);
+
+const DEFAULT_SCAN_MAX_DEPTH = 8;
+
+/** Does `dir` contain a `.git` entry (plain repo, worktree or submodule)? */
+function isGitRepositoryDir(dir: string): boolean {
+  try {
+    // existsSync is true for BOTH files and directories — exactly the
+    // shapes `.git` can take.
+    return fs.existsSync(path.join(dir, '.git'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Walk `rootPath` recursively and collect every Git repository found in
+ * it and its subfolders. Symlinked directories are not followed (cycle
+ * guard); depth is capped at `maxDepth` to stay snappy on huge trees.
+ */
+export function scanFolderForRepositories(
+  rootPath: string,
+  opts: { maxDepth?: number } = {},
+): ScannedRepository[] {
+  const root = path.resolve(rootPath);
+  const maxDepth = Math.max(1, Math.min(16, opts.maxDepth ?? DEFAULT_SCAN_MAX_DEPTH));
+  const found: ScannedRepository[] = [];
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return found;
+
+  // The picked root is ALWAYS opened as a container: even when it is a
+  // repository itself, its subfolders are still scanned (that's what
+  // "все что есть в папке и подпапках" means).
+  if (isGitRepositoryDir(root)) {
+    found.push({ path: root, name: path.basename(root), groupPath: [] });
+  }
+
+  const walk = (dir: string, chain: string[], depth: number): void => {
+    if (depth >= maxDepth) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable (permissions) — skip silently
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (SCAN_SKIP_DIRS.has(entry.name)) continue;
+      const child = path.join(dir, entry.name);
+      // Symlink guard: lstat detects links without following them; a
+      // linked folder would risk infinite loops and double-counting.
+      try {
+        if (fs.lstatSync(child).isSymbolicLink()) continue;
+      } catch {
+        continue;
+      }
+      const isRepo = isGitRepositoryDir(child);
+      if (isRepo) {
+        // groupPath = the CONTAINER folder chain (repo's own name is NOT a
+        // group — the repo itself is the leaf): /dev/libs/ui/.git scanned
+        // from /dev lands in the "libs" group with groupPath ['libs'].
+        found.push({ path: child, name: entry.name, groupPath: [...chain] });
+        // Do NOT descend into the found repository — its subfolders
+        // belong to it (submodules are part of the parent's tree).
+      } else {
+        walk(child, [...chain, entry.name], depth + 1);
+      }
+    }
+  };
+  walk(root, [], 0);
+  // Deterministic order: breadth of the folder tree, alphabetical.
+  found.sort((a, b) => a.path.localeCompare(b.path));
+  return found;
+}
+
+/**
+ * Find an existing group by (name, parent) — makes re-adding the same
+ * folder IDEMPOTENT: a second scan reuses its groups instead of piling
+ * up "work (2)" duplicates.
+ */
+function findOrCreateGroup(name: string, parentId: string | null): { group: RepoGroup; created: boolean } {
+  const groups = getGroups();
+  const existing = groups.find(
+    (g) => g.name === name && (g.parentId ?? null) === parentId,
+  );
+  if (existing) return { group: existing, created: false };
+  const group = createRepoGroup(name, parentId);
+  return { group, created: true };
+}
+
+/**
+ * Scan a folder and add EVERY repository found in it and its subfolders,
+ * building a group tree that mirrors the folder structure. Re-running on
+ * the same folder is safe: groups are reused, known repos only move into
+ * their group.
+ */
+export function addFolderRepositories(
+  rootPath: string,
+  opts: { maxDepth?: number } = {},
+): AddFolderRepositoriesResult {
+  const root = path.resolve(rootPath);
+  const scanned = scanFolderForRepositories(root, opts);
+  const rootGroupName = path.basename(root) || root;
+  let groupsCreated = 0;
+  let added = 0;
+  let existing = 0;
+
+  // Picking a folder that is ITSELF the only repository → no group wrapper
+  // (a group named after the repo containing that same repo is noise):
+  // the repo is added plainly, exactly like the single-repo flow.
+  const onlyRootRepoItself =
+    scanned.length === 1 && scanned[0].path === root && scanned[0].groupPath.length === 0;
+
+  // Root group (or a subgroup when a parent is given by future callers).
+  let rootGroupId: string | null = null;
+  if (!onlyRootRepoItself) {
+    const rootGroup = findOrCreateGroup(rootGroupName, null);
+    if (rootGroup.created) groupsCreated++;
+    rootGroupId = rootGroup.group.id;
+  }
+
+  const repos = (store.get('repositories') || []) as RepositoryEntry[];
+  const known = new Set(repos.map((r) => r.path));
+
+  for (const repo of scanned) {
+    // Build/locate the group chain: root → seg1 → seg2 → …
+    let parentId: string | null = rootGroupId;
+    if (parentId !== null) {
+      for (const segment of repo.groupPath) {
+        const g = findOrCreateGroup(segment, parentId!);
+        if (g.created) groupsCreated++;
+        parentId = g.group.id;
+      }
+    }
+    if (!known.has(repo.path)) {
+      addRepo({ path: repo.path, name: repo.name });
+      known.add(repo.path);
+      added++;
+    } else {
+      existing++;
+    }
+    // setRepoGroup handles both fresh and existing entries; fresh ones
+    // were just added above so the index lookup succeeds. null → the repo
+    // stays at the sidebar root (only-root-repo case).
+    setRepoGroup(repo.path, parentId);
+  }
+
+  return { scanned, added, existing, groupsCreated, rootGroupName };
+}

@@ -268,7 +268,7 @@ export function DragDropHandler() {
         <div className="fixed inset-0 z-200 flex items-center justify-center"
           style={{ backgroundColor: 'var(--overlay-bg)' }}
         >
-          <div className="flex flex-col items-center gap-3 bg-bg-elevated rounded-xl p-8 shadow-lg border border-border-default">
+          <div className="flex flex-col items-center gap-3 bg-zone-popover rounded-xl p-8 shadow-lg border border-border-default">
             <Loader size={32} className="spin text-accent" />
             <div className="text-sm font-medium text-text-primary">
               {t('shell.checkingRepos')}
@@ -282,7 +282,7 @@ export function DragDropHandler() {
 
       {/* Results panel */}
       {results && (
-        <div className="fixed bottom-12 right-4 z-200 w-96 bg-bg-elevated rounded-lg shadow-lg border border-border-default animate-slide-up overflow-hidden">
+        <div className="fixed bottom-12 right-4 z-200 w-96 bg-zone-popover rounded-lg shadow-lg border border-border-default animate-slide-up overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-default bg-bg-tertiary">
             <span className="text-sm font-semibold text-text-primary">
               {results.filter((r) => r.isRepo).length > 0 ? t('shell.reposAddedTitle') : t('shell.noReposFoundTitle')}

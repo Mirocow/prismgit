@@ -81,7 +81,7 @@ export function MergeInProgressPanel({ repoPath, onClose }: MergeInProgressPanel
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-bg-elevated border-t border-status-modified/50 shadow-lg z-40 animate-slide-up">
+    <div className="fixed bottom-0 left-0 right-0 bg-zone-popover border-t border-status-modified/50 shadow-lg z-40 animate-slide-up">
       <div className="flex items-center gap-3 px-4 py-2.5">
         <GitMerge size={16} className="text-status-modified shrink-0" />
         <div className="flex-1 min-w-0">

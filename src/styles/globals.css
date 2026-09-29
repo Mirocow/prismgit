@@ -22,6 +22,22 @@
   --color-bg-active: var(--bg-active);
   --color-bg-selected: var(--bg-selected);
 
+  /* ── zone-* (v2.3 — one zone = one token) ─────────────────────────────
+     Zone-scoped backgrounds: each token colors EXACTLY ONE UI region
+     (sidebar / titlebar / gitbar / main / statusbar / panel / panel
+     header / popover). The legacy --bg-* elevation palette stays as the
+     default source — every theme keeps working — but a zone override now
+     changes only that zone. Reported as: "настраиваешь одно, а цвета
+     меняются в других окнах/областях". */
+  --color-zone-sidebar: var(--zone-sidebar-bg);
+  --color-zone-titlebar: var(--zone-titlebar-bg);
+  --color-zone-gitbar: var(--zone-gitbar-bg);
+  --color-zone-main: var(--zone-main-bg);
+  --color-zone-statusbar: var(--zone-statusbar-bg);
+  --color-zone-panel: var(--zone-panel-bg);
+  --color-zone-panel-header: var(--zone-panel-header-bg);
+  --color-zone-popover: var(--zone-popover-bg);
+
   /* ── border-* ──────────────────────────────────────────────────────────
      `--color-border` covers the bare DEFAULT (`border-border`); the
      lowercase `default` alias is kept because ~260 call sites spell it
@@ -198,6 +214,32 @@
     --scrollbar-thumb-hover: rgba(23, 26, 33, 0.4);
 
     --splitter-color-hover: #399ee6;
+
+    /* ── Zone-scoped tokens (v2.3) ─────────────────────────────────────────
+       ONE ZONE = ONE TOKEN. Defined ONCE here (not per theme): each value
+       is an indirection to the elevation palette, so the final cascade on
+       <html> ([data-theme] overrides) flows through automatically and all
+       28 themes inherit without any per-theme edits. Zone overrides from
+       Settings → Appearance write --zone-* keys that beat these by source
+       order (injected style is last in <head>).
+
+       Legacy mapping preserved:
+         sidebar      ← bg-secondary   (was: sidebar + .panel shared it)
+         titlebar     ← bg-tertiary    (was: toolbar + panel headers + statusbar)
+         gitbar       ← bg-secondary   (2nd toolbar row under the titlebar)
+         main         ← bg-primary     (page canvas under the panels)
+         statusbar    ← bg-tertiary    (bottom footer strip)
+         panel        ← bg-secondary   (cards/panels inside pages)
+         panel-header ← bg-tertiary    (panel title strips)
+         popover      ← bg-elevated    (menus, dropdowns, tooltips) */
+    --zone-sidebar-bg: var(--bg-secondary);
+    --zone-titlebar-bg: var(--bg-tertiary);
+    --zone-gitbar-bg: var(--bg-secondary);
+    --zone-main-bg: var(--bg-primary);
+    --zone-statusbar-bg: var(--bg-tertiary);
+    --zone-panel-bg: var(--bg-secondary);
+    --zone-panel-header-bg: var(--bg-tertiary);
+    --zone-popover-bg: var(--bg-elevated);
   }
 
   /* Ollama-code Dark theme (Ayu Dark) */
@@ -553,7 +595,8 @@
     --status-deleted: #f14c4c;
     --scrollbar-thumb: rgba(138, 138, 138, 0.3);
     --scrollbar-thumb-hover: rgba(138, 138, 138, 0.5);
-    background-color: #1e1e1e;
+    --zone-sidebar-bg: #1e1e1e;
+    background-color: var(--zone-sidebar-bg);
     color: #cccccc;
   }
 
@@ -724,7 +767,10 @@
     height: 100%;
     width: 100%;
     overflow: hidden;
-    background-color: var(--bg-primary);
+    /* v2.3 zones: the app canvas reads the ZONE token, not the raw palette —
+       a --zone-main-bg override now colors the main window without touching
+       panels/toolbar/sidebar. */
+    background-color: var(--zone-main-bg);
     color: var(--text-primary);
     /* Use system UI font stack for non-code text — much more readable than pure monospace */
     font-family:
@@ -973,7 +1019,10 @@
 
   /* === Panels === */
   .panel {
-    background-color: var(--bg-secondary);
+    /* v2.3 zones: panels live inside pages — their background is the PANEL
+       zone token, decoupled from the sidebar (which used to share
+       --bg-secondary and change together with every panel). */
+    background-color: var(--zone-panel-bg);
     border: 1px solid var(--border-default);
     border-radius: 8px;
     box-shadow: var(--shadow-sm);
@@ -985,7 +1034,9 @@
     justify-content: space-between;
     padding: 10px 14px;
     border-bottom: 1px solid var(--border-default);
-    background-color: var(--bg-tertiary);
+    /* v2.3 zones: panel headers are decoupled from the toolbar/statusbar
+       (which used to share --bg-tertiary and changed together). */
+    background-color: var(--zone-panel-header-bg);
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;

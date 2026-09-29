@@ -60,4 +60,19 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:setRepoGroup', (_e, path: string, groupId: string | null) =>
     storage.setRepoGroup(path, groupId)
   );
+
+  // Folder repository scan (v2.3) — «репозитории из папок должны
+  // добавляться рекурсивно, образуя группы по названию папок».
+  // scanFolderRepos = dry-run (preview list for the confirm dialog);
+  // addFolderRepositories = scan + group tree + repo list, idempotent.
+  ipcMain.handle(
+    'settings:scanFolderRepos',
+    (_e, root: string, opts?: { maxDepth?: number }) =>
+      storage.scanFolderForRepositories(root, opts ?? {})
+  );
+  ipcMain.handle(
+    'settings:addFolderRepositories',
+    (_e, root: string, opts?: { maxDepth?: number }) =>
+      storage.addFolderRepositories(root, opts ?? {})
+  );
 }

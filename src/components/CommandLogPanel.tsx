@@ -428,12 +428,12 @@ export function CommandLogPanel({
 
   return (
     <div
-      className="flex flex-col bg-bg-secondary border-t border-border-default shrink-0"
+      className="flex flex-col bg-zone-panel border-t border-border-default shrink-0"
       style={{ height: '100%' }}
       data-testid="command-log-panel"
     >
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-bg-tertiary border-b border-border-default shrink-0">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-zone-panel-header border-b border-border-default shrink-0">
         <div className="flex items-center gap-1">
           <button
             className="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider transition-colors bg-bg-hover text-text-primary"

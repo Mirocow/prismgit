@@ -107,7 +107,7 @@ export function ProviderChip({ className }: { className?: string }) {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 w-64 bg-bg-elevated border border-border-default rounded shadow-xl z-50 max-h-80 overflow-y-auto">
+        <div className="absolute top-full left-0 mt-1 w-64 bg-zone-popover border border-border-default rounded shadow-xl z-50 max-h-80 overflow-y-auto">
           <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
             Switch provider
           </div>

@@ -55,7 +55,11 @@ describe('v2.3.10: light-dim-sidebar dark sidebar restored', () => {
     expect(body, 'aside block missing').not.toBe('');
     expect(body).toContain('--bg-primary: #1e1e1e');
     expect(body).toContain('--text-primary: #cccccc');
-    expect(body).toContain('background-color: #1e1e1e');
+    // v2.3 zones: the aside paints via the ZONE token (defined in the same
+    // block) instead of a hardcoded literal — same dark VS Code sidebar,
+    // but a --zone-sidebar-bg override can now recolor it per-zone.
+    expect(body).toContain('--zone-sidebar-bg: #1e1e1e');
+    expect(body).toContain('background-color: var(--zone-sidebar-bg)');
   });
 
   it('no orphaned selector glued to another block (the migration bug)', () => {

@@ -1950,7 +1950,7 @@ export function HistoryPage() {
               <ChevronDown size={9} />
             </button>
             {showBranchPicker && (
-              <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 max-h-72 overflow-y-auto min-w-64">
+              <div className="absolute top-full left-0 mt-1 bg-zone-popover border border-border-default rounded shadow-lg z-50 max-h-72 overflow-y-auto min-w-64">
                 {/* Head + Upstream option — the new default. Shows only the
                     current local branch + its remote-tracking branch. */}
                 <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs border-b border-border-subtle">
