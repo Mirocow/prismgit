@@ -543,14 +543,14 @@ export function InvestigatePage() {
                     </div>
                     <code className="text-xs font-mono text-text-tertiary shrink-0">{shortHash(entry.hash)}</code>
                     <button
-                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                      className="opacity-60 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                       title={t('pages.openInBrowser')}
                       onClick={(e) => { e.stopPropagation(); handleOpenCommitInBrowser(entry); }}
                     >
                       <ExternalLink size={11} />
                     </button>
                     <button
-                      className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                      className="opacity-60 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                       title={t('common.copyHash', { defaultValue: 'Copy commit hash' })}
                       onClick={(e) => { e.stopPropagation(); copyToClipboard(entry.hash); }}
                     >
@@ -590,28 +590,28 @@ export function InvestigatePage() {
                         </span>
                       </span>
                       <button
-                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        className="opacity-60 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.openInChanges')}
                         onClick={(e) => { e.stopPropagation(); openFileInChanges(f); }}
                       >
                         <FolderOpen size={11} />
                       </button>
                       <button
-                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        className="opacity-60 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.openInDiff', { defaultValue: 'Open in Diff tool' })}
                         onClick={(e) => { e.stopPropagation(); openFileInDiff(f); }}
                       >
                         <FileText size={11} />
                       </button>
                       <button
-                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        className="opacity-60 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.openInBlame', { defaultValue: 'Open in Blame tool' })}
                         onClick={(e) => { e.stopPropagation(); openInBlame(f); }}
                       >
                         <GitBranch size={11} />
                       </button>
                       <button
-                        className="opacity-0 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        className="opacity-60 group-hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.fileHistory')}
                         onClick={(e) => { e.stopPropagation(); openFileHistory(f); }}
                       >
@@ -656,21 +656,21 @@ export function InvestigatePage() {
                         <FolderOpen size={11} />
                       </button>
                       <button
-                        className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        className="opacity-60 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.openInDiff', { defaultValue: 'Open in Diff tool' })}
                         onClick={() => openFileInDiff(file)}
                       >
                         <FileText size={11} />
                       </button>
                       <button
-                        className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        className="opacity-60 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.openInBlame', { defaultValue: 'Open in Blame tool' })}
                         onClick={() => openInBlame(file, matches[0]?.line)}
                       >
                         <GitBranch size={11} />
                       </button>
                       <button
-                        className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        className="opacity-60 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.fileHistory')}
                         onClick={() => openFileHistory(file)}
                       >

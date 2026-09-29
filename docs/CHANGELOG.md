@@ -5,6 +5,13 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.3] - 2026-09-29
+
+### Fixed — Search tool: buttons were invisible until hover
+- **Every remaining hover-only action button in the Search tool is now always visible** (resting at 60% opacity, full on hover): commit-result rows (open in browser, copy hash), file-result rows (Changes / Diff / Blame / History) and the content group headers (Diff / Blame / History) — v2.3.2 had converted only the «Commit»/«Changes» buttons and the per-match rows; the rest stayed `opacity-0` until the mouse happened to pass over them (found by the user "by accident")
+- Verified live on the 20k-commit fixture: all 15 button kinds rest at opacity 0.6 with zero hover-only elements left; the «Commit» blame-lookup jump still lands on History with the file-filter chip
+- Guarded by a source-pin test (no `opacity-0` left in the Search page)
+
 ## [2.3.2] - 2026-09-29
 
 ### Fixed — 3-way merge editor (live-tested on a real conflict)

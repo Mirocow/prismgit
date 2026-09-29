@@ -7,6 +7,13 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.3] - 2026-09-29
+
+### Behoben — Suche-Tool: Schaltflächen waren bis zum Hovern unsichtbar
+- **Alle verbleibenden hover-only Aktionsschaltflächen des Suche-Tools sind jetzt stets sichtbar** (Ruhezustand 60 % Deckkraft, bei Hover 100 %): Commit-Ergebniszeilen (im Browser öffnen, Hash kopieren), Datei-Ergebniszeilen (Änderungen / Diff / Blame / Historie) und die Datei-Gruppenköpfe der Inhaltsresultate (Diff / Blame / Historie) — in v2.3.2 waren nur die «Commit»/«Änderungen»-Schaltflächen und die Schaltflächen der Trefferzeilen umgestellt; der Rest blieb `opacity-0`, bis der Mauszeiger zufällig darüber stand (vom Benutzer „zufällig" entdeckt)
+- Live am 20k-Commit-Fixture verifiziert: alle 15 Schaltflächenarten bei opacity 0.6 im Ruhezustand, keine hover-only Elemente mehr; der «Commit»-Sprung (Blame-Lookup) landet weiterhin in History mit dem Datei-Filter-Chip
+- Durch einen Source-Pin-Test abgesichert (kein `opacity-0` mehr auf der Suchseite)
+
 ## [2.3.2] - 2026-09-29
 
 ### Behoben — 3-Wege-Merge-Editor (an echtem Konflikt getestet)
