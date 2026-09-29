@@ -5,6 +5,13 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.8] - 2026-09-29
+
+### Added — a layout toggle for the BOTTOM panel (Command Log), the third button of the VS Code hero row
+- The user asked for the missing one: «кнопку для нижнего сайдбар?» — the VS Code reference row is sidebar-left / **layout-panel** / sidebar-right, and the middle button had no counterpart in PrismGit: the bottom Command Log panel was only reachable via the Terminal button / Ctrl+Shift+U / the StatusBar chip — its visibility was an App-level `useState` the toolbar could not touch
+- The flag moved into `uiLayoutStore` (the same migration v2.3.4 did for the sidebar rail and the History detail pane) with localStorage persistence, so the panel's open state now survives restarts; every legacy entry point (Terminal button, native menu Ctrl+Shift+U, StatusBar chip, panel ✕, error auto-open with the 30s snooze) drives the same store flag
+- The new header-corner button sits BETWEEN the two sidebar toggles and renders the exact upstream codicons `layout-panel` (bottom strip filled — panel open) / `layout-panel-off` (hollow divider-only — hidden), 16×16 fill at 16px, with localized tooltips in all four languages
+
 ## [2.3.7] - 2026-09-29
 
 ### Changed — sidebar collapse toggles now match the VS Code reference exactly

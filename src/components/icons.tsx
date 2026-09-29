@@ -247,6 +247,25 @@ export const LayoutSidebarRightOff = (p: FillIconProps) => (
   />
 );
 
+// v2.3.8 — the bottom-panel (Command Log) toggle of the header corner group.
+// Same hero row in VS Code: layout-sidebar-left / layout-panel /
+// layout-sidebar-right — exact upstream path data (microsoft/vscode-codicons).
+/** Toggle Panel — box with the BOTTOM strip filled (panel open). */
+export const LayoutPanel = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M15 12.5C15 13.881 13.881 15 12.5 15H3.5C2.119 15 1 13.881 1 12.5V3.5C1 2.119 2.119 1 3.5 1H12.5C13.881 1 15 2.119 15 3.5V12.5ZM2 10H14V3.5C14 2.672 13.328 2 12.5 2H3.5C2.672 2 2 2.672 2 3.5V10Z"
+  />
+);
+
+/** Panel hidden — box outline + divider, bottom strip hollow. */
+export const LayoutPanelOff = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M12.5 1H3.5C2.122 1 1 2.121 1 3.5V12.5C1 13.879 2.122 15 3.5 15H12.5C13.878 15 15 13.879 15 12.5V3.5C15 2.121 13.878 1 12.5 1ZM14 12.5C14 13.327 13.327 14 12.5 14H3.5C2.673 14 2 13.327 2 12.5V11H14V12.5ZM14 10H2V3.5C2 2.673 2.673 2 3.5 2H12.5C13.327 2 14 2.673 14 3.5V10Z"
+  />
+);
+
 export const PanelBottomOpen = (p: IconProps) => (
   <Icon {...p}>
     <rect x="3" y="4" width="18" height="16" rx="2" />

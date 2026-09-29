@@ -37,6 +37,7 @@ import { useRepositoryStore } from './stores/repositoryStore';
 import { useSelectionStore } from './stores/selectionStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useToastStore, useToastActions } from './stores/toastStore';
+import { useUiLayoutStore } from './stores/uiLayoutStore';
 
 // Heavy dialogs are code-split: they are never needed for first paint, and
 // pulling them out of the initial bundle makes the app window show faster.
@@ -345,7 +346,13 @@ export default function App() {
     window.addEventListener('smartgit:ai-prompt', handler);
     return () => window.removeEventListener('smartgit:ai-prompt', handler);
   }, []);
-  const [showCommandLog, setShowCommandLog] = useState(false);
+  // v2.3.8 — the Command Log visibility moved from a local useState to
+  // uiLayoutStore so the header-corner layout-panel toggle (the middle
+  // button of the VS Code hero row) can drive it, next to the sidebar-left /
+  // detail-right toggles. Same store pattern as v2.3.4.
+  const showCommandLog = useUiLayoutStore((s) => s.commandLogOpen);
+  const setCommandLogOpen = useUiLayoutStore((s) => s.setCommandLogOpen);
+  const toggleCommandLog = useUiLayoutStore((s) => s.toggleCommandLog);
   const [commandLogHeight, setCommandLogHeight] = useState(260);
   /**
    * When the command-log panel is auto-opened by a simple-git error, this
@@ -414,7 +421,7 @@ export default function App() {
         // when the panel was closed, so it never overwrites a filter
         // the user is actively using.
         setCommandLogErrorsOnly(true);
-        setShowCommandLog(true);
+        setCommandLogOpen(true);
       }
     }
     setLastSeenErrorPulse(errorPulse);
@@ -698,7 +705,7 @@ export default function App() {
       // Manual toggle resets the errorsOnly flag — user wants to see the
       // full command list, not just errors.
       setCommandLogErrorsOnly(false);
-      setShowCommandLog(s => !s);
+      toggleCommandLog();
     };
 
     // ===== SmartGit-style command helpers =====
@@ -1671,7 +1678,7 @@ export default function App() {
         </div>
         <StatusBar
           showCommandLog={showCommandLog}
-          onToggleCommandLog={() => setShowCommandLog(s => !s)}
+          onToggleCommandLog={toggleCommandLog}
         />
         <ToastContainer />
         <ConfirmDialogHost />
@@ -1724,7 +1731,7 @@ export default function App() {
         onShowShortcuts={() => setShowShortcuts(true)}
         onShowClone={() => setShowClone(true)}
         onShowInit={() => setShowInit(true)}
-        onToggleCommandLog={() => setShowCommandLog(s => !s)}
+        onToggleCommandLog={toggleCommandLog}
         onToggleAiAssistant={() => setShowAiAssistant(v => !v)}
       />
       <GitToolbar
@@ -1774,7 +1781,7 @@ export default function App() {
             <Suspense fallback={null}>
               <CommandLogPanel
                 onClose={() => {
-                  setShowCommandLog(false);
+                  setCommandLogOpen(false);
                   setCommandLogErrorsOnly(false);
                   // QW-5 — record the manual-close timestamp so the next
                   // error within 30s does NOT auto-reopen the panel.
@@ -1788,7 +1795,7 @@ export default function App() {
       )}
       <StatusBar
         showCommandLog={showCommandLog}
-        onToggleCommandLog={() => setShowCommandLog(s => !s)}
+        onToggleCommandLog={toggleCommandLog}
       />
       <ToastContainer />
       <ConfirmDialogHost />

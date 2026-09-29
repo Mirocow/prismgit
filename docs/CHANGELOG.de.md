@@ -7,6 +7,13 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.8] - 2026-09-29
+
+### Hinzugefügt — Layout-Schalter für das UNTERE Panel (Befehlsprotokoll), der dritte Knopf der VS-Code-Hero-Reihe
+- Der Nutzer fragte nach dem fehlenden: «кнопку для нижнего сайдбар?» — die VS-Code-Referenzreihe ist sidebar-left / **layout-panel** / sidebar-right, und die mittlere Schaltfläche hatte in PrismGit kein Gegenstück: das untere Befehlsprotokoll-Panel war nur über den Terminal-Knopf / Ctrl+Shift+U / den StatusBar-Chip erreichbar — seine Sichtbarkeit war ein `useState` auf App-Ebene, an das die Toolbar nicht herankam
+- Das Flag zog in `uiLayoutStore` (dieselbe Migration, die v2.3.4 für die Sidebar-Schiene und den History-Detailbereich durchgeführt hat) mit localStorage-Persistenz — der Panel-Zustand überlebt jetzt Neustarts; alle alten Einstiegspunkte (Terminal-Knopf, natives Menü Ctrl+Shift+U, StatusBar-Chip, Panel-✕, Fehler-Auto-Öffnen mit 30s-Snooze) steuern dasselbe Store-Flag
+- Der neue Kopfleisten-Knopf sitzt ZWISCHEN den beiden Sidebar-Schaltern und rendert die exakten Upstream-Codicons `layout-panel` (unterer Streifen gefüllt — Panel offen) / `layout-panel-off` (hohl, nur Trennlinie — ausgeblendet), 16×16 fill bei 16px, mit lokalisierten Tooltips in allen vier Sprachen
+
 ## [2.3.7] - 2026-09-29
 
 ### Geändert — Sidebar-Collapse-Schalter entsprechen jetzt exakt der VS-Code-Referenz

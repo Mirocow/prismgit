@@ -7,6 +7,13 @@ PrismGit 的所有显著变更都记录在此文件中。
 
 **其他语言：** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [Deutsch](CHANGELOG.de.md)
 
+## [2.3.8] - 2026-09-29
+
+### 新增 — 底部面板（命令日志）的布局切换按钮：VS Code hero 行的第三枚按钮
+- 用户问到了缺失的那枚：「кнопку для нижнего сайдбар？」— VS Code 参考行是 sidebar-left / **layout-panel** / sidebar-right，中间那枚在 PrismGit 里一直没有对应物：底部命令日志面板只能通过终端按钮 / Ctrl+Shift+U / 状态栏芯片打开 — 它的可见性是 App 层的 `useState`，工具栏够不着
+- 该标志迁入 `uiLayoutStore`（与 v2.3.4 对侧栏轨和 History 详情面板的迁移完全一致），带 localStorage 持久化 — 面板的打开状态现在能跨重启保留；所有旧入口（终端按钮、原生菜单 Ctrl+Shift+U、状态栏芯片、面板 ✕、带 30 秒静默的错误自动打开）都驱动同一个 store 标志
+- 新的头部角落按钮位于两个侧栏切换钮**之间**，渲染精确的上游 codicon `layout-panel`（底条填充 — 面板打开）/ `layout-panel-off`（仅分隔线的空心形 — 隐藏），16×16 fill、16px，四种语言的本地化提示
+
 ## [2.3.7] - 2026-09-29
 
 ### 变更 — 侧边栏折叠按钮现在与 VS Code 参考图完全一致

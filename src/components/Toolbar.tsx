@@ -19,7 +19,7 @@ import { offerPushRejection } from '../stores/pushRejectionStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
 import appLogo from '../assets/app-logo.png';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, LayoutSidebarLeft, LayoutSidebarLeftOff, LayoutSidebarRight, LayoutSidebarRightOff, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, StashPop, Sun, Terminal, Trash } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, LayoutPanel, LayoutPanelOff, LayoutSidebarLeft, LayoutSidebarLeftOff, LayoutSidebarRight, LayoutSidebarRightOff, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, StashPop, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -119,6 +119,11 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
   const toggleSidebar = useUiLayoutStore((s) => s.toggleSidebar);
   const detailCollapsed = useUiLayoutStore((s) => s.detailCollapsed);
   const toggleDetail = useUiLayoutStore((s) => s.toggleDetail);
+  // v2.3.8 — the bottom Command Log panel: the middle toggle of the VS Code
+  // hero row (sidebar-left / PANEL / sidebar-right). The Terminal button
+  // above keeps its own onToggleCommandLog prop — both drive the same flag.
+  const commandLogOpen = useUiLayoutStore((s) => s.commandLogOpen);
+  const toggleCommandLog = useUiLayoutStore((s) => s.toggleCommandLog);
 
   const disabled = !currentRepo;
   const location = useLocation();
@@ -357,6 +362,16 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
           onClick={() => toggleSidebar()}
           iconSize={16}
           title={sidebarCollapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')}
+        />
+        {/* v2.3.8 — the bottom panel toggle, BETWEEN the sidebars — the
+            exact order of the VS Code hero row (layout-sidebar-left /
+            layout-panel / layout-sidebar-right). Same codicon state
+            semantics: panel open → bottom strip filled, hidden → hollow. */}
+        <IconButton
+          icon={commandLogOpen ? LayoutPanel : LayoutPanelOff}
+          onClick={() => toggleCommandLog()}
+          iconSize={16}
+          title={commandLogOpen ? t('shell.hideCommandLog') : t('shell.showCommandLog')}
         />
         <IconButton
           icon={detailCollapsed ? LayoutSidebarRightOff : LayoutSidebarRight}
