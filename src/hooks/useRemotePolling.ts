@@ -138,6 +138,10 @@ export function useRemotePolling(): void {
     };
 
     const checkNow = () => {
+      // v3.9 — the user-visible PAUSE: skip every cycle while paused. Covers
+      // the timer tick, the focus-resume AND the initial gate. The manual
+      // sidebar «Check now» button still works (explicit user action).
+      if (useRepositoryStore.getState().remotePollingPaused) return;
       const paths = repoListKeyRef.current.split('\n').filter(Boolean);
       if (paths.length > 0) {
         void useRepositoryStore.getState().checkRemotes(scopeRemoteCheckPaths(paths)).catch(() => {});

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AiProvidersGrid } from '../components/AiProvidersGrid';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { ExternalLink, Folder, GitBranch, Github, Loader, Lock, LogOut, Moon, Pencil, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash, ArrowUp, ArrowDown } from '../components/icons';
+import { ExternalLink, Folder, GitBranch, Github, Loader, Lock, LogOut, Moon, Pencil, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Star, Sun, Trash, X, ArrowUp, ArrowDown } from '../components/icons';
 import { ThemeEditorDialog } from '../components/ThemeEditorDialog';
 import { InfoHint } from '../components/InfoHint';
 import { effectiveNavHotkeys, navItemsOrdered, NAV_HOTKEY_SLOTS } from '../components/navItems';
 import { SecuritySettings } from '../components/settings/SecuritySettings';
+import { useFavoriteToolsStore } from '../stores/favoriteToolsStore';
 import { api, type GitConfigEntry } from '../lib/api';
 import { restoreAllConfirmations } from '../lib/confirmations';
 import { LOCALES, useI18n } from '../lib/i18n';
@@ -57,6 +58,10 @@ export function SettingsPage() {
   // setThemeMode / toggleTheme are stable action references in Zustand, so
   // they never trigger re-renders on their own.
   const settings = useSettingsStore((s) => s.settings);
+  // v3.9 — favorites order block («Избранные инструменты») reactivity.
+  const favoriteTools = useFavoriteToolsStore((s) => s.favorites);
+  const moveFavorite = useFavoriteToolsStore((s) => s.move);
+  const toggleFavoriteTool = useFavoriteToolsStore((s) => s.toggleFavorite);
   const theme = useSettingsStore((s) => s.theme);
   const themeMode = useSettingsStore((s) => s.themeMode);
   const setSetting = useSettingsStore((s) => s.setSetting);
@@ -1756,7 +1761,65 @@ export function SettingsPage() {
             {t('settings.sidebarNavTitle', { defaultValue: 'Сайдбар и навигация' })}
             <InfoHint text={t('settings.sidebarNavHint', { defaultValue: 'Порядок пунктов левого сайдбара и горячие клавиши инструментов. Ctrl+1..9 — основные инструменты, Alt+1..9 — остальные; каждая комбинация может быть переназначена или снята (—). Изменения применяются сразу.' })} />
           </div>
-          <div className="p-4 space-y-1">
+          <div className="p-4 space-y-1.5">
+            {/* v3.9 — FAVORITES ordering («сортировать надо те что в\n                фаворитах»): the starred tools render as the sidebar's top\n                «Избранные» section; this block reorders them. */}
+            <div className="mb-2 pb-3 border-b border-border-subtle">
+              <div className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-text-tertiary mb-1.5">
+                <Star size={10} className="text-status-modified fill-current" />
+                {t('settings.sidebarFavTitle', { defaultValue: 'Избранные инструменты' })}
+                <InfoHint text={t('settings.sidebarFavHint', { defaultValue: 'Раздел «Избранные» вверху сайдбара. Порядок задаётся стрелками (↑/↓), ✕ убирает инструмент из избранных (вернуть можно звёздочкой у пункта в сайдбаре).' })} />
+              </div>
+              {(() => {
+                const favorites = favoriteTools;
+                const order = (settings as { navOrder?: string[] }).navOrder;
+                const allItems = navItemsOrdered(order);
+                if (favorites.length === 0) {
+                  return (
+                    <div className="text-2xs text-text-tertiary px-2 py-1">
+                      {t('settings.sidebarFavEmpty', { defaultValue: 'Нет избранных — отметьте инструменты звёздочкой в сайдбаре.' })}
+                    </div>
+                  );
+                }
+                return favorites.map((path, idx) => {
+                  const item = allItems.find((i) => i.path === path);
+                  if (!item) return null;
+                  const Icon = item.icon;
+                  return (
+                    <div key={path} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-bg-hover" data-testid="sidebar-fav-row">
+                      <span className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          className="icon-btn !w-5 !h-5"
+                          title={t('settings.sidebarFavMoveUp', { defaultValue: 'Переместить выше в избранном' })}
+                          disabled={idx === 0}
+                          onClick={() => moveFavorite(path, -1)}
+                        >
+                          <ArrowUp size={10} />
+                        </button>
+                        <button
+                          className="icon-btn !w-5 !h-5"
+                          title={t('settings.sidebarFavMoveDown', { defaultValue: 'Переместить ниже в избранном' })}
+                          disabled={idx === favorites.length - 1}
+                          onClick={() => moveFavorite(path, 1)}
+                        >
+                          <ArrowDown size={10} />
+                        </button>
+                      </span>
+                      <span className="flex items-center gap-1.5 text-sm text-text-primary min-w-0 flex-1">
+                        <Icon size={13} className="text-text-tertiary shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </span>
+                      <button
+                        className="icon-btn !w-5 !h-5 hover:!text-status-deleted shrink-0"
+                        title={t('settings.sidebarFavRemove', { defaultValue: 'Убрать из избранных' })}
+                        onClick={() => toggleFavoriteTool(path)}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
             {(() => {
               const overrides = (settings as { navHotkeys?: Record<string, string> }).navHotkeys;
               const order = (settings as { navOrder?: string[] }).navOrder;

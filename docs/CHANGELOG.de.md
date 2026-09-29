@@ -7,6 +7,38 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.2] - 2026-09-29
+
+### Behoben — 3-Wege-Merge-Editor (an echtem Konflikt getestet)
+- **Die Pane-Splitter waren tot**: ein 1px breiter Trenner mit Höhe 0 im Sticky-Wrapper — unsichtbar, nicht greifbar (Mousedown traf die Nachbarpane). Jetzt ein echter 6px-Trenner mit sichtbarem Mittelgriff, ±5px-Trefffläche und Akzent-Hover; Ziehen live verifiziert (Panes ändern die Breite, Header folgen)
+- **Pane-Header liefen aus dem Ruder**, sobald eine Pane breiter gezogen wurde (feste Drittel); sie spiegeln jetzt exakt leftPct/rightPct
+- Bearbeitung und Hervorhebungs-Layer der Mittelpane live auf einem echten Konflikt verifiziert (Tippen, Sync, kein fremder Streifen)
+
+### Hinzugefügt — Hintergrund-Fetch PAUSE
+- Der Aktualisierungs-Spinner der Seitenleiste ist jetzt eine Fetch-Steuerung: Klick auf den LAUFENDEN Spinner stoppt den Hintergrundzyklus; ein Play-Button setzt fort. Ein „Fetch“-Pause/Play-Schalter in der Statusleiste macht dasselbe von überall
+- Während der Pause wird jeder Zyklus übersprungen (Timer, Fokus-Wiederaufnahme, Erstcheck); manuelles „Jetzt prüfen“ funktioniert weiterhin
+
+### Hinzugefügt — VS Code-artiges Panel-Einklappen
+- Die Konsole klappt jetzt über einen Chevron in IHREM eigenen Panel-Header zu (zuvor nur Statusleisten-Schalter mit ✕); der Statusleisten-Schalter erhielt PanelBottomClose/PanelBottomOpen-Icons. Linke Seitenleiste und Commit-Details-Pane behalten ihre Header-Chevrons
+
+### Hinzugefügt — Zurück/Vorwärts merkt sich den WERKZEUGZUSTAND
+- Jeder Verlaufseintrag trägt einen Snapshot der globalen Auswahl (Commit, Datei, Branch, Tag, Pfadfilter). Zurück/Vorwärms stellt ihn wieder her; Cross-Tool-Sprünge markieren sich, damit der Austrittseintrag nicht verschmutzt wird
+
+### Hinzugefügt — aus der Suche zum Commit, der die Änderung einbrachte
+- Jeder Treffer hat einen „Commit“-Button: Blame-Lookup findet den einführenden Commit und öffnet History mit ausgewähltem Commit UND nach Datei vorgefiltertem Graphen. Blame/History/Diff-Buttons sind jetzt IMMER sichtbar (zuvor nur bei Hover)
+
+### Hinzugefügt — Favoriten sortierbar in den Einstellungen
+- Einstellungen → „Seitenleiste & Navigation“ hat einen Favoriten-Block: ↑/↓ sortiert die Favoriten-Sektion der Seitenleiste (persistent), ✕ entfernt Einträge; die Favoritenliste zog aus dem Sidebar-Lokalzustand in einen Store
+
+### Verbessert — Theme-Editor-Zonen & Textkontrast
+- Jede Farbfläche hat einen «!»-Hinweis, WO die Farbe wirkt; Hover hebt die Zone in der Vorschau hervor
+- Textfarben werden auf Kontrast geprüft: Warnung mit Verhältnis + Ein-Klick „Lesbar“ unter 4.5:1
+- Die verwirrende Zone „Panel“ heißt jetzt „Panels und Konsole“ (RU); der Button-Text der Vorschau nutzt die gleiche Auto-Farbe wie das kompilierte Theme
+
+### Geändert — Zeilenabstände in den Einstellungen
+- Navigations-Werkzeugzeilen (und der Favoriten-Block) weiter auseinander
+
+
 ## [2.3.1] - 2026-09-29
 
 ### Behoben — der Bericht «App hängt in jedem Werkzeug» (gemessen, dann behoben)

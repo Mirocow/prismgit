@@ -10,6 +10,7 @@ import { Avatar } from '../components/Avatar';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useNavHistoryStore } from '../stores/navHistoryStore';
 import { api, type LogEntry } from '../lib/api';
 import { cn, formatDate, shortHash } from '../lib/utils';
 import { parseGrepOutput, highlight, filterTrackedFiles, type GrepMatch } from '../lib/searchUtils';
@@ -169,17 +170,43 @@ export function InvestigatePage() {
   }, [repo.path]);
 
   // ─── Cross-tool navigation helpers ────────────────────────────────────────
+  // v3.9: each helper marks the jump BEFORE touching the selection, so the
+  // nav-history OUTGOING entry keeps its own state (Back returns to what
+  // the user had, not to the jump's pre-set state).
   const openCommitInHistory = useCallback((hash: string) => {
+    useNavHistoryStore.getState().markCrossToolJump();
     useSelectionStore.getState().selectCommit(hash);
     navigate('/history');
   }, [navigate]);
 
   const openFileInChanges = useCallback((path: string) => {
+    useNavHistoryStore.getState().markCrossToolJump();
     useSelectionStore.getState().selectFile(path);
     navigate('/changes');
   }, [navigate]);
 
+  /** Blame the found line AT HEAD to identify THE COMMIT that introduced
+   *  the match, then jump to History with that commit selected and the graph
+   *  pre-filtered to the file — the user's «не получается перейти в комит
+   *  который отображается в History» flow, one click. */
+  const openCommitFromMatch = useCallback(async (path: string, line: number) => {
+    try {
+      const blame = await api.git.blame(repo.path, path);
+      const blamed = blame.lines.find((l) => l.finalLineNumber === line)
+        ?? blame.lines[Math.min(line - 1, blame.lines.length - 1)];
+      useNavHistoryStore.getState().markCrossToolJump();
+      const sel = useSelectionStore.getState();
+      sel.selectFile(path);
+      sel.setPathFilter(path);
+      if (blamed) sel.selectCommit(blamed.hash);
+      navigate('/history');
+    } catch (e) {
+      toast.error(t('pages.invBlameLookupFailed', { defaultValue: 'Не удалось определить коммит' }), String(e));
+    }
+  }, [repo.path, navigate, toast, t]);
+
   const openFileInDiff = useCallback((path: string) => {
+    useNavHistoryStore.getState().markCrossToolJump();
     useSelectionStore.getState().selectFile(path);
     navigate('/diff');
   }, [navigate]);
@@ -188,6 +215,7 @@ export function InvestigatePage() {
     // v3.8 — «фильтровать сразу по файлу»: jump to History ALREADY filtered
     // to this file (git log -- <path>), optionally selecting the commit that
     // introduced the match so it's right there in the short filtered list.
+    useNavHistoryStore.getState().markCrossToolJump();
     const sel = useSelectionStore.getState();
     sel.selectFile(path);
     sel.setPathFilter(path);
@@ -199,6 +227,7 @@ export function InvestigatePage() {
     // v3.8 — Blame focused on the FOUND line: shows which commit introduced
     // the match («кто внёс это изменение»). BlamePage consumes the one-shot
     // blameFocusLine after loading (scroll + flash-highlight).
+    useNavHistoryStore.getState().markCrossToolJump();
     const sel = useSelectionStore.getState();
     sel.selectFile(path);
     sel.setBlameFocusLine(line ?? null);
@@ -609,11 +638,18 @@ export function InvestigatePage() {
                       <FileText size={11} className="text-text-tertiary shrink-0" />
                       <code className="font-mono text-xs text-text-primary truncate flex-1 min-w-0">{file}</code>
                       <span className="text-2xs text-text-tertiary shrink-0">{matches.length}</span>
-                      {/* v3.8 — the found file's full tool set (was History-only):
-                          the user asked to jump from a find to Diff / Blame /
-                          the file's commit history in one click. */}
+                      {/* v3.9 — the found file's full tool set, always
+                          visible (was hover-only): «Коммит» / Changes / Diff /
+                          Blame / History. */}
                       <button
-                        className="opacity-0 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
+                        className="opacity-60 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0 text-accent"
+                        title={t('pages.invOpenCommitHint', { defaultValue: 'Открыть коммит, внёсший строку, в History' })}
+                        onClick={() => { void openCommitFromMatch(file, matches[0]?.line ?? 1); }}
+                      >
+                        <GitCommit size={11} />
+                      </button>
+                      <button
+                        className="opacity-60 hover:opacity-100 icon-btn !w-5 !h-5 shrink-0"
                         title={t('pages.openInChanges')}
                         onClick={() => openFileInChanges(file)}
                       >
@@ -648,31 +684,41 @@ export function InvestigatePage() {
                         title={t('pages.invMatchRowHint', { file: m.file, line: m.line })}
                         onClick={() => openFileInChanges(m.file)}
                       >
-                        {/* v3.8 — per-line tool jumps: Blame AT the found line
-                            (who introduced it), History of the file, Diff. */}
+                        {/* v3.9 — per-line tool jumps, ALWAYS VISIBLE (the
+                            hover-only opacity hid them — the user literally
+                            couldn't see the way to Blame/History/Diff):
+                            «Коммит» (blame-lookup → History, selected),
+                            Blame AT the found line, History of the file, Diff. */}
                         <button
-                          className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
+                          className="icon-btn !w-4 !h-4 shrink-0 mt-0.5 text-accent"
+                          title={t('pages.invOpenCommitHint', { defaultValue: 'Открыть коммит, внёсший строку, в History' })}
+                          onClick={(e) => { e.stopPropagation(); void openCommitFromMatch(m.file, m.line); }}
+                        >
+                          <GitCommit size={10} />
+                        </button>
+                        <button
+                          className="opacity-60 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
                           title={t('pages.invBlameAtLine', { line: m.line, defaultValue: 'Blame — строка {line}' })}
                           onClick={(e) => { e.stopPropagation(); openInBlame(m.file, m.line); }}
                         >
                           <GitBranch size={10} />
                         </button>
                         <button
-                          className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
+                          className="opacity-60 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
                           title={t('pages.fileHistory')}
                           onClick={(e) => { e.stopPropagation(); openFileHistory(m.file); }}
                         >
                           <History size={10} />
                         </button>
                         <button
-                          className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
+                          className="opacity-60 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
                           title={t('pages.openInDiff', { defaultValue: 'Open in Diff tool' })}
                           onClick={(e) => { e.stopPropagation(); openFileInDiff(m.file); }}
                         >
                           <FileText size={10} />
                         </button>
                         <button
-                          className="opacity-0 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
+                          className="opacity-60 group-hover:opacity-100 icon-btn !w-4 !h-4 shrink-0 mt-0.5"
                           title={t('pages.copyRef')}
                           onClick={(e) => {
                             e.stopPropagation();

@@ -5,6 +5,38 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.2] - 2026-09-29
+
+### Fixed — 3-way merge editor (live-tested on a real conflict)
+- **The panes' splitters were dead**: a 1px-wide divider with height 0 inside its sticky wrapper — invisible, ungrabbable (mousedown landed on the neighbouring pane). Now a REAL 6px divider with a visible center grip, ±5px hit area and accent hover; drag verified live (panes resize, headers follow)
+- **Pane headers misaligned with the body columns** as soon as a pane was resized (headers were fixed thirds); they now mirror leftPct/rightPct exactly
+- The center pane's editing and highlight layers re-verified live on a real conflict fixture (typing, highlight follow, no foreign stripe)
+
+### Added — background fetch PAUSE
+- The sidebar's refresh spinner is now a fetch control: click the RUNNING spinner to stop the background fetch cycle; a Play button resumes it. A StatusBar «Фетч» Pause/Play toggle does the same from anywhere
+- While paused, every poll cycle is skipped (timer, window-focus resume, initial check); manual «Check now» still works
+
+### Added — VS Code-style panel collapse
+- The console now collapses via a chevron in ITS OWN panel header (was: status-bar toggle only, with an ✕); the StatusBar toggle got the matching PanelBottomClose/PanelBottomOpen icons. Left sidebar and the History details pane keep their header-corner chevrons
+
+### Added — Back/Forward remembers tool STATE
+- Each history entry carries a snapshot of the global selection (commit, file, branch, tag, path filter). Back/Forward restores it, so returning to History re-selects the commit you were reading; cross-tool jumps mark themselves so the outgoing entry is not polluted with the incoming tool's state
+
+### Added — Search: jump to THE COMMIT that made the change
+- Every content hit has a «Коммит» button: blame-lookup finds the commit that introduced the found line, then opens History with that commit selected AND the graph pre-filtered to the file. The Blame/History/Diff buttons are now ALWAYS visible (were hover-only — invisible to the user)
+
+### Added — Settings: favorites are sortable
+- Settings → «Сайдбар и навигация» gained an «Избранные инструменты» block: ↑/↓ reorders the sidebar's Favorites section (persisted), ✕ removes an entry; the favorites list moved from Sidebar-local state into a store so Settings and the sidebar share it
+
+### Improved — theme editor zones & text contrast
+- Every swatch has a «!» hint explaining WHERE its color lands; hovering a swatch highlights that zone in the live preview
+- Text tokens are contrast-checked against the main background: a warning chip with the ratio + a one-click «Читаемо» fix below 4.5:1
+- The confusing «Панель» zone renamed to «Панели и консоль» (RU); the preview's button label now uses the same auto-computed readable-on-accent color the compiled theme applies (was the main background color — invisible on light accents)
+
+### Changed — settings rows spacing
+- The sidebar-navigation tool rows (and their favorites block) use wider spacing per the «расстояние между строками инструментов» request
+
+
 ## [2.3.1] - 2026-09-29
 
 ### Fixed — the «app lags on every tool» report (measured, then fixed)

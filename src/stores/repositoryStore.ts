@@ -20,6 +20,14 @@ interface RepositoryState {
    */
   remoteChecks: Record<string, RemoteCheckSummary>;
   checkingRemotes: boolean;
+  /** v3.9 — user-visible PAUSE of the background remote poll («нет
+   *  возможности остановить постоянный фетч»). True → the periodic poll
+   * skips every cycle (both the timer tick and the window-focus resume);
+   * the sidebar refresh spinner turns into a resume control. Session-level:
+   * a restart resumes polling (Settings → Auto refresh is the persistent
+   * lever). */
+  remotePollingPaused: boolean;
+  setRemotePollingPaused: (paused: boolean) => void;
 
   loadRepos: () => Promise<void>;
   loadGroups: () => Promise<void>;
@@ -86,6 +94,8 @@ export const useRepositoryStore = create<RepositoryState>((set, get) => ({
   error: null,
   remoteChecks: {},
   checkingRemotes: false,
+  remotePollingPaused: false,
+  setRemotePollingPaused: (paused) => set({ remotePollingPaused: paused }),
 
   loadRepos: async () => {
     set({ loading: true, error: null });

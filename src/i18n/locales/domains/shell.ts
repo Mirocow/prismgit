@@ -60,6 +60,9 @@ export const en: Record<string, string> = {
   'shell.closeRepoMessage': 'This stops the file-system watcher, clears the git cache and all selections, and frees memory.',
   'shell.checkingRemotes': 'Checking remotes…',
   'shell.checkAllRemotesFull': 'Check all repositories for remote changes (fetch + incoming/outgoing)',
+  'shell.pauseRemotePolling': 'Stop the background fetch cycle (pause until resumed)',
+  'shell.resumeRemotePolling': 'Resume background remote checks (fetch + incoming/outgoing)',
+  'shell.remotePollingLabel': 'Fetch',
 
   // Sidebar — tree / navigation
   'shell.noReposYet': 'No repositories yet.',
@@ -380,6 +383,9 @@ export const ru: Record<string, string> = {
   'shell.closeRepoMessage': 'Будет остановлен наблюдатель файловой системы, очищен кэш git и все выделения, освобождена память.',
   'shell.checkingRemotes': 'Проверка remote…',
   'shell.checkAllRemotesFull': 'Проверить все репозитории на изменения в remote (fetch + входящие/исходящие)',
+  'shell.pauseRemotePolling': 'Остановить фоновый цикл fetch (пауза до возобновления)',
+  'shell.resumeRemotePolling': 'Возобновить фоновые проверки удалённых репозиториев (fetch + входящие/исходящие)',
+  'shell.remotePollingLabel': 'Фетч',
 
   // Sidebar — tree / navigation
   'shell.noReposYet': 'Пока нет репозиториев.',
@@ -700,6 +706,9 @@ export const zh: Record<string, string> = {
   'shell.closeRepoMessage': '这将停止文件系统监视器、清除 git 缓存和所有选择，并释放内存。',
   'shell.checkingRemotes': '正在检查远程…',
   'shell.checkAllRemotesFull': '检查所有仓库的远程更改（fetch + 传入/传出）',
+  'shell.pauseRemotePolling': '停止后台 fetch 循环（暂停直到恢复）',
+  'shell.resumeRemotePolling': '恢复后台远程检查（fetch + 传入/传出）',
+  'shell.remotePollingLabel': '拉取',
 
   // Sidebar — tree / navigation
   'shell.noReposYet': '还没有仓库。',
@@ -1020,6 +1029,9 @@ export const de: Record<string, string> = {
   'shell.closeRepoMessage': 'Dies stoppt den Dateisystem-Watcher, leert den Git-Cache und alle Auswahlen und gibt Speicher frei.',
   'shell.checkingRemotes': 'Remotes werden geprüft…',
   'shell.checkAllRemotesFull': 'Alle Repositories auf Remote-Änderungen prüfen (fetch + eingehend/ausgehend)',
+  'shell.pauseRemotePolling': 'Hintergrund-Fetch-Zyklus anhalten (Pause bis zum Fortsetzen)',
+  'shell.resumeRemotePolling': 'Hintergrund-Remote-Prüfungen fortsetzen (fetch + eingehend/ausgehend)',
+  'shell.remotePollingLabel': 'Fetch',
 
   // Sidebar — tree / navigation
   'shell.noReposYet': 'Noch keine Repositories.',

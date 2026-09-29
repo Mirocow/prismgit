@@ -265,7 +265,7 @@ const hotkeySelects = await page.locator('select[title*="Горячая клав
 check('V2 hotkey select per tool (17 rows)', hotkeySelects === 17, `got=${hotkeySelects}`);
 await shot(page, '08-sidebar-nav-settings');
 // Move the first tool down → navOrder persisted → sidebar order changes
-const moveDown = page.locator('button[title*="Переместить ниже"]').first();
+const moveDown = page.locator('button[title="Переместить ниже"]').first();
 await moveDown.click();
 await page.waitForTimeout(900);
 const saved = JSON.parse(fs.readFileSync(path.join(userDataDir, 'prismgit-settings.json'), 'utf8'));

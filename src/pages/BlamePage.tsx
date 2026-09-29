@@ -3,6 +3,7 @@ import { Search, FileText, Loader, RefreshCw, GitCommit, History, ChevronDown, C
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useNavHistoryStore } from '../stores/navHistoryStore';
 import { api, type BlameResult, type BlameLine } from '../lib/api';
 import { shortHash, cn, copyToClipboard } from '../lib/utils';
 import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
@@ -183,6 +184,8 @@ export function BlamePage() {
 
   // Click a commit hash → navigate to History with that commit + file filter
   const handleCommitClick = useCallback((hash: string) => {
+    // v3.9 — mark the cross-tool jump so Back returns to the blame state.
+    useNavHistoryStore.getState().markCrossToolJump();
     useSelectionStore.getState().selectCommit(hash);
     if (filePath.trim()) {
       useSelectionStore.getState().setPathFilter(filePath.trim());

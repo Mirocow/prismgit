@@ -11,7 +11,7 @@ import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { FooterCounters } from './FooterCounters';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Loader } from './icons';
+import { ArrowDown, ArrowUp, Loader, PanelBottomClose, PanelBottomOpen, Pause, Play } from './icons';
 
 /**
  * Clickable commit hash — clicking jumps to History and focuses that commit.
@@ -84,6 +84,8 @@ export function StatusBar({
   onToggleCommandLog?: () => void;
 }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
+  // v3.9 — background remote-poll pause state (the Pause/Play toggle).
+  const pollingPaused = useRepositoryStore((s) => s.remotePollingPaused);
   const status = useGitStore((s) => s.status);
   const lastRefresh = useGitStore((s) => s.lastRefresh);
   // Global selected commit — visible from anywhere in the app
@@ -265,6 +267,21 @@ export function StatusBar({
             {t('shell.updatedAt', { time: new Date(lastRefresh).toLocaleTimeString() })}
           </button>
         )}
+        {/* v3.9 — background-fetch pause toggle («нет возможности остановить
+            постоянный фетч»). One click stops the periodic remote poll until
+            resumed — the sidebar spinner turns into a Play button too. */}
+        {vis('outputToggle') && (
+        <button
+          className={cn('flex items-center gap-1 transition-colors cursor-pointer px-1',
+            pollingPaused ? 'text-accent' : 'text-text-tertiary hover:text-text-primary')}
+          onClick={() => useRepositoryStore.getState().setRemotePollingPaused(!pollingPaused)}
+          title={pollingPaused ? t('shell.resumeRemotePolling') : t('shell.pauseRemotePolling')}
+          data-testid="polling-pause-toggle"
+        >
+          {pollingPaused ? <Play size={10} /> : <Pause size={10} />}
+          <span className="text-2xs">{t('shell.remotePollingLabel')}</span>
+        </button>
+        )}
         {/* Command Log toggle button */}
         {vis('outputToggle') && (
         <button
@@ -272,7 +289,7 @@ export function StatusBar({
           onClick={() => onToggleCommandLog && onToggleCommandLog()}
           title={t('shell.toggleOutputTooltip')}
         >
-          {showCommandLog ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
+          {showCommandLog ? <PanelBottomClose size={10} /> : <PanelBottomOpen size={10} />}
           <span className="text-2xs">{t('shell.outputPanel')}</span>
         </button>
         )}

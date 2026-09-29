@@ -13,6 +13,7 @@ import { useContextMenu } from '../lib/useContextMenu';
 import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useFavoriteToolsStore } from '../stores/favoriteToolsStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
@@ -26,6 +27,7 @@ import {
   GitBranch,
   Moon,
   PanelLeftClose, PanelLeftOpen,
+  Play,
   Plus,
   RefreshCw,
   Settings as SettingsIcon,
@@ -101,6 +103,7 @@ export function Sidebar() {
   const metadata = useRepositoryStore((s) => s.metadata);
   const remoteChecks = useRepositoryStore((s) => s.remoteChecks);
   const checkingRemotes = useRepositoryStore((s) => s.checkingRemotes);
+  const remotePollingPaused = useRepositoryStore((s) => s.remotePollingPaused);
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   // Actions are stable references in zustand — selecting them via separate
   // calls doesn't cause re-renders on state changes.
@@ -183,25 +186,10 @@ export function Sidebar() {
     setCollapsedGroups(saved ? new Set(saved) : new Set(loadGlobalCollapsedGroups()));
   }, [currentRepo?.path]);
   // Favorites — GLOBAL (shared across all repositories), not per-repo.
-  // Default: Changes, History, Diff — the 3 most-used tools.
-  const FAVORITES_KEY = 'prismgit-favorite-tools';
-  const DEFAULT_FAVORITES = ['/changes', '/history', '/branches', '/diff'];
-  const [favoriteTools, setFavoriteTools] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(FAVORITES_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch { /* ignore */ }
-    return DEFAULT_FAVORITES;
-  });
-
-  // Save to global localStorage whenever favorites change
-  useEffect(() => {
-    try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(favoriteTools)); } catch { /* ignore */ }
-  }, [favoriteTools]);
-
-  const toggleFavorite = useCallback((path: string) => {
-    setFavoriteTools(prev => prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]);
-  }, []);
+  // v3.9: the list lives in useFavoriteToolsStore (localStorage persistence
+  // included) so Settings' «Избранные инструменты» block can REORDER it.
+  const favoriteTools = useFavoriteToolsStore((s) => s.favorites);
+  const toggleFavorite = useFavoriteToolsStore((s) => s.toggleFavorite);
 
   // Repository tree DnD state. dragPayload is mirrored in a ref because
   // dataTransfer.getData() is unavailable during dragover in Chromium.
@@ -928,32 +916,55 @@ export function Sidebar() {
                 <X size={14} />
               </button>
             )}
-            <button
-              className="icon-btn no-drag shrink-0 !w-7 !h-7"
-              title={checkingRemotes ? t('shell.checkingRemotes') : t('shell.checkAllRemotesFull')}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                // Refresh BOTH:
-                //  1) remote checks (fetch + incoming/outgoing counters)
-                //  2) cached metadata (lastCommit, branchCount, commitCount,
-                //     provider) — previously this was NOT refreshed, which
-                //     made the sidebar rows look "stuck" after a push/pull
-                //     because the cached stats never updated.
-                //  3) repo list — removes repos whose folders were deleted
-                //     from disk externally (e.g. via Finder).
-                // Bug fix: clearPollCache() BEFORE checkRemotes() so the
-                // poll doesn't return the 60s cached result. Without this,
-                // clicking refresh within 60s of the last poll returned
-                // stale ↓/↑ numbers.
-                void api.git.clearPollCache().then(() => {
-                  void checkRemotes();
-                });
-                void useRepositoryStore.getState().refreshAllStats();
-              }}
-            >
-              <RefreshCw size={13} className={cn(checkingRemotes && 'animate-spin')} />
-            </button>
+            {/* v3.9 — the fetch control: PAUSED → Play (resume); a check is
+                RUNNING (spinner) → click stops future cycles («клик по
+                крутилке останавливает фетч»); idle → normal refresh. */}
+            {remotePollingPaused ? (
+              <button
+                className="icon-btn no-drag shrink-0 !w-7 !h-7 !text-accent"
+                title={t('shell.resumeRemotePolling')}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  useRepositoryStore.getState().setRemotePollingPaused(false);
+                }}
+              >
+                <Play size={13} />
+              </button>
+            ) : (
+              <button
+                className={cn('icon-btn no-drag shrink-0 !w-7 !h-7', checkingRemotes && '!text-accent')}
+                title={checkingRemotes ? t('shell.pauseRemotePolling') : t('shell.checkAllRemotesFull')}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (checkingRemotes) {
+                    // The user clicked the RUNNING spinner — stop the
+                    // background fetch loop instead of stacking another check.
+                    useRepositoryStore.getState().setRemotePollingPaused(true);
+                    return;
+                  }
+                  // Refresh BOTH:
+                  //  1) remote checks (fetch + incoming/outgoing counters)
+                  //  2) cached metadata (lastCommit, branchCount, commitCount,
+                  //     provider) — previously this was NOT refreshed, which
+                  //     made the sidebar rows look "stuck" after a push/pull
+                  //     because the cached stats never updated.
+                  //  3) repo list — removes repos whose folders were deleted
+                  //     from disk externally (e.g. via Finder).
+                  // Bug fix: clearPollCache() BEFORE checkRemotes() so the
+                  // poll doesn't return the 60s cached result. Without this,
+                  // clicking refresh within 60s of the last poll returned
+                  // stale ↓/↑ numbers.
+                  void api.git.clearPollCache().then(() => {
+                    void checkRemotes();
+                  });
+                  void useRepositoryStore.getState().refreshAllStats();
+                }}
+              >
+                <RefreshCw size={13} className={cn(checkingRemotes && 'animate-spin')} />
+              </button>
+            )}
           </div>
         </div>
 

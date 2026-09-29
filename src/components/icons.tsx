@@ -182,6 +182,35 @@ export const PanelRightOpen = (p: IconProps) => (
   </Icon>
 );
 
+export const PanelBottomClose = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="3" y1="15" x2="21" y2="15" />
+    <polyline points="9 9 12 12 15 9" />
+  </Icon>
+);
+
+export const PanelBottomOpen = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="3" y1="15" x2="21" y2="15" />
+    <polyline points="9 12 12 9 15 12" />
+  </Icon>
+);
+
+export const Pause = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="6" y="4" width="4" height="16" rx="1" />
+    <rect x="14" y="4" width="4" height="16" rx="1" />
+  </Icon>
+);
+
+export const Play = (p: IconProps) => (
+  <Icon {...p}>
+    <polygon points="6 3 20 12 6 21 6 3" />
+  </Icon>
+);
+
 export const ChevronUp = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="18 15 12 9 6 15" />

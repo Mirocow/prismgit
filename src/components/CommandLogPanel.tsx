@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useRef, memo } from 'react';
 import { useCommandLogStore } from '../stores/commandLogStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { api, type CommandLogEntry } from '../lib/api';
-import { Check, X, ChevronDown, ChevronRight, Trash, Loader, Copy, Terminal, Search } from './icons';
+import { Check, X, ChevronDown, ChevronRight, Trash, Loader, Copy, Terminal, Search, PanelBottomClose } from './icons';
 import { cn } from '../lib/utils';
 import { useLazyList } from '../lib/useLazyList';
 import { useI18n } from '../lib/i18n';
@@ -499,7 +499,9 @@ export function CommandLogPanel({
             title={t('pages.closePanelTitle')}
             onClick={onClose}
           >
-            <X size={12} />
+            {/* v3.9 — VS Code-style collapse chevron (the console folds
+                DOWN, like VS Code's panel collapse in its header). */}
+            <PanelBottomClose size={12} />
           </button>
         </div>
       </div>

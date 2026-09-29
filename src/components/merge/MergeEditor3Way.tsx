@@ -567,22 +567,31 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
       )}
 
       {/* Fixed pane headers — OUTSIDE the scroller so they don't scroll away.
-          Widths mirror the 3 columns below (flex-1 + matching borders). */}
+          v3.9: widths MIRROR the body columns (leftPct/rightPct) — with the
+          resizable panes the old equal thirds desynced from the body as soon
+          as the user dragged a splitter, and the header borders then landed
+          mid-text (part of the «отображение/полоса» report). The splitter
+          columns below are 6px wide each — headers add the same so the
+          borders line up exactly: left header = leftPct% (same as the body
+          pane), a 6px placeholder per splitter, middle flex, right =
+          rightPct%. */}
       <div className="flex shrink-0 h-8 border-b border-border-default bg-bg-tertiary text-xs font-medium">
-        <div className="flex-1 min-w-0 flex items-center px-3 border-r border-border-default">
+        <div className="min-w-0 flex items-center px-3 border-r border-border-default shrink-0" style={{ width: `${leftPct}%` }}>
           <span className="truncate text-status-added">{t('conflict.oursPaneTitle')}</span>
           <span className="ml-2 text-2xs text-text-tertiary font-normal shrink-0">
             ({oursLines.length} {t('common.lines')})
           </span>
         </div>
-        <div className="flex-1 min-w-0 flex items-center px-3 border-x border-border-default">
+        <div className="w-[6px] shrink-0" />
+        <div className="flex-1 min-w-0 flex items-center px-3">
           <span className="truncate">{t('conflict.resultPaneTitle')}</span>
           <span className="ml-2 text-2xs text-text-tertiary font-normal shrink-0">
             ({resultLines.length} {t('common.lines')})
           </span>
         </div>
-        <div className="flex-1 min-w-0 flex items-center px-3 border-l border-border-default">
-          <span className="truncate text-status-info" style={{ color: 'var(--status-info)' }}>
+        <div className="w-[6px] shrink-0" />
+        <div className="min-w-0 flex items-center px-3 border-l border-border-default shrink-0" style={{ width: `${rightPct}%` }}>
+          <span className="truncate" style={{ color: 'var(--status-info)' }}>
             {t('conflict.theirsPaneTitle')}
           </span>
           <span className="ml-2 text-2xs text-text-tertiary font-normal shrink-0">
@@ -607,10 +616,13 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
             lines={oursLines}
           />
         </div>
-        {/* Vertical splitter — Ours | Result. Sticky so it stays grabbable
-            while the shared scroller is scrolled down. */}
-        <div style={{ position: 'sticky', top: 0, height: viewport.viewportHeight }} className="flex-shrink-0">
-          <ResizableSplitter direction="horizontal" onResize={handleLeftResize} />
+        {/* Vertical splitter — Ours | Result. v3.9: the wrapper is a FLEX
+            row so the splitter STRETCHES to the wrapper height (the old plain
+            div left it height 0 — invisible and ungrabbable: mousedown landed
+            on the neighbouring pane; that was «полоса, которую нельзя
+            перетащить»). Sticky keeps it grabbable at any scroll offset. */}
+        <div style={{ position: 'sticky', top: 0, height: viewport.viewportHeight }} className="flex shrink-0 items-stretch">
+          <ResizableSplitter direction="horizontal" onResize={handleLeftResize} wide />
         </div>
 
         {/* Middle: Result (editable) + floating per-conflict action bars */}
@@ -639,9 +651,9 @@ export function MergeEditor3Way({ filePath, onResolved }: MergeEditor3WayProps) 
           ))}
         </div>
 
-        {/* Vertical splitter — Result | Theirs (sticky, see above). */}
-        <div style={{ position: 'sticky', top: 0, height: viewport.viewportHeight }} className="flex-shrink-0">
-          <ResizableSplitter direction="horizontal" onResize={handleRightResize} />
+        {/* Vertical splitter — Result | Theirs (sticky + flex, see above). */}
+        <div style={{ position: 'sticky', top: 0, height: viewport.viewportHeight }} className="flex shrink-0 items-stretch">
+          <ResizableSplitter direction="horizontal" onResize={handleRightResize} wide />
         </div>
 
         {/* Right: Theirs (read-only, windowed) — width controlled by the splitter */}

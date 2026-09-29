@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../lib/i18n';
 import { getThemeMeta, type CustomThemeColors, type CustomThemeEntry } from '../lib/themes';
+import { readableOn } from '../lib/customThemeCss';
 import { cn } from '../lib/utils';
-import { Palette, Pencil, Trash, X } from './icons';
+import { AlertTriangle, Palette, Pencil, Trash, X } from './icons';
+import { InfoHint } from './InfoHint';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog } from './ConfirmDialog';
 
@@ -18,6 +20,48 @@ import { confirmDialog } from './ConfirmDialog';
  * mirrors the picker cards. Saving upserts into settings.customThemes; the
  * card in the picker applies it.
  */
+
+/** Per-zone «!» hints (v3.9 — «с зонами тем большая беда, особенно с
+ *  названием \u201cПанель\u201d»): every swatch explains WHERE its color lands,
+ *  so the names alone don't have to. */
+const ZONE_HINTS: Partial<Record<keyof CustomThemeColors, string>> = {
+  bgPrimary: 'settings.zoneHintBgPrimary',
+  bgSecondary: 'settings.zoneHintBgSecondary',
+  bgTertiary: 'settings.zoneHintBgTertiary',
+  bgElevated: 'settings.zoneHintBgElevated',
+  bgSidebar: 'settings.zoneHintBgSidebar',
+  textPrimary: 'settings.zoneHintTextPrimary',
+  textSecondary: 'settings.zoneHintTextSecondary',
+  textTertiary: 'settings.zoneHintTextTertiary',
+  accent: 'settings.zoneHintAccent',
+  border: 'settings.zoneHintBorder',
+};
+
+/** Text tokens checked against the main background for readability. */
+const TEXT_TOKENS: (keyof CustomThemeColors)[] = ['textPrimary', 'textSecondary', 'textTertiary'];
+
+// ── WCAG contrast math (local — same formulas as customThemeCss) ────────
+function parseHexLocal(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec((hex || '').trim());
+  if (!m) return null;
+  const v = parseInt(m[1], 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+function relLum([r, g, b]: [number, number, number]): number {
+  const f = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+function contrastRatio(aHex: string, bHex: string): number | null {
+  const a = parseHexLocal(aHex);
+  const b = parseHexLocal(bHex);
+  if (!a || !b) return null;
+  const l1 = relLum(a);
+  const l2 = relLum(b);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+}
 
 interface ColorField {
   key: keyof CustomThemeColors;
@@ -91,6 +135,10 @@ export function ThemeEditorDialog({
   const [name, setName] = useState('');
   const [isDark, setIsDark] = useState(false);
   const [colors, setColors] = useState<CustomThemeColors>({});
+  // v3.9 — the swatch being hovered: the PREVIEW highlights the zone that
+  // color drives (VS Code-style "where does this color land" affordance —
+  // the answer to «с зонами тем большая беда»).
+  const [hoveredKey, setHoveredKey] = useState<keyof CustomThemeColors | null>(null);
 
   useEscapeKey(open, onClose);
 
@@ -151,10 +199,36 @@ export function ThemeEditorDialog({
 
   const renderField = (f: ColorField) => {
     const value = colors[f.key] ?? '';
+    // v3.9 — text tokens are contrast-checked against the main background:
+    // a dark-on-dark / light-on-light pick gets a warning chip + a one-click
+    // «Сделать читаемым» fix (readableOn picks the readable near-black/white).
+    const isTextToken = TEXT_TOKENS.includes(f.key);
+    const ratio = isTextToken ? contrastRatio(value || preview.textPrimary, preview.bgPrimary) : null;
+    const lowContrast = isTextToken && ratio != null && ratio < 4.5 && value !== '';
+    const zoneHint = ZONE_HINTS[f.key];
     return (
-      <label key={f.key} className="flex items-center justify-between gap-2 py-1">
-        <span className="text-xs text-text-secondary min-w-0 truncate">
-          {t(f.labelKey, { defaultValue: f.key })}
+      <label
+        key={f.key}
+        className="flex items-center justify-between gap-2 py-1"
+        onMouseEnter={() => setHoveredKey(f.key)}
+        onMouseLeave={() => setHoveredKey((k) => (k === f.key ? null : k))}
+      >
+        <span className="flex items-center gap-1 text-xs text-text-secondary min-w-0">
+          <span className="truncate">
+            {t(f.labelKey, { defaultValue: f.key })}
+          </span>
+          {zoneHint && (
+            <InfoHint text={t(zoneHint, { defaultValue: '' })} />
+          )}
+          {lowContrast && (
+            <span
+              className="flex items-center gap-0.5 text-2xs text-status-modified shrink-0"
+              title={t('settings.zoneContrastWarning', { defaultValue: 'Контраст с фоном ниже 4.5:1 — текст будет плохо читаться' })}
+            >
+              <AlertTriangle size={9} />
+              {ratio != null ? `${ratio.toFixed(1)}:1` : ''}
+            </span>
+          )}
           {f.key === 'bgSidebar' && (
             <span className="text-2xs text-text-tertiary block truncate">
               {t('settings.themeEditorSidebarNote', { defaultValue: 'Тёмный сайдбар при светлом окне' })}
@@ -162,6 +236,20 @@ export function ThemeEditorDialog({
           )}
         </span>
         <span className="flex items-center gap-1.5 shrink-0">
+          {lowContrast && (
+            <button
+              type="button"
+              className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/50 text-status-modified hover:bg-status-modified/10 shrink-0"
+              title={t('settings.zoneContrastFix', { defaultValue: 'Сделать читаемым на этом фоне' })}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setColor(f.key, readableOn(preview.bgPrimary));
+              }}
+            >
+              {t('settings.zoneContrastFixLabel', { defaultValue: 'Читаемо' })}
+            </button>
+          )}
           <input
             type="color"
             className="w-7 h-7 rounded border border-border-default cursor-pointer bg-transparent p-0.5"
@@ -250,15 +338,24 @@ export function ThemeEditorDialog({
             </div>
             <div
               className="rounded-md border border-border-default overflow-hidden"
-              style={{ background: preview.bgPrimary }}
+              style={{
+                background: preview.bgPrimary,
+                outline: hoveredKey && (hoveredKey === 'bgPrimary' || TEXT_TOKENS.includes(hoveredKey)) ? '2px dashed #f59e0b' : 'none',
+                outlineOffset: -2,
+              }}
             >
               <div
                 className="flex items-center gap-1.5 px-2 py-1.5 border-b"
-                style={{ background: preview.bgTertiary, borderColor: preview.border }}
+                style={{
+                  background: preview.bgTertiary,
+                  borderColor: preview.border,
+                  outline: hoveredKey === 'bgTertiary' ? '2px dashed #f59e0b' : 'none',
+                  outlineOffset: -2,
+                }}
               >
-                <span className="rounded-full" style={{ width: 8, height: 8, background: preview.statusDeleted, display: 'inline-block' }} />
-                <span className="rounded-full" style={{ width: 8, height: 8, background: preview.statusModified, display: 'inline-block' }} />
-                <span className="rounded-full" style={{ width: 8, height: 8, background: preview.statusAdded, display: 'inline-block' }} />
+                <span className="rounded-full" style={{ width: 8, height: 8, background: preview.statusDeleted, display: 'inline-block', outline: hoveredKey === 'statusDeleted' ? '2px solid #f59e0b' : 'none' }} />
+                <span className="rounded-full" style={{ width: 8, height: 8, background: preview.statusModified, display: 'inline-block', outline: hoveredKey === 'statusModified' ? '2px solid #f59e0b' : 'none' }} />
+                <span className="rounded-full" style={{ width: 8, height: 8, background: preview.statusAdded, display: 'inline-block', outline: hoveredKey === 'statusAdded' ? '2px solid #f59e0b' : 'none' }} />
                 <span className="ml-1 text-2xs font-medium truncate flex-1" style={{ color: preview.textPrimary }}>
                   {name || t('settings.themeEditorDefaultName', { defaultValue: 'Моя тема' })}
                 </span>
@@ -266,28 +363,51 @@ export function ThemeEditorDialog({
               <div className="flex" style={{ minHeight: 90 }}>
                 <div
                   className="flex flex-col gap-1 p-1.5"
-                  style={{ width: 48, background: preview.bgSecondary, borderRight: `1px solid ${preview.border}` }}
+                  style={{
+                    width: 48,
+                    background: colors.bgSidebar ?? preview.bgSecondary,
+                    borderRight: `1px solid ${preview.border}`,
+                    outline: hoveredKey === 'bgSidebar' || hoveredKey === 'bgSecondary' ? '2px dashed #f59e0b' : 'none',
+                    outlineOffset: -2,
+                  }}
                 >
-                  <div className="rounded-sm" style={{ height: 7, background: preview.accent, opacity: 0.5 }} />
+                  <div className="rounded-sm" style={{ height: 7, background: preview.accent, opacity: 0.5, outline: hoveredKey === 'accent' ? '2px solid #f59e0b' : 'none' }} />
                   <div className="rounded-sm" style={{ height: 7, background: preview.textPrimary, opacity: 0.25 }} />
                   <div className="rounded-sm" style={{ height: 7, background: preview.textPrimary, opacity: 0.25 }} />
                   <div className="rounded-sm" style={{ height: 7, background: preview.textPrimary, opacity: 0.25 }} />
                 </div>
-                <div className="flex-1 p-2 flex flex-col gap-1" style={{ background: preview.bgPrimary }}>
-                  <div className="flex items-center gap-1 text-2xs" style={{ color: preview.textPrimary }}>
+                <div
+                  className="flex-1 p-2 flex flex-col gap-1"
+                  style={{
+                    background: preview.bgPrimary,
+                    outline: hoveredKey === 'bgPrimary' ? '2px dashed #f59e0b' : 'none',
+                    outlineOffset: -2,
+                  }}
+                >
+                  <div className="flex items-center gap-1 text-2xs" style={{ color: preview.textPrimary, background: hoveredKey === 'textPrimary' ? 'rgba(245,158,11,0.18)' : 'transparent' }}>
                     <span style={{ color: preview.statusModified, fontWeight: 700 }}>M</span>
                     <span style={{ opacity: 0.85 }}>file.ts</span>
                   </div>
-                  <div className="flex items-center gap-1 text-2xs" style={{ color: preview.textPrimary }}>
+                  <div className="flex items-center gap-1 text-2xs" style={{ color: preview.textPrimary, background: hoveredKey === 'textPrimary' ? 'rgba(245,158,11,0.18)' : 'transparent' }}>
                     <span style={{ color: preview.statusAdded, fontWeight: 700 }}>A</span>
                     <span style={{ opacity: 0.85 }}>new.ts</span>
                   </div>
-                  <div className="text-2xs" style={{ color: preview.textSecondary, opacity: 0.8 }}>
+                  <div className="text-2xs" style={{ color: preview.textSecondary, opacity: 0.8, background: hoveredKey === 'textSecondary' ? 'rgba(245,158,11,0.18)' : 'transparent' }}>
                     {t('settings.themeEditorTextSample', { defaultValue: 'Текст вторичного цвета' })}
                   </div>
                   <div
                     className="self-start mt-auto px-1.5 py-0.5 rounded text-2xs font-medium"
-                    style={{ background: preview.accent, color: preview.bgPrimary }}
+                    style={{
+                      background: preview.accent,
+                      // v3.9 — was bgPrimary: on a light accent over a light
+                      // main bg the button label was invisible («наложение
+                      // при тёмных цветах»). The compiled theme uses
+                      // --text-inverse = readableOn(accent) — the preview now
+                      // matches what will actually render.
+                      color: readableOn(preview.accent),
+                      outline: hoveredKey === 'accent' || hoveredKey === 'border' ? '2px dashed #f59e0b' : 'none',
+                      outlineOffset: -2,
+                    }}
                   >
                     {t('settings.sampleButton')}
                   </div>

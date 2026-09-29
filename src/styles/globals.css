@@ -1168,6 +1168,49 @@
     right: -3px;
   }
 
+  /* v3.9 — the WIDE variant: a real grabbable divider for layouts where the
+     splitter is a PRIMARY resize control (3-way merge Ours|Result|Theirs).
+     The 1px default was invisible AND ungrabbable there (the merge editor's
+     sticky wrapper didn't stretch it → height 0 → the «полоса по середине
+     панели» that couldn't be dragged). 6px body + visible center grip +
+     ±5px hit area. */
+  .split-divider-wide {
+    width: 6px;
+    background: var(--bg-tertiary);
+  }
+
+  .split-divider-wide::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    margin-left: -0.5px;
+    background: var(--border-strong);
+    pointer-events: none;
+  }
+
+  .split-divider-wide::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -5px;
+    right: -5px;
+  }
+
+  .split-divider-wide:hover,
+  .split-divider-wide.dragging {
+    background: var(--accent-muted);
+  }
+
+  .split-divider-wide:hover::before,
+  .split-divider-wide.dragging::before {
+    background: var(--accent);
+    width: 2px;
+  }
+
   .split-divider-horizontal {
     height: 1px;
     width: 100%;
