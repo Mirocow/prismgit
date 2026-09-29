@@ -24,6 +24,7 @@ import { useToastActions } from '../stores/toastStore';
 import { useI18n } from '../lib/i18n';
 import { api } from '../lib/api';
 import { proxyFetch } from '../lib/aiChat';
+import { isFreeModel } from '../lib/aiErrors';
 import { cn } from '../lib/utils';
 import {
   PROVIDER_TEMPLATES, getProviderTemplate, kindToProtocol, kindBadge,
@@ -44,6 +45,8 @@ interface ProviderModelInfo {
   family?: string;
   parameterSize?: string;
   quantization?: string;
+  /** v2.3.12 — true when the provider lists this model as free (OpenRouter). */
+  free?: boolean;
 }
 
 interface TestResult {
@@ -101,6 +104,10 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
   const [models, setModels] = useState<ProviderModelInfo[]>([]);
   const [modelsOpen, setModelsOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
+  // v2.3.12 — "free only" filter for fetched model lists. OpenRouter lists
+  // hundreds of models; free ones (pricing 0 / :free suffix) are what most
+  // users want — the filter defaults ON for the openrouter template.
+  const [freeOnly, setFreeOnly] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [fetchResult, setFetchResult] = useState<TestResult | null>(null);
 
@@ -123,6 +130,9 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
   const fetchModels = useCallback(async () => {
     setFetching(true);
     setModelsOpen(true);
+    // v2.3.12 — OpenRouter's list is huge and mostly paid; free is what the
+    // user is there for. Default the filter ON for that template.
+    setFreeOnly(templateId === 'openrouter');
     const started = Date.now();
     try {
       // Derive the models URL in the RENDERER (same as CloudModelPicker),
@@ -172,6 +182,9 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
           ...(m.details?.parameter_size ? { parameterSize: m.details.parameter_size } : {}),
           ...(m.details?.quantization_level ? { quantization: m.details.quantization_level } : {}),
           ...(m.details?.format ? { format: m.details.format } : {}),
+          // v2.3.12 — OpenRouter /models entries carry pricing ("0" = free);
+          // Ollama entries don't (all local = free anyway, no badge needed).
+          ...(isFreeModel(m) ? { free: true } : {}),
         })).filter((m: ProviderModelInfo) => m.id);
         setModels(modelList);
         setFetchResult({ loading: false, ok: true, error: null, latencyMs: Date.now() - started, modelCount: modelList.length });
@@ -190,7 +203,7 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
     } finally {
       setFetching(false);
     }
-  }, [protocol, url, apiKey, isOllama]);
+  }, [protocol, url, apiKey, isOllama, templateId]);
 
   const handleSave = async () => {
     const finalName = name.trim() || template.label;
@@ -386,21 +399,36 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
                 )}
                 {!fetching && fetchResult?.ok && models.length > 0 && (
                   <>
-                    {/* Search field — filters models by name (case-insensitive) */}
-                    <div className="relative px-2 py-1.5 border-b border-border-subtle shrink-0">
-                      <Search size={11} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
-                      <input
-                        type="text"
-                        autoFocus
-                        className="w-full text-xs pl-6 pr-2 py-1 bg-bg-tertiary border border-border-default rounded outline-none focus:border-accent"
-                        placeholder={t('settings.aiGridSearchModels') || 'Search models...'}
-                        value={modelSearch}
-                        onChange={(e) => setModelSearch(e.target.value)}
-                      />
+                    {/* Search field — filters models by name (case-insensitive). */}
+                    {/* v2.3.12 — + a "free only" toggle when the list has */}
+                    {/* any free models (OpenRouter pricing 0 / :free). */}
+                    <div className="relative px-2 py-1.5 border-b border-border-subtle shrink-0 flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search size={11} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+                        <input
+                          type="text"
+                          autoFocus
+                          className="w-full text-xs pl-6 pr-2 py-1 bg-bg-tertiary border border-border-default rounded outline-none focus:border-accent"
+                          placeholder={t('settings.aiGridSearchModels') || 'Search models...'}
+                          value={modelSearch}
+                          onChange={(e) => setModelSearch(e.target.value)}
+                        />
+                      </div>
+                      {models.some(m => m.free) && (
+                        <label className="flex items-center gap-1 text-2xs text-text-secondary cursor-pointer select-none shrink-0" title="Only models that cost nothing (pricing 0 or :free)">
+                          <input
+                            type="checkbox"
+                            checked={freeOnly}
+                            onChange={(e) => setFreeOnly(e.target.checked)}
+                            className="w-3 h-3"
+                          />
+                          {t('settings.aiGridFreeOnly') || 'Free only'}
+                        </label>
+                      )}
                     </div>
                     <div className="overflow-y-auto flex-1">
                       {models
-                        .filter(m => !modelSearch.trim() || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
+                        .filter(m => (!modelSearch.trim() || m.id.toLowerCase().includes(modelSearch.toLowerCase())) && (!freeOnly || m.free))
                         .map(m => (
                         <button
                           key={m.id}
@@ -411,12 +439,17 @@ function ProviderEditorModal({ initial, onClose }: EditorProps) {
                           onClick={() => { setModel(m.id); setModelsOpen(false); setModelSearch(''); }}
                         >
                           <span className="truncate flex-1 font-mono">{m.id}</span>
+                          {m.free && (
+                            <span className="text-3xs font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-status-added/15 text-status-added shrink-0">
+                              FREE
+                            </span>
+                          )}
                           {m.parameterSize && <span className="text-3xs text-text-tertiary shrink-0">{m.parameterSize}</span>}
                           {m.quantization && <span className="text-3xs text-text-tertiary shrink-0">{m.quantization}</span>}
                           {m.size && <span className="text-3xs text-text-tertiary shrink-0">{formatSize(m.size)}</span>}
                         </button>
                       ))}
-                      {models.filter(m => !modelSearch.trim() || m.id.toLowerCase().includes(modelSearch.toLowerCase())).length === 0 && (
+                      {models.filter(m => (!modelSearch.trim() || m.id.toLowerCase().includes(modelSearch.toLowerCase())) && (!freeOnly || m.free)).length === 0 && (
                         <div className="px-3 py-2 text-2xs text-text-tertiary italic">
                           {t('settings.aiGridNoMatch') || 'No models match'} "{modelSearch}"
                         </div>

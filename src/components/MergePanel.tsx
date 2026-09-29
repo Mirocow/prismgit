@@ -7,6 +7,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { api } from '../lib/api';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
 import type { LLMProvider } from '../lib/aiCommitMessages';
+import { llmErrorDetail } from '../lib/aiErrors';
 import type { AppSettings } from '../../electron/types/settings-api';
 import { useI18n } from '../lib/i18n';
 
@@ -440,7 +441,8 @@ export function MergePanel({
                       // Copy to clipboard for user to paste
                       navigator.clipboard.writeText(message);
                     } catch (e) {
-                      toast.error(t('changes.aiGenerationFailed'), String(e));
+                      // v2.3.12 — friendly detail instead of a raw error dump.
+                      toast.error(t('changes.aiGenerationFailed'), llmErrorDetail(e));
                     }
                   }}
                 >

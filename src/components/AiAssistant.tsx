@@ -7,6 +7,9 @@ import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage, type TokenUsage } from '../lib/aiChat';
 import type { LLMProvider } from '../lib/aiCommitMessages';
+import {
+  describeLLMError, llmErrorTitleKey, subscribeLLMFallback,
+} from '../lib/aiErrors';
 import { buildProviderFromSettings } from '../lib/aiUtils';
 import {
   getEnabledAiProviders, getActiveAiProvider,
@@ -306,6 +309,15 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
+  // v2.3.12 — OpenRouter free-model fallback notice: when a :free model
+  // 429s and the request is retried via the openrouter/free meta-router,
+  // tell the user (info toast) — the switch must be visible, not silent.
+  useEffect(() => {
+    return subscribeLLMFallback((model) => {
+      toast.info(t('aiErr.fallbackToastTitle', { model }), t('aiErr.fallbackToastDetail'));
+    });
+  }, [toast, t]);
+
   // ── Session switcher dropdown ───────────────────────────────────────────
   const [showSessionMenu, setShowSessionMenu] = useState(false);
   const sortedRepos = useMemo(() => {
@@ -376,8 +388,15 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           content: t('aiAssistant.stoppedByUser'),
         });
       } else {
-        toast.error(t('changes.aiGenerationFailed'), String(e));
-        storeAppendMessage({ role: 'assistant', content: `Error: ${String(e)}` });
+        // v2.3.12 — structured, localized error instead of the old
+        // 'Error: ' + String(e) concatenation (which produced the double
+        // "Error: Error: OpenAI chat error 429: {raw JSON}" wall).
+        const info = describeLLMError(e);
+        const lines = [t(llmErrorTitleKey(info.kind)) + (info.status ? ` (HTTP ${info.status})` : '')];
+        if (info.providerMessage) lines.push(info.providerMessage.slice(0, 240));
+        if (info.remedy) lines.push(info.remedy.slice(0, 200));
+        toast.error(t('changes.aiGenerationFailed'), lines.join('\n'));
+        storeAppendMessage({ role: 'assistant', content: lines.join('\n') });
       }
     } finally {
       setBusy(false);

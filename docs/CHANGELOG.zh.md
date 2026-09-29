@@ -7,6 +7,15 @@ PrismGit 的所有显著变更都记录在此文件中。
 
 **其他语言：** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [Deutsch](CHANGELOG.de.md)
 
+## [2.3.12] - 2026-09-29
+
+### 修复 — OpenRouter 免费模型：可读的错误提示 + 429 自动绕行（「免费里只有 openrouter/free 能用」）
+- 告别 `Error: Error: OpenAI chat error 429: {"error":{…}}` 原始 JSON 长墙：所有 LLM 调用点（助手聊天、AI 聊天页、提交信息批量与流式、主进程 IPC 路径）现在抛出结构化的 `LLMApiError`，界面渲染本地化标题 + 提供商的真实信息（OpenRouter 把它藏在 `error.metadata.raw` —「google/gemma-…:free is temporarily rate-limited upstream」）+ 建议措施，而不是带双重 "Error: " 前缀的 JSON 堆
+- **`:free` 模型遇到 429 现在自动改走 `openrouter/free` 重试** — 这个元路由会在所有提供商里选任何可用的免费模型，这正是它「唯一能用」的原因。每次请求重试一次，并用信息级 toast 明示（切换可见、绝不静默）；付费模型的 429（你自己的密钥配额）仍然显示为可读错误 — 不悄悄降级质量
+- OpenRouter 预设的默认模型 `meta-llama/llama-3.1-8b-instruct:free`（上游早已下线）改为 `openrouter/free`，描述说明了何时适合具体 `:free` 模型（它们仍可用 — 429 时会自动经路由重试）
+- 提供商编辑器的模型下拉列表现在给免费模型（OpenRouter pricing 0 / `:free` / 路由本身）打上绿色 FREE 徽章，并新增「仅免费」过滤（OpenRouter 默认开启）— 可拉取的列表有数百个 mostly-paid 条目，不再碍事
+- 错误也完整穿越 Electron IPC 边界：消息携带可解析的 `[kind status]` 标记，主进程故障同样获得友好的渲染
+
 ## [2.3.11] - 2026-09-29
 
 ### 修复 — AI 助手开箱即用处处不可用（«AI assistant в комитах и не только не работает»）

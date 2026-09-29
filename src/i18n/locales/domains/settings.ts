@@ -592,6 +592,7 @@ export const en: Record<string, string> = {
 
   // ── v3.4 localization completion ──
   'settings.aiGridSearchModels': 'Search models...',
+  'settings.aiGridFreeOnly': 'Free only',
   'settings.aiGridNoMatch': 'No models match',
   'settings.commitGraphHint': 'Write commit-graph cache after fetch — speeds up git log, blame, and history graph traversal by 40-60%.',
   'settings.fsmonitorHint': 'FileSystem Monitor — git tracks changed files without scanning the whole tree. Massive speedup on repos with 100k+ files.',
@@ -1215,6 +1216,7 @@ export const ru: Record<string, string> = {
 
   // ── v3.4 localization completion ──
   'settings.aiGridSearchModels': 'Поиск моделей...',
+  'settings.aiGridFreeOnly': 'Только бесплатные',
   'settings.aiGridNoMatch': 'Нет подходящих моделей',
   'settings.commitGraphHint': 'Записывать кэш commit-graph после fetch — ускоряет git log, blame и обход графа истории на 40-60%.',
   'settings.fsmonitorHint': 'FileSystem Monitor — git отслеживает изменённые файлы без сканирования всего дерева. Огромное ускорение на репозиториях со 100k+ файлов.',
@@ -1837,6 +1839,7 @@ export const zh: Record<string, string> = {
 
   // ── v3.4 localization completion ──
   'settings.aiGridSearchModels': '搜索模型…',
+  'settings.aiGridFreeOnly': '仅免费',
   'settings.aiGridNoMatch': '没有匹配的模型',
   'settings.commitGraphHint': 'fetch 后写入 commit-graph 缓存——将 git log、blame 和历史图遍历提速 40-60%。',
   'settings.fsmonitorHint': '文件系统监视器——git 无需扫描整个文件树即可跟踪更改。在含 10 万+ 文件的仓库中提速显著。',
@@ -2459,6 +2462,7 @@ export const de: Record<string, string> = {
 
   // ── v3.4 localization completion ──
   'settings.aiGridSearchModels': 'Modelle suchen...',
+  'settings.aiGridFreeOnly': 'Nur kostenlose',
   'settings.aiGridNoMatch': 'Keine passenden Modelle',
   'settings.commitGraphHint': 'Commit-Graph-Cache nach Fetch schreiben — beschleunigt git log, blame und das Durchlaufen des Historiengraphen um 40-60%.',
   'settings.fsmonitorHint': 'FileSystem-Monitor — git verfolgt geänderte Dateien, ohne den ganzen Baum zu scannen. Enorme Beschleunigung bei Repositories mit 100k+ Dateien.',

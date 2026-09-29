@@ -13,6 +13,10 @@
  */
 
 import { proxyFetch } from './aiChat';
+import {
+  LLMApiError, OPENROUTER_FREE_MODEL, notifyLLMFallback,
+  shouldFallbackToOpenRouterFree,
+} from './aiErrors';
 import { deriveChatUrl, deriveAnthropicUrl, deriveOllamaChatUrl } from './aiUtils';
 
 export interface LLMProvider {
@@ -99,8 +103,13 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'openrouter',
     label: 'OpenRouter (free models aggregator)',
     defaultUrl: 'https://openrouter.ai/api/v1',
-    defaultModel: 'meta-llama/llama-3.1-8b-instruct:free',
-    description: 'Aggregator with dozens of FREE models (Llama 3, Gemma, Mistral). No credit card needed. Pick any model from openrouter.ai/models.',
+    // v2.3.12 — openrouter/free is the meta-router that picks any available
+    // free model. Individual :free models share one rate-limited upstream
+    // pool (429 at peak times) — the router dodges it, which is exactly why
+    // users observed «only openrouter/free works». Specific :free models
+    // still work (and are auto-retried via the router on 429).
+    defaultModel: 'openrouter/free',
+    description: 'Aggregator with free models. Recommended: the openrouter/free auto-router (always picks an available free model). Or any specific :free model from openrouter.ai/models — free pools are rate-limited at peak times, and the app auto-retries via the router.',
     apiKeyHint: 'https://openrouter.ai/keys',
     freeTier: true,
   },
@@ -292,7 +301,7 @@ async function callOpenAICompatible(
   if (provider.apiKey) {
     headers['Authorization'] = `Bearer ${provider.apiKey}`;
   }
-  const body = {
+  const body: Record<string, unknown> = {
     model: provider.model,
     messages: [
       { role: 'system', content: systemPrompt },
@@ -305,9 +314,16 @@ async function callOpenAICompatible(
   // providers (Z.ai, OpenAI, Groq, Cerebras, …) do NOT send CORS headers,
   // so a renderer-side fetch() fails with "Failed to fetch" before the
   // request ever reaches the API. The IPC proxy has no CORS restriction.
-  const response = await proxyFetch(url, headers, JSON.stringify(body));
+  let response = await proxyFetch(url, headers, JSON.stringify(body));
+  // v2.3.12 — OpenRouter free model 429 → retry once via the free
+  // meta-router (same rationale as callOpenAIChat in aiChat.ts).
+  if (!response.ok && shouldFallbackToOpenRouterFree(provider.type, provider.model, response.status, response.body)) {
+    notifyLLMFallback(provider.model);
+    response = await proxyFetch(url, headers, JSON.stringify({ ...body, model: OPENROUTER_FREE_MODEL }));
+  }
   if (!response.ok) {
-    throw new Error(`LLM API error ${response.status}: ${response.body}`);
+    // v2.3.12 — structured error instead of `LLM API error 429: {raw JSON}`.
+    throw new LLMApiError(response.status, response.body);
   }
   let data: { choices?: { message?: { content?: string } }[] };
   try {
@@ -319,6 +335,9 @@ async function callOpenAICompatible(
   if (!content) throw new Error('Empty LLM response');
   return content.trim();
 }
+
+// (Anthropic/Ollama batch throw sites below also got the structured error —
+// v2.3.12.)
 
 /** Anthropic Claude API. */
 async function callAnthropic(
@@ -347,7 +366,8 @@ async function callAnthropic(
   // IPC proxy — see callOpenAICompatible (CORS).
   const response = await proxyFetch(url, headers, JSON.stringify(body));
   if (!response.ok) {
-    throw new Error(`Anthropic API error ${response.status}: ${response.body}`);
+    // v2.3.12 — structured error instead of a raw body dump.
+    throw new LLMApiError(response.status, response.body);
   }
   let data: { content?: { text?: string }[] };
   try {
@@ -397,7 +417,8 @@ async function callOllama(
     JSON.stringify(body)
   );
   if (!response.ok) {
-    throw new Error(`Ollama API error ${response.status}: ${response.body}`);
+    // v2.3.12 — structured error instead of a raw body dump.
+    throw new LLMApiError(response.status, response.body);
   }
   let data: { message?: { content?: string } };
   try {
@@ -716,8 +737,36 @@ export async function* callLLMStream(
       return;
     }
     if (!response.ok || !response.body) {
-      const text = await response.text();
-      throw new Error(`LLM stream error ${response.status}: ${text}`);
+      // v2.3.12 — OpenRouter free model 429 → retry via the meta-router.
+      // This direct-fetch path is reachable because openrouter.ai DOES send
+      // CORS headers (unlike most providers), so the 429 can land here
+      // before the batch fallback ever runs.
+      // NOTE: response.text() may be called ONCE per Response — read it here
+      // and reuse the string; a second .text() on the same body throws
+      // "Body is unusable: Body has already been read".
+      const text = await response.text().catch(() => '');
+      if (shouldFallbackToOpenRouterFree(provider.type, provider.model, response.status, text)) {
+        notifyLLMFallback(provider.model);
+        const fbBody = JSON.stringify({
+          model: OPENROUTER_FREE_MODEL,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          max_tokens: maxTokens,
+          temperature: provider.temperature ?? 0.4,
+          stream: true,
+        });
+        response = await fetch(url, { method: 'POST', headers, body: fbBody, signal });
+        if (!response.ok || !response.body) {
+          const fbText = await response.text().catch(() => '');
+          // v2.3.12 — structured error instead of a raw body dump.
+          throw new LLMApiError(response.status, fbText);
+        }
+      } else {
+        // v2.3.12 — structured error instead of a raw body dump.
+        throw new LLMApiError(response.status, text);
+      }
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -778,7 +827,8 @@ export async function* callLLMStream(
     }
     if (!response.ok || !response.body) {
       const text = await response.text();
-      throw new Error(`Anthropic stream error ${response.status}: ${text}`);
+      // v2.3.12 — structured error instead of a raw body dump.
+      throw new LLMApiError(response.status, text);
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -838,7 +888,8 @@ export async function* callLLMStream(
     }
     if (!response.ok || !response.body) {
       const text = await response.text();
-      throw new Error(`Ollama stream error ${response.status}: ${text}`);
+      // v2.3.12 — structured error instead of a raw body dump.
+      throw new LLMApiError(response.status, text);
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

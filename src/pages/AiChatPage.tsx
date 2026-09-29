@@ -11,6 +11,9 @@ import {
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage, type TokenUsage } from '../lib/aiChat';
 import type { LLMProvider } from '../lib/aiCommitMessages';
+import {
+  describeLLMError, llmErrorTitleKey, subscribeLLMFallback,
+} from '../lib/aiErrors';
 import { buildProviderFromSettings } from '../lib/aiUtils';
 import {
   getEnabledAiProviders, getActiveAiProvider,
@@ -172,6 +175,13 @@ export default function AiChatPage() {
     };
   }, []);
 
+  // v2.3.12 — OpenRouter free-model fallback notice (same as AiAssistant).
+  useEffect(() => {
+    return subscribeLLMFallback((model) => {
+      toast.info(t('aiErr.fallbackToastTitle', { model }), t('aiErr.fallbackToastDetail'));
+    });
+  }, [toast, t]);
+
   // ── Session switcher dropdown ───────────────────────────────────────────
   const [showSessionMenu, setShowSessionMenu] = useState(false);
   const sortedRepos = useMemo(() => {
@@ -238,8 +248,14 @@ export default function AiChatPage() {
           content: t('aiAssistant.stoppedByUser'),
         });
       } else {
-        toast.error(t('changes.aiGenerationFailed'), String(e));
-        storeAppendMessage({ role: 'assistant', content: `Error: ${String(e)}` });
+        // v2.3.12 — structured, localized error (no double "Error: Error:",
+        // no raw JSON wall) — same as AiAssistant.
+        const info = describeLLMError(e);
+        const lines = [t(llmErrorTitleKey(info.kind)) + (info.status ? ` (HTTP ${info.status})` : '')];
+        if (info.providerMessage) lines.push(info.providerMessage.slice(0, 240));
+        if (info.remedy) lines.push(info.remedy.slice(0, 200));
+        toast.error(t('changes.aiGenerationFailed'), lines.join('\n'));
+        storeAppendMessage({ role: 'assistant', content: lines.join('\n') });
       }
     } finally {
       setBusy(false);

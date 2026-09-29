@@ -5,6 +5,15 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.12] - 2026-09-29
+
+### Fixed — OpenRouter free models: readable errors + an automatic way around 429 («из бесплатных доступна только openrouter/free»)
+- The raw `Error: Error: OpenAI chat error 429: {"error":{…}}` wall is gone: every LLM call site (assistant chat, AI chat page, commit messages batch + streaming, the main-process IPC path) now throws a structured `LLMApiError`, and the UI renders a localized title + the provider's actual message (OpenRouter hides it in `error.metadata.raw` — «google/gemma-…:free is temporarily rate-limited upstream») + the remedy, instead of stringified JSON with a double "Error: " prefix
+- **429 on a `:free` model now retries automatically through `openrouter/free`** — the meta-router that picks any available free model across all providers, which is exactly why it was «the only one that worked». One retry per request, announced by an info toast (the switch is visible, never silent); a paid model 429ing (your own key quota) still surfaces as a readable error — no silent quality downgrade
+- The OpenRouter preset's default model `meta-llama/llama-3.1-8b-instruct:free` (long gone upstream) is now `openrouter/free`, and the description explains when specific `:free` models make sense (they still work — and are auto-retried via the router on 429)
+- The provider editor's model dropdown now marks FREE models (OpenRouter pricing 0 / `:free` / the router itself) with a green badge and gains a «Free only» filter (on by default for OpenRouter) — the fetchable list is hundreds of mostly-paid entries
+- Errors also cross the Electron IPC boundary in one piece: the message carries a parseable `[kind status]` marker, so main-process failures get the same friendly rendering
+
 ## [2.3.11] - 2026-09-29
 
 ### Fixed — the AI assistant worked nowhere out of the box («AI assistant в комитах и не только не работает»)

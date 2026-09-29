@@ -21,6 +21,10 @@
  */
 
 import type { LLMProvider } from './aiCommitMessages';
+import {
+  LLMApiError, OPENROUTER_FREE_MODEL, notifyLLMFallback,
+  shouldFallbackToOpenRouterFree,
+} from './aiErrors';
 import { AI_TOOLS, getTool, getToolLimits, type AITool } from './aiTools';
 import { api } from './api';
 
@@ -643,7 +647,8 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, si
   if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
 
   // First attempt: WITH tools (full agent mode).
-  let body = buildOpenAIBody(messages, provider, true);
+  let includeTools = true;
+  let body = buildOpenAIBody(messages, provider, includeTools);
   let res = await proxyFetch(url, headers, body, signal);
 
   // ── Fallback: if the model doesn't support tools, retry WITHOUT tools ──
@@ -651,7 +656,21 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, si
   // when the `tools` field is present. We retry the same request without
   // tools — the AI can still chat, just without git tool integration.
   if (!res.ok && isToolsUnsupported(res.status, res.body)) {
-    body = buildOpenAIBody(messages, provider, false);
+    includeTools = false;
+    body = buildOpenAIBody(messages, provider, includeTools);
+    res = await proxyFetch(url, headers, body, signal);
+  }
+
+  // ── v2.3.12 Fallback: OpenRouter free model 429 → free meta-router ──────
+  // OpenRouter's :free models share one rate-limited upstream pool, but
+  // `openrouter/free` routes across ALL of them. When the configured free
+  // model is rate-limited (the user's «из бесплатных доступна только
+  // openrouter/free» report), retry ONCE through the meta-router instead of
+  // failing. The UI gets a toast via notifyLLMFallback so the switch is
+  // visible, not silent.
+  if (!res.ok && shouldFallbackToOpenRouterFree(provider.type, provider.model, res.status, res.body)) {
+    notifyLLMFallback(provider.model);
+    body = buildOpenAIBody(messages, { ...provider, model: OPENROUTER_FREE_MODEL }, includeTools);
     res = await proxyFetch(url, headers, body, signal);
   }
 
@@ -665,7 +684,9 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, si
         `Switch to a model that supports tools (e.g. llama3.1, mistral, qwen2.5) for full AI Assistant functionality.`
       );
     }
-    throw new Error(`OpenAI chat error ${res.status}: ${res.body}`);
+    // v2.3.12 — structured error (kind + provider message + remedy) instead
+    // of a raw JSON wall: `OpenAI chat error 429: {"error":{…}}`.
+    throw new LLMApiError(res.status, res.body);
   }
   const data = JSON.parse(res.body);
   const msg = data.choices?.[0]?.message ?? {};
@@ -739,7 +760,8 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider,
   });
   const res = await proxyFetch(url, headers, body, signal);
   if (!res.ok) {
-    throw new Error(`Anthropic chat error ${res.status}: ${res.body}`);
+    // v2.3.12 — structured error instead of a raw body dump.
+    throw new LLMApiError(res.status, res.body);
   }
   const data = JSON.parse(res.body);
   // Anthropic returns content as an array of blocks (text + tool_use).
@@ -855,7 +877,8 @@ async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, si
         `Switch to a model that supports tools (e.g. llama3.1, mistral, qwen2.5) for full AI Assistant functionality.`
       );
     }
-    throw new Error(`Ollama chat error ${res.status}: ${res.body}`);
+    // v2.3.12 — structured error instead of a raw body dump.
+    throw new LLMApiError(res.status, res.body);
   }
   const data = JSON.parse(res.body);
   const content: string = data.message?.content ?? '';

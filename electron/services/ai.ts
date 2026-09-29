@@ -6,6 +6,9 @@
  * and explicitly presses the AI button.
  */
 
+import {
+  LLMApiError, OPENROUTER_FREE_MODEL, shouldFallbackToOpenRouterFree,
+} from '../../src/lib/aiErrors';
 import { getSetting } from './storage.js';
 
 export interface AiProviderConfig {
@@ -27,6 +30,15 @@ export const DEFAULT_AI_PROMPT =
   '- Reply with the commit message text ONLY, no code fences, no explanations.';
 
 export const DEFAULT_MAX_DIFF_SIZE = 131072; // 128 KiB, SmartGit default is conservative
+
+/** Hostname of a URL, lowercase, without throwing on odd input. */
+function safeHost(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
 
 /**
  * Default AI request timeout in seconds (5 min). User-configurable via
@@ -109,21 +121,38 @@ export async function generateCommitMessage(
   const timeoutMs = getAiRequestTimeoutMs();
   const timeout = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    const res = await fetch(endpoint, {
+    let res = await fetch(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`AI request failed (${res.status}): ${text.slice(0, 400) || res.statusText}`);
+      let text = await res.text().catch(() => '');
+      // v2.3.12 — OpenRouter free model 429 → retry once via the free
+      // meta-router. This service has no provider-type field, so OpenRouter
+      // is detected by the endpoint host (only openrouter.ai serves the
+      // openrouter/free model).
+      const isOpenRouter = /(^|\.)openrouter\.ai$/.test(safeHost(endpoint));
+      if (isOpenRouter && shouldFallbackToOpenRouterFree('openrouter', cfg.model, res.status, text)) {
+        res = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ...payload, model: OPENROUTER_FREE_MODEL }),
+          signal: controller.signal,
+        });
+        if (!res.ok) text = await res.text().catch(() => '');
+      }
+      // v2.3.12 — structured error (parseable `[kind status]` marker) instead
+      // of `AI request failed (429): {raw JSON}` — the message crosses IPC to
+      // the renderer, where describeLLMError() revives it.
+      throw new LLMApiError(res.status, text || res.statusText);
     }
     const json = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
       error?: { message?: string };
     };
-    if (json.error?.message) throw new Error(`AI error: ${json.error.message}`);
+    if (json.error?.message) throw new LLMApiError(200, JSON.stringify({ error: json.error }));
     const content = json.choices?.[0]?.message?.content;
     if (!content) throw new Error('AI returned an empty response');
     // Strip markdown fences if the model wrapped the message

@@ -11,6 +11,7 @@ import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, generateCommitMessageStream, type LLMProvider } from '../lib/aiCommitMessages';
+import { llmErrorDetail } from '../lib/aiErrors';
 import { buildProviderFromSettings } from '../lib/aiUtils';
 import { LS_FILES_V_ARGS, parseLsFilesV } from '../lib/changesIndexScan';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
@@ -961,7 +962,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             editorRef.current?.setText(finalMsg);
             toast.success(t('changes.aiMessageGenerated'), t('changes.reviewAndCommit'));
           } catch (e) {
-            toast.warning(t('changes.aiGenFailedPlaceholder'), String(e));
+            toast.warning(t('changes.aiGenFailedPlaceholder'), llmErrorDetail(e));
             return;
           } finally {
             setAiGenerating(false);
@@ -1124,7 +1125,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         toast.success(t('changes.aiMessageGenerated'), t('changes.reviewBeforeCommitting'));
       }
     } catch (e) {
-      toast.error(t('changes.aiGenerationFailed'), String(e));
+      toast.error(t('changes.aiGenerationFailed'), llmErrorDetail(e));
     } finally {
       setAiGenerating(false);
     }

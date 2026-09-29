@@ -7,6 +7,15 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.12] - 2026-09-29
+
+### Behoben — OpenRouter-Kostenlosmodelle: lesbare Fehler + automatischer Weg um die 429 («von den kostenlosen funktioniert nur openrouter/free»)
+- Die rohe `Error: Error: OpenAI chat error 429: {"error":{…}}`-Wand ist weg: jede LLM-Aufrufstelle (Assistenten-Chat, AI-Chat-Seite, Commit-Nachrichten — Batch und Streaming, der IPC-Pfad im Hauptprozess) wirft jetzt einen strukturierten `LLMApiError`, und die UI zeigt einen lokalisierten Titel + die eigentliche Anbietermeldung (OpenRouter versteckt sie in `error.metadata.raw` — «google/gemma-…:free is temporarily rate-limited upstream») + den Lösungshinweis statt stringifiziertem JSON mit doppeltem "Error: "-Präfix
+- **429 auf ein `:free`-Modell wird jetzt automatisch über `openrouter/free` wiederholt** — der Meta-Router, der bei allen Anbietern ein beliebiges verfügbares kostenloses Modell wählt; genau deshalb «funktionierte nur der». Ein Wiederholungsversuch pro Anfrage, per Info-Toast angekündigt (der Wechsel ist sichtbar, nie still); ein 429 auf ein BEZAHLTES Modell (Ihr eigenes Schlüsselkontingent) bleibt ein lesbarer Fehler — kein stiller Qualitätsdowngrade
+- Das Standardmodell des OpenRouter-Presets, `meta-llama/llama-3.1-8b-instruct:free` (upstream längst entfernt), ist jetzt `openrouter/free`, und die Beschreibung erklärt, wann konkrete `:free`-Modelle sinnvoll sind (sie funktionieren — und werden bei 429 automatisch über den Router wiederholt)
+- Das Modell-Dropdown im Anbieter-Editor markiert KOSTENLOSE Modelle (OpenRouter pricing 0 / `:free` / der Router selbst) mit grünem Badge und erhält einen Filter «Nur kostenlose» (bei OpenRouter standardmäßig an) — die abrufbare Liste hat hunderte meist kostenpflichtige Einträge
+- Fehler überqueren jetzt auch intakt die Electron-IPC-Grenze: die Meldung trägt einen parsbaren `[kind status]`-Marker, sodass Hauptprozess-Fehler genauso freundlich gerendert werden
+
 ## [2.3.11] - 2026-09-29
 
 ### Behoben — der KI-Assistent funktionierte nirgendwo out of the box («AI assistant в комитах и не только не работает»)
