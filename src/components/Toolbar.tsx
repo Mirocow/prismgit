@@ -19,6 +19,7 @@ import {
 import { useOperationLogStore } from "../stores/operationLogStore";
 import { offerPushRejection } from "../stores/pushRejectionStore";
 import { offerSslBypass } from "../stores/sslBypassStore";
+import { offerAuthBypass } from "../stores/authBypassStore";
 import { useRepositoryStore } from "../stores/repositoryStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -233,6 +234,7 @@ export function Toolbar({
             // dialog; plain network errors keep the old error toast.
             if (offerPushRejection(e, { repoPath: currentRepo.path })) return;
             if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => handlePush() })) return;
+            if (offerAuthBypass(e, { repoPath: currentRepo.path, retry: () => handlePush() })) return;
             toast.error(t("shell.pushFailed"), String(e));
         }
     };
@@ -242,8 +244,10 @@ export function Toolbar({
             await pull(currentRepo.path);
             toast.success(t("status.pulledSuccessfully"));
         } catch (e) {
-            // TLS certificate rejection — offer the bypass + auto-retry.
+            // TLS certificate rejection — offer the bypass + auto-retry;
+            // required login the app has not stored — ask for it + retry.
             if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => handlePull() })) return;
+            if (offerAuthBypass(e, { repoPath: currentRepo.path, retry: () => handlePull() })) return;
             toast.error(t("shell.pullFailed"), String(e));
         }
     };
@@ -260,6 +264,7 @@ export function Toolbar({
             // the whole sync dies on a rejected TLS certificate — bypass it.
             if (offerPushRejection(e, { repoPath: currentRepo.path })) return;
             if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => handleSynchronize() })) return;
+            if (offerAuthBypass(e, { repoPath: currentRepo.path, retry: () => handleSynchronize() })) return;
             toast.error(t("shell.synchronizeFailed"), String(e));
         }
     };
@@ -887,6 +892,7 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
             });
             if (offered) return;
             if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => doPush() })) return;
+            if (offerAuthBypass(e, { repoPath: currentRepo.path, remoteName: selectedRemote || undefined, retry: () => doPush() })) return;
             toast.error(t("shell.pushFailed"), String(e));
         }
         setOpen(false);
@@ -1249,6 +1255,7 @@ function PullDropdown({
             );
         } catch (e) {
             if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => fetchRemoteNow() })) return;
+            if (offerAuthBypass(e, { repoPath: currentRepo.path, remoteName: selectedRemote || undefined, retry: () => fetchRemoteNow() })) return;
             toast.error(
                 t("shell.fetchRemoteFailed", { remote: selectedRemote }),
                 String(e),
@@ -1273,6 +1280,7 @@ function PullDropdown({
             loadRemoteBranches();
         } catch (e) {
             if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => fetchFromSelected() })) return;
+            if (offerAuthBypass(e, { repoPath: currentRepo.path, remoteName: selectedRemote || undefined, retry: () => fetchFromSelected() })) return;
             toast.error(
                 t("shell.fetchRemoteFailed", { remote: selectedRemote }),
                 String(e),
@@ -1292,6 +1300,7 @@ function PullDropdown({
             loadRemoteBranches();
         } catch (e) {
             if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => fetchAllRemotes() })) return;
+            if (offerAuthBypass(e, { repoPath: currentRepo.path, retry: () => fetchAllRemotes() })) return;
             toast.error(t("shell.fetchAllFailed"), String(e));
         }
     };
@@ -1360,8 +1369,10 @@ function PullDropdown({
             // streams CONFLICT lines to stdout, so message-matching is brittle)
             // and take the user to the Conflicts UI. A plain transient toast was
             // reported as "ничего не произошло". A rejected TLS certificate is
-            // NOT a conflict — offer the SSL bypass + auto-retry instead.
+            // NOT a conflict — offer the SSL bypass + auto-retry instead; a
+            // required login — the credentials dialog (saves + retries).
             if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => doPull() })) return;
+            if (offerAuthBypass(e, { repoPath: currentRepo.path, retry: () => doPull() })) return;
             const conflicted = await surfaceConflictedState(currentRepo.path);
             if (!conflicted) {
                 toast.error(t("shell.pullFailed"), String(e));
@@ -1665,6 +1676,7 @@ export function GitToolbar({
             // SSL bypass dialog + auto-retry.
             if (offerPushRejection(e, { repoPath: currentRepo.path })) return;
             if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => handlePush() })) return;
+            if (offerAuthBypass(e, { repoPath: currentRepo.path, retry: () => handlePush() })) return;
             toast.error(t("toast.git.pushFailed"), String(e));
         }
     };
@@ -1699,8 +1711,10 @@ export function GitToolbar({
             // Conflicted pull → repo is mid-merge — detect from repo state and
             // open the Conflicts UI (toast + navigation handled centrally).
             // A rejected TLS certificate is NOT a conflict — offer the SSL
-            // bypass + auto-retry FIRST (the user-reported dead-end toast).
+            // bypass + auto-retry FIRST (the user-reported dead-end toast);
+            // a required login — the credentials dialog (saves + retries).
             if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => handlePull() })) return;
+            if (offerAuthBypass(e, { repoPath: currentRepo.path, retry: () => handlePull() })) return;
             const conflicted = await surfaceConflictedState(currentRepo.path);
             if (!conflicted) {
                 toast.error(t("toast.git.pullFailed"), String(e));

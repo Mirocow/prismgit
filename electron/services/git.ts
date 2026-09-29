@@ -19,6 +19,7 @@ import {
 // shared module exports identical types, so no conversion is needed.
 import { parseDiff as parseDiffShared, type ParsedDiff } from '../../src/lib/diffParser';
 import { classifySslFailure } from '../../src/lib/sslErrors';
+import { classifyAuthFailure } from '../../src/lib/authErrors';
 import { addGitSpawnListener } from './commandLog.js';
 import { buildSshEnv } from './ssh.js';
 import { getSetting } from './storage.js';
@@ -1995,13 +1996,24 @@ function describeNetworkError(e: unknown, op: 'push' | 'pull' | 'fetch'): Error 
   // classic internal-corporate-Git case). The renderer's offerSslBypass()
   // opens the SslBypassDialog for the SAME error class; this hint keeps the
   // toast path (batch operations, background fetches) actionable too.
-  const ssl = classifySslFailure(raw);
+  const ssl: ReturnType<typeof classifySslFailure> = classifySslFailure(raw);
+  // HTTP(S) authentication failure (no stored login / rejected / 403). The
+  // renderer's offerAuthBypass() opens the RemoteAuthDialog for the SAME
+  // error class; this hint keeps the toast path actionable too.
+  const auth: ReturnType<typeof classifyAuthFailure> = classifyAuthFailure(raw);
   if (ssl) {
     hint =
       `The server's TLS certificate was rejected (${ssl.kind}` +
       (ssl.host ? ` — ${ssl.host}` : '') +
       `). Disable certificate verification for this repository and retry ` +
       `(Repository Settings → Fetch and Pull, or the SSL dialog). `;
+  } else if (auth) {
+    hint =
+      `Authentication failed` +
+      (auth.kind === 'no-credentials' ? ' — no login/password is stored for this remote' : auth.kind === 'bad-credentials' ? ' — the stored login/password was rejected by the server' : auth.kind === 'forbidden' ? ' — the account lacks access (403)' : '') +
+      (auth.host ? ` (${auth.host})` : '') +
+      `. Enter Username + Password/token in the authentication dialog (it saves them and retries), ` +
+      `or Repository Settings → Remotes. `;
   } else if (/remote rejected|protected branch|GH006|hook declined|pre-receive/i.test(raw)) {
     hint =
       'The server REFUSED the branch update — the branch is protected ' +
@@ -2011,10 +2023,6 @@ function describeNetworkError(e: unknown, op: 'push' | 'pull' | 'fetch'): Error 
     hint =
       'The remote branch has commits you do not have locally — pull first ' +
       '(Pull button, or Pull --rebase), then push again. ';
-  } else if (/could not read Username|Authentication failed|401|403|authorization/i.test(raw)) {
-    hint =
-      `Authentication failed — set Username + Password/token for this remote in ` +
-      `Repository Settings → Remotes (or the Remotes tool → Edit URLs). `;
   } else if (/HTTP 400/.test(raw)) {
     hint =
       'The server rejected the request (HTTP 400) — usually a proxy or server ' +
@@ -4611,7 +4619,17 @@ export async function clone(
     sslArgs.push('-c', 'http.sslVerify=false');
     sslPersistArgs.push('--config', 'http.sslVerify=false');
   }
-  const args: string[] = [...sslArgs, 'clone', ...sslPersistArgs];
+  // HTTP(S) auth for CLONE contexts: the RemoteAuthDialog saves the entered
+  // credentials keyed by the TARGET path + 'origin' (the remote the clone
+  // creates). The repo does not exist yet, so remoteNetworkArgs() — which
+  // reads the remote URL out of the repo config — cannot apply here; read
+  // the stored credential by the target key instead and carry the
+  // Authorization header on the command line. A `-c` override is per-command
+  // only: the password never lands in .git/config or the remote URL, and
+  // later fetch/pull/push pick the SAME stored credential up through their
+  // regular remoteNetworkArgs() path.
+  const authArgs = buildHttpAuthArgs(url, getStoredCredential(targetPath, 'origin'));
+  const args: string[] = [...sslArgs, ...authArgs, 'clone', ...sslPersistArgs];
   // BUGFIX "не получаю все ветки": `git clone --depth N` IMPLIES
   // --single-branch — the clone's remote.origin.fetch refspec then covers
   // exactly ONE branch, every later fetch keeps that refspec, and the
@@ -4629,7 +4647,18 @@ export async function clone(
       const child = spawn('git', args, {
         cwd: process.cwd(),
         windowsHide: true,
-        env: { ...process.env, ...GIT_ENV_LFS_SKIP, ...ssh.env },
+        env: {
+          ...process.env,
+          ...GIT_ENV_LFS_SKIP,
+          ...ssh.env,
+          // A GUI must never block on a terminal credential prompt: without
+          // stored credentials git would otherwise sit on an invisible
+          // prompt until the 30-min clone timeout. With prompts disabled it
+          // fails FAST with "could not read Username …: terminal prompts
+          // disabled" — which classifyAuthFailure() turns into the
+          // RemoteAuthDialog reaction (same contract as the pull path).
+          GIT_TERMINAL_PROMPT: '0',
+        },
       });
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
@@ -6579,16 +6608,21 @@ export async function mirror(
 ): Promise<void> {
   const git = withMergedGitEnv(simpleGit(GIT_UNSAFE_OPTIONS));
   // Same TLS-bypass contract as clone(): -c for the transfer, --config to
-  // persist into the mirrored repo (see clone()).
+  // persist into the mirrored repo (see clone()). Same HTTP-auth contract:
+  // the RemoteAuthDialog stores the entered credentials keyed by the TARGET
+  // path + 'origin' — carry the Authorization header on the command line
+  // (per-command only, never persisted).
+  const authArgs = buildHttpAuthArgs(remoteUrl, getStoredCredential(targetPath, 'origin'));
   if (options.sslVerify === false) {
     await git.raw([
+      ...authArgs,
       '-c', 'http.sslVerify=false',
       'clone', '--mirror', '--config', 'http.sslVerify=false',
       remoteUrl, targetPath,
     ]);
     return;
   }
-  await git.mirror(remoteUrl, targetPath);
+  await git.raw([...authArgs, 'clone', '--mirror', remoteUrl, targetPath]);
 }
 
 /**
@@ -7767,10 +7801,13 @@ export async function clonePartial(
   options?: { depth?: number; branch?: string; recursive?: boolean; sslVerify?: boolean }
 ): Promise<string> {
   // TLS-bypass args first (see clone()): -c covers the transfer, --config
-  // persists into the new repo.
+  // persists into the new repo. HTTP-auth args next — same contract as
+  // clone(): credentials stored (by the RemoteAuthDialog) keyed by the
+  // TARGET path + 'origin', carried per-command only.
+  const authArgs = buildHttpAuthArgs(url, getStoredCredential(targetPath, 'origin'));
   const args = options?.sslVerify === false
-    ? ['-c', 'http.sslVerify=false', 'clone', '--config', 'http.sslVerify=false', '--filter=' + filter, url, targetPath]
-    : ['clone', '--filter=' + filter, url, targetPath];
+    ? [...authArgs, '-c', 'http.sslVerify=false', 'clone', '--config', 'http.sslVerify=false', '--filter=' + filter, url, targetPath]
+    : [...authArgs, 'clone', '--filter=' + filter, url, targetPath];
   if (options?.depth) args.push('--depth=' + options.depth, '--no-single-branch');
   // BUGFIX "не получаю все ветки": --single-branch here limited the partial
   // clone to ONE branch's refs. --filter only filters BLOBS from history;

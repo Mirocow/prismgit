@@ -30,6 +30,7 @@ import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { offerPushRejection } from '../stores/pushRejectionStore';
 import { offerSslBypass } from '../stores/sslBypassStore';
+import { offerAuthBypass } from '../stores/authBypassStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore, type FileDisplayFlag } from '../stores/selectionStore';
@@ -1212,6 +1213,16 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       // Retry ONLY the push half — the commit above already succeeded, so
       // re-running handleCommitAndPush would die on "nothing to commit".
       if (offerSslBypass(e, {
+        repoPath: repo.path,
+        retry: () => push(repo.path).then((res) => {
+          const d = describePushResult(res);
+          if (d.kind === 'error') toast.error(d.title, d.detail);
+          else if (d.kind === 'info') toast.info(d.title, d.detail);
+          else toast.success(d.title, d.detail);
+        }),
+      })) return;
+      // Required login the app has not stored — ask, save, retry the push.
+      if (offerAuthBypass(e, {
         repoPath: repo.path,
         retry: () => push(repo.path).then((res) => {
           const d = describePushResult(res);

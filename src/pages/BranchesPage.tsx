@@ -14,6 +14,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { offerSslBypass } from '../stores/sslBypassStore';
+import { offerAuthBypass } from '../stores/authBypassStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
@@ -517,6 +518,7 @@ export function BranchesPage() {
       await refreshStatus(repo.path);
     } catch (e) {
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchRemote(name) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: name, retry: () => handleFetchRemote(name) })) return;
       toast.error(t('branches.fetchFailed', { name }), String(e));
     } finally {
       setRemoteBusy(null);
@@ -536,6 +538,7 @@ export function BranchesPage() {
       await refreshStatus(repo.path);
     } catch (e) {
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAllBranches(name) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: name, retry: () => handleFetchAllBranches(name) })) return;
       toast.error(t('branches.fetchFailed', { name }), String(e));
     } finally {
       setRemoteBusy(null);
@@ -554,6 +557,7 @@ export function BranchesPage() {
       await refreshStatus(repo.path);
     } catch (e) {
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAllRemotes() })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, retry: () => handleFetchAllRemotes() })) return;
       toast.error(t('branches.fetchAllRemotesFailed'), String(e));
     } finally {
       setRemoteBusy(null);
@@ -639,6 +643,7 @@ export function BranchesPage() {
       await refreshStatus(repo.path);
     } catch (e) {
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePushBranch(branch) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: (branch.tracking ? branch.tracking.split('/')[0] : '') || undefined, retry: () => handlePushBranch(branch) })) return;
       toast.error(t('branches.pushFailed'), String(e));
     }
   };
@@ -673,6 +678,7 @@ export function BranchesPage() {
       await refreshStatus(repo.path);
     } catch (e) {
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleForcePushBranch(branch) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: (branch.tracking ? branch.tracking.split('/')[0] : '') || undefined, retry: () => handleForcePushBranch(branch) })) return;
       toast.error(t('branches.pushFailed'), String(e));
     }
   };
@@ -825,6 +831,7 @@ export function BranchesPage() {
       await refreshStatus(repo.path);
     } catch (e) {
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => executePushTo(opts) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: opts.remote, retry: () => executePushTo(opts) })) return;
       toast.error(t('branches.pushFailed'), String(e));
     } finally {
       setPushToBusy(false);
@@ -901,6 +908,7 @@ export function BranchesPage() {
       toast.success(t('branches.tagPushed', { name: tag.name, remote: remoteName }));
     } catch (e) {
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePushTag(tag) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, retry: () => handlePushTag(tag) })) return;
       toast.error(t('branches.tagPushFailed'), String(e));
     }
   };
@@ -965,6 +973,7 @@ export function BranchesPage() {
       // rejected cert never leaves a conflicted state behind, so the extra
       // repo-state read is wasted work in exactly this case.
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => executePull(opts) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: pullRemote || undefined, retry: () => executePull(opts) })) return;
       // A conflicted pull leaves the repo mid-merge — surface the Conflicts
       // UI (state-based detection, see gitStore.surfaceConflictedState)
       // instead of only a transient error toast.
@@ -989,6 +998,7 @@ export function BranchesPage() {
       await load();
     } catch (e) {
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => executeFetchMore(commits) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: moreRemote || undefined, retry: () => executeFetchMore(commits) })) return;
       toast.error(t('branches.fetchMoreFailed', { name: moreRemote }), String(e));
     } finally {
       setMoreBusy(false);
@@ -1009,6 +1019,7 @@ export function BranchesPage() {
       await load();
     } catch (e) {
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => executeSetDepth(depth) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: depthRemote || undefined, retry: () => executeSetDepth(depth) })) return;
       toast.error(t('branches.setDepthFailed', { name: depthRemote }), String(e));
     } finally {
       setDepthBusy(false);
@@ -1437,7 +1448,7 @@ export function BranchesPage() {
             toast.success(t('branches.pushedToGerrit', { branch: branchName }), output.split('\n')[0] || '');
             await refreshStatus(repo.path);
           } catch (e) {
-            // Gerrit review push — same TLS reaction as any other push.
+            // Gerrit review push — same TLS/auth reaction as any other push.
             if (offerSslBypass(e, {
               repoPath: repo.path,
               retry: async () => {
@@ -1448,6 +1459,13 @@ export function BranchesPage() {
                 await refreshStatus(repo.path);
               },
             })) return;
+            if (offerAuthBypass(e, { repoPath: repo.path, remoteName, retry: async () => {
+              const output = await api.git.pushToGerrit(repo.path, branchName, remoteName, {
+                topic: topic || undefined,
+              });
+              toast.success(t('branches.pushedToGerrit', { branch: branchName }), output.split('\n')[0] || '');
+              await refreshStatus(repo.path);
+            } })) return;
             toast.error(t('branches.pushGerritFailed'), String(e));
           }
         }

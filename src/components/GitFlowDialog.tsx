@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, GitBranch, Tag, AlertCircle, Loader, GitMerge, CornerDownRight } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
+import { offerSslBypass } from '../stores/sslBypassStore';
+import { offerAuthBypass } from '../stores/authBypassStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { offerPushRejection } from '../stores/pushRejectionStore';
-import { offerSslBypass } from '../stores/sslBypassStore';
 import { api } from '../lib/api';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useI18n } from '../lib/i18n';
@@ -172,8 +173,10 @@ export function GitFlowDialog({
           // auto-retry: the finish sequence (branch delete + tag + push) is
           // NOT idempotent, so re-running it could double-execute flow
           // steps. The dialog applies the bypass; the user re-runs Finish.
+          // Same for a required login: save credentials, re-run Finish.
           if (!offerSslBypass(e, { repoPath: repo.path }))
-            toast.error(t('pages.operationFailed'), String(e));
+            if (!offerAuthBypass(e, { repoPath: repo.path }))
+              toast.error(t('pages.operationFailed'), String(e));
         }
       } else {
         // Conflicted → the user is now on the Changes resolver; the modal

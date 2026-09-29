@@ -7,6 +7,7 @@ import { isThemeDark } from "../lib/themes";
 import { cn } from "../lib/utils";
 import { useGitStore } from "../stores/gitStore";
 import { offerSslBypass } from "../stores/sslBypassStore";
+import { offerAuthBypass } from "../stores/authBypassStore";
 import { useRepositoryStore } from "../stores/repositoryStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useToastActions } from "../stores/toastStore";
@@ -125,6 +126,11 @@ export function CommandPalette({
                                       retry: () => git.push(repo.path).then(() =>
                                           toast.success(t("status.pushedSuccessfully"))),
                                   })) return;
+                                  if (offerAuthBypass(e, {
+                                      repoPath: repo.path,
+                                      retry: () => git.push(repo.path).then(() =>
+                                          toast.success(t("status.pushedSuccessfully"))),
+                                  })) return;
                                   toast.error(t("shell.pushFailed"), String(e));
                               }),
                   },
@@ -172,6 +178,11 @@ export function CommandPalette({
                                       retry: () => git.pull(repo.path).then(() =>
                                           toast.success(t("status.pulledSuccessfully"))),
                                   })) return;
+                                  if (offerAuthBypass(e, {
+                                      repoPath: repo.path,
+                                      retry: () => git.pull(repo.path).then(() =>
+                                          toast.success(t("status.pulledSuccessfully"))),
+                                  })) return;
                                   toast.error(t("shell.pullFailed"), String(e));
                               }),
                   },
@@ -192,6 +203,11 @@ export function CommandPalette({
                               )
                               .catch((e) => {
                                   if (offerSslBypass(e, {
+                                      repoPath: repo.path,
+                                      retry: () => git.fetch(repo.path).then(() =>
+                                          toast.success(t("status.fetchedSuccessfully"))),
+                                  })) return;
+                                  if (offerAuthBypass(e, {
                                       repoPath: repo.path,
                                       retry: () => git.fetch(repo.path).then(() =>
                                           toast.success(t("status.fetchedSuccessfully"))),

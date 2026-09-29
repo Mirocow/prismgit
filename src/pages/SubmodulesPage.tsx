@@ -5,6 +5,7 @@ import { useGitStore } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { offerSslBypass } from '../stores/sslBypassStore';
+import { offerAuthBypass } from '../stores/authBypassStore';
 import { api, type SubmoduleInfo } from '../lib/api';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -61,8 +62,9 @@ export function SubmodulesPage() {
       await load();
     } catch (e) {
       // submodule update clones/fetches from the submodule's remote — an
-      // expired corporate certificate hits HERE too.
+      // expired corporate certificate OR a required login hits HERE too.
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleUpdate(name) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, retry: () => handleUpdate(name) })) return;
       toast.error(t('pages.submoduleUpdateFailed'), String(e));
     } finally {
       setBusy(null);

@@ -65,6 +65,7 @@ import { useNavHistoryStore } from "./stores/navHistoryStore";
 import { initOperationLogIpcListener } from "./stores/operationLogStore";
 import { offerPushRejection } from "./stores/pushRejectionStore";
 import { offerSslBypass } from "./stores/sslBypassStore";
+import { offerAuthBypass } from "./stores/authBypassStore";
 import { useRepositoryStore } from "./stores/repositoryStore";
 import { useSelectionStore } from "./stores/selectionStore";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -124,6 +125,15 @@ const PushRejectionDialog = lazy(() =>
 const SslBypassDialog = lazy(() =>
     import("./components/SslBypassDialog").then((m) => ({
         default: m.SslBypassDialog,
+    })),
+);
+// HTTP-authentication reaction surface — opened from ANY network catch site
+// via offerAuthBypass() (authBypassStore) when the server requires
+// login/password and none are stored (or the stored ones were rejected).
+// Asks the user, SAVES per repo+remote (encrypted vault), retries the op.
+const RemoteAuthDialog = lazy(() =>
+    import("./components/RemoteAuthDialog").then((m) => ({
+        default: m.RemoteAuthDialog,
     })),
 );
 const ErrorDialogHost = lazy(() =>
@@ -962,9 +972,11 @@ export default function App() {
                 .catch((e) => {
                     // Menu path now carries the full reaction matrix too:
                     // remote rejections → PushRejectionDialog, TLS cert → SSL
-                    // bypass dialog (the menu used to dead-end in a toast).
+                    // bypass dialog, missing/rejected login → credentials
+                    // dialog (the menu used to dead-end in a toast).
                     if (offerPushRejection(e, { repoPath: repo.path })) return;
                     if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handlePush(); } })) return;
+                    if (offerAuthBypass(e, { repoPath: repo.path, retry: async () => { await handlePush(); } })) return;
                     toast.error(i18nT("toast.git.pushFailed"), String(e));
                 });
         };
@@ -995,6 +1007,7 @@ export default function App() {
                 .catch((e) => {
                     if (offerPushRejection(e, { repoPath: repo.path })) return;
                     if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handleForcePush(); } })) return;
+                    if (offerAuthBypass(e, { repoPath: repo.path, retry: async () => { await handleForcePush(); } })) return;
                     toast.error(i18nT("toast.git.pushFailed"), String(e));
                 });
         };
@@ -1021,8 +1034,10 @@ export default function App() {
                     // smartPull can end mid-rebase ("could not apply …") or mid-merge —
                     // detect from the repo state and surface the Conflicts UI instead
                     // of a transient error toast (user-reported "ничего не произошло").
-                    // A TLS certificate rejection is neither — offer the bypass first.
+                    // A TLS certificate rejection is neither — offer the bypass first;
+                    // a required login the app has not stored — ask for it.
                     if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handlePull(); } })) return;
+                    if (offerAuthBypass(e, { repoPath: repo.path, retry: async () => { await handlePull(); } })) return;
                     const conflicted = await surfaceConflictedState(repo.path);
                     if (!conflicted)
                         toast.error(i18nT("toast.git.pullFailed"), String(e));
@@ -1043,6 +1058,7 @@ export default function App() {
                 })
                 .catch((e) => {
                     if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handleFetch(); } })) return;
+                    if (offerAuthBypass(e, { repoPath: repo.path, retry: async () => { await handleFetch(); } })) return;
                     toast.error(i18nT("toast.git.fetchFailed"), String(e));
                 });
         };
@@ -1560,6 +1576,7 @@ export default function App() {
             } catch (e) {
                 if (offerPushRejection(e, { repoPath: repo.path, remote })) return;
                 if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePushTo() })) return;
+                if (offerAuthBypass(e, { repoPath: repo.path, remoteName: remote, retry: () => handlePushTo() })) return;
                 toast.error("Push failed", String(e));
             }
         };
@@ -1583,6 +1600,7 @@ export default function App() {
                 );
             } catch (e) {
                 if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAll() })) return;
+                if (offerAuthBypass(e, { repoPath: repo.path, retry: () => handleFetchAll() })) return;
                 toast.error("Fetch all failed", String(e));
             }
         };
@@ -2811,6 +2829,7 @@ export default function App() {
                     />
                     <PushRejectionDialog />
                     <SslBypassDialog />
+                    <RemoteAuthDialog />
                 </Suspense>
                 <Suspense fallback={null}>
                     <KeyboardShortcutsOverlay

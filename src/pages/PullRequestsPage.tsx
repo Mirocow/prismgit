@@ -14,6 +14,7 @@ import { cn, copyToClipboard, formatDate, shortHash } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { offerSslBypass } from '../stores/sslBypassStore';
+import { offerAuthBypass } from '../stores/authBypassStore';
 import { useProviderStore } from '../stores/providerStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -615,6 +616,7 @@ export function PullRequestsPage() {
       // TLS certificate rejection — the PR tool's Fetch hits the same
       // corporate server as pull; offer the per-repo bypass + retry.
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAll() })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, retry: () => handleFetchAll() })) return;
       toast.error(t('pages.fetchFailed'), String(e));
     } finally {
       setSyncing(null);
@@ -631,8 +633,9 @@ export function PullRequestsPage() {
     } catch (e) {
       // TLS certificate rejection (expired / self-signed corporate remote) —
       // offer the bypass + retry BEFORE the conflict probing (same rationale
-      // as BranchesPage.executePull).
+      // as BranchesPage.executePull); required login — the credentials dialog.
       if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePull() })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, retry: () => handlePull() })) return;
       // State-based conflict detection (message matching is brittle — git
       // streams CONFLICT lines to stdout): navigate to the Conflicts UI.
       const conflicted = await surfaceConflictedState(repo.path);

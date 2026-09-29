@@ -3,6 +3,7 @@ import { Folder, X, Github, Loader, Download, Lock, GitBranch } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useAuthStore } from '../stores/authStore';
 import { offerSslBypass } from '../stores/sslBypassStore';
+import { offerAuthBypass } from '../stores/authBypassStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type GithubRepository, type GitLabProject, type SshUrlResolution, type SshTestResult } from '../lib/api';
@@ -359,8 +360,12 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
     // The clone body is a NAMED inner step (not inline in the try) so the
     // SSL-bypass retry below can re-run the EXACT clone — mirror / partial /
     // normal — with sslVerify:false after the server's certificate was
-    // rejected.
+    // rejected. The auth retry must remember WHICH mode it is in: a server
+    // with BOTH an expired certificate AND required login goes
+    // SSL dialog → retry (bypassed) → auth dialog → retry (STILL bypassed).
+    let sslBypassed = false;
     const runClone = async (sslBypass: boolean): Promise<void> => {
+      sslBypassed = sslBypass;
       if (mirror) {
         // Mirror clone: copies ALL refs (heads, tags, notes, remotes) — bare backup copy
         await api.git.mirror(normalizedUrl, finalPath, sslBypass ? { sslVerify: false } : undefined);
@@ -421,6 +426,16 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
         repoPath: finalPath,
         skipConfigWrite: true,
         retry: () => runClone(true),
+      })) return;
+      // The server requires a login and none is stored (git, prompts
+      // disabled, says "could not read Username"). The dialog saves the
+      // entered credentials keyed by the TARGET path + 'origin' — clone()
+      // picks them up from there and re-runs; the retry keeps whatever SSL
+      // state the previous round established.
+      if (offerAuthBypass(e, {
+        repoPath: finalPath,
+        remoteName: 'origin',
+        retry: () => runClone(sslBypassed),
       })) return;
       toast.error(t('dialogs.cloneFailed'), String(e));
     } finally {
