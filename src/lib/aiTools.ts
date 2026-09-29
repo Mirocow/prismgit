@@ -14,6 +14,9 @@ import { surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore } from '../stores/toastStore';
 import { t as i18nT } from './i18n';
 import { useSettingsStore } from '../stores/settingsStore';
+import { detectGitFlowStatus, detectFlowKind, flowPrefix } from './gitflow';
+import { loadReviews, loadReviewsForCommit } from './distributedReviews';
+import { useProviderStore } from '../stores/providerStore';
 
 // ── Configurable limits (read from AppSettings at runtime) ──────────────
 const DEFAULT_MAX_LOG_COUNT = 50;
@@ -1482,6 +1485,380 @@ export const getMemoryTool: AITool = {
   },
 };
 
+// ── Full tool coverage (v2.3.4) ──────────────────────────────────────────
+// The user's ask: «AI должен уметь пользоваться всеми инструментами PrismGit».
+// Before this batch the chat covered 10 of the 18 sidebar tools; the tools
+// below give it the SAME engines the remaining surfaces use: Reflog,
+// Submodules, LFS, Bisect, GitFlow, Recyclable (lost commits), Reviews
+// (distributed, git-notes) and Pull Requests (GitHub/GitLab).
+
+/** Read the reflog of a ref — the Reflog tool's engine (merged Journal). */
+export const getReflogTool: AITool = {
+  name: 'get_reflog',
+  description: 'Read the reflog of a ref (default HEAD) — every recorded movement: checkouts, commits, merges, resets, rebases, with ages and reflog selectors. This is the tool for "what was HEAD before the reset", "when did I switch branches", "what happened just before the disaster". Entries are newest-first; the selector (e.g. HEAD@{2}) can be passed to checkout to return to that exact point.',
+  parameters: {
+    type: 'object',
+    properties: {
+      ref: { type: 'string', description: 'Ref whose reflog to read (default "HEAD"; e.g. "main", "refs/heads/feature/x").' },
+      max_count: { type: 'number', description: 'Max entries to return (default 40, capped at 500).' },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    const p = params as { ref?: string; max_count?: number };
+    try {
+      const ref = p.ref?.trim() || 'HEAD';
+      const max = Math.min(Math.max(1, Math.floor(p.max_count ?? 40)), 500);
+      const entries = await api.git.reflog(repoPath, ref, max);
+      if (!entries.length) return `No reflog entries for ${ref}.`;
+      const body = entries.slice(0, max).map((e) => {
+        const ts = Date.parse(e.date);
+        const when = Number.isFinite(ts) ? formatAgo(Date.now() - ts) : '?';
+        return `  #${e.index}  ${e.hashAbbrev}  ${e.selector ?? ''}  ${e.message}  (${when})`;
+      }).join('\n');
+      return `reflog ${ref} — ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}, newest first:\n${body}`;
+    } catch (e) {
+      return `Reflog failed: ${String(e)}`;
+    }
+  },
+};
+
+/** List submodules — the Submodules tool's engine. */
+export const listSubmodulesTool: AITool = {
+  name: 'list_submodules',
+  description: 'List the repository\'s git submodules: path, name, URL, tracking branch, initialized / up-to-date state, and the checked-out vs superproject-tracked commits. Use for "what submodules does this project have" and "is the submodule checked out".',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  async execute(_params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    try {
+      const subs = await api.git.submodules(repoPath);
+      if (!subs.length) return 'No submodules configured (no .gitmodules entries).';
+      const body = subs.map((s) => {
+        const state = !s.initialized ? 'NOT INITIALIZED' : s.upToDate ? 'ok' : 'OUTDATED';
+        const commits = s.currentCommit || s.trackedCommit
+          ? `  at ${(s.currentCommit ?? '?').slice(0, 8)}${s.trackedCommit ? ` (superproject tracks ${s.trackedCommit.slice(0, 8)})` : ''}`
+          : '';
+        return `  ${s.path} (${s.name})\n      url: ${s.url}${s.branch ? `  branch: ${s.branch}` : ''}\n      state: ${state}${commits}`;
+      }).join('\n');
+      return `git submodules (${subs.length}):\n${body}`;
+    } catch (e) {
+      return `Submodule list failed: ${String(e)}`;
+    }
+  },
+};
+
+/** Submodule init+update — the Submodules tool's main action. */
+export const submoduleUpdateTool: AITool = {
+  name: 'submodule_update',
+  description: 'Initialize and update submodules (git submodule update --init [--recursive]). Optionally target a single submodule by name or path; default is all. Use when submodules are uninitialized/outdated or the user says "init/update the submodules".',
+  parameters: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'Optional submodule name or path to update (default: all).' },
+      recursive: { type: 'boolean', description: 'Recurse into nested submodules (default true).' },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    const p = params as { name?: string; recursive?: boolean };
+    try {
+      await api.git.submoduleInit(repoPath, p.name);
+      await api.git.submoduleUpdate(repoPath, p.name, true, p.recursive !== false);
+      return `Submodules ${p.name ? `"${p.name}"` : '(all)'} initialized/updated${p.recursive !== false ? ' (recursive)' : ''}.`;
+    } catch (e) {
+      return `Submodule update failed: ${String(e)}`;
+    }
+  },
+};
+
+/** LFS overview — the LFS tool's engine. */
+export const lfsOverviewTool: AITool = {
+  name: 'lfs_overview',
+  description: 'Git LFS status: whether git-lfs is installed, tracked patterns (the filter=lfs rules from .gitattributes), tracked files with sizes and sync status, and file locks. Use for "is LFS used here", "what files are in LFS", "is anything locked".',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  async execute(_params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    try {
+      const status = await api.git.lfsStatus(repoPath);
+      const patterns = await api.git.lfsList(repoPath).catch(() => [] as string[]);
+      const locks = await api.git.lfsListLocks(repoPath).catch(() => [] as { id: string; path: string; owner: { name: string } }[]);
+      const lines: string[] = [];
+      lines.push(`git-lfs installed: ${status.installed ? 'yes' : 'NO — git-lfs is not on PATH; install it before syncing LFS content'}`);
+      lines.push(`tracked patterns (${patterns.length}): ${patterns.length ? patterns.map((x) => x.trim()).join(', ') : 'none'}`);
+      if (status.files.length) {
+        lines.push(`LFS files (${status.files.length}):`);
+        for (const f of status.files.slice(0, 30)) lines.push(`  ${f.path}  ${f.size}  ${f.status}`);
+        if (status.files.length > 30) lines.push(`  …(${status.files.length - 30} more)`);
+      } else {
+        lines.push('LFS files: none currently reported by git lfs status');
+      }
+      const lockStr = locks.length
+        ? ' ' + locks.slice(0, 10).map((l) => `${l.path} (${l.owner?.name ?? '?'})`).join(', ') + (locks.length > 10 ? ' …' : '')
+        : ' none';
+      lines.push(`locks (${locks.length}):${lockStr}`);
+      return lines.join('\n');
+    } catch (e) {
+      return `LFS status failed: ${String(e)}`;
+    }
+  },
+};
+
+/** LFS objects sync — pull/fetch/push LFS content. */
+export const lfsSyncTool: AITool = {
+  name: 'lfs_sync',
+  description: 'Sync Git LFS objects with the remote: "pull" (default — download missing LFS content, optionally only for given files), "fetch" (just download), or "push" (upload local LFS objects). Use after clone/checkout when LFS files show as pointer stubs, and before pushing when LFS objects must be uploaded.',
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['pull', 'fetch', 'push'], description: 'LFS sync action (default "pull").' },
+      files: { type: 'array', items: { type: 'string' }, description: 'Optional file list for pull (default: all).' },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    const p = params as { action?: string; files?: string[] };
+    const action = p.action ?? 'pull';
+    try {
+      if (action === 'pull') await api.git.lfsPull(repoPath, p.files?.length ? p.files : undefined);
+      else if (action === 'fetch') await api.git.lfsFetch(repoPath);
+      else if (action === 'push') await api.git.lfsPush(repoPath);
+      else return `Error: unknown action "${action}" (use pull|fetch|push).`;
+      return `LFS ${action} done${p.files?.length ? ` for ${p.files.length} file(s)` : ''}.`;
+    } catch (e) {
+      return `LFS ${action} failed: ${String(e)}`;
+    }
+  },
+};
+
+/** Drive a git bisect session — the Bisect tool's whole state machine. */
+export const bisectTool: AITool = {
+  name: 'bisect',
+  description: 'Drive a git bisect session — the Bisect tool\'s engine. Actions: "status" (is a bisect running, current candidate, suspects left), "start", "good <ref>" (mark a known-good commit), "bad <ref>" (mark a known-bad commit, default HEAD), "skip" (candidate untestable), "reset" (end session, return to the branch), "log" (the bisect journal). Typical flow: status → start → bad → good → test the candidate → good/bad → … → reset. After every action the tool reports the next candidate.',
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['status', 'start', 'good', 'bad', 'skip', 'reset', 'log'], description: 'Bisect action (default "status").' },
+      ref: { type: 'string', description: 'Commit/branch for good/bad ("bad" defaults to HEAD).' },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    const p = params as { action?: string; ref?: string };
+    const action = p.action ?? 'status';
+    try {
+      switch (action) {
+        case 'status': {
+          const st = await api.git.bisectStatus(repoPath);
+          return st.state === 'bisecting'
+            ? `Bisect IN PROGRESS: candidate ${st.rev?.slice(0, 8)} (~${st.remaining ?? '?'} suspect(s) left). Test it, then call bisect with good/bad (or skip); reset when done.`
+            : 'No bisect in progress. Use action=start, then bad=<known-bad>, good=<known-good>.';
+        }
+        case 'start': await api.git.bisectStart(repoPath); break;
+        case 'good': await api.git.bisectGood(repoPath, p.ref?.trim() || undefined); break;
+        case 'bad': await api.git.bisectBad(repoPath, p.ref?.trim() || undefined); break;
+        case 'skip': await api.git.bisectSkip(repoPath); break;
+        case 'reset':
+          await api.git.bisectReset(repoPath);
+          return 'Bisect session ended — back on the original branch.';
+        case 'log': return `bisect log:\n${await api.git.bisectLog(repoPath)}`;
+        default: return `Error: unknown action "${action}" (use status|start|good|bad|skip|reset|log).`;
+      }
+      const st = await api.git.bisectStatus(repoPath);
+      if (st.state === 'bisecting') {
+        return `bisect ${action}${p.ref ? ` ${p.ref}` : ''} accepted. Next candidate: ${st.rev?.slice(0, 8)} (~${st.remaining ?? '?'} suspect(s) left) — test it, then call bisect good/bad.`;
+      }
+      return `bisect ${action}${p.ref ? ` ${p.ref}` : ''} accepted (session may have converged — run action=log to see the result, or reset to finish).`;
+    } catch (e) {
+      return `Bisect ${action} failed: ${String(e)}`;
+    }
+  },
+};
+
+/** GitFlow analysis — the GitFlow tool's engine (read-only). */
+export const gitflowOverviewTool: AITool = {
+  name: 'gitflow_overview',
+  description: 'Analyze the repository against the GitFlow model: detected config (master/develop branch names, feature/release/hotfix/fix prefixes, version tag prefix — from gitflow.* config or inferred), whether the flow is initialized, branch counts per flow type, the actual feature/release/hotfix branches, and which flow type the CURRENT branch is. Use for "is this repo gitflow", "what feature branches exist", "what should I branch off".',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  async execute(_params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    try {
+      const st = await detectGitFlowStatus(repoPath);
+      const branches = await api.git.branches(repoPath);
+      const locals = branches.filter((b) => !b.remote);
+      const byFlow: Record<string, string[]> = {};
+      for (const b of locals) {
+        const kind = detectFlowKind(st, b.name);
+        if (kind) (byFlow[kind] ??= []).push(b.name);
+      }
+      let current = '';
+      try {
+        current = (await api.git.raw(repoPath, ['symbolic-ref', '--short', 'HEAD'])).trim();
+      } catch { /* detached HEAD */ }
+      const lines: string[] = [];
+      lines.push(`gitflow: ${st.initialized ? 'INITIALIZED (gitflow.* config present)' : 'not initialized (config is inferred defaults)'}`);
+      lines.push(`branches: master=${st.masterBranch}${st.masterExists ? '' : ' (missing!)'}  develop=${st.developBranch}${st.developExists ? '' : ' (missing!)'}  tag prefix: ${st.versionTagPrefix}`);
+      lines.push(`prefixes: feature=${st.featurePrefix}  release=${st.releasePrefix}  hotfix=${st.hotfixPrefix}  fix=${st.fixPrefix}  support=${st.supportPrefix}`);
+      for (const kind of ['feature', 'fix', 'release', 'hotfix', 'support']) {
+        const list = byFlow[kind] ?? [];
+        lines.push(`${kind} (${list.length}): ${list.length ? list.slice(0, 15).join(', ') + (list.length > 15 ? ' …' : '') : 'none'}`);
+      }
+      if (current) {
+        const kind = detectFlowKind(st, current);
+        lines.push(`current branch "${current}" → ${kind ? `${kind} branch (prefix ${flowPrefix(st, kind)})` : 'not a flow branch (trunk?)'}`);
+      }
+      return lines.join('\n');
+    } catch (e) {
+      return `GitFlow analysis failed: ${String(e)}`;
+    }
+  },
+};
+
+/** Recyclable commits — the Recyclable tool's engine (lost commits). */
+export const recyclableCommitsTool: AITool = {
+  name: 'recyclable_commits',
+  description: 'List RECYCLABLE commits — commits that still exist in the object database but are no longer referenced by any branch (lost after resets, rebases, deleted branches; reachable only via reflog). Returns hash, age, subject and the source that still remembers them. Use for "я потерял коммит" / "что было до reset" — then offer checkout/cherry-pick via the UI or a branch-at hash. Chain with get_reflog for the exact loss moment.',
+  parameters: {
+    type: 'object',
+    properties: {
+      limit: { type: 'number', description: 'Max commits to return (default 25).' },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    const p = params as { limit?: number };
+    try {
+      const commits = await api.git.recyclableCommits(repoPath);
+      if (!commits.length) return 'No recyclable commits — nothing lost (every commit is reachable from a branch/tag).';
+      const limit = Math.min(Math.max(1, Math.floor(p.limit ?? 25)), 100);
+      const body = commits.slice(0, limit).map((c) =>
+        `  ${c.hashAbbrev}  ${c.subject}  (${formatAgo(Date.now() - c.timestamp * 1000)}, via ${c.source})`
+      ).join('\n');
+      const note = commits.length > limit ? `\n(${commits.length} total — showing ${limit})` : '';
+      return `recyclable commits (${commits.length}) — unreferenced but recoverable:\n${body}${note}`;
+    } catch (e) {
+      return `Recyclable scan failed: ${String(e)}`;
+    }
+  },
+};
+
+/** Distributed reviews — the Reviews tool's engine (git-notes comments). */
+export const listReviewsTool: AITool = {
+  name: 'list_reviews',
+  description: 'List distributed code-review threads stored in git notes (refs/notes/reviews) — the Reviews tool\'s engine for locally-stored reviews. Each thread: commit, file, line, author, date, severity, resolved state, comment text. Optionally filter to one commit (abbreviated hash works). Use for "какие комментарии ревью" / "что не решено в ревью". (GitHub/GitLab PR reviews live in list_pull_requests instead.)',
+  parameters: {
+    type: 'object',
+    properties: {
+      commit_hash: { type: 'string', description: 'Optional commit hash (full or abbreviated) to filter threads for.' },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    const p = params as { commit_hash?: string };
+    try {
+      let comments: { commitHash: string; filePath: string; lineNumber: number; author: string; date: string; body: string; severity: string; resolved: boolean }[] = [];
+      if (p.commit_hash?.trim()) {
+        const want = p.commit_hash.trim().toLowerCase();
+        // Exact engine call first; abbreviations fall back to prefix matching.
+        try {
+          comments = await loadReviewsForCommit(repoPath, want);
+        } catch { comments = []; }
+        if (!comments.length) {
+          const all = await loadReviews(repoPath);
+          for (const r of all) {
+            if (r.commitHash.toLowerCase().startsWith(want)) comments.push(...r.comments);
+          }
+        }
+      } else {
+        const reviews = await loadReviews(repoPath);
+        for (const r of reviews) comments.push(...r.comments);
+      }
+      if (!comments.length) {
+        return p.commit_hash
+          ? `No review comments for commit ${p.commit_hash}.`
+          : 'No review comments stored yet (refs/notes/reviews is empty). Reviews are created in the Reviews tool.';
+      }
+      const unresolved = comments.filter((c) => !c.resolved).length;
+      const body = comments.slice(0, 40).map((c) =>
+        `  ${c.commitHash.slice(0, 8)}  ${c.filePath}:${c.lineNumber}  [${c.severity}${c.resolved ? ', resolved' : ', UNRESOLVED'}]  ${c.author}: ${c.body.replace(/\s+/g, ' ').slice(0, 120)}`
+      ).join('\n');
+      const note = comments.length > 40 ? `\n(${comments.length} total — showing 40)` : '';
+      return `review comments (${comments.length}, ${unresolved} unresolved):\n${body}${note}`;
+    } catch (e) {
+      return `Reviews failed: ${String(e)}`;
+    }
+  },
+};
+
+/** List pull/merge requests — the Pull Requests tool's engine. */
+export const listPullRequestsTool: AITool = {
+  name: 'list_pull_requests',
+  description: 'List pull requests (GitHub) or merge requests (GitLab) for the current repository — the Pull Requests tool\'s engine. Each entry: number, title, author, source → target branches, state, age. Requires the matching integration token (Settings → Integrations); returns a helpful message when not authenticated. Use for "какие PR открыты" / "что ждёт ревью" / "что не смержено".',
+  parameters: {
+    type: 'object',
+    properties: {
+      state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'PR state filter (default "open"; "closed" includes merged).' },
+    },
+    additionalProperties: false,
+  },
+  async execute(params, repoPath) {
+    if (!repoPath) return 'Error: no repository open.';
+    const p = params as { state?: string };
+    const state = p.state === 'closed' || p.state === 'all' ? p.state : 'open';
+    try {
+      // Provider detection (same engine as the PR page; honors manual override)
+      const ps = useProviderStore.getState();
+      if (ps.repoPath !== repoPath || ps.provider === 'unknown') {
+        await useProviderStore.getState().detect(repoPath);
+      }
+      const st = useProviderStore.getState();
+      if (st.provider !== 'github' && st.provider !== 'gitlab') {
+        return 'Could not detect a GitHub/GitLab remote for this repository — the PR list is unavailable for this hosting.';
+      }
+      if (!st.owner || !st.repo) return 'Could not parse owner/repo from the remote URL.';
+      if (st.provider === 'github' && !st.githubAuthed) {
+        return 'GitHub integration is not authenticated. Add a token in Settings → Integrations («Интеграции») and retry.';
+      }
+      if (st.provider === 'gitlab' && !st.gitlabAuthed) {
+        return 'GitLab integration is not authenticated. Add a token in Settings → Integrations («Интеграции») and retry.';
+      }
+      if (st.provider === 'github') {
+        const prs = await api.github.listPullRequests(st.owner, st.repo, state);
+        if (!prs.length) return `No ${state} pull requests in ${st.owner}/${st.repo}.`;
+        const body = prs.slice(0, 30).map((pr) => {
+          const merged = pr.merged_at ? ', merged' : '';
+          return `  #${pr.number}  ${pr.title}\n      ${pr.user.login}  ${pr.head.ref} → ${pr.base.ref}  [${pr.state}${merged}]  (${formatAgo(Date.now() - Date.parse(pr.updated_at))})`;
+        }).join('\n');
+        const note = prs.length > 30 ? `\n(${prs.length} total — showing 30)` : '';
+        return `GitHub pull requests (${state}) in ${st.owner}/${st.repo}:\n${body}${note}`;
+      }
+      // GitLab
+      let projectId = st.gitlabProjectId;
+      if (projectId == null) {
+        const project = await api.gitlab.getProjectByPath(`${st.owner}/${st.repo}`);
+        projectId = project.id;
+        useProviderStore.getState().setGitlabProjectId(projectId);
+      }
+      const glState = state === 'open' ? 'opened' : state === 'closed' ? 'closed' : 'all';
+      const mrs = await api.gitlab.listMergeRequests(projectId, glState as 'opened' | 'closed' | 'merged' | 'all');
+      if (!mrs.length) return `No ${state} merge requests in ${st.owner}/${st.repo}.`;
+      const body = mrs.slice(0, 30).map((mr) => {
+        const merged = mr.state === 'merged' ? ', merged' : '';
+        return `  !${mr.iid}  ${mr.title}\n      ${mr.author.username}  ${mr.source_branch} → ${mr.target_branch}  [${mr.state}${merged}]  (${formatAgo(Date.now() - Date.parse(mr.updated_at))})`;
+      }).join('\n');
+      const note = mrs.length > 30 ? `\n(${mrs.length} total — showing 30)` : '';
+      return `GitLab merge requests (${state}) in ${st.owner}/${st.repo}:\n${body}${note}`;
+    } catch (e) {
+      return `PR list failed: ${String(e)}`;
+    }
+  },
+};
+
 /** All registered AI tools. */
 export const AI_TOOLS: AITool[] = [
   // Read-only
@@ -1494,6 +1871,17 @@ export const AI_TOOLS: AITool[] = [
   // Search / Blame (v3.8 — the Search & Blame tool engines)
   searchCodeTool,
   blameFileTool,
+  // Full tool coverage (v2.3.4 — the remaining sidebar tools' engines)
+  getReflogTool, // Reflog
+  listSubmodulesTool, // Submodules
+  submoduleUpdateTool, // Submodules (action)
+  lfsOverviewTool, // LFS
+  lfsSyncTool, // LFS (action)
+  bisectTool, // Bisect
+  gitflowOverviewTool, // GitFlow
+  recyclableCommitsTool, // Recyclable
+  listReviewsTool, // Reviews
+  listPullRequestsTool, // Pull Requests
   // File operations (read-only)
   readFileTool,
   listFilesTool,

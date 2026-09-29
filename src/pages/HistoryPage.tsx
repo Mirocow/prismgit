@@ -51,6 +51,7 @@ import { cn, copyToClipboard, shortHash } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useUiLayoutStore } from '../stores/uiLayoutStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
@@ -208,16 +209,10 @@ export function HistoryPage() {
   // Right detail pane collapse (VS Code-style): the commit-details sidebar
   // folds away to a 24px strip so the graph takes the full width (the user's
   // «кнопок сворачивания сайдбаров … правого»). Persisted.
-  const [detailCollapsed, setDetailCollapsed] = useState(
-    () => localStorage.getItem('prismgit-history-detail-collapsed') === '1'
-  );
-  const toggleDetailCollapsed = useCallback(() => {
-    setDetailCollapsed((v) => {
-      const next = !v;
-      localStorage.setItem('prismgit-history-detail-collapsed', next ? '1' : '0');
-      return next;
-    });
-  }, []);
+  // v2.3.4: the flag lives in uiLayoutStore (localStorage under the SAME
+  // key) so the Toolbar's corner toggle can flip it too.
+  const detailCollapsed = useUiLayoutStore((s) => s.detailCollapsed);
+  const toggleDetailCollapsed = useUiLayoutStore((s) => s.toggleDetail);
   const showContextMenu = useContextMenu();
 
   // ===== SmartGit integrations =====

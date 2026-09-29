@@ -7,6 +7,25 @@ PrismGit 的所有显著变更都记录在此文件中。
 
 **其他语言：** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [Deutsch](CHANGELOG.de.md)
 
+## [2.3.4] - 2026-09-29
+
+### 修复 — 让前三轮"加大间距"全部失效的间距 Bug
+- **根因（层叠 Bug）：应用自己的 `* { margin: 0; padding: 0 }` 重置被编译进了 `@layer utilities`，位置在 Tailwind `space-y-*` 规则之后** — v4 的 space 工具类经由 `:where()` 输出（特异性 0），于是这个重置静默压过了全应用的每一个 `space-y-*`/`space-x-*` 工具类：兄弟元素之间的外边距从未渲染过。这就是 v2.3.1–v2.3.3 里无论把类调到多大、Settings/对话框间距都毫无视觉变化的原因。冗余重置已删除（Tailwind preflight 本就在 `@layer base` 里清零 margin）— 现在每个 `space-*` 类都按设计生效，覆盖所有工具和对话框
+- 在修复之上再加大 Settings 间距：主面板 `space-y-8`（32px），次级面板 6/5，排序列表 2.5
+
+### 修复 — «!»提示从不显示内容
+- InfoHint 工具提示从未显示过：叠加变体 `group-hover:group-focus:block` 要求悬停与聚焦同时成立（而按钮吞掉 mousedown，焦点根本到不了）— 已替换为 `group-hover:block group-focus-within:block`。«!» 标记现在在悬停和键盘聚焦时都会显示说明文字
+
+### 新增 — 工具栏角落的 VS Code 式折叠开关
+- 位于「自定义工具栏」按钮右侧的两个布局开关：折叠/展开左侧边栏（48px 图标栏）与右侧提交详情面板。两个标志移入共享的 `uiLayoutStore`（沿用原 localStorage 键 — 已保存状态不丢失）；工具栏、边栏图标栏与 History 面板保持同步
+
+### 修复 — LFS 工具按钮只在悬停时可见
+- 文件行的「文件历史」与锁定按钮现在静止时 60% 不透明度（始终可见），与 v2.3.3 的搜索工具修复一致
+
+### 新增 — AI 助手能用所有工具（18/18）
+- 新注册 10 个工具引擎（共 41 个）：`get_reflog`（Reflog）、`list_submodules` + `submodule_update`（子模块）、`lfs_overview` + `lfs_sync`（LFS）、`bisect`（完整状态机：status/start/good/bad/skip/reset/log）、`gitflow_overview`（flow 配置 + 按类型分支 + 当前分支角色）、`recyclable_commits`（丢失提交）、`list_reviews`（git notes 里的分布式评审）、`list_pull_requests`（GitHub PR / GitLab MR，带提供商检测与令牌指引）
+- 系统提示词教会模型何时选用每个引擎（规则 24–27），包括 bisect 循环（"测试候选提交，然后回复 good/bad"）
+
 ## [2.3.3] - 2026-09-29
 
 ### 修复 — 搜索工具：按钮在悬停前不可见

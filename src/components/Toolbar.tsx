@@ -13,12 +13,13 @@ import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useUiLayoutStore } from '../stores/uiLayoutStore';
 import { useToastActions } from '../stores/toastStore';
 import { offerPushRejection } from '../stores/pushRejectionStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
 import appLogo from '../assets/app-logo.png';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, StashPop, Sun, Terminal, Trash } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, StashPop, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -112,6 +113,12 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
   const setGroups = useToolbarStore((s) => s.setGroups);
   const [showCustomize, setShowCustomize] = useState(false);
   const { t } = useI18n();
+  // v2.3.4 — layout collapse flags (shared with the Sidebar rail and the
+  // History detail pane via uiLayoutStore) for the corner toggle buttons.
+  const sidebarCollapsed = useUiLayoutStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useUiLayoutStore((s) => s.toggleSidebar);
+  const detailCollapsed = useUiLayoutStore((s) => s.detailCollapsed);
+  const toggleDetail = useUiLayoutStore((s) => s.toggleDetail);
 
   const disabled = !currentRepo;
   const location = useLocation();
@@ -336,6 +343,20 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
         >
           <SettingsIcon size={15} />
         </button>
+        {/* v2.3.4 — VS Code-style layout toggles in the header corner, to the
+            RIGHT of the «Customize toolbar» button (user request): collapse
+            the left sidebar to its 48px icon rail, collapse the right
+            (commit-details) panel. Same flags the in-panel chevrons use. */}
+        <IconButton
+          icon={sidebarCollapsed ? PanelLeftOpen : PanelLeftClose}
+          onClick={() => toggleSidebar()}
+          title={sidebarCollapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')}
+        />
+        <IconButton
+          icon={detailCollapsed ? PanelRightOpen : PanelRightClose}
+          onClick={() => toggleDetail()}
+          title={detailCollapsed ? t('shell.expandDetailPanel') : t('shell.collapseDetailPanel')}
+        />
         {showCustomize && (
           <div className="absolute top-full right-2 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-72">
             <div className="px-3 py-2 text-2xs uppercase text-text-tertiary border-b border-border-subtle">

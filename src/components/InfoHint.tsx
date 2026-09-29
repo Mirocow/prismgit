@@ -36,7 +36,7 @@ export function InfoHint({ text, side = 'top' }: { text: string; side?: 'top' | 
       <span
         role="note"
         id={id}
-        className={`pointer-events-none absolute ${pos} z-50 hidden group-hover:group-focus:block w-64 p-2 rounded-md bg-bg-elevated border border-border-default shadow-lg text-2xs leading-relaxed text-text-secondary text-left whitespace-normal`}
+        className={`pointer-events-none absolute ${pos} z-50 hidden group-hover:block group-focus-within:block w-64 p-2 rounded-md bg-bg-elevated border border-border-default shadow-lg text-2xs leading-relaxed text-text-secondary text-left whitespace-normal`}
       >
         {text}
       </span>

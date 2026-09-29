@@ -1,7 +1,7 @@
 {
   "name": "PrismGit",
   "productName": "PrismGit",
-  "version": "2.3.3",
+  "version": "2.3.4",
   "description": "A modern Git client built on Electron + React + TypeScript — visual history, smart merges, and a clean Ayu palette.",
   "author": "Mirocow <mr.mirocow@gmail.com>",
   "license": "MIT",

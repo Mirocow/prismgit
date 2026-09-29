@@ -7,6 +7,25 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.4] - 2026-09-29
+
+### Behoben — der Abstands-Bug, der drei Runden „mehr Abstand“ unsichtbar machte
+- **Ursache (Kaskaden-Bug): Das app-eigene Reset `* { margin: 0; padding: 0 }` landete beim Kompilieren in `@layer utilities` NACH Tailwinds `space-y-*`-Regeln** — v4 erzeugt Space-Utilities über `:where()` (Spezifität 0), deshalb hat das Reset ALLE `space-y-*`/`space-x-*`-Utilities app-weit lautlos geschlagen: Abstände zwischen Geschwistern wurden nie gerendert. Deshalb änderte sich der Abstand in Settings/Dialogen in v2.3.1–v2.3.3 sichtbar nie, egal wie hoch die Klassen erhöht wurden. Das redundante Reset ist entfernt (Tailwinds Preflight nullt Margins bereits in `@layer base`) — jetzt rendert jede `space-*`-Klasse wie vorgesehen, in jedem Tool und Dialog
+- Zusätzlich Abstände in Settings verbreitert: Haupt-Panels `space-y-8` (32px), sekundäre 6/5, Sortierlisten 2.5
+
+### Behoben — „!“-Hinweise zeigten nie ihren Inhalt
+- Der InfoHint-Tooltip erschien buchstäblich nie: Die gestapelte Variante `group-hover:group-focus:block` verlangt Hover UND Fokus gleichzeitig (und der Button schluckt das Mousedown, Fokus kam nie an) — ersetzt durch `group-hover:block group-focus-within:block`. Die „!“-Marker zeigen ihren Erklärungstext jetzt bei Hover und Tastaturfokus
+
+### Hinzugefügt — VS-Code-artige Einklapp-Schalter in der Toolbar-Ecke
+- Zwei Layout-Schalter RECHTS der „Symbolleiste anpassen“-Taste: linke Seitenleiste (48px-Icon-Rail) und rechtes Commit-Details-Panel ein-/ausklappen. Beide Flags liegen jetzt im gemeinsamen `uiLayoutStore` (dieselben localStorage-Keys — gespeicherter Zustand bleibt); Toolbar, Rail und History-Panel bleiben synchron
+
+### Behoben — LFS-Tool-Schaltflächen nur bei Hover sichtbar
+- „Datei-Historie“ und Sperr-Schaltflächen der Dateizeilen ruhen jetzt bei 60 % Deckkraft (stets sichtbar), wie der Search-Fix aus v2.3.3
+
+### Hinzugefügt — der AI-Assistent kann JEDES Tool nutzen (18/18)
+- 10 neue Tool-Engines registriert (41 gesamt): `get_reflog` (Reflog), `list_submodules` + `submodule_update` (Submodules), `lfs_overview` + `lfs_sync` (LFS), `bisect` (die komplette Zustandsmaschine: status/start/good/bad/skip/reset/log), `gitflow_overview` (Flow-Konfiguration + Zweige je Typ + Rolle des aktuellen Zweigs), `recyclable_commits` (verlorene Commits), `list_reviews` (verteilte Review-Threads aus Git-Notes), `list_pull_requests` (GitHub-PRs / GitLab-MRs mit Provider-Erkennung + Token-Hinweis)
+- Der System-Prompt lehrt das Modell, wann welche Engine zu greifen ist (Regeln 24–27), inklusive der Bisect-Schleife („Kandidat testen, dann good/bad antworten“)
+
 ## [2.3.3] - 2026-09-29
 
 ### Behoben — Suche-Tool: Schaltflächen waren bis zum Hovern unsichtbar

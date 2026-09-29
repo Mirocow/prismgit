@@ -12,6 +12,7 @@ import { getThemeMeta } from '../lib/themes';
 import { useContextMenu } from '../lib/useContextMenu';
 import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
+import { useUiLayoutStore } from '../stores/uiLayoutStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useFavoriteToolsStore } from '../stores/favoriteToolsStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -133,16 +134,10 @@ export function Sidebar() {
   // VS Code-style sidebar collapse: the full sidebar folds into a 48px icon
   // rail (expand button + tool icons + theme/settings). Persisted so the
   // choice survives restarts. The splitter is hidden while collapsed.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(
-    () => localStorage.getItem('prismgit-sidebar-collapsed') === '1'
-  );
-  const toggleSidebarCollapsed = useCallback(() => {
-    setSidebarCollapsed((v) => {
-      const next = !v;
-      localStorage.setItem('prismgit-sidebar-collapsed', next ? '1' : '0');
-      return next;
-    });
-  }, []);
+  // v2.3.4: the flag lives in uiLayoutStore (localStorage under the SAME
+  // key) so the Toolbar's corner toggle can flip it too.
+  const sidebarCollapsed = useUiLayoutStore((s) => s.sidebarCollapsed);
+  const toggleSidebarCollapsed = useUiLayoutStore((s) => s.toggleSidebar);
   const { width: sidebarWidth, handleResize: handleSidebarResize } = useResizableWidth(240, 180, 400);
   // SmartGit-style: vertical splitter between Repositories list and Navigation
   // panel in the sidebar — user can drag to give more space to either side.

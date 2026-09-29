@@ -473,7 +473,7 @@ export function SettingsPage() {
         {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.appearance')}</div>
-          <div className="p-5 space-y-6">
+          <div className="p-5 space-y-8">
             {/* Language selector */}
             <div className="flex items-center justify-between">
               <div>
@@ -673,7 +673,7 @@ export function SettingsPage() {
         {showGit && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.git')}</div>
-          <div className="p-5 space-y-6">
+          <div className="p-5 space-y-8">
             {/* Default commit author — written to new repos on init/clone,
                 used as a commit-time fallback. Fixes "Please tell me who
                 you are" on repositories created via PrismGit. */}
@@ -970,7 +970,7 @@ export function SettingsPage() {
               <div className="text-2xs text-text-tertiary mb-3">
                 {t('settings.gitPerformanceHint', { defaultValue: 'These settings are applied globally via env override and affect ALL repositories. They are the same as running the git config commands manually, but without modifying your --global config.' })}
               </div>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <label className="flex items-center justify-between cursor-pointer">
                   <div>
                     <div className="text-sm font-medium">feature.manyFiles</div>
@@ -1020,7 +1020,7 @@ export function SettingsPage() {
         {showAdvanced && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.advancedTitle', { defaultValue: 'Advanced Properties' })}</div>
-          <div className="p-5 space-y-6">
+          <div className="p-5 space-y-8">
             <div className="text-xs text-text-tertiary p-3 bg-bg-tertiary rounded">
               {t('settings.advancedWarning', { defaultValue: 'These properties affect low-level behavior. Changes apply immediately.' })}
             </div>
@@ -1154,7 +1154,7 @@ export function SettingsPage() {
         {showIntegrations && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.externalTools')}</div>
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-6">
             {/* --- Visual Studio Code integration --- */}
             <div className="pb-3 mb-1 border-b border-border-subtle">
               <div className="flex items-center justify-between mb-2">
@@ -1349,7 +1349,7 @@ export function SettingsPage() {
         {showProject && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.pullStrategy')}</div>
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-6">
             <div>
               <label className="text-xs text-text-tertiary block mb-2">{t('settings.whenPulling')}</label>
               <div className="flex gap-4">
@@ -1413,7 +1413,7 @@ export function SettingsPage() {
                 </button>
               </div>
             </div>
-            <div className="p-5 space-y-3">
+            <div className="p-5 space-y-5">
               <input
                 type="text"
                 className="w-full text-xs"
@@ -1579,7 +1579,7 @@ export function SettingsPage() {
         {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.commands')}</div>
-          <div className="p-5 space-y-3 text-sm">
+          <div className="p-5 space-y-5 text-sm">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
@@ -1761,7 +1761,7 @@ export function SettingsPage() {
             {t('settings.sidebarNavTitle', { defaultValue: 'Сайдбар и навигация' })}
             <InfoHint text={t('settings.sidebarNavHint', { defaultValue: 'Порядок пунктов левого сайдбара и горячие клавиши инструментов. Ctrl+1..9 — основные инструменты, Alt+1..9 — остальные; каждая комбинация может быть переназначена или снята (—). Изменения применяются сразу.' })} />
           </div>
-          <div className="p-4 space-y-1.5">
+          <div className="p-4 space-y-2.5">
             {/* v3.9 — FAVORITES ordering («сортировать надо те что в\n                фаворитах»): the starred tools render as the sidebar's top\n                «Избранные» section; this block reorders them. */}
             <div className="mb-2 pb-3 border-b border-border-subtle">
               <div className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-text-tertiary mb-1.5">
@@ -1918,7 +1918,7 @@ export function SettingsPage() {
         {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.lowLevelProps')}</div>
-          <div className="p-5 text-sm space-y-3">
+          <div className="p-5 text-sm space-y-5">
             <div className="text-2xs text-text-tertiary">
               {t('settings.lowLevelHint')} <code>smartgit.properties</code>. {t('settings.lowLevelRestart')}
             </div>
@@ -1959,7 +1959,7 @@ smartgit.refresh.inspectEol=true
             <Sparkles size={16} />
             {t('settings.aiCommitMessages')}
           </div>
-          <div className="p-5 text-sm space-y-4">
+          <div className="p-5 text-sm space-y-6">
             {/* AI providers — unlimited registry rendered as a grid.
                 Replaces the old per-preset dropdown + flat connection fields.
                 Handles activation (legacy-field mirroring), testing, editing. */}
@@ -2109,7 +2109,7 @@ smartgit.refresh.inspectEol=true
               <div className="text-2xs text-text-tertiary mb-2">
                 Control which destructive git actions the AI Assistant is allowed to perform. "Deny" blocks the action entirely — the AI will tell the user to do it manually.
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2.5">
                 {([
                   ['discard', 'Discard changes (reset --hard + clean)'],
                   ['syncWithRemote', 'Sync with remote (reset --hard origin)'],
@@ -2175,7 +2175,7 @@ smartgit.refresh.inspectEol=true
         {showGit && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.forcePushPolicy')}</div>
-          <div className="p-5 space-y-3 text-sm">
+          <div className="p-5 space-y-5 text-sm">
             <div>
               <label className="text-xs text-text-tertiary block mb-1">{t('settings.policy')}</label>
               <select
@@ -2226,7 +2226,7 @@ smartgit.refresh.inspectEol=true
         {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.outputPanel')}</div>
-          <div className="p-5 space-y-3 text-sm">
+          <div className="p-5 space-y-5 text-sm">
             <label className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium">{t('settings.commandLogLimit')}</div>
@@ -2565,7 +2565,7 @@ smartgit.refresh.inspectEol=true
         {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.densityTitle')}</div>
-          <div className="p-5 space-y-3">
+          <div className="p-5 space-y-5">
             <p className="text-xs text-text-tertiary">{t('settings.densityHint')}</p>
             <div className="flex items-center gap-1">
               {(['compact', 'comfortable'] as const).map((d) => (
@@ -2591,7 +2591,7 @@ smartgit.refresh.inspectEol=true
         {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.dateFormatTitle')}</div>
-          <div className="p-5 space-y-3">
+          <div className="p-5 space-y-5">
             <p className="text-xs text-text-tertiary">{t('settings.dateFormatHint')}</p>
             <div className="flex items-center gap-1">
               {(['relative', 'absolute', 'both'] as const).map((f) => (
@@ -2617,7 +2617,7 @@ smartgit.refresh.inspectEol=true
         {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.zoomTitle')}</div>
-          <div className="p-5 space-y-3">
+          <div className="p-5 space-y-5">
             <p className="text-xs text-text-tertiary">{t('settings.zoomHint')}</p>
             <div className="flex items-center gap-2">
               <button
@@ -2649,7 +2649,7 @@ smartgit.refresh.inspectEol=true
         {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.footerSectionTitle')}</div>
-          <div className="p-5 space-y-3">
+          <div className="p-5 space-y-5">
             <p className="text-xs text-text-tertiary">{t('settings.footerSectionDesc')}</p>
             <div className="grid grid-cols-2 gap-2">
               {([
@@ -2717,7 +2717,7 @@ smartgit.refresh.inspectEol=true
               {t('settings.github')}
             </span>
           </div>
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-6">
             {authenticated && user ? (
               <div className="flex items-center gap-3 p-3 bg-bg-tertiary rounded">
                 <img
@@ -2800,7 +2800,7 @@ smartgit.refresh.inspectEol=true
               {t('settings.gitlab', { defaultValue: 'GitLab' })}
             </span>
           </div>
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-6">
             {gitlabAuthed && gitlabUser ? (
               <div className="flex items-center gap-3 p-3 bg-bg-tertiary rounded">
                 {gitlabUser.avatar_url && <img src={gitlabUser.avatar_url} alt={gitlabUser.username} className="w-10 h-10 rounded-full" />}

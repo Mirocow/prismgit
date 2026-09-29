@@ -5,6 +5,25 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.4] - 2026-09-29
+
+### Fixed — the spacing bug that made three rounds of "wider spacing" invisible
+- **Root cause (cascade bug): the app's own `* { margin: 0; padding: 0 }` reset compiled into `@layer utilities` AFTER Tailwind's `space-y-*` rules** — Tailwind v4 emits space utilities through `:where()` (specificity 0), so the reset silently beat EVERY `space-y-*`/`space-x-*` utility app-wide: margins between siblings never rendered at all. That is why Settings/dialog spacing never visibly changed in v2.3.1–v2.3.3 no matter how far the classes were bumped. The redundant reset is removed (Tailwind's preflight already zeroes margins in `@layer base`) — every `space-*` class now renders as designed, in every tool and dialog
+- On top of the fix, Settings spacing is widened: main panels `space-y-8` (32px), secondary panels 6/5, reorder lists 2.5
+
+### Fixed — «!» hints never showed their content
+- The InfoHint tooltip literally never displayed: the stacked variant `group-hover:group-focus:block` requires hover AND focus simultaneously (and the button swallows mousedown, so focus never lands) — replaced with `group-hover:block group-focus-within:block`. The «!» markers now show their explanation text on hover and on keyboard focus
+
+### Added — VS Code-style collapse toggles in the toolbar corner
+- Two layout toggles to the RIGHT of the «Customize toolbar» button: collapse/expand the left sidebar (48px icon rail) and the right commit-details panel. Both flags moved to a shared `uiLayoutStore` (same localStorage keys — saved state survives); the toolbar, the sidebar rail and the History pane stay in sync
+
+### Fixed — LFS tool buttons were hover-only
+- The file rows' «File history» and lock buttons now rest at 60% opacity (always visible), matching the Search tool fix from v2.3.3
+
+### Added — the AI Assistant can use EVERY tool (18/18 sidebar tools)
+- 10 new tool engines registered (41 total): `get_reflog` (Reflog), `list_submodules` + `submodule_update` (Submodules), `lfs_overview` + `lfs_sync` (LFS), `bisect` (the whole state machine: status/start/good/bad/skip/reset/log), `gitflow_overview` (flow config + branches by type + current branch's role), `recyclable_commits` (lost commits), `list_reviews` (distributed review threads from git notes), `list_pull_requests` (GitHub PRs / GitLab MRs with provider detection + auth guidance)
+- The system prompt teaches the model when to reach for each engine (rules 24–27), including the bisect loop ("test the candidate, then reply good/bad")
+
 ## [2.3.3] - 2026-09-29
 
 ### Fixed — Search tool: buttons were invisible until hover

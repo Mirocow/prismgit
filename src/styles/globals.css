@@ -540,11 +540,15 @@
  * ===========================================================================
  */
 
-  * {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-  }
+  /* v2.3.4 — the app's own `* { margin: 0; padding: 0; box-sizing:
+     border-box }` reset is REMOVED. It compiled into `@layer utilities`
+     AFTER Tailwind's `space-y-*`/`space-x-*` rules (which use `:where()`
+     → specificity 0), so it silently BEAT every space-* utility in the
+     whole app — margins between siblings never rendered. Tailwind's
+     preflight in `@layer base` already zeroes margin/padding/box-sizing
+     for `*`, so this block was redundant — and this cascade bug is why
+     the user kept reporting «расстояние между строками … мало» after the
+     space-y bumps in v2.3.1–v2.3.3 never visibly changed anything. */
 
   html,
   body,

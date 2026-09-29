@@ -281,7 +281,7 @@ export function LfsPage() {
                       <span className="text-2xs text-text-tertiary">{f.status}</span>
                       {/* Cross-tool: jump straight to this file's history/blame */}
                       <button
-                        className="icon-btn !w-5 !h-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="icon-btn !w-5 !h-5 opacity-60 group-hover:opacity-100 transition-opacity"
                         title={t('pages.fileHistoryLog')}
                         onClick={() => {
                           useSelectionStore.getState().selectFile(f.path);
@@ -302,7 +302,7 @@ export function LfsPage() {
                         </button>
                       ) : (
                         <button
-                          className="icon-btn !w-5 !h-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="icon-btn !w-5 !h-5 opacity-60 group-hover:opacity-100 transition-opacity"
                           title={t('pages.lfsLockFile')}
                           onClick={() => handleLock(f.path)}
                           disabled={busy === 'lock-' + f.path}
