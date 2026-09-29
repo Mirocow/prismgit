@@ -19,7 +19,7 @@ import { offerPushRejection } from '../stores/pushRejectionStore';
 import { DEFAULT_TOOLBAR_GROUPS, useToolbarStore, type ToolbarGroupKey, type ToolbarGroups } from '../stores/toolbarStore';
 import { confirmDialog } from './ConfirmDialog';
 import appLogo from '../assets/app-logo.png';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, Minus, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, StashPop, Sun, Terminal, Trash } from './icons';
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, CloudDownload, Download, ExternalLink, EyeOff, FileText, Folder, GitBranch, GitCommit, GitMerge, GitPullRequest, Keyboard, Loader, LayoutSidebarLeft, LayoutSidebarLeftOff, LayoutSidebarRight, LayoutSidebarRightOff, Minus, Moon, Plus, RefreshCw, RotateCcw, Search, Settings as SettingsIcon, Sparkles, Star, StashPop, Sun, Terminal, Trash } from './icons';
 
 // Toolbar groups live in a shared zustand store (toolbarStore.ts) so the
 // customize editor applies to BOTH toolbars (top row + git actions row) live.
@@ -188,8 +188,11 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
   // The reaction lives in PullDropdown/GitToolbar below via lib/repoState.
 
   // Compact icon-only button
-  const IconButton = ({ icon: Icon, onClick, disabled, title }: {
-    icon: typeof RefreshCw; onClick: () => void; disabled?: boolean; title: string;
+  // v2.3.7: `iconSize` lets the VS Code layout toggles render at 16px (the
+  // codicon size VS Code itself uses in the title bar) while other icon
+  // buttons keep the classic 15px.
+  const IconButton = ({ icon: Icon, onClick, disabled, title, iconSize = 15 }: {
+    icon: typeof RefreshCw; onClick: () => void; disabled?: boolean; title: string; iconSize?: number;
   }) => (
     <button
       className="flex items-center justify-center w-8 h-8 rounded-md hover:bg-bg-hover transition-colors no-drag disabled:opacity-30 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary"
@@ -197,7 +200,7 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
       disabled={disabled}
       title={title}
     >
-      <Icon size={15} />
+      <Icon size={iconSize} />
     </button>
   );
 
@@ -343,18 +346,22 @@ export function Toolbar({ onFind, onGlobalSearch, onGitFlow, onInteractiveRebase
         >
           <SettingsIcon size={15} />
         </button>
-        {/* v2.3.4 — VS Code-style layout toggles in the header corner, to the
-            RIGHT of the «Customize toolbar» button (user request): collapse
-            the left sidebar to its 48px icon rail, collapse the right
-            (commit-details) panel. Same flags the in-panel chevrons use. */}
+        {/* v2.3.4 — layout collapse toggles in the header corner, to the
+            RIGHT of the «Customize toolbar» button (user request).
+            v2.3.7 — icons now match the VS Code reference exactly
+            (docs/editing/userinterface hero): codicon-style boxes whose
+            strip is FILLED while the panel is open and hollow (divider only)
+            while collapsed — same flags the in-panel chevrons use. */}
         <IconButton
-          icon={sidebarCollapsed ? PanelLeftOpen : PanelLeftClose}
+          icon={sidebarCollapsed ? LayoutSidebarLeftOff : LayoutSidebarLeft}
           onClick={() => toggleSidebar()}
+          iconSize={16}
           title={sidebarCollapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')}
         />
         <IconButton
-          icon={detailCollapsed ? PanelRightOpen : PanelRightClose}
+          icon={detailCollapsed ? LayoutSidebarRightOff : LayoutSidebarRight}
           onClick={() => toggleDetail()}
+          iconSize={16}
           title={detailCollapsed ? t('shell.expandDetailPanel') : t('shell.collapseDetailPanel')}
         />
         {showCustomize && (

@@ -7,6 +7,12 @@ PrismGit 的所有显著变更都记录在此文件中。
 
 **其他语言：** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [Deutsch](CHANGELOG.de.md)
 
+## [2.3.7] - 2026-09-29
+
+### 变更 — 侧边栏折叠按钮现在与 VS Code 参考图完全一致
+- 用户指出了 VS Code 文档的 hero 图（「вот посмотри как должны выглядеть кнопки сворачивания сайдбаров справа на картике」）：其右上一排是标题栏的 **layout 切换按钮** —— codicon 风格的圆角方框，面板打开时对应条带**填充**，折叠时为空心（仅剩分隔线）。对参考图的像素级取证确认了确切的图标集（`layout-sidebar-left`、`layout-panel`、`layout-sidebar-right-off`、`layout`）
+- PrismGit 头部角落的切换按钮（左侧边栏 / 右侧详情面板，位于「自定义工具栏」右侧）此前使用带折叠箭头的 lucide 风格面板图标 —— 现在渲染**原版 codicon 的精确 path 数据**（microsoft/vscode-codicons，16×16 fill），采用 codicon 尺寸 16px，状态语义与 VS Code 相同：打开 → 填充条带，折叠 → 空心。面板内部的折叠箭头（侧边栏竖条、History 面板）保持原有样式
+
 ## [2.3.6] - 2026-09-29
 
 ### 修复 — 3-way：点击或聚焦中间面板时出现的条纹

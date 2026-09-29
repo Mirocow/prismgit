@@ -7,6 +7,12 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.7] - 2026-09-29
+
+### Geändert — Sidebar-Collapse-Schalter entsprechen jetzt exakt der VS-Code-Referenz
+- Der Nutzer verwies auf das Hero-Bild der VS-Code-Dokumentation («вот посмотри как должны выглядеть кнопки сворачивания сайдбаров справа на картике»): dessen obere rechte Reihe sind die **Layout-Toggles** der Titelleiste — codicon-artige abgerundete Kästchen, deren Panel-Streifen **gefüllt ist, solange das Panel offen ist**, und hohl (nur Trennlinie), solange es eingeklappt ist. Eine Pixel-Forensik der Referenz bestätigte die exakten Icons (`layout-sidebar-left`, `layout-panel`, `layout-sidebar-right-off`, `layout`)
+- Die Schalter in der Header-Ecke von PrismGit (linke Sidebar / rechtes Detail-Panel, rechts von «Symbolleiste anpassen») nutzten bisher lucide-artige Panel-Icons mit Falt-Pfeilen — jetzt rendern sie die **exakten Pfaddaten der Original-Codicons** (microsoft/vscode-codicons, 16×16, fill) in der Codicon-Größe 16px mit denselben Zustands-Semantiken: offen → gefüllter Streifen, eingeklappt → hohl. Die In-Panel-Chevrons (Sidebar-Rail, History-Pane) behalten ihr Aussehen
+
 ## [2.3.6] - 2026-09-29
 
 ### Behoben — 3-Wege: Streifen auf der Mittelpane bei Klick oder Fokus

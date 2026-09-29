@@ -190,6 +190,63 @@ export const PanelBottomClose = (p: IconProps) => (
   </Icon>
 );
 
+// ── VS Code layout-toggle icons (codicons, 16×16 FILL) ─────────────────────
+// v2.3.7 — the header-corner sidebar toggles now match the VS Code reference
+// (code.visualstudio.com/docs/editing/userinterface hero): a rounded box
+// where the panel's strip is FILLED while the panel is open and a hollow
+// divider-only variant while it is collapsed. Exact paths from
+// microsoft/vscode-codicons (layout-sidebar-left / -off / -right / -off).
+// These are FILL icons (not stroke) — they deliberately bypass the 24×24
+// stroke-based <Icon> wrapper and render their own <svg>.
+type FillIconProps = IconProps;
+
+function FillIcon({ size = 16, d, ...props }: FillIconProps & { d: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d={d} fillRule="evenodd" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+/** Toggle Primary Side Bar — box with the LEFT strip filled (panel open). */
+export const LayoutSidebarLeft = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M12.5 1C13.881 1 15 2.119 15 3.5V12.5C15 13.881 13.881 15 12.5 15H3.5C2.119 15 1 13.881 1 12.5V3.5C1 2.119 2.119 1 3.5 1H12.5ZM12.5 14C13.328 14 14 13.328 14 12.5V3.5C14 2.672 13.328 2 12.5 2H7V14H12.5Z"
+  />
+);
+
+/** Primary Side Bar hidden — box outline + divider, left strip hollow. */
+export const LayoutSidebarLeftOff = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M1 3.5V12.5C1 13.879 2.122 15 3.5 15H12.5C13.878 15 15 13.879 15 12.5V3.5C15 2.122 13.878 1 12.5 1H3.5C2.122 1 1 2.122 1 3.5ZM12.5 14H7V2H12.5C13.327 2 14 2.673 14 3.5V12.5C14 13.327 13.327 14 12.5 14ZM2 3.5C2 2.673 2.673 2 3.5 2H6V14H3.5C2.673 14 2 13.327 2 12.5V3.5Z"
+  />
+);
+
+/** Toggle Secondary Side Bar — box with the RIGHT strip filled (panel open). */
+export const LayoutSidebarRight = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M12.5 1C13.881 1 15 2.119 15 3.5V12.5C15 13.881 13.881 15 12.5 15H3.5C2.119 15 1 13.881 1 12.5V3.5C1 2.119 2.119 1 3.5 1H12.5ZM9 14V2H3.5C2.672 2 2 2.672 2 3.5V12.5C2 13.328 2.672 14 3.5 14H9Z"
+  />
+);
+
+/** Secondary Side Bar hidden — box outline + divider, right strip hollow. */
+export const LayoutSidebarRightOff = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M12.5 1H3.5C2.122 1 1 2.122 1 3.5V12.5C1 13.879 2.122 15 3.5 15H12.5C13.878 15 15 13.879 15 12.5V3.5C15 2.122 13.878 1 12.5 1ZM2 12.5V3.5C2 2.673 2.673 2 3.5 2H9V14H3.5C2.673 14 2 13.327 2 12.5ZM14 12.5C14 13.327 13.327 14 12.5 14H10V2H12.5C13.327 2 14 2.673 14 3.5V12.5Z"
+  />
+);
+
 export const PanelBottomOpen = (p: IconProps) => (
   <Icon {...p}>
     <rect x="3" y="4" width="18" height="16" rx="2" />

@@ -66,8 +66,10 @@ describe('v2.3.4 — Toolbar collapse toggles in the header corner', () => {
 
   it('uses the shared uiLayoutStore (works with the sidebar rail + History pane)', () => {
     expect(src).toContain('useUiLayoutStore');
-    expect(src).toContain('PanelLeftClose');
-    expect(src).toContain('PanelRightClose');
+    // v2.3.7: the toggles switched from lucide-style PanelLeft/RightClose
+    // (with fold arrows) to the VS Code codicon layout toggles.
+    expect(src).toContain('LayoutSidebarLeft');
+    expect(src).toContain('LayoutSidebarRight');
   });
 });
 

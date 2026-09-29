@@ -5,6 +5,12 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.7] - 2026-09-29
+
+### Changed — sidebar collapse toggles now match the VS Code reference exactly
+- The user pointed at the VS Code UI docs hero («вот посмотри как должны выглядеть кнопки сворачивания сайдбаров справа на картике»): its top-right row is the title-bar **layout toggles** — codicon-style rounded boxes whose panel strip is **filled while the panel is open** and a hollow divider-only variant while it is collapsed. Pixel-level forensics of the reference confirmed the exact icons (`layout-sidebar-left`, `layout-panel`, `layout-sidebar-right-off`, `layout`)
+- The header-corner toggles in PrismGit (left sidebar / right detail panel, right of «Customize toolbar») previously used lucide-style panel icons with fold arrows — they now render the **exact upstream codicon path data** (microsoft/vscode-codicons, 16×16 fill) at the VS Code codicon size, with the same state semantics: open → filled strip, collapsed → hollow variant. The in-panel chevrons (sidebar rail, History pane) keep their affordance
+
 ## [2.3.6] - 2026-09-29
 
 ### Fixed — 3-way: a stripe appeared on the middle pane when clicked or focused
