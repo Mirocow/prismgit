@@ -52,6 +52,20 @@
  *
  * Horizontal scrolling (long lines): textarea overflow-x:auto drives a
  * translateX on the pre's inner wrapper (synced in onScroll).
+ *
+ * v2.3.6 fix (user report: «полоса появляется при клике на среднюю панель
+ * или при фокусе ее»): the Result pane is a PANE-SIZED textarea, and the
+ * global focus rules in globals.css (textarea:focus-visible → 2px accent
+ * outline; *:focus-visible → position:relative) painted accent stripes
+ * down the pane edges on every click (Chromium matches :focus-visible for
+ * text inputs even on MOUSE click) and collapsed the textarea from
+ * absolute/fill-width to intrinsic `cols` width (385→201px — caret landed
+ * on the wrong character). The caret IS the focus indicator in a code
+ * editor (VS Code shows no ring either), so the ring is suppressed here:
+ *   - className `merge-editor-input` → opt-out rule in globals.css
+ *   - INLINE outline:'none' + position:'absolute' — inline styles beat any
+ *     stylesheet rule regardless of specificity, so no future global focus
+ *     rule can reintroduce the stripe or the layout hijack.
  */
 
 import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
@@ -261,12 +275,18 @@ export function MergeResultEditor({
         onScroll={handleScroll}
         spellCheck={false}
         wrap="off"
-        className="absolute top-0 left-0 right-0 resize-none bg-transparent outline-none font-mono text-xs leading-5"
+        className="merge-editor-input absolute top-0 left-0 right-0 resize-none bg-transparent outline-none font-mono text-xs leading-5"
         style={{
           color: 'transparent',
           caretColor: 'var(--text-primary)',
           background: 'transparent',
           border: 0,
+          // v2.3.6 — focus-ring immunity (see header comment): inline beats
+          // the global *:focus-visible / textarea:focus-visible rules that
+          // otherwise paint a pane-high accent stripe and flip absolute→relative.
+          outline: 'none',
+          position: 'absolute',
+          boxShadow: 'none',
           padding: 0,
           margin: 0,
           height: totalHeight,

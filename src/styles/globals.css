@@ -1297,6 +1297,21 @@
     box-shadow: inset 2px 0 0 var(--accent);
   }
 
+  /* v2.3.6 — Full-pane code editors (3-way Result overlay textarea): the
+   * CARET is the focus indicator — a :focus-visible ring around a
+   * pane-sized textarea paints accent stripes down the pane edges on every
+   * click (Chromium matches :focus-visible for text inputs even on mouse
+   * click), and *:focus-visible's position:relative hijacked the absolute
+   * overlay (textarea collapsed to intrinsic cols width → caret misalign).
+   * Specificity (0,2,0) beats textarea:focus-visible (0,1,1); the component
+   * also sets inline outline/position as a second line of defense. */
+  .merge-editor-input:focus,
+  .merge-editor-input:focus-visible {
+    outline: none;
+    border-color: transparent;
+    box-shadow: none;
+  }
+
   /* ===========================================================================
  * UX Polish: Hover states — make interactive elements feel tactile
  * ===========================================================================

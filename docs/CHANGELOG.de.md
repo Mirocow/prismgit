@@ -7,6 +7,13 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.6] - 2026-09-29
+
+### Behoben — 3-Wege: Streifen auf der Mittelpane bei Klick oder Fokus
+- Die Fortsetzung: «полоса появляется при клике на среднюю панель» — sobald man in die Ergebnis-Pane klickt (oder sie fokussiert), erscheint ein heller vertikaler Streifen an den Pane-Kanten und verschwindet beim Verlassen des Fokus. Ursache (live bewiesen via computed-style + Pixel-Diff): Die Ergebnis-Pane ist eine **textarea in Panegröße**, und die globalen Fokusregeln malten einen 2px-Akzentring um sie herum — Chromium matcht `:focus-visible` bei Texteingaben **auch bei Mausklick**, der Ring feuerte also bei jedem Klick
+- Schlimmer noch: dieselbe globale Regel setzte `position: relative` und kaperte damit das `absolute` des Overlays — die textarea **fiel auf ihre inhärente `cols`-Breite zusammen (385→201px)**, und der Klick setzte den Cursor an das falsche Zeichen
+- Fix: In einem Code-Editor ist der **Cursor der Fokusindikator** (VS Code zeichnet auch keinen Ring) — Ring/Rahmen/Schatten werden für den Merge-Editor über die dedizierte Klasse `merge-editor-input` unterdrückt, plus inline `outline: none` / `position: absolute`, die keine künftige globale Regel überstimmen kann. Die Tastatur-Fokusringe überall sonst (Buttons, Felder, Dialoge) bleiben unangetastet
+
 ## [2.3.5] - 2026-09-29
 
 ### Behoben — 3-Wege: der „Streifen in der Mittelpane“ waren die Konfliktmarker

@@ -5,6 +5,13 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.6] - 2026-09-29
+
+### Fixed — 3-way: a stripe appeared on the middle pane when clicked or focused
+- The follow-up report: «полоса появляется при клике на среднюю панель или при фокусе ее» — a bright vertical band showed up along the pane edges the moment you clicked into the Result pane (or focused it), then vanished on blur. Root cause (proven live via computed-style + pixel-diff): the Result pane is a **pane-sized textarea**, and the app's global focus rules painted a 2px accent ring around it — Chromium matches `:focus-visible` for text inputs even on a **mouse click**, so the ring fired on every click
+- Worse, the same global rule set `position: relative`, hijacking the overlay's `absolute` layout: the textarea **collapsed to its intrinsic `cols` width (385→201px)** — the click placed the caret on the wrong character
+- Fix: in a code editor the **caret is the focus indicator** (VS Code shows no ring either) — the ring/border/shadow are suppressed for the merge editor via a dedicated `merge-editor-input` opt-out class, plus inline `outline: none` / `position: absolute` that no future global rule can override. Keyboard focus rings everywhere else (buttons, inputs, dialogs) are untouched
+
 ## [2.3.5] - 2026-09-29
 
 ### Fixed — 3-way: the «stripe in the center pane» was the conflict markers
