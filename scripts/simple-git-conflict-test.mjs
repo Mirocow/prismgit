@@ -5,7 +5,7 @@
  * whether to refreshStatus and warn — if the word is missing, a conflicted
  * pull shows a transient toast and the UI never enters conflict state.)
  */
-import simpleGit from 'simple-git';
+import { simpleGit } from 'simple-git';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
@@ -48,7 +48,16 @@ shell('git add file.txt', work);
 shell('git commit -q -m "local edit"', work);
 
 // ── The app's exact call: simple-git raw pull with --no-rebase ──────────────
-const git = simpleGit(work);
+const git = simpleGit({
+  // v4: ambient GIT_*-переменные ФИЛЬТРУЮТСЯ у дочерних git-процессов —
+  // изоляцию GIT_CONFIG_GLOBAL из process.env нужно провести явно
+  // (allowEnvironment + unsafe.allowUnsafeConfigPaths), иначе ребёнок увидит
+  // реальный глобальный конфиг машины, а не пустой.
+  baseDir: work,
+  allowEnvironment: ['GIT_CONFIG_GLOBAL'],
+  unsafe: { allowUnsafeConfigPaths: true },
+});
+git.env({ GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL });
 const args = ['pull', '--no-rebase', 'origin', 'main'];
 try {
   await git.raw(args);

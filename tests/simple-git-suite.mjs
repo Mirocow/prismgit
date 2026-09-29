@@ -1,6 +1,11 @@
 /**
  * =============================================================
- * PrismGit — simple-git v3.x full API & core coverage suite
+ * PrismGit — simple-git v4.x full API & core coverage suite
+ *
+ * v4 migration (per docs/RELEASE-NOTES-V4.md):
+ *   - named `simpleGit` export only (gitP / default / simple-git/promise removed)
+ *   - `.silent()` and `.clearQueue()` removed
+ *   - GIT_* env vars need `allowEnvironment` (+ unsafe flags) to reach children
  * =============================================================
  *
  * Monolithic Node.js test script (ESM) built on the native
@@ -26,7 +31,6 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   simpleGit,
-  gitP,
   pathspec,
   grepQueryBuilder,
   DiffNameStatus,
@@ -1588,9 +1592,12 @@ describe('S19: опции инстанса и утилиты', () => {
   });
 
   test("19.1 env('GIT_SSH_COMMAND', ...) — переменная доступна дочерним процессам", async () => {
+    // v4 double opt-in: env-гвард требует allowEnvironment, unsafe-плагин —
+    // allowUnsafeSshCommand ( оба флажка, иначе «blocked by the environment guard»).
     const g = simpleGit({
       baseDir: repo,
       config: CFG,
+      allowEnvironment: ['GIT_SSH_COMMAND'],
       unsafe: { allowUnsafeSshCommand: true },
       maxConcurrentProcesses: 8,
     });
@@ -1628,12 +1635,13 @@ describe('S19: опции инстанса и утилиты', () => {
     assert.match(captured.stdout, /true/);
   });
 
-  test('19.5 silent(true)/silent(false) — оба режима работают', async () => {
+  test('19.5 silent() — удалён в v4 (логирование через debug-пакет)', async () => {
     const g = await makeGit(repo);
-    const s1 = await g.silent(true).status();
-    assert.ok(typeof s1.isClean === 'function');
-    const s2 = await g.silent(false).status();
-    assert.ok(typeof s2.isClean === 'function');
+    // v4: simpleGit.silent() удалён; логирование настраивается переменными
+    // окружения пакета debug (DEBUG=simple-git*).
+    assert.equal(g.silent, undefined, 'instance no longer has .silent()');
+    const st = await g.status();
+    assert.ok(typeof st.isClean === 'function', 'status still works');
   });
 
   test('19.6 chain() — удалён в v3 (задокументировано пропусками)', { skip: 'chain() was removed in simple-git v2/v3; abortPlugin replaced it' }, () => {});
@@ -1652,9 +1660,9 @@ describe('S19: опции инстанса и утилиты', () => {
     assert.equal(called, true);
   });
 
-  test('19.9 clearQueue — deprecated, но разрешается', async () => {
-    await git.clearQueue();
-    assert.ok(true);
+  test('19.9 clearQueue — удалён в v4 (noop с v3; замена — abort-плагин)', () => {
+    // v4: clearQueue() удалён — с v3 он был noop; отмена задач через abort-плагин.
+    assert.equal(git.clearQueue, undefined, 'instance no longer has .clearQueue()');
   });
 });
 
@@ -2377,7 +2385,10 @@ describe('B9: Environment Override API', () => {
   });
 
   test('9.1-9.2 .env() замещает метаданные автора в дочерних процессах', async () => {
-    const g = await makeGit(repo);
+    // v4: GIT_*-ключи в .env() проходят только через allowEnvironment.
+    const g = await makeGit(repo, [], {
+      allowEnvironment: ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'],
+    });
     g.env({
       GIT_AUTHOR_NAME: 'Env Author',
       GIT_AUTHOR_EMAIL: 'env@test.com',
@@ -2393,7 +2404,7 @@ describe('B9: Environment Override API', () => {
   });
 
   test('9.3 env(name, value) — построчная форма', async () => {
-    const g = await makeGit(repo);
+    const g = await makeGit(repo, [], { allowEnvironment: ['GIT_AUTHOR_NAME'] });
     g.env('GIT_AUTHOR_NAME', 'Single Env');
     write(repo, 'env2.txt', 'second env commit\n');
     await g.add('.');
@@ -2749,7 +2760,7 @@ describe('S25: расширения remote/tag', () => {
 
 /* =============================================================
  * SECTION 26 — Экспортируемые фабрики и хелперы
- * (gitP / pathspec / grepQueryBuilder / DiffNameStatus)
+ * (simpleGit / pathspec / grepQueryBuilder / DiffNameStatus; gitP удалён в v4)
  * ============================================================= */
 
 describe('S26: экспортируемые фабрики и хелперы', () => {
@@ -2769,14 +2780,19 @@ describe('S26: экспортируемые фабрики и хелперы', (
     git.outputHandler((_cmd, _out, _err, args) => { seenArgs.push(args.join(' ')); });
   });
 
-  test('26.1 gitP — независимая promise-фабрика с полной поверхностью API', async () => {
-    assert.notEqual(gitP, simpleGit, 'separate factory export');
-    const g = gitP({ baseDir: repo, config: CFG });
+  test('26.1 gitP / default / simple-git/promise — удалены в v4; simpleGit — единственная фабрика', async () => {
+    // v4: единственный поддерживаемый импорт — named export simpleGit
+    // (ESM: import { simpleGit } from 'simple-git'; CJS: const { simpleGit } = require('simple-git')).
+    const mod = await import('simple-git');
+    assert.equal('gitP' in mod, false, 'v4 no longer exports gitP');
+    assert.equal(mod.default, undefined, 'v4 has no default export');
+    await assert.rejects(() => import('simple-git/promise'), 'subpath simple-git/promise removed in v4');
+    const g = mod.simpleGit({ baseDir: repo, config: CFG });
     const st = await g.status();
     assert.equal(st.isClean(), true);
     assert.equal(st.current, 'main');
     for (const m of ['raw', 'status', 'commit', 'diff', 'log', 'branch']) {
-      assert.equal(typeof g[m], 'function', `gitP instance has .${m}`);
+      assert.equal(typeof g[m], 'function', `simpleGit instance has .${m}`);
     }
   });
 
