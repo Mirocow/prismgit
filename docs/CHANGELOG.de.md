@@ -7,6 +7,16 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.10] - 2026-09-29
+
+### Behoben — das Designsystem: Was die Einstellungen versprechen, sieht man auch («темы там просто ад»)
+- Das vom Nutzer geforderte Audit («предлагаю самому построить пару тем и посмотреть что реально изменяется»): zwei extreme Signal-Farben-Benutzerthemen + sechs eingebaute Themes wurden durch die Live-App geschickt und pixelweise mit der Baseline verglichen — jede theme-blinde Zone ist behoben
+- **light-dim-sidebar war seit der Tailwind-v4-Migration still kaputt**: der Dark-Sidebar-Block wurde gelöscht, sein verwaister Selektor klebte am `simple-light`-Block — das „VS Code dunkle Seitenleiste"-Thema zeigte eine WEISSE Sidebar (0,4 % Pixelunterschied zu plain light), und simple-light-Tokens leckten hinein. Der dunkle Block ist wiederhergestellt (live verifiziert: aside bg #1e1e1e, helle Schrift, 16 % Unterschied)
+- **Eingebaute Themes hatten unvollständige Token-Sets**: hover/active/focus und Status-Synonyme fielen auf die Ayu-Basis zurück — ein Material-Indigo-Button wurde beim Hover AYU-BLAU, Discord zeigte Ayu-Cyan-Info und Gold-Warnungen. Alle fünf `[data-theme]`-Blöcke definieren jetzt das vollständige kanonische Set aus 59 Tokens (per Tests fixiert)
+- **Theme-blinde UI-Zonen**: Status-Badges (hartkodiertes Ayu rgba — identisch in allen 8 Probe-Themes), 3-Way-Konfliktflächen (feste VS-Code-Palette), Geister-Ausrichtungszeilen, .btn-primär's blauer Schatten-Halo und .btn-danger's fixer Hover werden jetzt per `color-mix()` aus den Theme-Tokens abgeleitet; der „Aktiv"-Chip auf Akzent nutzt `--text-inverse` statt Weiß
+- **Syntax-Hervorhebung**: `.text-function`/`.tok-function` referenzierten die NICHT EXISTIERENTE Variable `--accent-blue` — Funktionsnamen waren in jedem Theme ungefärbt; jetzt `--accent-light-blue` mit Fallback
+- **Benutzerthemes**: `--border-subtle` war für dunkle Themen invertiert (Richtung Weiß gemischt — heller als der Standard-Border), und nichts leitete focus/info/link/tag/graph/scrollbar/diff-Tints ab — der Compiler leitet jetzt die ganze Familie aus den 13 Editor-Feldern ab, sodass ein Benutzerthema auch die Code-Syntax färbt (Status-Farben → die accent-green/yellow/red/purple/cyan-Familie)
+
 ## [2.3.8] - 2026-09-29
 
 ### Hinzugefügt — Layout-Schalter für das UNTERE Panel (Befehlsprotokoll), der dritte Knopf der VS-Code-Hero-Reihe

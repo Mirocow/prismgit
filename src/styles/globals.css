@@ -405,6 +405,20 @@
      fell back to Ayu Dark values (cyan tints on a blurple theme). */
     --bg-sidebar-selected: rgba(88, 101, 242, 0.24);
     --status-success: #3ba55c;
+    /* v2.3.10 — completing the set: status-warning/error/info + the accent
+       family + comment used to fall through to the .dark (Ayu Dark) block —
+       cyan #39bae6 info and gold #ffd700 warnings on a blurple theme. */
+    --status-warning: #faa61a;
+    --status-error: #ed4245;
+    --status-info: #00aff4;
+    --accent-purple: #a855f7;
+    --accent-cyan: #00aff4;
+    --accent-green: #3ba55c;
+    --accent-yellow: #faa61a;
+    --accent-yellow-dim: #8a6a10;
+    --accent-red: #ed4245;
+    --accent-red-dim: #8a2a2c;
+    --comment: #72767d;
 
     --diff-added-bg: rgba(59, 165, 92, 0.18);
     --diff-removed-bg: rgba(237, 66, 69, 0.18);
@@ -456,16 +470,93 @@
     --status-modified: #f2ae49;
     --status-deleted: #f07171;
     --status-renamed: #399ee6;
-    --status-conflict: #f07171;
+    --status-conflict: #ff6b35;
+    --status-untracked: #4cbf99;
     --status-info: #399ee6;
     --status-warning: #f2ae49;
     --status-error: #f07171;
+    --status-success: #86b300;
+    /* v2.3.10 — the rest of the canonical token set (was falling through to
+       :root Ayu values for everything not listed above). */
+    --bg-active: rgba(57, 158, 230, 0.13);
+    --bg-sidebar-selected: rgba(57, 158, 230, 0.14);
+    --border-strong: #c2c7cd;
+    --border-focused: #399ee6;
+    --text-inverse: #ffffff;
+    --text-link: #2585d4;
+    --accent-hover: #55b4d4;
+    --accent-active: #1c7eb4;
+    --accent-light-blue: #55b4d4;
+    --accent-purple: #a37acc;
+    --accent-cyan: #4cbf99;
+    --accent-green: #86b300;
+    --accent-yellow: #f2ae49;
+    --accent-yellow-dim: #8b7000;
+    --accent-red: #f07171;
+    --accent-red-dim: #993333;
+    --diff-added-bg: rgba(134, 179, 0, 0.22);
+    --diff-removed-bg: rgba(240, 113, 113, 0.22);
+    --diff-added-line: rgba(134, 179, 0, 0.1);
+    --diff-removed-line: rgba(240, 113, 113, 0.1);
+    --diff-added-word: rgba(134, 179, 0, 0.4);
+    --diff-removed-word: rgba(240, 113, 113, 0.4);
+    --tag-bg: rgba(57, 158, 230, 0.08);
+    --tag-border: rgba(57, 158, 230, 0.3);
+    --tag-text: #399ee6;
+    --warning-bg: #fef9e7;
+    --warning-icon: #f2ae49;
+    --warning-border: #f0e0a0;
+    --comment: #abadb1;
+    --graph-line: #c8cacf;
+    --graph-node-fill: #ffffff;
+    --graph-node-border: #5c6166;
+    --graph-node-selected: #399ee6;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+    --scrollbar-thumb: rgba(23, 26, 33, 0.22);
+    --scrollbar-thumb-hover: rgba(23, 26, 33, 0.4);
+    --splitter-color-hover: #399ee6;
   }
 
-  /* Dark sidebar override for both light-dim-sidebar and github-light-dim.
-   Targets the <aside> sidebar element specifically so the main content
-   area stays light. */
-  [data-theme='light-dim-sidebar'] aside,
+  /* v2.3.10 FIX — the declaration block below was lost in the Tailwind v4
+     migration (15183c3): the orphaned selector
+     `[data-theme='light-dim-sidebar'] aside,` got glued to the
+     [data-theme='simple-light'] block, so the sidebar rendered WHITE
+     (the theme's whole point is a dark VS Code sidebar) AND simple-light
+     tokens leaked into this theme's aside. Restored from pre-migration
+     history + completed with the missing derived tokens. */
+  [data-theme='light-dim-sidebar'] aside {
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #252526;
+    --bg-tertiary: #2d2d30;
+    --bg-elevated: #333333;
+    --bg-hover: #2a2d2e;
+    --bg-active: #37373d;
+    --bg-selected: #37373d;
+    --bg-sidebar-selected: rgba(79, 195, 247, 0.15);
+    --text-primary: #cccccc;
+    --text-secondary: #aaaaaa;
+    --text-tertiary: #999999;
+    --text-inverse: #1e1e1e;
+    --text-link: #4fc3f7;
+    --border-default: #3e3e42;
+    --border-subtle: #2d2d30;
+    --border-strong: #4a4a4e;
+    --border-focused: #4fc3f7;
+    --accent: #4fc3f7;
+    --accent-hover: #6fd0f9;
+    --accent-active: #37a9db;
+    --accent-muted: rgba(79, 195, 247, 0.12);
+    --status-added: #89d185;
+    --status-modified: #cca45e;
+    --status-deleted: #f14c4c;
+    --scrollbar-thumb: rgba(138, 138, 138, 0.3);
+    --scrollbar-thumb-hover: rgba(138, 138, 138, 0.5);
+    background-color: #1e1e1e;
+    color: #cccccc;
+  }
+
   /* ===========================================================================
  * Simple Light — minimal black/white/grey + blue accent
  * =========================================================================== */
@@ -488,14 +579,53 @@
     --status-deleted: #cc0000;
     --status-renamed: #0066ff;
     --status-conflict: #cc0000;
+    --status-untracked: #009999;
     --status-info: #0066ff;
     --status-warning: #ff9900;
     --status-error: #cc0000;
     --bg-sidebar-selected: rgba(0, 102, 255, 0.1);
+    /* v2.3.10 — the rest of the canonical token set. Before this, hover /
+       active / focus on accent elements flipped to the Ayu BLUE inherited
+       from :root ("в настройках одно — визуально другое"). */
+    --bg-active: rgba(0, 102, 255, 0.13);
+    --border-strong: #cccccc;
+    --border-focused: #0066ff;
+    --text-inverse: #ffffff;
+    --text-link: #0066ff;
+    --accent-hover: #3377ff;
+    --accent-active: #0052cc;
+    --accent-light-blue: #3377ff;
+    --accent-purple: #9c27b0;
+    --accent-cyan: #009999;
+    --accent-green: #009900;
+    --accent-yellow: #ff9900;
+    --accent-yellow-dim: #8a5a00;
+    --accent-red: #cc0000;
+    --accent-red-dim: #8b0000;
+    --status-success: #009900;
+    --diff-added-bg: rgba(0, 153, 0, 0.15);
+    --diff-removed-bg: rgba(204, 0, 0, 0.15);
+    --diff-added-line: rgba(0, 153, 0, 0.08);
+    --diff-removed-line: rgba(204, 0, 0, 0.08);
+    --diff-added-word: rgba(0, 153, 0, 0.35);
+    --diff-removed-word: rgba(204, 0, 0, 0.35);
+    --tag-bg: rgba(0, 102, 255, 0.08);
+    --tag-border: rgba(0, 102, 255, 0.3);
+    --tag-text: #0066ff;
+    --warning-bg: #fff8e6;
+    --warning-icon: #ff9900;
+    --warning-border: #ffdd99;
+    --comment: #999999;
+    --graph-line: #d0d0d0;
     --graph-node-fill: #ffffff;
-    --scrollbar-track: #fafafa;
+    --graph-node-border: #666666;
+    --graph-node-selected: #0066ff;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
     --scrollbar-thumb: rgba(0, 0, 0, 0.12);
     --scrollbar-thumb-hover: rgba(0, 0, 0, 0.22);
+    --splitter-color-hover: #0066ff;
   }
 
   /* ===========================================================================
@@ -520,12 +650,50 @@
     --status-deleted: #f44336;
     --status-renamed: #3f51b5;
     --status-conflict: #f44336;
+    --status-untracked: #00bcd4;
     --status-info: #2196f3;
     --status-warning: #ff9800;
     --status-error: #f44336;
     --bg-sidebar-selected: rgba(63, 81, 181, 0.12);
+    /* v2.3.10 — the rest of the canonical token set (hover/active/focus used
+       to flip to the inherited Ayu blue on this indigo theme). */
+    --bg-active: rgba(63, 81, 181, 0.13);
+    --border-strong: #bdbdbd;
+    --border-focused: #3f51b5;
+    --text-inverse: #ffffff;
+    --text-link: #3f51b5;
+    --accent-hover: #5c6bc0;
+    --accent-active: #303f9f;
+    --accent-light-blue: #2196f3;
+    --accent-purple: #9c27b0;
+    --accent-cyan: #00bcd4;
+    --accent-green: #4caf50;
+    --accent-yellow: #ff9800;
+    --accent-yellow-dim: #8a5a00;
+    --accent-red: #f44336;
+    --accent-red-dim: #8b2f26;
+    --status-success: #4caf50;
+    --diff-added-bg: rgba(76, 175, 80, 0.16);
+    --diff-removed-bg: rgba(244, 67, 54, 0.16);
+    --diff-added-line: rgba(76, 175, 80, 0.08);
+    --diff-removed-line: rgba(244, 67, 54, 0.08);
+    --diff-added-word: rgba(76, 175, 80, 0.35);
+    --diff-removed-word: rgba(244, 67, 54, 0.35);
+    --tag-bg: rgba(63, 81, 181, 0.08);
+    --tag-border: rgba(63, 81, 181, 0.3);
+    --tag-text: #3f51b5;
+    --warning-bg: #fff8e1;
+    --warning-icon: #ff9800;
+    --warning-border: #ffe082;
+    --comment: #9e9e9e;
+    --graph-line: #e0e0e0;
     --graph-node-fill: #fafafa;
-    --scrollbar-track: #f5f5f5;
+    --graph-node-border: #757575;
+    --graph-node-selected: #3f51b5;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+    --splitter-color-hover: #3f51b5;
     --scrollbar-thumb: rgba(0, 0, 0, 0.12);
     --scrollbar-thumb-hover: rgba(0, 0, 0, 0.22);
   }
@@ -695,12 +863,14 @@
     background-color: var(--accent);
     color: var(--text-inverse);
     font-weight: 600;
-    box-shadow: 0 1px 2px rgba(57, 158, 230, 0.2);
+    /* v2.3.10 — was a hardcoded blue rgba shadow (visible as a blue halo on
+       every non-blue theme); now derived from the theme accent. */
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 25%, transparent);
   }
 
   .btn-primary:hover {
     background-color: var(--accent-hover);
-    box-shadow: 0 2px 5px rgba(57, 158, 230, 0.3);
+    box-shadow: 0 2px 5px color-mix(in srgb, var(--accent) 35%, transparent);
   }
 
   .btn-primary:disabled {
@@ -735,7 +905,8 @@
   }
 
   .btn-danger:hover {
-    background-color: #ff7a85;
+    /* v2.3.10 — was a hardcoded light-red; now a tint of the theme's red. */
+    background-color: color-mix(in srgb, var(--status-deleted) 82%, #ffffff);
   }
 
   /* Author badge — colored background with theme-aware text color.
@@ -857,35 +1028,38 @@
     line-height: 1.3;
   }
 
+  /* v2.3.10 — badge tints are now derived from the THEME's status tokens via
+     color-mix() instead of hardcoded Ayu rgba() channels (they used to stay
+     green/yellow/red-tinted in EVERY theme, incl. custom ones). */
   .badge-added {
-    background-color: rgba(170, 217, 76, 0.12);
+    background-color: color-mix(in srgb, var(--status-added) 12%, transparent);
     color: var(--status-added);
-    border-color: rgba(170, 217, 76, 0.25);
+    border-color: color-mix(in srgb, var(--status-added) 25%, transparent);
   }
   .badge-modified {
-    background-color: rgba(255, 215, 0, 0.12);
+    background-color: color-mix(in srgb, var(--status-modified) 12%, transparent);
     color: var(--status-modified);
-    border-color: rgba(255, 215, 0, 0.25);
+    border-color: color-mix(in srgb, var(--status-modified) 25%, transparent);
   }
   .badge-deleted {
-    background-color: rgba(242, 109, 120, 0.12);
+    background-color: color-mix(in srgb, var(--status-deleted) 12%, transparent);
     color: var(--status-deleted);
-    border-color: rgba(242, 109, 120, 0.25);
+    border-color: color-mix(in srgb, var(--status-deleted) 25%, transparent);
   }
   .badge-renamed {
-    background-color: rgba(57, 186, 230, 0.12);
+    background-color: color-mix(in srgb, var(--status-renamed) 12%, transparent);
     color: var(--status-renamed);
-    border-color: rgba(57, 186, 230, 0.25);
+    border-color: color-mix(in srgb, var(--status-renamed) 25%, transparent);
   }
   .badge-untracked {
-    background-color: rgba(149, 230, 203, 0.12);
+    background-color: color-mix(in srgb, var(--status-untracked) 12%, transparent);
     color: var(--status-untracked);
-    border-color: rgba(149, 230, 203, 0.25);
+    border-color: color-mix(in srgb, var(--status-untracked) 25%, transparent);
   }
   .badge-conflict {
-    background-color: rgba(255, 143, 111, 0.15);
+    background-color: color-mix(in srgb, var(--status-conflict) 15%, transparent);
     color: var(--status-conflict);
-    border-color: rgba(255, 143, 111, 0.3);
+    border-color: color-mix(in srgb, var(--status-conflict) 30%, transparent);
   }
 
   input[type='checkbox'],
@@ -1030,7 +1204,7 @@
     font-style: italic;
   }
   .text-function {
-    color: var(--accent-blue);
+    color: var(--accent-light-blue, var(--accent));
   }
   .text-type {
     color: var(--accent-cyan);
@@ -1054,7 +1228,7 @@
     font-style: italic;
   }
   .tok-function {
-    color: var(--accent-blue);
+    color: var(--accent-light-blue, var(--accent));
   }
   .tok-type {
     color: var(--accent-cyan);
@@ -1086,45 +1260,48 @@
    - .conflict-bg-conflict : orange/yellow tint (true 3-way conflicts)
    - .bg-ghost-row       : striped grey for alignment-filler rows
 */
+  /* v2.3.10 — conflict washes are derived from theme tokens (were fixed
+     VS-Code-palette rgba values, identical across all themes). OURS=green
+     (status-added), THEIRS=blue (status-info), markers=conflict orange. */
   .conflict-bg-ours {
-    background-color: rgba(34, 197, 94, 0.25);
-    border-left: 3px solid rgba(34, 197, 94, 0.8);
+    background-color: color-mix(in srgb, var(--status-added) 25%, transparent);
+    border-left: 3px solid color-mix(in srgb, var(--status-added) 80%, transparent);
   }
   .conflict-bg-theirs {
-    background-color: rgba(9, 105, 218, 0.18);
-    border-right: 3px solid rgba(9, 105, 218, 0.7);
+    background-color: color-mix(in srgb, var(--status-info) 18%, transparent);
+    border-right: 3px solid color-mix(in srgb, var(--status-info) 70%, transparent);
   }
   .conflict-bg-marker {
-    background-color: rgba(220, 38, 38, 0.35);
+    background-color: color-mix(in srgb, var(--status-conflict) 35%, transparent);
     font-weight: 600;
   }
   .conflict-bg-conflict {
-    background-color: rgba(255, 143, 111, 0.18);
+    background-color: color-mix(in srgb, var(--status-conflict) 18%, transparent);
   }
 
   /* Ghost row — striped grey, used when one side has no line at this position
    (alignment filler). Repeat-linear-gradient gives a subtle diagonal stripe
    pattern so the user immediately sees "this row doesn't exist on this side". */
   .bg-ghost-row {
-    background-color: rgba(128, 128, 128, 0.05);
+    background-color: color-mix(in srgb, var(--text-secondary) 5%, transparent);
     background-image: repeating-linear-gradient(
       45deg,
       transparent,
       transparent 4px,
-      rgba(128, 128, 128, 0.04) 4px,
-      rgba(128, 128, 128, 0.04) 8px
+      color-mix(in srgb, var(--text-secondary) 4%, transparent) 4px,
+      color-mix(in srgb, var(--text-secondary) 4%, transparent) 8px
     );
   }
   /* The Tailwind-style alias used by MergeRow — `bg-bg-ghost-row` is the
    className the component sets; map it to the same styles as .bg-ghost-row. */
   .bg-bg-ghost-row {
-    background-color: rgba(128, 128, 128, 0.05);
+    background-color: color-mix(in srgb, var(--text-secondary) 5%, transparent);
     background-image: repeating-linear-gradient(
       45deg,
       transparent,
       transparent 4px,
-      rgba(128, 128, 128, 0.04) 4px,
-      rgba(128, 128, 128, 0.04) 8px
+      color-mix(in srgb, var(--text-secondary) 4%, transparent) 4px,
+      color-mix(in srgb, var(--text-secondary) 4%, transparent) 8px
     );
   }
 

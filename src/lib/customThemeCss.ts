@@ -100,16 +100,65 @@ export function customThemeCss(entry: CustomThemeEntry): string {
     // Text on accent-filled buttons/links — the requirement that themes
     // change TEXT colors everywhere, including on colored surfaces.
     put('--text-inverse', readableOn(c.accent!));
+    put('--text-link', c.accent);
+    put('--border-focused', c.accent);
+    put('--splitter-color-hover', c.accent);
+    put('--status-info', c.accent);
+    put('--accent-light-blue', c.accent);
+    put('--tag-bg', `rgba(${accent[0]}, ${accent[1]}, ${accent[2]}, 0.08)`);
+    put('--tag-border', `rgba(${accent[0]}, ${accent[1]}, ${accent[2]}, 0.3)`);
+    put('--tag-text', c.accent);
+    put('--bg-sidebar-selected', `rgba(${accent[0]}, ${accent[1]}, ${accent[2]}, 0.14)`);
+  } else {
+    // No accent set — text-inverse still needs to be readable on the bg.
+    // (bg here already carries the isDark fallback — c.bgPrimary may be unset.)
+    if (bg) put('--text-inverse', readableOn(toHex(bg[0], bg[1], bg[2])));
   }
+
+  // v2.3.10 — syntax-highlighting secondary accents, derived from the theme's
+  // status colors. Before this, tok-*/text-* highlights in a custom theme
+  // silently used the BASE theme's Ayu palette ("в теме надо менять и цвета
+  // текста в инструментах" — including the syntax colors).
+  const addedRgb = parseHex(c.statusAdded ?? '');
+  const modifiedRgb = parseHex(c.statusModified ?? '');
+  const deletedRgb = parseHex(c.statusDeleted ?? '');
+  const conflictRgb = parseHex(c.statusConflict ?? '');
+  const untrackedRgb = parseHex(c.statusUntracked ?? '');
+  if (addedRgb) {
+    put('--accent-green', c.statusAdded);
+    put('--status-success', `rgb(${addedRgb[0]}, ${addedRgb[1]}, ${addedRgb[2]})`);
+  }
+  if (modifiedRgb) put('--accent-yellow', c.statusModified);
+  if (deletedRgb) put('--accent-red', c.statusDeleted);
+  if (conflictRgb) put('--accent-purple', c.statusConflict);
+  if (untrackedRgb) put('--accent-cyan', c.statusUntracked);
 
   // Borders + derived subtle/strong
   const border = parseHex(c.border ?? '');
   put('--border-default', c.border);
   if (border) {
-    const target = dark ? WHITE : BLACK;
-    put('--border-subtle', mix(border, dark ? WHITE : WHITE, 0.35));
-    put('--border-strong', mix(border, target, 0.18));
+    // v2.3.10 FIX — subtle used to mix toward WHITE in BOTH modes (typo
+    // `dark ? WHITE : WHITE`), so dark themes got a BRIGHTER subtle border
+    // than the default one (inverted semantics). Dark → toward BLACK now.
+    const subtleTarget = dark ? BLACK : WHITE;
+    put('--border-subtle', mix(border, subtleTarget, 0.35));
+    put('--border-strong', mix(border, dark ? WHITE : BLACK, 0.18));
+    // Graph rail + comment mutedness follow the border/text tokens.
+    put('--graph-line', c.border);
+    put('--comment', mix(border, dark ? WHITE : BLACK, 0.25));
   }
+  if (bg) {
+    put('--graph-node-fill', c.bgPrimary);
+    put('--graph-node-border', mix(bg, dark ? WHITE : BLACK, 0.55));
+  }
+  if (c.textSecondary) {
+    const ts = parseHex(c.textSecondary);
+    if (ts) {
+      put('--scrollbar-thumb', `rgba(${ts[0]}, ${ts[1]}, ${ts[2]}, 0.22)`);
+      put('--scrollbar-thumb-hover', `rgba(${ts[0]}, ${ts[1]}, ${ts[2]}, 0.4)`);
+    }
+  }
+  if (accent) put('--graph-node-selected', c.accent);
 
   // Status colors + synonyms (success/warning/error/info) + diff tints
   const status: Array<[string, string | undefined]> = [
@@ -130,6 +179,9 @@ export function customThemeCss(entry: CustomThemeEntry): string {
     if (rgb) {
       put('--status-warning', `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`);
       put('--diff-added-bg', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.12)`);
+      put('--warning-icon', c.statusModified);
+      put('--warning-bg', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.08)`);
+      put('--warning-border', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.3)`);
     }
   }
   if (c.statusDeleted) {
@@ -141,7 +193,18 @@ export function customThemeCss(entry: CustomThemeEntry): string {
   }
   if (c.statusAdded) {
     const rgb = parseHex(c.statusAdded);
-    if (rgb) put('--diff-added-bg', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.12)`);
+    if (rgb) {
+      put('--diff-added-bg', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.12)`);
+      put('--diff-added-line', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.08)`);
+      put('--diff-added-word', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.35)`);
+    }
+  }
+  if (c.statusDeleted) {
+    const rgb = parseHex(c.statusDeleted);
+    if (rgb) {
+      put('--diff-removed-line', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.08)`);
+      put('--diff-removed-word', `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.35)`);
+    }
   }
 
   const mainBlock = lines.length

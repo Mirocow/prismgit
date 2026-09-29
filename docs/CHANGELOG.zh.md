@@ -7,6 +7,16 @@ PrismGit 的所有显著变更都记录在此文件中。
 
 **其他语言：** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [Deutsch](CHANGELOG.de.md)
 
+## [2.3.10] - 2026-09-29
+
+### 修复 — 主题系统：设置里承诺的就是你看到的（«темы там просто ад»）
+- 按用户要求做了审计（«предлагаю самому построить пару тем и посмотреть что реально изменяется»）：两套极端信号色的自定义主题 + 六套内置主题跑过真实应用，与基线逐像素对比 — 每一处"对主题视而不见"的区域都已修复
+- **light-dim-sidebar 自 Tailwind v4 迁移起就默默坏掉了**：深色侧边栏覆盖块被删除，孤立的selector粘到了 `simple-light` 块上 — "VS Code 深色侧边栏"主题渲染出白色侧边栏（与普通浅色仅 0.4% 像素差异），simple-light 的 token 还渗入其中。深色块已恢复（实测：侧边栏背景 #1e1e1e、浅色文字、16% 差异）
+- **内置主题只定义了部分 token**：hover/active/focus 和状态同义词都回落到 Ayu 基础值 — Material 的靛蓝按钮悬停时变成 AYU 蓝，Discord 显示 Ayu 青色 info 和金色警告。五个 `[data-theme]` 块现在都定义了完整的 59-token 规范集（测试钉死）
+- **对主题视而不见的区域**：状态徽章（硬编码 Ayu rgba — 8 个探针主题里一模一样）、3-way 冲突底色（固定 VS Code 调色板）、对齐幽灵行、.btn-primary 的蓝色阴影光晕和 .btn-danger 的固定悬停色，现在全部通过 `color-mix()` 从主题 token 派生；强调色上的"Active"角标使用 `--text-inverse` 而非白色
+- **语法高亮**：`.text-function`/`.tok-function` 引用了不存在的变量 `--accent-blue` — 函数名在所有主题里都没有颜色；现在改为带回退的 `--accent-light-blue`
+- **自定义主题**：深色主题的 `--border-subtle` 方向反了（向白色混合 — 比默认边框还亮），而且 focus/info/link/tag/graph/滚动条/diff 行级高亮完全没有派生 — 编译器现在从 13 个编辑器字段派生整个家族，自定义主题也能给代码语法上色（状态色 → accent-green/yellow/red/purple/cyan 家族）
+
 ## [2.3.8] - 2026-09-29
 
 ### 新增 — 底部面板（命令日志）的布局切换按钮：VS Code hero 行的第三枚按钮

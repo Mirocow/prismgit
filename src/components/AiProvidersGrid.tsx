@@ -609,7 +609,7 @@ export function AiProvidersGrid() {
                 {entry.kind === 'ollama' ? <Cpu size={14} className="text-status-added shrink-0" /> : <Zap size={14} className="text-accent shrink-0" />}
                 <span className="text-sm font-medium truncate flex-1" title={entry.name}>{entry.name}</span>
                 {entryActive && (
-                  <span className="px-1.5 py-0.5 rounded bg-accent text-white text-3xs font-bold uppercase shrink-0">
+                  <span className="px-1.5 py-0.5 rounded bg-accent text-text-inverse text-3xs font-bold uppercase shrink-0">
                     {t('settings.aiGridActive') || 'Active'}
                   </span>
                 )}

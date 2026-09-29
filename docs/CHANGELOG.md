@@ -5,6 +5,16 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.10] - 2026-09-29
+
+### Fixed — the theme system: what Settings promises is what you see («темы там просто ад»)
+- The audit the user asked for («предлагаю самому построить пару тем и посмотреть что реально изменяется»): two extreme signal-color custom themes + six built-ins were pushed through the live app, screenshot-diffed against the baseline — every theme-blind region is now fixed
+- **light-dim-sidebar was silently broken since the Tailwind v4 migration**: the dark-sidebar override block was deleted and its orphaned selector glued itself to the `simple-light` block — the "VS Code dark sidebar" theme rendered a WHITE sidebar (0.4% pixel diff vs plain light) and simple-light tokens leaked into it. The dark block is restored (verified live: aside bg #1e1e1e, light text, 16% diff)
+- **Built-in themes had partial token sets**: hover/active/focus and status synonyms fell through to the Ayu base — a Material indigo button hovered to AYU BLUE, Discord showed Ayu cyan info / gold warnings. All five `[data-theme]` blocks now define the full 59-token canonical set (pinned by tests)
+- **Theme-blind UI regions**: status badges (hardcoded Ayu rgba — identical in all 8 probe themes), 3-way conflict washes (fixed VS Code palette), ghost alignment rows, .btn-primary's blue shadow halo and .btn-danger's fixed hover now derive from the theme tokens via `color-mix()`; the "Active" chip on accent uses `--text-inverse` instead of white
+- **Syntax highlighting**: `.text-function`/`.tok-function` referenced the NON-EXISTENT `--accent-blue` variable — function names rendered uncolored in every theme; now `--accent-light-blue` with a fallback
+- **Custom themes**: `--border-subtle` was inverted for dark themes (mixed toward white — brighter than the default border), and nothing derived focus/info/link/tag/graph/scrollbar/diff-line/word tints — the compiler now derives the full family from the 13 editor inputs, so a custom theme colors code syntax too (status colors → the accent-green/yellow/red/purple/cyan family)
+
 ## [2.3.8] - 2026-09-29
 
 ### Added — a layout toggle for the BOTTOM panel (Command Log), the third button of the VS Code hero row
