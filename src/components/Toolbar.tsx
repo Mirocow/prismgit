@@ -455,17 +455,15 @@ export function Toolbar({
                         title={t("shell.keyboardShortcutsTooltip")}
                     />
                 </span>
-                {/* LAR-3 — AI Assistant toggle button. Disabled when AI is not
-            enabled in Settings (aiCommitMessagesEnabled). */}
+                {/* LAR-3 — AI Assistant toggle button. v2.3.11 — NOT gated by
+            aiCommitMessagesEnabled anymore: out of the box that flag is
+            OFF, which used to disable this button (and the Changes AI
+            button) with no visible way in — «AI не работает». The panel
+            handles the no-provider state itself (banner + settings link). */}
                 <IconButton
                     icon={Sparkles}
                     onClick={() => onToggleAiAssistant && onToggleAiAssistant()}
-                    disabled={!settings?.aiCommitMessagesEnabled}
-                    title={
-                        settings?.aiCommitMessagesEnabled
-                            ? t("aiAssistant.toggleTitle")
-                            : t("aiAssistant.disabledHint")
-                    }
+                    title={t("aiAssistant.toggleTitle")}
                 />
                 {/* Customize toolbar button — RESTORED in v2.3.10: the
             ff9e761 refactor dropped the gear entry-point, leaving the

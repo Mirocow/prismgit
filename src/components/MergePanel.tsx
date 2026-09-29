@@ -414,14 +414,15 @@ export function MergePanel({
                   className="btn btn-secondary text-xs"
                   onClick={async () => {
                     const settings = useSettingsStore.getState().settings;
-                    if (!settings?.aiCommitMessagesEnabled) {
-                      toast.warning(t('changes.aiDisabled'), t('changes.aiEnableHint'));
-                      return;
-                    }
+                    // v2.3.11 — provider first (see ChangesPage.handleAIGenerate):
+                    // the click is the intent; the flag auto-enables.
                     const provider = buildAIProvider(settings);
                     if (!provider) {
-                      toast.warning(t('changes.aiNoProvider'));
+                      toast.warning(t('changes.aiNoProvider'), t('changes.aiSetProviderHint'));
                       return;
+                    }
+                    if (!settings?.aiCommitMessagesEnabled) {
+                      void useSettingsStore.getState().setSetting('aiCommitMessagesEnabled', true);
                     }
                     try {
                       const { generateMergeMessage } = await import('../lib/aiCommitMessages');

@@ -104,6 +104,15 @@ export function SettingsPage() {
   // - Integrations: GitHub + GitLab + VS Code
   // - Project: per-repo settings (only when a repo is open)
   const [activeTab, setActiveTab] = useState<'appearance' | 'git' | 'ai' | 'security' | 'integrations' | 'repositories' | 'user-interface' | 'project'>('appearance');
+  // v2.3.11 — deep link: #/settings?tab=ai (used by the AI no-provider
+  // banners in the assistant panel / chat page). One-shot on mount; later
+  // in-app tab clicks simply win.
+  useEffect(() => {
+    const m = /(?:\?|&)tab=([a-z-]+)/.exec(window.location.hash);
+    const tab = m?.[1];
+    const valid = ['appearance', 'git', 'ai', 'security', 'integrations', 'repositories', 'user-interface', 'project'];
+    if (tab && valid.includes(tab)) setActiveTab(tab as typeof activeTab);
+  }, []);
   const showApp = activeTab === 'appearance';
   const showGit = activeTab === 'git';
   const showProject = activeTab === 'project' && !!currentRepo;

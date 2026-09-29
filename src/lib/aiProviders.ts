@@ -284,6 +284,10 @@ export async function upsertAiProvider(
   const shouldActivate = opts?.activate || (isFirst && entry.enabled);
   if (shouldActivate) {
     await activateAiProvider({ ...settings, aiProviders: list }, setSetting, entry.id);
+    // v2.3.11 — a first provider means the user WANTS AI. The commit-message
+    // flag used to stay OFF after setup, leaving the Changes AI button
+    // visually dead («настроил провайдера, а кнопка всё равно не работает»).
+    await setSetting('aiCommitMessagesEnabled', true);
   }
 }
 

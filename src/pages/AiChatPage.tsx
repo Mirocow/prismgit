@@ -573,6 +573,23 @@ export default function AiChatPage() {
             </div>
           )}
 
+          {/* v2.3.11 — visible, actionable no-provider state (see AiAssistant). */}
+          {enabledProviders.length === 0 && (
+            <div className="border-t border-border-default bg-bg-tertiary px-3 py-2 flex items-center gap-2">
+              <Sparkles size={12} className="text-text-tertiary shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-text-primary">{t('aiAssistant.noProviderBanner')}</div>
+                <div className="text-2xs text-text-tertiary">{t('aiAssistant.noProviderBannerHint')}</div>
+              </div>
+              <button
+                className="btn btn-primary text-2xs shrink-0"
+                onClick={() => { window.location.hash = '#/settings?tab=ai'; }}
+                title={t('aiAssistant.openSettings')}
+              >
+                {t('aiAssistant.openSettings')}
+              </button>
+            </div>
+          )}
           {/* Input */}
           <div className="border-t border-border-default p-3 flex items-end gap-2 shrink-0 bg-bg-elevated">
             <textarea

@@ -49,6 +49,9 @@ export const en: Record<string, string> = {
   'aiAssistant.switchProvider': 'Switch AI Provider',
   'aiAssistant.switchProviderHint': 'Switching preserves the conversation — the new provider continues the chat.',
   'aiAssistant.noProvidersHint': 'No providers yet — add them in Settings → AI.',
+  'aiAssistant.noProviderBanner': 'No AI provider configured',
+  'aiAssistant.noProviderBannerHint': 'Add one in Settings → AI and the assistant, commit messages and merge descriptions all come alive.',
+  'aiAssistant.openSettings': 'Configure',
   'aiAssistant.noProviderSelected': 'no provider',
   'aiAssistant.providerTitle': 'Provider',
 
@@ -162,6 +165,9 @@ export const ru: Record<string, string> = {
   'aiAssistant.switchProvider': 'Сменить AI провайдера',
   'aiAssistant.switchProviderHint': 'Переключение сохраняет разговор — новый провайдер продолжит чат.',
   'aiAssistant.noProvidersHint': 'Провайдеров пока нет — добавьте их в Настройки → AI.',
+  'aiAssistant.noProviderBanner': 'ИИ-провайдер не настроен',
+  'aiAssistant.noProviderBannerHint': 'Добавьте его в Настройки → ИИ — и заработают ассистент, сообщения коммитов и описания слияний.',
+  'aiAssistant.openSettings': 'Настроить',
   'aiAssistant.noProviderSelected': 'нет провайдера',
   'aiAssistant.providerTitle': 'Провайдер',
 
@@ -275,6 +281,9 @@ export const zh: Record<string, string> = {
   'aiAssistant.switchProvider': '切换 AI 提供商',
   'aiAssistant.switchProviderHint': '切换会保留对话 — 新提供商将继续聊天。',
   'aiAssistant.noProvidersHint': '暂无提供商——请在设置 → AI 中添加。',
+  'aiAssistant.noProviderBanner': '未配置 AI 提供商',
+  'aiAssistant.noProviderBannerHint': '在 设置 → AI 中添加后，助手、提交信息和合并描述即可使用。',
+  'aiAssistant.openSettings': '去设置',
   'aiAssistant.noProviderSelected': '无提供商',
   'aiAssistant.providerTitle': '提供商',
 
@@ -388,6 +397,9 @@ export const de: Record<string, string> = {
   'aiAssistant.switchProvider': 'KI-Anbieter wechseln',
   'aiAssistant.switchProviderHint': 'Wechseln erhält die Konversation — der neue Anbieter setzt den Chat fort.',
   'aiAssistant.noProvidersHint': 'Noch keine Anbieter — bitte in Einstellungen → AI hinzufügen.',
+  'aiAssistant.noProviderBanner': 'Kein KI-Provider konfiguriert',
+  'aiAssistant.noProviderBannerHint': 'Fügen Sie einen unter Einstellungen → KI hinzu — dann funktionieren Assistent, Commit-Nachrichten und Merge-Beschreibungen.',
+  'aiAssistant.openSettings': 'Konfigurieren',
   'aiAssistant.noProviderSelected': 'kein Anbieter',
   'aiAssistant.providerTitle': 'Anbieter',
 

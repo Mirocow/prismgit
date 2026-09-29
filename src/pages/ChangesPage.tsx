@@ -138,6 +138,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const push = useGitStore((s) => s.push);
   const pull = useGitStore((s) => s.pull);
   const settings = useSettingsStore((s) => s.settings);
+  const setSetting = useSettingsStore((s) => s.setSetting);
   const toast = useToastActions();
 
   // Listen for conflict resolution requests from GitToolbar
@@ -1078,14 +1079,19 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }, [repo?.path]);
 
   const handleAIGenerate = async () => {
-    if (!settings?.aiCommitMessagesEnabled) {
-      toast.warning(t('changes.aiDisabled'), t('changes.aiEnableHint'));
-      return;
-    }
+    // v2.3.11 — provider FIRST, flag second. Out of the box both the flag
+    // and the registry are empty, and the button used to be DISABLED by the
+    // flag — a dead control with no way in («AI не работает»). Now the
+    // button is always clickable: no provider → actionable toast; provider
+    // configured → the click itself turns the feature on (auto-suggest +
+    // the @ai placeholder follow) instead of bouncing the user to Settings.
     const provider = buildAIProvider(settings);
     if (!provider) {
       toast.warning(t('changes.aiNoProvider'), t('changes.aiSetProviderHint'));
       return;
+    }
+    if (!settings?.aiCommitMessagesEnabled) {
+      void setSetting('aiCommitMessagesEnabled', true);
     }
     setAiGenerating(true);
     try {
@@ -2773,16 +2779,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               >
                 MD
               </button>
-              {/* SmartGit Manual: AI Commit Messages — generate button */}
+              {/* SmartGit Manual: AI Commit Messages — generate button.
+                  v2.3.11: always clickable (see handleAIGenerate). */}
               <button
                 className={cn(
                   'text-2xs px-1.5 py-0.5 rounded flex items-center gap-1',
-                  settings?.aiCommitMessagesEnabled
-                    ? 'text-accent hover:bg-accent-muted'
-                    : 'text-text-tertiary cursor-not-allowed opacity-50'
+                  'text-accent hover:bg-accent-muted'
                 )}
                 onClick={handleAIGenerate}
-                disabled={!settings?.aiCommitMessagesEnabled || aiGenerating}
+                disabled={aiGenerating}
                 title={t('changes.aiGenerateTitle')}
               >
                 <Sparkles size={10} className={aiGenerating ? 'animate-pulse' : ''} />

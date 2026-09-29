@@ -5,6 +5,16 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.11] - 2026-09-29
+
+### Fixed — the AI assistant worked nowhere out of the box («AI assistant в комитах и не только не работает»)
+- Diagnosed by walking EVERY AI surface against a mock LLM server (scripts/diagnose-ai.mjs): the pipeline itself was fine (commit messages, assistant panel, chat page all answered) — what was broken was the GATING: `aiCommitMessagesEnabled` defaults to OFF, and it disabled not only the Changes «AI» button but also the toolbar Sparkles (the whole assistant chat, which has nothing to do with commit messages). Every AI control looked dead with no visible way in
+- The Changes «AI» button and the Merge-panel AI action are now always clickable: no provider → an actionable toast; provider configured → the click itself turns the feature on (auto-suggest + the `@ai` placeholder follow) instead of bouncing the user to Settings
+- The toolbar Sparkles opens the assistant unconditionally — the panel handles the empty state itself
+- Adding the FIRST provider (Settings → AI → «Add provider») now auto-enables the flag — previously the buttons stayed dead even after setup («настроил провайдера, а кнопка всё равно не работает»)
+- New visible no-provider banners in the assistant panel and the AI chat page — «ИИ-провайдер не настроен» + a «Настроить» button that deep-links straight to Settings → AI (`#/settings?tab=ai` now selects the tab); before, the only signal was a transient toast AFTER typing a message
+- Everything live-verified end-to-end (scripts/verify-v2311ai.mjs, 16 checks): out-of-the-box guidance, the full mock-LLM pipeline, and the complete setup loop — add a provider through the real dialog → the flag flips → the commit message generates from the just-added provider
+
 ## [2.3.10] - 2026-09-29
 
 ### Fixed — the theme system: what Settings promises is what you see («темы там просто ад»)

@@ -7,6 +7,16 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.11] - 2026-09-29
+
+### Behoben — der KI-Assistent funktionierte nirgendwo out of the box («AI assistant в комитах и не только не работает»)
+- Diagnose per Rundgang über ALLE KI-Oberflächen gegen einen Mock-LLM-Server (scripts/diagnose-ai.mjs): die Pipeline selbst war intakt (Commit-Nachrichten, Assistenten-Panel, Chat-Seite antworteten alle) — kaputt war das GATING: `aiCommitMessagesEnabled` ist standardmäßig AUS und deaktivierte nicht nur die «AI»-Schaltfläche in Changes, sondern auch den Toolbar-Sparkles (den gesamten Assistenten-Chat, der mit Commit-Nachrichten nichts zu tun hat). Jede KI-Schaltfläche wirkte tot, ohne sichtbaren Weg hinein
+- Die «AI»-Schaltfläche in Changes und die KI-Aktion im Merge-Panel sind jetzt immer klickbar: kein Provider → umsetzbarer Toast; Provider konfiguriert → der Klick selbst schaltet die Funktion ein (Auto-Suggest + `@ai`-Platzhalter folgen) statt den Nutzer zu den Einstellungen zu verweisen
+- Der Toolbar-Sparkles öffnet den Assistenten bedingungslos — das Panel handhabt den Leerzustand selbst
+- Das Hinzufügen des ERSTEN Providers (Einstellungen → KI → «Anbieter hinzufügen») aktiviert jetzt automatisch das Flag — zuvor blieben die Schaltflächen selbst nach dem Setup tot
+- Neue sichtbare Kein-Provider-Banner im Assistenten-Panel und auf der Chat-Seite — «Kein KI-Provider konfiguriert» + «Konfigurieren»-Button mit Deep-Link direkt zu Einstellungen → KI (`#/settings?tab=ai` wählt jetzt den Tab)
+- Alles live end-to-end verifiziert (scripts/verify-v2311ai.mjs, 16 Checks): Out-of-the-Box-Hinweise, die komplette Mock-LLM-Pipeline und der ganze Setup-Zyklus
+
 ## [2.3.10] - 2026-09-29
 
 ### Behoben — das Designsystem: Was die Einstellungen versprechen, sieht man auch («темы там просто ад»)
