@@ -180,6 +180,35 @@ describe('SslBypassDialog — «Continue without certificate verification»', ()
   });
 });
 
+describe('SslBypassDialog — CLONE mode (skipConfigWrite — the repo does not exist yet)', () => {
+  it('skips the config probe AND the config write; registers the host and retries', async () => {
+    const retry = vi.fn().mockResolvedValue(undefined);
+    openDialog({ skipConfigWrite: true, retry });
+    render(<SslBypassDialog />);
+    // No alreadyOff probe — configGetMany would fail on a non-existent repo.
+    expect(configGetMany).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Continue without certificate verification'));
+    await waitFor(() => {
+      // The retried clone carries -c http.sslVerify=false itself — the
+      // dialog must NOT write a config into a repo that isn't there yet.
+      expect(configSetMany).not.toHaveBeenCalled();
+      expect(addInsecureSslHost).toHaveBeenCalledWith('git.nbgi.cloud.rt-dc.ru');
+      expect(retry).toHaveBeenCalledTimes(1);
+    });
+    expect(useSslBypassStore.getState().ctx).toBeNull();
+  });
+
+  it('a failed clone retry → error toast (same as the repo case)', async () => {
+    const retry = vi.fn().mockRejectedValue(new Error('repository exists'));
+    openDialog({ skipConfigWrite: true, retry });
+    render(<SslBypassDialog />);
+    fireEvent.click(screen.getByText('Continue without certificate verification'));
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('Retry failed', expect.stringContaining('repository exists')));
+    expect(configSetMany).not.toHaveBeenCalled();
+    expect(useSslBypassStore.getState().ctx).toBeNull();
+  });
+});
+
 describe('SslBypassDialog — Cancel', () => {
   it('closes without writing anything', () => {
     openDialog();

@@ -140,7 +140,7 @@ const api = {
       ipcRenderer.invoke('git:submoduleDeinit', repoPath, name, force),
     submoduleAdd: (repoPath: string, url: string, targetPath: string, branch?: string) =>
       ipcRenderer.invoke('git:submoduleAdd', repoPath, url, targetPath, branch),
-    clone: (url: string, targetPath: string, options?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean }) =>
+    clone: (url: string, targetPath: string, options?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean; sslVerify?: boolean }) =>
       ipcRenderer.invoke('git:clone', url, targetPath, options),
     init: (targetPath: string, bare?: boolean) => ipcRenderer.invoke('git:init', targetPath, bare),
     addRemote: (repoPath: string, name: string, url: string) => ipcRenderer.invoke('git:addRemote', repoPath, name, url),
@@ -162,7 +162,7 @@ const api = {
     applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => ipcRenderer.invoke('git:applyPatch', repoPath, patch, options),
     show: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:show', repoPath, args),
     showBuffer: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:showBuffer', repoPath, args),
-    mirror: (remoteUrl: string, targetPath: string) => ipcRenderer.invoke('git:mirror', remoteUrl, targetPath),
+    mirror: (remoteUrl: string, targetPath: string, options?: { sslVerify?: boolean }) => ipcRenderer.invoke('git:mirror', remoteUrl, targetPath, options),
     countObjects: (repoPath: string, verbose?: boolean) => ipcRenderer.invoke('git:countObjects', repoPath, verbose),
     updateServerInfo: (repoPath: string) => ipcRenderer.invoke('git:updateServerInfo', repoPath),
     listRemote: (repoPath: string, remote?: string) => ipcRenderer.invoke('git:listRemote', repoPath, remote),
@@ -339,7 +339,7 @@ const api = {
     filesWithRealChanges: (repoPath: string, files: string[]) => ipcRenderer.invoke('git:filesWithRealChanges', repoPath, files),
     pushToGerrit: (repoPath: string, branch?: string, remote?: string, options?: { draft?: boolean; reviewers?: string[]; topic?: string }) =>
       ipcRenderer.invoke('git:pushToGerrit', repoPath, branch, remote, options),
-    clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean }) =>
+    clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean; sslVerify?: boolean }) =>
       ipcRenderer.invoke('git:clonePartial', url, targetPath, filter, options),
     setupCredentialHelper: (repoPath: string) => ipcRenderer.invoke('git:setupCredentialHelper', repoPath),
     // NOTE: blameBidirectional, pickaxeSearch, detectRenames IPCs were

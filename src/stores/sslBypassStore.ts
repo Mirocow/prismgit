@@ -38,6 +38,14 @@ export interface SslBypassCtx {
    * toasts. Optional — when omitted the dialog only applies the bypass.
    */
   retry?: () => Promise<void>;
+  /**
+   * CLONE contexts: the repository does not exist yet, so there is no local
+   * config to write — the retried clone carries its own
+   * `-c http.sslVerify=false` (which git also persists into the new repo's
+   * config via `clone --config`). The dialog then only registers the host
+   * (provider API calls) and retries.
+   */
+  skipConfigWrite?: boolean;
 }
 
 interface SslBypassState {

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Folder, X, Github, Loader, Download, Lock, GitBranch } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useAuthStore } from '../stores/authStore';
+import { offerSslBypass } from '../stores/sslBypassStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type GithubRepository, type GitLabProject, type SshUrlResolution, type SshTestResult } from '../lib/api';
@@ -354,12 +355,15 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
       toast.warning(t('dialogs.targetRequired'));
       return;
     }
-    setLoading(true);
-    try {
-      const finalPath = targetPath;
+    const finalPath = targetPath;
+    // The clone body is a NAMED inner step (not inline in the try) so the
+    // SSL-bypass retry below can re-run the EXACT clone — mirror / partial /
+    // normal — with sslVerify:false after the server's certificate was
+    // rejected.
+    const runClone = async (sslBypass: boolean): Promise<void> => {
       if (mirror) {
         // Mirror clone: copies ALL refs (heads, tags, notes, remotes) — bare backup copy
-        await api.git.mirror(normalizedUrl, finalPath);
+        await api.git.mirror(normalizedUrl, finalPath, sslBypass ? { sslVerify: false } : undefined);
         await useRepositoryStore.getState().openRepository(finalPath);
         // Mirror clones also honour the group selector.
         if (targetGroupId) {
@@ -375,6 +379,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
           depth: depth ? Number(depth) : undefined,
           branch: branch || undefined,
           recursive: !noRecursive,
+          ...(sslBypass ? { sslVerify: false } : {}),
         });
         await useRepositoryStore.getState().openRepository(finalPath);
         if (targetGroupId) {
@@ -391,6 +396,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
           // Forward the chosen sidebar group so the cloned repo lands
           // in the right place in the Sidebar's tree (not the root).
           groupId: targetGroupId,
+          ...(sslBypass ? { sslVerify: false } : {}),
         });
       }
       if (setupCredentialHelper) {
@@ -402,7 +408,20 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
         : t('dialogs.cloneCreated')
       );
       onClose();
+    };
+    setLoading(true);
+    try {
+      await runClone(false);
     } catch (e) {
+      // Expired / self-signed corporate certificate — same reaction as
+      // pull/push: offer the bypass. skipConfigWrite because the repo does
+      // not exist yet; the retry passes sslVerify:false which git ALSO
+      // persists into the new repo's config (clone --config).
+      if (offerSslBypass(e, {
+        repoPath: finalPath,
+        skipConfigWrite: true,
+        retry: () => runClone(true),
+      })) return;
       toast.error(t('dialogs.cloneFailed'), String(e));
     } finally {
       setLoading(false);

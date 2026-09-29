@@ -63,6 +63,8 @@ import { useCommandLogStore } from "./stores/commandLogStore";
 import { surfaceConflictedState, useGitStore } from "./stores/gitStore";
 import { useNavHistoryStore } from "./stores/navHistoryStore";
 import { initOperationLogIpcListener } from "./stores/operationLogStore";
+import { offerPushRejection } from "./stores/pushRejectionStore";
+import { offerSslBypass } from "./stores/sslBypassStore";
 import { useRepositoryStore } from "./stores/repositoryStore";
 import { useSelectionStore } from "./stores/selectionStore";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -943,7 +945,8 @@ export default function App() {
         const handlePush = () => {
             const repo = useRepositoryStore.getState().currentRepo;
             if (!repo) return;
-            useGitStore
+            // Returns the promise so the SSL-bypass retry can await it.
+            return useGitStore
                 .getState()
                 .push(repo.path)
                 .then(() => {
@@ -956,9 +959,14 @@ export default function App() {
                         new CustomEvent("smartgit:history-refresh"),
                     );
                 })
-                .catch((e) =>
-                    toast.error(i18nT("toast.git.pushFailed"), String(e)),
-                );
+                .catch((e) => {
+                    // Menu path now carries the full reaction matrix too:
+                    // remote rejections → PushRejectionDialog, TLS cert → SSL
+                    // bypass dialog (the menu used to dead-end in a toast).
+                    if (offerPushRejection(e, { repoPath: repo.path })) return;
+                    if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handlePush(); } })) return;
+                    toast.error(i18nT("toast.git.pushFailed"), String(e));
+                });
         };
         // Menu Remote → Force Push — real `git push --force` on the current
         // branch. Protected branches are still rejected by the service-level
@@ -966,7 +974,8 @@ export default function App() {
         const handleForcePush = () => {
             const repo = useRepositoryStore.getState().currentRepo;
             if (!repo) return;
-            useGitStore
+            // Returns the promise so the SSL-bypass retry can await it.
+            return useGitStore
                 .getState()
                 .push(
                     repo.path,
@@ -983,15 +992,18 @@ export default function App() {
                         new CustomEvent("smartgit:history-refresh"),
                     );
                 })
-                .catch((e) =>
-                    toast.error(i18nT("toast.git.pushFailed"), String(e)),
-                );
+                .catch((e) => {
+                    if (offerPushRejection(e, { repoPath: repo.path })) return;
+                    if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handleForcePush(); } })) return;
+                    toast.error(i18nT("toast.git.pushFailed"), String(e));
+                });
         };
         const handlePull = () => {
             const repo = useRepositoryStore.getState().currentRepo;
             if (!repo) return;
             // SmartGit Manual: Smart Pull — prevents divergence after remote force-push
-            api.git
+            // Returns the promise so the SSL-bypass retry can await it.
+            return api.git
                 .smartPull(repo.path)
                 .then((result) => {
                     toast.success(
@@ -1009,6 +1021,8 @@ export default function App() {
                     // smartPull can end mid-rebase ("could not apply …") or mid-merge —
                     // detect from the repo state and surface the Conflicts UI instead
                     // of a transient error toast (user-reported "ничего не произошло").
+                    // A TLS certificate rejection is neither — offer the bypass first.
+                    if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handlePull(); } })) return;
                     const conflicted = await surfaceConflictedState(repo.path);
                     if (!conflicted)
                         toast.error(i18nT("toast.git.pullFailed"), String(e));
@@ -1017,7 +1031,8 @@ export default function App() {
         const handleFetch = () => {
             const repo = useRepositoryStore.getState().currentRepo;
             if (!repo) return;
-            useGitStore
+            // Returns the promise so the SSL-bypass retry can await it.
+            return useGitStore
                 .getState()
                 .fetch(repo.path)
                 .then(() => {
@@ -1026,9 +1041,10 @@ export default function App() {
                         new CustomEvent("smartgit:history-refresh"),
                     );
                 })
-                .catch((e) =>
-                    toast.error(i18nT("toast.git.fetchFailed"), String(e)),
-                );
+                .catch((e) => {
+                    if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handleFetch(); } })) return;
+                    toast.error(i18nT("toast.git.fetchFailed"), String(e));
+                });
         };
         const handleToggleTheme = () =>
             useSettingsStore.getState().toggleTheme();
@@ -1542,6 +1558,8 @@ export default function App() {
                 toast.success(`Pushed ${branch ?? ""} to ${remote}`);
                 useGitStore.getState().refreshStatus(repo.path);
             } catch (e) {
+                if (offerPushRejection(e, { repoPath: repo.path, remote })) return;
+                if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePushTo() })) return;
                 toast.error("Push failed", String(e));
             }
         };
@@ -1564,6 +1582,7 @@ export default function App() {
                     new CustomEvent("smartgit:history-refresh"),
                 );
             } catch (e) {
+                if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAll() })) return;
                 toast.error("Fetch all failed", String(e));
             }
         };

@@ -203,7 +203,7 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:submoduleAdd', (_e, p: string, u: string, pp: string, b?: string) => wrap(gitService.submoduleAdd)(p, u, pp, b));
 
   // Repo management
-  ipcMain.handle('git:clone', (_e, u: string, t: string, o?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean }) =>
+  ipcMain.handle('git:clone', (_e, u: string, t: string, o?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean; sslVerify?: boolean }) =>
     wrap(gitService.clone)(u, t, o)
   );
   ipcMain.handle('git:init', (_e, t: string, b?: boolean) => wrap(gitService.init)(t, b));
@@ -252,7 +252,7 @@ export function registerGitIpc(): void {
   ipcMain.handle('git:applyPatch', (_e, p: string, patch: string | string[], opts?: Record<string, null> | string[]) => wrap(gitService.applyPatch)(p, patch, opts));
   ipcMain.handle('git:show', (_e, p: string, a: string[]) => wrap(gitService.show)(p, a));
   ipcMain.handle('git:showBuffer', (_e, p: string, a: string[]) => wrap(gitService.showBuffer)(p, a));
-  ipcMain.handle('git:mirror', (_e, url: string, target: string) => wrap(gitService.mirror)(url, target));
+  ipcMain.handle('git:mirror', (_e, url: string, target: string, o?: { sslVerify?: boolean }) => wrap(gitService.mirror)(url, target, o));
   ipcMain.handle('git:countObjects', (_e, p: string, verbose?: boolean) => wrap(gitService.countObjects)(p, verbose));
   ipcMain.handle('git:updateServerInfo', (_e, p: string) => wrap(gitService.updateServerInfo)(p));
   ipcMain.handle('git:listRemote', (_e, p: string, remote?: string) => wrap(gitService.listRemote)(p, remote));
@@ -509,7 +509,7 @@ export function registerGitIpc(): void {
     wrap(gitService.pushToGerrit)(p, b, r, o)
   );
   // Partial clone
-  ipcMain.handle('git:clonePartial', (_e, u: string, t: string, f?: 'blob:none' | 'tree:0' | 'blob:limit=1m', o?: { depth?: number; branch?: string; recursive?: boolean }) =>
+  ipcMain.handle('git:clonePartial', (_e, u: string, t: string, f?: 'blob:none' | 'tree:0' | 'blob:limit=1m', o?: { depth?: number; branch?: string; recursive?: boolean; sslVerify?: boolean }) =>
     wrap(gitService.clonePartial)(u, t, f || 'blob:none', o)
   );
   // Credential helper

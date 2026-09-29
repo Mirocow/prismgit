@@ -191,6 +191,75 @@ describe('fetch against a self-signed HTTPS git server — the REAL workaround',
   });
 });
 
+describe('clone against the self-signed HTTPS server — the PRE-repo bypass', () => {
+  it('clone FAILS with a CLASSIFIED certificate error while verification is on', async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'prismgit-ssl-clone-fail-'));
+    let thrown: unknown;
+    try {
+      await gitService.clone(remoteUrl, path.join(parent, 'repo'));
+    } catch (e) {
+      thrown = e;
+    }
+    // The classifier contract CloneModal's offerSslBypass relies on.
+    const info = classifySslFailure(thrown instanceof Error ? thrown.message : String(thrown));
+    expect(info).not.toBeNull();
+    expect(info!.kind).toMatch(/self-signed|untrusted|other/);
+  });
+
+  it('clone with sslVerify=false succeeds AND persists the bypass into the new repo', async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'prismgit-ssl-clone-ok-'));
+    const target = path.join(parent, 'repo');
+    await gitService.clone(remoteUrl, target, { sslVerify: false });
+    // The clone landed (working tree arrived, not just an empty dir).
+    expect(fs.existsSync(path.join(target, 'README.md'))).toBe(true);
+    expect(fs.readFileSync(path.join(target, 'README.md'), 'utf-8')).toContain('ssl test');
+    // The bypass PERSISTED via `clone --config` — every later fetch/pull/push
+    // from this repo stays bypassed without touching the dialog again.
+    expect(shell('git config --local --get http.sslVerify', target)).toBe('false');
+  });
+
+  it('clonePartial with sslVerify=false succeeds (the simple-git raw arg path — no guard trip)', async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'prismgit-ssl-clone-partial-'));
+    const target = path.join(parent, 'repo');
+    await gitService.clonePartial(remoteUrl, target, 'blob:none', { sslVerify: false });
+    expect(fs.existsSync(path.join(target, 'README.md'))).toBe(true);
+    expect(shell('git config --local --get http.sslVerify', target)).toBe('false');
+  });
+
+  it('mirror with sslVerify=false succeeds (bare mirror over the rejected cert)', async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'prismgit-ssl-mirror-'));
+    const target = path.join(parent, 'mirror.git');
+    await gitService.mirror(remoteUrl, target, { sslVerify: false });
+    // A bare mirror: HEAD lives at the top level, no working tree.
+    expect(fs.existsSync(path.join(target, 'HEAD'))).toBe(true);
+    expect(shell('git config --get http.sslVerify', target)).toBe('false');
+  });
+});
+
+describe('smartPull — a rejected certificate must not silently degrade to stale refs', () => {
+  it('re-throws the CLASSIFIED SSL failure instead of running ahead/behind math on stale data', async () => {
+    // Fresh clone over FILE (no TLS involved) so origin/main EXISTS locally;
+    // then point origin at the self-signed HTTPS server. The in-smartPull
+    // fetch now fails on the certificate while rev-list keeps working on the
+    // STALE ref — exactly the situation the rethrow protects from (the old
+    // code would silently reset/rebase to the stale ref and report success).
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'prismgit-ssl-smart-'));
+    const fresh = path.join(parent, 'repo');
+    shell(`git clone "${path.join(serverDir, 'repo.git')}" "${fresh}"`, parent);
+    shell(`git config user.email t@t && git config user.name t`, fresh);
+    shell(`git remote set-url origin ${remoteUrl}`, fresh);
+    let thrown: unknown;
+    try {
+      await gitService.smartPull(fresh);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeTruthy();
+    const info = classifySslFailure(thrown instanceof Error ? thrown.message : String(thrown));
+    expect(info).not.toBeNull();
+  });
+});
+
 describe('insecureHosts — API-level bypass registry', () => {
   it('add/list/remove roundtrip with lowercase normalization and idempotency', async () => {
     const hosts = await import('../../electron/services/insecureHosts');

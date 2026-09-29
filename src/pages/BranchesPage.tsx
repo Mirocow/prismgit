@@ -516,6 +516,7 @@ export function BranchesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchRemote(name) })) return;
       toast.error(t('branches.fetchFailed', { name }), String(e));
     } finally {
       setRemoteBusy(null);
@@ -534,6 +535,7 @@ export function BranchesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAllBranches(name) })) return;
       toast.error(t('branches.fetchFailed', { name }), String(e));
     } finally {
       setRemoteBusy(null);
@@ -551,6 +553,7 @@ export function BranchesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAllRemotes() })) return;
       toast.error(t('branches.fetchAllRemotesFailed'), String(e));
     } finally {
       setRemoteBusy(null);
@@ -634,7 +637,10 @@ export function BranchesPage() {
       else toast.success(t.title, t.detail);
       await load();
       await refreshStatus(repo.path);
-    } catch (e) { toast.error(t('branches.pushFailed'), String(e)); }
+    } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePushBranch(branch) })) return;
+      toast.error(t('branches.pushFailed'), String(e));
+    }
   };
 
   /**
@@ -665,7 +671,10 @@ export function BranchesPage() {
       else toast.success(t2.title, t2.detail);
       await load();
       await refreshStatus(repo.path);
-    } catch (e) { toast.error(t('branches.pushFailed'), String(e)); }
+    } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleForcePushBranch(branch) })) return;
+      toast.error(t('branches.pushFailed'), String(e));
+    }
   };
 
   const handleOpenInBrowser = async (branch: BranchInfo) => {
@@ -815,6 +824,7 @@ export function BranchesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => executePushTo(opts) })) return;
       toast.error(t('branches.pushFailed'), String(e));
     } finally {
       setPushToBusy(false);
@@ -889,7 +899,10 @@ export function BranchesPage() {
         () => api.git.pushTag(repo.path, tag.name, remoteName.trim())
       );
       toast.success(t('branches.tagPushed', { name: tag.name, remote: remoteName }));
-    } catch (e) { toast.error(t('branches.tagPushFailed'), String(e)); }
+    } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePushTag(tag) })) return;
+      toast.error(t('branches.tagPushFailed'), String(e));
+    }
   };
 
   const showTagContextMenu = (e: React.MouseEvent, tag: TagInfo) => {
@@ -975,6 +988,7 @@ export function BranchesPage() {
       setMoreRemote(null);
       await load();
     } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => executeFetchMore(commits) })) return;
       toast.error(t('branches.fetchMoreFailed', { name: moreRemote }), String(e));
     } finally {
       setMoreBusy(false);
@@ -994,6 +1008,7 @@ export function BranchesPage() {
       setDepthRemote(null);
       await load();
     } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => executeSetDepth(depth) })) return;
       toast.error(t('branches.setDepthFailed', { name: depthRemote }), String(e));
     } finally {
       setDepthBusy(false);
@@ -1421,7 +1436,20 @@ export function BranchesPage() {
             });
             toast.success(t('branches.pushedToGerrit', { branch: branchName }), output.split('\n')[0] || '');
             await refreshStatus(repo.path);
-          } catch (e) { toast.error(t('branches.pushGerritFailed'), String(e)); }
+          } catch (e) {
+            // Gerrit review push — same TLS reaction as any other push.
+            if (offerSslBypass(e, {
+              repoPath: repo.path,
+              retry: async () => {
+                const output = await api.git.pushToGerrit(repo.path, branchName, remoteName, {
+                  topic: topic || undefined,
+                });
+                toast.success(t('branches.pushedToGerrit', { branch: branchName }), output.split('\n')[0] || '');
+                await refreshStatus(repo.path);
+              },
+            })) return;
+            toast.error(t('branches.pushGerritFailed'), String(e));
+          }
         }
 
         // === Log (show this branch's history in History page) ===

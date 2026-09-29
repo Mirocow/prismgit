@@ -36,7 +36,7 @@ interface RepositoryState {
   openRepositoryPicker: () => Promise<void>;
   closeRepository: () => void;
   removeRepo: (path: string) => Promise<void>;
-  cloneRepository: (url: string, targetPath: string, options?: { depth?: number; branch?: string; groupId?: string | null }) => Promise<string>;
+  cloneRepository: (url: string, targetPath: string, options?: { depth?: number; branch?: string; groupId?: string | null; sslVerify?: boolean }) => Promise<string>;
   initRepository: (targetPath: string) => Promise<void>;
 
   // Repository groups (tree in the sidebar)

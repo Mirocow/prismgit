@@ -868,8 +868,15 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
             else if (t2.kind === "info") toast.info(t2.title, t2.detail);
             else toast.success(t2.title, t2.detail);
         } catch (e) {
+            // Close the dropdown FIRST — the dialogs take over the reaction.
+            setOpen(false);
+            setForce(false);
+            setPushTags(false);
+            setRemoteBranch("");
             // Push To… carries its OWN parameters — the recovery actions must
-            // retry the same remote/branch/target/force combination.
+            // retry the same remote/branch/target/force combination. A TLS
+            // certificate rejection (expired / self-signed corporate server)
+            // gets the SSL bypass dialog with the SAME combination.
             const offered = offerPushRejection(e, {
                 repoPath: currentRepo.path,
                 remote: selectedRemote,
@@ -878,7 +885,9 @@ function PushDropdown({ disabled }: { disabled: boolean }) {
                 force,
                 forceMode,
             });
-            if (!offered) toast.error(t("shell.pushFailed"), String(e));
+            if (offered) return;
+            if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => doPush() })) return;
+            toast.error(t("shell.pushFailed"), String(e));
         }
         setOpen(false);
         setForce(false);
@@ -1239,6 +1248,7 @@ function PullDropdown({
                 t("shell.remoteBranchesUpdated"),
             );
         } catch (e) {
+            if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => fetchRemoteNow() })) return;
             toast.error(
                 t("shell.fetchRemoteFailed", { remote: selectedRemote }),
                 String(e),
@@ -1246,6 +1256,43 @@ function PullDropdown({
         } finally {
             setFetching(false);
             loadRemoteBranches();
+        }
+    };
+
+    // Quick-actions of the pull dropdown (Fetch from / Fetch All) — named so
+    // the SSL-bypass retry can re-run the EXACT same fetch.
+    const fetchFromSelected = async () => {
+        if (!currentRepo || !selectedRemote) return;
+        try {
+            await api.git.fetch(currentRepo.path, selectedRemote, true, true);
+            toast.success(
+                t("shell.fetchedFromRemote", { remote: selectedRemote }),
+                t("shell.remoteBranchesUpdated"),
+            );
+            await refreshStatus(currentRepo.path);
+            loadRemoteBranches();
+        } catch (e) {
+            if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => fetchFromSelected() })) return;
+            toast.error(
+                t("shell.fetchRemoteFailed", { remote: selectedRemote }),
+                String(e),
+            );
+        }
+    };
+
+    const fetchAllRemotes = async () => {
+        if (!currentRepo) return;
+        try {
+            await api.git.fetchAll(currentRepo.path, true);
+            toast.success(
+                t("shell.fetchedAllRemotes"),
+                t("shell.remoteBranchesUpdated"),
+            );
+            await refreshStatus(currentRepo.path);
+            loadRemoteBranches();
+        } catch (e) {
+            if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => fetchAllRemotes() })) return;
+            toast.error(t("shell.fetchAllFailed"), String(e));
         }
     };
 
@@ -1305,10 +1352,16 @@ function PullDropdown({
                     : t("shell.pulledFromMerge", { branch: selectedBranch }),
             );
         } catch (e) {
+            // Close the dropdown FIRST — the dialog takes over the reaction.
+            setOpen(false);
+            setUseRebase(false);
+            setNoFF(false);
             // Don't crash — detect a conflicted pull from the REPO STATE (git
             // streams CONFLICT lines to stdout, so message-matching is brittle)
             // and take the user to the Conflicts UI. A plain transient toast was
-            // reported as "ничего не произошло".
+            // reported as "ничего не произошло". A rejected TLS certificate is
+            // NOT a conflict — offer the SSL bypass + auto-retry instead.
+            if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => doPull() })) return;
             const conflicted = await surfaceConflictedState(currentRepo.path);
             if (!conflicted) {
                 toast.error(t("shell.pullFailed"), String(e));
@@ -1374,32 +1427,7 @@ function PullDropdown({
                         <div className="px-3 py-2 border-b border-border-subtle flex gap-2">
                             <button
                                 className="btn btn-secondary text-2xs flex-1"
-                                onClick={async () => {
-                                    if (!currentRepo || !selectedRemote) return;
-                                    try {
-                                        await api.git.fetch(
-                                            currentRepo.path,
-                                            selectedRemote,
-                                            true,
-                                            true,
-                                        );
-                                        toast.success(
-                                            t("shell.fetchedFromRemote", {
-                                                remote: selectedRemote,
-                                            }),
-                                            t("shell.remoteBranchesUpdated"),
-                                        );
-                                        await refreshStatus(currentRepo.path);
-                                        loadRemoteBranches();
-                                    } catch (e) {
-                                        toast.error(
-                                            t("shell.fetchRemoteFailed", {
-                                                remote: selectedRemote,
-                                            }),
-                                            String(e),
-                                        );
-                                    }
-                                }}
+                                onClick={() => void fetchFromSelected()}
                                 disabled={
                                     !selectedRemote || remotes.length === 0
                                 }
@@ -1410,26 +1438,7 @@ function PullDropdown({
                             </button>
                             <button
                                 className="btn btn-secondary text-2xs flex-1"
-                                onClick={async () => {
-                                    if (!currentRepo) return;
-                                    try {
-                                        await api.git.fetchAll(
-                                            currentRepo.path,
-                                            true,
-                                        );
-                                        toast.success(
-                                            t("shell.fetchedAllRemotes"),
-                                            t("shell.remoteBranchesUpdated"),
-                                        );
-                                        await refreshStatus(currentRepo.path);
-                                        loadRemoteBranches();
-                                    } catch (e) {
-                                        toast.error(
-                                            t("shell.fetchAllFailed"),
-                                            String(e),
-                                        );
-                                    }
-                                }}
+                                onClick={() => void fetchAllRemotes()}
                                 disabled={remotes.length === 0}
                                 title="git fetch --all --prune --tags"
                             >
@@ -1651,6 +1660,11 @@ export function GitToolbar({
             // Notify History page to reload (one-shot event, no loop).
             window.dispatchEvent(new CustomEvent("smartgit:history-refresh"));
         } catch (e) {
+            // Same reaction matrix as the title-bar toolbar: remote-side push
+            // rejections → PushRejectionDialog; TLS certificate rejection →
+            // SSL bypass dialog + auto-retry.
+            if (offerPushRejection(e, { repoPath: currentRepo.path })) return;
+            if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => handlePush() })) return;
             toast.error(t("toast.git.pushFailed"), String(e));
         }
     };
@@ -1684,6 +1698,9 @@ export function GitToolbar({
         } catch (e) {
             // Conflicted pull → repo is mid-merge — detect from repo state and
             // open the Conflicts UI (toast + navigation handled centrally).
+            // A rejected TLS certificate is NOT a conflict — offer the SSL
+            // bypass + auto-retry FIRST (the user-reported dead-end toast).
+            if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => handlePull() })) return;
             const conflicted = await surfaceConflictedState(currentRepo.path);
             if (!conflicted) {
                 toast.error(t("toast.git.pullFailed"), String(e));

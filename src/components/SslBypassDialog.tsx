@@ -43,9 +43,10 @@ export function SslBypassDialog() {
   useEscapeKey(ctx != null && !busy, close);
 
   // Read the repo's current verification state so the dialog can say
-  // "already disabled" instead of offering a no-op fix.
+  // "already disabled" instead of offering a no-op fix. CLONE contexts skip
+  // the probe — the target repo does not exist yet.
   useEffect(() => {
-    if (!ctx) {
+    if (!ctx || ctx.skipConfigWrite) {
       setAlreadyOff(false);
       return;
     }
@@ -64,17 +65,21 @@ export function SslBypassDialog() {
   }, [ctx]);
 
   /**
-   * Primary action: (1) http.sslVerify=false for THIS repo, (2) register the
-   * host for API-level bypass, (3) RETRY the original operation. A retry
-   * that fails for a NON-certificate reason surfaces as an error toast —
-   * the failure is real and verification is already off, so re-offering the
-   * dialog would be a dead loop, not a reaction.
+   * Primary action: (1) http.sslVerify=false for THIS repo (CLONE contexts
+   * skip the write — the retry carries `-c http.sslVerify=false`, which git
+   * itself persists into the new repo's config), (2) register the host for
+   * API-level bypass, (3) RETRY the original operation. A retry that fails
+   * for a NON-certificate reason surfaces as an error toast — the failure is
+   * real and verification is already off, so re-offering the dialog would be
+   * a dead loop, not a reaction.
    */
   const applyBypassAndRetry = useCallback(async () => {
     if (!ctx || busy) return;
     setBusy(true);
     try {
-      await api.git.configSetMany(ctx.repoPath, [{ key: 'http.sslVerify', value: 'false' }]);
+      if (!ctx.skipConfigWrite) {
+        await api.git.configSetMany(ctx.repoPath, [{ key: 'http.sslVerify', value: 'false' }]);
+      }
       if (ctx.failure.host) {
         try {
           // Dedicated channel — keeps the main-process host cache in sync

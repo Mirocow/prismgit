@@ -4578,7 +4578,7 @@ export async function submoduleAdd(
 export async function clone(
   url: string,
   targetPath: string,
-  options: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean; timeoutMs?: number } = {}
+  options: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean; timeoutMs?: number; sslVerify?: boolean } = {}
 ): Promise<string> {
   // SSH URL → use the default managed key when the user configured one
   // (repoPath '' resolves sshDefaultKeyId; without a key git uses system ssh).
@@ -4595,7 +4595,23 @@ export async function clone(
   // electron/ipc/git.ts can pass through the renderer's AbortController in
   // a follow-up — for now the timeout is the safety net.
   const CLONE_TIMEOUT_MS = options.timeoutMs ?? 30 * 60 * 1000;
-  const args: string[] = ['clone'];
+  // TLS bypass for clone contexts (SslBypassDialog → retry): the repo does
+  // not exist yet, so there is no local config to flip — instead the retry
+  // passes sslVerify:false and we carry the bypass ON THE COMMAND LINE:
+  //   - `-c http.sslVerify=false` BEFORE the subcommand applies during the
+  //     transfer itself (belt);
+  //   - `clone --config http.sslVerify=false` persists the setting into the
+  //     NEW repository's config (suspenders) — git documents that it "takes
+  //     effect immediately after the repository is initialized, but before
+  //     the remote history is fetched", so it covers the transfer too, and
+  //     every later pull/push/fetch from the cloned repo stays bypassed.
+  const sslArgs: string[] = [];
+  const sslPersistArgs: string[] = [];
+  if (options.sslVerify === false) {
+    sslArgs.push('-c', 'http.sslVerify=false');
+    sslPersistArgs.push('--config', 'http.sslVerify=false');
+  }
+  const args: string[] = [...sslArgs, 'clone', ...sslPersistArgs];
   // BUGFIX "не получаю все ветки": `git clone --depth N` IMPLIES
   // --single-branch — the clone's remote.origin.fetch refspec then covers
   // exactly ONE branch, every later fetch keeps that refspec, and the
@@ -6556,8 +6572,22 @@ export async function showBuffer(repoPath: string, args: string[]): Promise<Buff
  *
  * Returns when the clone is complete.
  */
-export async function mirror(remoteUrl: string, targetPath: string): Promise<void> {
+export async function mirror(
+  remoteUrl: string,
+  targetPath: string,
+  options: { sslVerify?: boolean } = {}
+): Promise<void> {
   const git = withMergedGitEnv(simpleGit(GIT_UNSAFE_OPTIONS));
+  // Same TLS-bypass contract as clone(): -c for the transfer, --config to
+  // persist into the mirrored repo (see clone()).
+  if (options.sslVerify === false) {
+    await git.raw([
+      '-c', 'http.sslVerify=false',
+      'clone', '--mirror', '--config', 'http.sslVerify=false',
+      remoteUrl, targetPath,
+    ]);
+    return;
+  }
   await git.mirror(remoteUrl, targetPath);
 }
 
@@ -7734,9 +7764,13 @@ export async function clonePartial(
   url: string,
   targetPath: string,
   filter: 'blob:none' | 'tree:0' | 'blob:limit=1m' = 'blob:none',
-  options?: { depth?: number; branch?: string; recursive?: boolean }
+  options?: { depth?: number; branch?: string; recursive?: boolean; sslVerify?: boolean }
 ): Promise<string> {
-  const args = ['clone', '--filter=' + filter, url, targetPath];
+  // TLS-bypass args first (see clone()): -c covers the transfer, --config
+  // persists into the new repo.
+  const args = options?.sslVerify === false
+    ? ['-c', 'http.sslVerify=false', 'clone', '--config', 'http.sslVerify=false', '--filter=' + filter, url, targetPath]
+    : ['clone', '--filter=' + filter, url, targetPath];
   if (options?.depth) args.push('--depth=' + options.depth, '--no-single-branch');
   // BUGFIX "не получаю все ветки": --single-branch here limited the partial
   // clone to ONE branch's refs. --filter only filters BLOBS from history;
@@ -8386,8 +8420,18 @@ export async function smartPull(
   // Fetch first
   try {
     await git.raw(['fetch', remote, targetBranch]);
-  } catch {
-    /* ignore fetch errors */
+  } catch (e) {
+    // A certificate failure MUST NOT be swallowed: with the fetch silently
+    // dead, the ahead/behind math below runs on STALE refs and the fallback
+    // pull would surface the same TLS error anyway. Re-throw it (wrapped,
+    // like pull/fetch do) so the renderer's catch site can offer the SSL
+    // bypass dialog and the retry actually fixes the fetch too. Every OTHER
+    // fetch failure keeps the lenient fallback (deleted remote branch, ref
+    // gone mid-flight, …).
+    if (classifySslFailure(e instanceof Error ? e.message : String(e))) {
+      throw describeNetworkError(e, 'fetch');
+    }
+    /* ignore other fetch errors */
   }
   // Check ahead/behind. `rev-list --left-right --count HEAD...remote` prints
   // "<left> <right>": left = commits only in HEAD (LOCAL, ahead), right =

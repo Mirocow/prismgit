@@ -499,7 +499,7 @@ export interface GitApi {
   submoduleSync: (repoPath: string, name?: string) => Promise<void>;
   submoduleDeinit: (repoPath: string, name: string, force?: boolean) => Promise<void>;
   submoduleAdd: (repoPath: string, url: string, path: string, branch?: string) => Promise<void>;
-  clone: (url: string, targetPath: string, options?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean }) => Promise<string>;
+  clone: (url: string, targetPath: string, options?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean; sslVerify?: boolean }) => Promise<string>;
   init: (targetPath: string, bare?: boolean) => Promise<void>;
   addRemote: (repoPath: string, name: string, url: string) => Promise<void>;
   removeRemote: (repoPath: string, name: string) => Promise<void>;
@@ -523,7 +523,7 @@ export interface GitApi {
   applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => Promise<string>;
   show: (repoPath: string, args: string[]) => Promise<string>;
   showBuffer: (repoPath: string, args: string[]) => Promise<Buffer>;
-  mirror: (remoteUrl: string, targetPath: string) => Promise<void>;
+  mirror: (remoteUrl: string, targetPath: string, options?: { sslVerify?: boolean }) => Promise<void>;
   countObjects: (repoPath: string, verbose?: boolean) => Promise<string>;
   updateServerInfo: (repoPath: string) => Promise<string>;
   listRemote: (repoPath: string, remote?: string) => Promise<string>;
@@ -730,7 +730,7 @@ export interface GitApi {
   pushToGerrit: (repoPath: string, branch?: string, remote?: string, options?: { draft?: boolean; reviewers?: string[]; topic?: string }) => Promise<string>;
 
   /** Partial clone (--filter=blob:none). */
-  clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean }) => Promise<string>;
+  clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean; sslVerify?: boolean }) => Promise<string>;
 
   /** Setup PrismGit as credential helper. */
   setupCredentialHelper: (repoPath: string) => Promise<void>;
