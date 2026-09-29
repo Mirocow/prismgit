@@ -556,6 +556,12 @@ export default function App() {
     lastRepoPathRef.current = repoPath;
     useSelectionStore.getState().applyProjectPrefs(loadProjectPrefs(repoPath));
   }, [repoPath]);
+  // v2.3.5 — Back/Forward is PROJECT-scoped: switching the open repository
+  // wipes the navigation stack (user request). ensureScope is a no-op when
+  // the path is unchanged.
+  useEffect(() => {
+    useNavHistoryStore.getState().ensureScope(repoPath);
+  }, [repoPath]);
   useEffect(() => {
     if (!repoPath) return;
     let timer: ReturnType<typeof setTimeout> | undefined;

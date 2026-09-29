@@ -166,6 +166,15 @@ export function HistoryPage() {
     const g = globalAuthorFilter ?? '';
     setAuthorFilterLocal((prev) => (prev === g ? prev : g));
   }, [globalAuthorFilter]);
+  // v2.3.5 — debounced mirror of the author filter for the SERVER-SIDE git
+  // log --author: typing "thomisus" fires one rev-walk 300ms after the last
+  // keystroke instead of one spawn per character. The client-side `filtered`
+  // pass keeps using the INSTANT value (typing feels live).
+  const [debouncedAuthorFilter, setDebouncedAuthorFilter] = useState(authorFilter);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedAuthorFilter(authorFilter), 300);
+    return () => clearTimeout(timer);
+  }, [authorFilter]);
   // "Recent" smart-view preset (last 7 days) — date-based, independent of author filter
   const [recentActive, setRecentActive] = useState(false);
   // "Tagged" smart-view preset — show only commits that have at least one tag
@@ -267,7 +276,21 @@ export function HistoryPage() {
       // scroll via loadMore(). Previously this loaded up to 500 commits
       // upfront, hiding anything older — the user could not scroll back to
       // the first commit. With paging, the user can scroll indefinitely.
-      const logOpts: { maxCount: number; skip?: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = { maxCount: PAGE_SIZE };
+      // v2.3.5: author/date filters go SERVER-SIDE (git log --author/--since/
+      // --until) — the user's report: with an author set, Refresh re-ran the
+      // UNFILTERED log and the client-side pass only saw the first 100
+      // commits (the author's work beyond page 1 required scrolling the
+      // whole history in first). The client-side filters stay (idempotent,
+      // and they hold the exact end-of-day date semantics).
+      const logOpts: { maxCount: number; skip?: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean; author?: string; since?: string; until?: string } = { maxCount: PAGE_SIZE };
+      if (debouncedAuthorFilter.trim()) logOpts.author = debouncedAuthorFilter.trim();
+      if (dateFrom) logOpts.since = dateFrom;
+      if (dateTo) {
+        // end-of-day for --until: the client check adds +1d, so the server
+        // pre-narrow uses the next day's midnight exclusive window.
+        const toTs = new Date(dateTo).getTime();
+        if (!isNaN(toTs)) logOpts.until = new Date(toTs + 86400000).toISOString().slice(0, 10);
+      }
       // Resolve which refs to walk commits from. Priority:
       //   1. Multi-branch selection (Ctrl+click in Branches page).
       //   2. 'head+upstream' — default: HEAD branch + its remote-tracking
@@ -434,7 +457,7 @@ export function HistoryPage() {
     // `smartgit:history-refresh` events). Branch-name / upstream reads
     // inside the effect still use call-time `useGitStore.getState().status`
     // (see RACE FIX above) so they can never be stale even mid-render.
-  }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit, status?.current, status?.tracking, status?.head, status?.ahead, status?.behind]);
+  }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit, status?.current, status?.tracking, status?.head, status?.ahead, status?.behind, debouncedAuthorFilter, dateFrom, dateTo]);
 
   // Prune the multi-selection when the underlying entries change (history
   // reload / rebase / filter): hashes that are no longer visible are dropped
@@ -469,10 +492,19 @@ export function HistoryPage() {
       // Snapshot the current entries length — we'll skip past these.
       const currentLen = entries.length;
       if (currentLen === 0) return; // nothing loaded yet — let loadHistory handle it
-      const logOpts: { maxCount: number; skip: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = {
+      const logOpts: { maxCount: number; skip: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean; author?: string; since?: string; until?: string } = {
         maxCount: PAGE_SIZE,
         skip: currentLen,
       };
+      // v2.3.5 — keep the SERVER-SIDE author/date filters in sync with
+      // loadHistory (paging walks the FILTERED set; otherwise page 2 of the
+      // unfiltered history would append foreign commits).
+      if (debouncedAuthorFilter.trim()) logOpts.author = debouncedAuthorFilter.trim();
+      if (dateFrom) logOpts.since = dateFrom;
+      if (dateTo) {
+        const toTs = new Date(dateTo).getTime();
+        if (!isNaN(toTs)) logOpts.until = new Date(toTs + 86400000).toISOString().slice(0, 10);
+      }
       if (selectedBranches.size > 0) {
         logOpts.branches = Array.from(selectedBranches);
       } else if (branchFilter === 'head+upstream') {
@@ -514,7 +546,7 @@ export function HistoryPage() {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, loading, entries.length, repo.path, branchFilter, selectedBranches, globalPathFilter, toast, status?.current, status?.tracking]);
+  }, [loadingMore, hasMore, loading, entries.length, repo.path, branchFilter, selectedBranches, globalPathFilter, debouncedAuthorFilter, dateFrom, dateTo, toast, status?.current, status?.tracking]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 

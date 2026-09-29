@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useSelectionStore } from './selectionStore';
+import { useSettingsStore } from './settingsStore';
 
 /**
  * NAV HISTORY — in-app Back/Forward navigation (browser-style) between tools
@@ -26,6 +27,15 @@ import { useSelectionStore } from './selectionStore';
  * UNLESS the change came from back()/forward() (they set a one-shot
  * suppression flag that the effect consumes). So the stack only grows on
  * real user-driven navigation.
+ *
+ * PROJECT SCOPING + CAP (v2.3.5 — user request: «кнопки вперед назад
+ * должны работать только в рамках проекта и при переключении проекта
+ * история должна сбрасываться. По умолчанию должно быть в истории 10 шагов
+ * и количество должно настраиваться в Settings»):
+ *   - the stack belongs to ONE repo path (scope); ensureScope() wipes it
+ *     when the open project changes (App calls it on currentRepo.path);
+ *   - the stack length is capped by settings.navHistoryLimit (default 10) —
+     *     push() shifts the oldest entry out beyond the limit.
  */
 
 /** Tool state captured per entry — the fields the target tools read on
@@ -70,6 +80,11 @@ interface NavHistoryState {
   stack: NavEntry[];
   /** Index of the CURRENT location inside stack, -1 until first push. */
   index: number;
+  /** v2.3.5 — the repo path this history belongs to (project scoping). */
+  scope: string | null;
+  /** v2.3.5 — wipe the stack when the open PROJECT changed. Called by App
+   * on currentRepo.path change; same path = no-op. */
+  ensureScope: (repoPath: string | null) => void;
   back: () => string | null;
   forward: () => string | null;
   /** Record a user-driven location change. Returns false for no-ops. */
@@ -87,7 +102,13 @@ interface NavHistoryState {
   __currentSnapshotForTests: () => NavSnapshot | null;
 }
 
-const MAX_STACK = 60;
+const DEFAULT_HISTORY_LIMIT = 10;
+/** v2.3.5 — the cap is user-configurable (Settings → «Сайдбар и
+ * навигация»); default 10 steps. */
+export function navHistoryLimit(): number {
+  const n = useSettingsStore.getState().settings.navHistoryLimit;
+  return Math.max(1, Math.min(100, Math.floor(Number(n) || DEFAULT_HISTORY_LIMIT)));
+}
 let suppressed = false;
 /** Set by cross-tool jump helpers: the next push() treats the current
  *  selection as the NEW entry's state (no refresh of the outgoing entry). */
@@ -96,6 +117,14 @@ let pendingCrossToolJump = false;
 export const useNavHistoryStore = create<NavHistoryState>((set, get) => ({
   stack: [],
   index: -1,
+  scope: null,
+
+  ensureScope: (repoPath) => {
+    const { scope, reset } = get();
+    if (scope === repoPath) return;
+    reset();
+    set({ scope: repoPath });
+  },
 
   markCrossToolJump: () => {
     pendingCrossToolJump = true;
@@ -122,7 +151,10 @@ export const useNavHistoryStore = create<NavHistoryState>((set, get) => ({
     // the file already selected; that state belongs to the new entry).
     const kept = stack.slice(0, index + 1);
     kept.push({ loc: location, snap: captureSnapshot() });
-    if (kept.length > MAX_STACK) kept.shift();
+    // v2.3.5 — user-configurable cap (default 10): the OLDEST entries drop
+    // out beyond the limit (Back walks at most `limit` steps).
+    const limit = navHistoryLimit();
+    while (kept.length > limit) kept.shift();
     set({ stack: kept, index: kept.length - 1 });
     return true;
   },

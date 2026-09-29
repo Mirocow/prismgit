@@ -197,6 +197,8 @@ export interface AppSettings {
   gitUserEmail?: string;
   showReflogInHistory: boolean;
   maxHistoryLoad: number;
+  /** v2.3.5 — max entries in the in-app Back/Forward stack (default 10). */
+  navHistoryLimit: number;
   githubPAT?: string;
   pullStrategy: 'merge' | 'rebase';
   /**

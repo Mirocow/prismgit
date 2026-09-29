@@ -7,6 +7,19 @@ das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 **Andere Sprachen:** [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md) · [中文](CHANGELOG.zh.md)
 
+## [2.3.5] - 2026-09-29
+
+### Behoben — 3-Wege: der „Streifen in der Mittelpane“ waren die Konfliktmarker
+- Die `<<<<<<<` / `=======` / `>>>>>>>`-Markierungszeilen trugen eine rote 35 %-Bande über die volle Breite — bei einem Konflikt mitten in der Datei las sich das genau als „Streifen in der Mitte der Mittelpane“ (und Rot suggeriert FEHLER). Marker sind strukturelles Rauschen, kein Inhalt: jetzt neutraler Hintergrund + gedämpfter Text; die ours/theirs-INHALTSzeilen behalten ihr Grün/Blau — auf 20 % abgeschwächt, sodass der Block als eine ruhige Region statt als aggressive Streifen wirkt
+
+### Geändert — Zurück/Vorwär gilt pro Projekt, Tiefe einstellbar
+- Das Wechseln des Repos löscht den Navigationsstapel (die History reicht nie mehr projektübergreifend)
+- Der Stapel hält **standardmäßig 10 Schritte** (vorher unbegrenzt 60); die Anzahl ist konfigurierbar unter Einstellungen → „Seitenleiste & Navigation“ → „Schritte in Zurück/Vorwärts-History“ (5–100); die ältesten Einträge fallen über dem Limit hinaus
+
+### Behoben — Historie: Autor/Datum-Filter laufen jetzt SERVER-SEITIG
+- Der Bericht: Autor eingeben, Aktualisieren — nichts änderte sich; die Commits erschienen erst nach dem Durchscrollen der gesamten Historie. Ursache: Autor-/Datumsfilter liefen CLIENT-SEITIG über die erste geladene 100-Commit-Seite. Jetzt läuft `git log --author=<muster> --since/--until` beim Refresh selbst (groß/klein-unabhängig, gegen „Name <email>“), das Paging behält die Filter, und der Filter greift 300 ms nach der Eingabe automatisch (entprellt — ein Rev-Walk, nicht einer pro Taste)
+- Nebenbei ein latenter Argumentreihenfolge-Bug behoben: `--grep`/`--author`/`--since`/`--until` werden jetzt immer VOR dem `-- <datei>`-Trennzeichen gesetzt (Optionen nach `--` gelten als Pfade — Autor+Datei- und grep+Datei-Kombinationen liefen vorher ins Leere)
+
 ## [2.3.4] - 2026-09-29
 
 ### Behoben — der Abstands-Bug, der drei Runden „mehr Abstand“ unsichtbar machte

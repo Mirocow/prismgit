@@ -5,6 +5,19 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.5] - 2026-09-29
+
+### Fixed — 3-way: the «stripe in the center pane» was the conflict markers
+- The `<<<<<<<` / `=======` / `>>>>>>>` marker lines in the Result pane carried a full-width RED 35% band — at a mid-file conflict that read exactly as «полоса по центру центральной панели» (and red suggests ERROR). Markers are structural noise, not content: they now render with a neutral tertiary background + dimmed text, while the ours/theirs CONTENT lines keep their green/blue signal — softened to 20% so the block reads as one quiet highlighted region instead of aggressive stripes
+
+### Changed — Back/Forward is project-scoped with a configurable depth
+- Switching the open repository now WIPES the navigation stack (the history never crossed projects again — «кнопки вперед назад должны работать только в рамках проекта»)
+- The stack holds **10 steps by default** (was an unbounded 60) and the count is configurable in Settings → «Сайдбар и навигация» → «Шагов в истории Назад/Вперёд» (5–100); the oldest entries drop out beyond the limit
+
+### Fixed — History: author/date filters now run SERVER-SIDE
+- The user's report: type an author, press Refresh — nothing changed; the commits only appeared after scrolling the whole history in. Root cause: the author/date filters ran CLIENT-SIDE over the first loaded 100-commit page — the author's commits beyond page 1 were invisible to the filter. Now `git log --author=<pattern> --since/--until` runs on the refresh itself (case-insensitive, matched against «Name <email>»), paging keeps the filters, and the filter re-applies automatically 300ms after typing (debounced — one rev-walk, not one per keystroke)
+- Fixed a latent argv-ordering bug while at it: `--grep`/`--author`/`--since`/`--until` are now always pushed BEFORE the `-- <file>` pathspec separator (options after `--` are treated as paths — author+file and grep+file combinations silently returned empty before)
+
 ## [2.3.4] - 2026-09-29
 
 ### Fixed — the spacing bug that made three rounds of "wider spacing" invisible

@@ -1819,6 +1819,27 @@ export function SettingsPage() {
                   );
                 });
               })()}
+              {/* v2.3.5 — Back/Forward history depth (project-scoped, default 10).
+                  The user: «по умолчанию должно быть в истории 10 шагов и
+                  количество должно настраиваться в Settings». */}
+              <div className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-bg-hover">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-sm text-text-primary truncate">
+                    {t('settings.navHistoryLimit', { defaultValue: 'Шагов в истории Назад/Вперёд' })}
+                  </span>
+                  <InfoHint text={t('settings.navHistoryLimitHint', { defaultValue: 'Сколько последних переходов помнят кнопки Назад/Вперёд (Alt+←/→). История действует только внутри открытого проекта и сбрасывается при переключении репозитория. По умолчанию — 10.' })} />
+                </div>
+                <select
+                  className="text-sm px-2 py-1 bg-bg-secondary border border-border-default rounded"
+                  value={settings.navHistoryLimit ?? 10}
+                  onChange={(e) => setSetting('navHistoryLimit', Number(e.target.value))}
+                  data-testid="nav-history-limit-select"
+                >
+                  {[5, 10, 15, 20, 30, 50, 100].map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             {(() => {
               const overrides = (settings as { navHotkeys?: Record<string, string> }).navHotkeys;

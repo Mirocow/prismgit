@@ -2486,10 +2486,10 @@ async function validateLogRefs(git: SimpleGit, branches: string[]): Promise<stri
 
 export async function log(
   repoPath: string,
-  options: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean } = {}
+  options: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean; author?: string; since?: string; until?: string } = {}
 ): Promise<LogEntry[]> {
   const git = getGit(repoPath);
-  const { maxCount = 500, skip = 0, branch, branches, file, follow = false, all = false, grep, grepIgnoreCase = false } = options;
+  const { maxCount = 500, skip = 0, branch, branches, file, follow = false, all = false, grep, grepIgnoreCase = false, author, since, until } = options;
 
   // Use a custom pretty format with record separator \x1e between commits and \x00 between fields.
   // simple-git's built-in log() uses \n\n to split commits which breaks when body contains blank lines.
@@ -2556,16 +2556,32 @@ export async function log(
     rawArgs.push(branch);
   }
 
+  // v2.3.5 — AUTHOR + DATE filters, SERVER-SIDE. The user's report: with
+  // an author filter set, Refresh re-ran the same UNFILTERED git log (the
+  // filter was client-side over the loaded 100-commit page) — the author's
+  // commits beyond the first page only appeared after scrolling the whole
+  // history in. `--author` takes a regex over "Name <email>"; -i gives it
+  // the case-insensitivity the History filter UI promises. `--since/--until`
+  // pre-narrow the date window the same way (the client-side date check
+  // stays as the precise end-of-day guard — idempotent).
+  // ⚠ ORDER: every revision OPTION must precede the `-- <file>` pathspec
+  // separator — anything after `--` is a PATH. This also fixes the latent
+  // grep+file ordering bug (grep used to be pushed after `--`).
+  if (grep && grep.trim()) {
+    rawArgs.push(`--grep=${grep.trim()}`);
+    if (grepIgnoreCase) rawArgs.push('--regexp-ignore-case');
+  }
+  if (author && author.trim()) {
+    rawArgs.push(`--author=${author.trim()}`);
+    rawArgs.push('--regexp-ignore-case');
+  }
+  if (since) rawArgs.push(`--since=${since}`);
+  if (until) rawArgs.push(`--until=${until}`);
+
+  // Pathspec LAST — everything after `--` is a file path, never an option.
   if (file) {
     rawArgs.push('--', file);
     if (follow) rawArgs.splice(2, 0, '--follow');
-  }
-
-  // Commit-message search (Search tool → Commits tab). `--grep` matches the
-  // subject + body with basic regex; -i makes it case-insensitive.
-  if (grep && grep.trim()) {
-    rawArgs.push(`--grep=${grep.trim()}`);
-    if (grepIgnoreCase) rawArgs.push('-i');
   }
 
   let out: string;

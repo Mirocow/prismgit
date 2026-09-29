@@ -89,13 +89,20 @@ interface ClassifiedLine {
 }
 
 // DIRECT COLOUR VALUES — inline styles, no CSS classes
+// v2.3.5: the marker lines (<<<<<<< / ======= / >>>>>>>) used to carry a
+// full-width RED 35% band — at a mid-file conflict that reads as «полоса
+// по центру центральной панели» (the user's report; the red also looks like
+// an ERROR stripe). Markers are structural noise, not content: neutral
+// tertiary background + dimmed text now. The ours/theirs CONTENT bands
+// stay colored (the signal) but softer (0.35 → 0.20) so the whole block
+// reads as one highlighted region instead of aggressive stripes.
 const KIND_BG: Record<ResultLineKind, string> = {
   'context':      'transparent',
-  'marker-start': 'rgba(220, 38, 38, 0.35)',   // red for conflict markers
-  'marker-sep':   'rgba(220, 38, 38, 0.35)',
-  'marker-end':   'rgba(220, 38, 38, 0.35)',
-  'ours':         'rgba(34, 197, 94, 0.35)',    // green for ours block
-  'theirs':       'rgba(59, 130, 246, 0.35)',   // blue for theirs block
+  'marker-start': 'var(--bg-tertiary)',       // neutral — markers are noise
+  'marker-sep':   'var(--bg-tertiary)',
+  'marker-end':   'var(--bg-tertiary)',
+  'ours':         'rgba(34, 197, 94, 0.20)',    // green for ours block (softer)
+  'theirs':       'rgba(59, 130, 246, 0.20)',   // blue for theirs block (softer)
 };
 
 /** Classify each line of the Result content by its position relative to
@@ -172,11 +179,12 @@ export function MergeResultEditor({
     for (let i = start; i < end; i++) {
       const line = lines[i] || '';
       const cls = classified[i];
+      const isMarker = cls.kind === 'marker-start' || cls.kind === 'marker-sep' || cls.kind === 'marker-end';
       const lineNum = `<span style="display:inline-block;width:${GUTTER_WIDTH}px;flex-shrink:0;box-sizing:border-box;text-align:right;padding-right:7px;border-right:1px solid var(--border-subtle);color:var(--text-tertiary);user-select:none;">${i + 1}</span>`;
       const contentHtml = (line.startsWith('<<<<<<<') || line.startsWith('=======') || line.startsWith('>>>>>>>'))
         ? escapeHtml(line) || '&nbsp;'
         : tokensToHtml(tokenizeLineCached(line, lang)) || '&nbsp;';
-      html += `<div style="position:absolute;top:${i * ROW_HEIGHT}px;left:0;height:${ROW_HEIGHT}px;min-height:${ROW_HEIGHT}px;background-color:${cls.bgClass};font-family:${FONT_STACK};font-size:12px;line-height:20px;display:flex;align-items:flex-start;white-space:pre;padding-right:8px;">${lineNum}<span style="white-space:pre;">${contentHtml}</span></div>`;
+      html += `<div style="position:absolute;top:${i * ROW_HEIGHT}px;left:0;height:${ROW_HEIGHT}px;min-height:${ROW_HEIGHT}px;background-color:${cls.bgClass};${isMarker ? 'color:var(--text-tertiary);' : ''}font-family:${FONT_STACK};font-size:12px;line-height:20px;display:flex;align-items:flex-start;white-space:pre;padding-right:8px;">${lineNum}<span style="white-space:pre;">${contentHtml}</span></div>`;
     }
     return html;
   }, [highlightContent, lang, visibleRange.start, visibleRange.end]);
